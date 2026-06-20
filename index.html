@@ -26,21 +26,26 @@
         }
         #hud.hidden { opacity: 0; pointer-events: none; }
         .hl { color: #444; } .hv { color: #7fff7f; font-weight: bold; }
-        #wrap { width: min(600px, calc(100vw - 16px)); position: relative; }
-        canvas#c { display: block; width: 100%; height: auto; border: 1px solid #1a1a2e; touch-action: none; }
+        #topbar {
+            width: min(600px, calc(100vw - 16px));
+            display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
+        }
+        #fps-el { font: 11px 'Courier New',monospace; color: #4a7a4a; letter-spacing: 1px; }
         #btn-mute {
-            position: absolute; top: 6px; left: 6px; width: 34px; height: 22px;
-            background: rgba(7,7,14,0.78); border: 1px solid #2a3a2a;
+            width: 34px; height: 22px;
+            background: #0d180d; border: 1px solid #2a3a2a;
             color: #7fff7f; font: 10px 'Courier New',monospace;
-            cursor: pointer; border-radius: 3px; z-index: 10; padding: 0;
+            cursor: pointer; border-radius: 3px; padding: 0;
             -webkit-tap-highlight-color: transparent;
         }
         #btn-mute:hover { border-color: #7fff7f; }
         #btn-mute.muted { color: #444; border-color: #222; }
-        #gamepad { display: none; align-items: center; gap: 14px; }
+        #wrap { width: min(600px, calc(100vw - 16px)); }
+        canvas#c { display: block; width: 100%; height: auto; border: 1px solid #1a1a2e; touch-action: none; }
+        #gamepad { display: none; align-items: center; justify-content: center; gap: 14px; }
         @media (pointer: coarse) { #gamepad { display: flex; } }
-        #dpad-c { width: min(150px, 40vw); height: min(150px, 40vw); touch-action: none; display: block; }
-        #side-btns { display: flex; flex-direction: column; gap: 10px; }
+        #dpad-c { width: min(120px, 33vw); height: min(120px, 33vw); touch-action: none; display: block; }
+        #left-btns, #side-btns { display: flex; flex-direction: column; gap: 10px; }
         .sbtn {
             width: 54px; height: 54px;
             background: #0d180d; border: 1px solid #2a3a2a; color: #7fff7f;
@@ -60,11 +65,17 @@
     <span><span class="hl">LIVES </span><span class="hv" id="hv-lives">&#9829;&#9829;&#9829;</span></span>
     <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
 </div>
+<div id="topbar">
+    <button id="btn-mute" title="Toggle music (M)">SND</button>
+    <span id="fps-el"></span>
+</div>
 <div id="wrap">
     <canvas id="c"></canvas>
-    <button id="btn-mute" title="Toggle music (M)">SND</button>
 </div>
 <div id="gamepad">
+    <div id="left-btns">
+        <button class="sbtn" id="btn-esc">ESC</button>
+    </div>
     <canvas id="dpad-c" width="150" height="150"></canvas>
     <div id="side-btns">
         <button class="sbtn" id="btn-ok">OK</button>
@@ -301,6 +312,9 @@ const Snd = (() => {
             t(523, now, 0.04); t(659, now + 0.045, 0.08);
         } else if (type === 'bonus') {
             [880,1047,1319,1568].forEach((f,i)=>t(f,now+i*0.055,0.10));
+        } else if (type === 'perfect') {
+            [523,659,784,1047,1319,1568].forEach((f,i)=>t(f,now+i*0.07,0.22));
+            [784,988,1319].forEach(f=>t(f,now+0.50,0.30,'triangle'));
         }
     }
 
@@ -380,6 +394,7 @@ let gem, gemsDone, bars;
 let speed, stepAt, phaseAt, gemAt, deathMsg, pauseAt;
 let spawnAt = 0, levelDoneWaiting = false;
 let pauseReadyAt = 0, escReadyAt = 0;
+let perfectLevel = true, levelWasPerfect = false, fireworks = [];
 let nameStr = '', nameCharIdx = 0, nameReason = '';
 let creditsScroll = 0;
 let fpsVal = 0, fpsFrames = 0, fpsLast = 0;
@@ -404,6 +419,7 @@ function beginLevel() {
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
     phase='playing'; stepAt=performance.now()+speed; phaseAt=0;
     spawnAt=performance.now(); levelDoneWaiting=false;
+    perfectLevel=true; levelWasPerfect=false; fireworks=[];
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
@@ -433,17 +449,46 @@ function step(now) {
         gemsDone++;
         const base=level*100;
         const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
+        if(!bonus) perfectLevel=false;
         score+=bonus?base*2:base;
         if(bonus){Snd.sfx('bonus',cfg.music);showBonus(now);}
         else Snd.sfx('eat',cfg.music);
-        if(gemsDone>=GEMS_PER_LEVEL){ gem=null; score+=level*500; phase='levelDone'; phaseAt=now; Snd.sfx('levelUp',cfg.music); }
-        else spawnGem();
+        if(gemsDone>=GEMS_PER_LEVEL){
+            gem=null; score+=level*500;
+            if(perfectLevel){ score+=level*1000; spawnFireworks(now); Snd.sfx('perfect',cfg.music); }
+            else Snd.sfx('levelUp',cfg.music);
+            phase='levelDone'; phaseAt=now;
+        } else spawnGem();
     } else snake.pop();
     updateHUD();
 }
 
 let bonusAt = -9999;
 function showBonus(now) { bonusAt = now; }
+
+function spawnFireworks(now) {
+    levelWasPerfect = true;
+    const palette = ['#ff4040','#ff9000','#ffee00','#40ff80','#00ccff','#cc44ff','#ff44aa','#ffffff'];
+    for (let b = 0; b < 8; b++) {
+        const delay = b * 310 + Math.random() * 80;
+        const x = 55 + Math.random() * (CW - 110);
+        const y = 22 + Math.random() * (CH * 0.62);
+        const col = palette[b % palette.length];
+        for (let i = 0; i < 22; i++) {
+            const angle = (i / 22) * Math.PI * 2;
+            const spd = 1.7 + Math.random() * 2.4;
+            fireworks.push({
+                startAt: now + delay,
+                x, y,
+                vx: Math.cos(angle) * spd,
+                vy: Math.sin(angle) * spd - 0.7,
+                color: col,
+                life: 0,
+                maxLife: 52 + Math.floor(Math.random() * 38),
+            });
+        }
+    }
+}
 
 function die(now) {
     lives--; phase='dying'; phaseAt=now;
@@ -569,6 +614,10 @@ function drawMenu() {
     ctx.font='bold 12px "Courier New"';
     ctx.textAlign='right'; ctx.textBaseline='bottom';
     ctx.fillText(`FOKOINS: ${coins.toLocaleString()}`, CW-10, CH-8);
+    // Version lower-left
+    ctx.shadowBlur=0; ctx.fillStyle='#222'; ctx.font='10px "Courier New"';
+    ctx.textAlign='left';
+    ctx.fillText('v0.7', 10, CH-8);
     ctx.restore();
 }
 
@@ -681,12 +730,37 @@ function drawGameBoard(now) {
     if(protect&&Math.floor(now/130)%2===1) ctx.globalAlpha=0.22;
     drawSnake(flash);
     ctx.globalAlpha=1;
+    // Fireworks particles (perfect level)
+    if(fireworks.length>0){
+        const fwNow=performance.now();
+        fireworks=fireworks.filter(p=>{
+            if(fwNow<p.startAt) return true;
+            p.life++; p.x+=p.vx; p.y+=p.vy; p.vy+=0.055; p.vx*=0.97;
+            if(p.life>=p.maxLife) return false;
+            const a=(1-p.life/p.maxLife)*0.92;
+            ctx.globalAlpha=a; ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=6;
+            ctx.beginPath(); ctx.arc(p.x,p.y,2.5,0,Math.PI*2); ctx.fill();
+            return true;
+        });
+        ctx.globalAlpha=1; ctx.shadowBlur=0;
+    }
     if(phase==='levelDone'){
         const a=Math.min(1,(now-phaseAt)/150);
         ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=30;
-        ct('LEVEL COMPLETE!',CW/2,CH/2-18,'#7fff7f',30); ctx.restore();
+        ct('LEVEL COMPLETE!',CW/2,levelWasPerfect?CH/2-36:CH/2-18,'#7fff7f',30); ctx.restore();
+        if(levelWasPerfect){
+            const pa=Math.min(1,(now-phaseAt-180)/200);
+            if(pa>0){
+                ctx.save(); ctx.globalAlpha=pa;
+                ctx.shadowColor='#ffd700'; ctx.shadowBlur=22;
+                ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',22);
+                ctx.shadowBlur=0;
+                ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+28,'#ffaa00',15,false);
+                ctx.restore();
+            }
+        }
         if(levelDoneWaiting&&Math.floor(now/520)%2===0)
-            ct('TAP OR PRESS ANY KEY',CW/2,CH/2+22,'#446644',13,false);
+            ct('TAP OR PRESS ANY KEY',CW/2,CH/2+(levelWasPerfect?58:22),'#446644',13,false);
     }
     if(dying){
         const t=(now-phaseAt)/DEATH_DUR;
@@ -731,12 +805,7 @@ function drawQuitConfirm() {
     showHUD(false);
 }
 
-function drawFPS() {
-    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(CW-56,4,52,17);
-    ctx.fillStyle='#7fff7f'; ctx.font='11px "Courier New"';
-    ctx.textAlign='right'; ctx.textBaseline='top';
-    ctx.fillText(`${fpsVal} FPS`,CW-5,6);
-}
+const fpsEl = document.getElementById('fps-el');
 
 // ================================================================
 // D-PAD
@@ -889,6 +958,8 @@ document.getElementById('btn-ok').addEventListener('touchstart',e=>{e.preventDef
 document.getElementById('btn-ok').addEventListener('click',()=>handleKey('Enter',null));
 document.getElementById('btn-pause').addEventListener('touchstart',e=>{e.preventDefault();handleKey(' ',null);},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
+document.getElementById('btn-esc').addEventListener('touchstart',e=>{e.preventDefault();handleKey('Escape',null);},{passive:false});
+document.getElementById('btn-esc').addEventListener('click',()=>handleKey('Escape',null));
 
 // Canvas swipe: direction fires immediately on touchmove threshold (not on touchend) for low latency
 let touchStart=null, swipeFired=false;
@@ -954,7 +1025,7 @@ muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{pas
 function loop(now) {
     requestAnimationFrame(loop);
     fpsFrames++;
-    if(now-fpsLast>=500){fpsVal=Math.round(fpsFrames*1000/(now-fpsLast));fpsFrames=0;fpsLast=now;}
+    if(now-fpsLast>=500){fpsVal=Math.round(fpsFrames*1000/(now-fpsLast));fpsFrames=0;fpsLast=now;fpsEl.textContent=`${fpsVal} FPS`;}
 
     // Music routing (skip paused / quitConfirm states)
     if(phase!=='paused'&&phase!=='quitConfirm'){
@@ -984,8 +1055,6 @@ function loop(now) {
     else if(phase==='nameEntry')   {drawNameEntry(now);}
     else if(phase==='quitConfirm') {drawQuitConfirm();}
     else                           {drawGameBoard(now);showHUD(true);}
-
-    drawFPS();
 }
 
 Snd.init();
