@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Snake</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -13,23 +13,80 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
+            padding: 8px;
+            gap: 10px;
             font-family: 'Courier New', Courier, monospace;
             color: #ccc;
             user-select: none;
+            overflow: hidden;
         }
         #hud {
             display: flex;
-            gap: 32px;
-            padding: 0 0 10px;
-            font-size: 15px;
-            letter-spacing: 1.5px;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 18px 28px;
+            font-size: 14px;
+            letter-spacing: 1.2px;
             opacity: 1;
             transition: opacity 0.15s;
         }
         #hud.hidden { opacity: 0; pointer-events: none; }
         .hl { color: #444; }
         .hv { color: #7fff7f; font-weight: bold; }
-        canvas { display: block; border: 1px solid #1a1a2e; }
+        #wrap {
+            width: min(600px, calc(100vw - 16px));
+            position: relative;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            border: 1px solid #1a1a2e;
+            touch-action: none;
+        }
+        /* D-pad (visible always, useful on mobile) */
+        #dpad {
+            display: grid;
+            grid-template-areas: '. du .' 'dl dok dr' '. dd .';
+            gap: 6px;
+        }
+        #db-u  { grid-area: du; }
+        #db-l  { grid-area: dl; }
+        #db-ok { grid-area: dok; }
+        #db-r  { grid-area: dr; }
+        #db-d  { grid-area: dd; }
+        .dbtn {
+            width: 52px; height: 52px;
+            background: #111820;
+            border: 1px solid #2a3a2a;
+            color: #7fff7f;
+            font-size: 20px;
+            font-family: inherit;
+            cursor: pointer;
+            border-radius: 6px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .dbtn:active, .dbtn.pressed { background: #1a2e1a; border-color: #7fff7f; }
+        #db-ok { font-size: 13px; letter-spacing: 0.5px; }
+        #btn-mute {
+            position: absolute;
+            top: 6px; left: 6px;
+            width: 32px; height: 22px;
+            background: rgba(7,7,14,0.75);
+            border: 1px solid #2a3a2a;
+            color: #7fff7f;
+            font: 10px 'Courier New', monospace;
+            cursor: pointer;
+            border-radius: 3px;
+            z-index: 10;
+            padding: 0;
+            letter-spacing: 0.5px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #btn-mute:hover { border-color: #7fff7f; }
+        #btn-mute.muted { color: #555; border-color: #333; }
     </style>
 </head>
 <body>
@@ -39,32 +96,39 @@
     <span><span class="hl">LIVES </span><span class="hv" id="hv-lives">&#9829;&#9829;&#9829;</span></span>
     <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
 </div>
-<canvas id="c"></canvas>
+<div id="wrap">
+    <canvas id="c"></canvas>
+    <button id="btn-mute" title="Toggle music (M)">SND</button>
+</div>
+<div id="dpad">
+    <button class="dbtn" id="db-u">^</button>
+    <button class="dbtn" id="db-l">&lt;</button>
+    <button class="dbtn" id="db-ok">OK</button>
+    <button class="dbtn" id="db-r">&gt;</button>
+    <button class="dbtn" id="db-d">v</button>
+</div>
 <script>
 // ================================================================
 // CONSTANTS
 // ================================================================
 const COLS = 30, ROWS = 20, CS = 20;
-const CW = COLS * CS, CH = ROWS * CS;          // 600 x 400
+const CW = COLS * CS, CH = ROWS * CS;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 const DEATH_DUR = 900, LEVELDONE_DUR = 1400;
 const MAX_NAME = 8;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
 
-// Normal-difficulty speed (ms/step) and barricade count per level
 const LEVEL_CFG = Array.from({ length: MAX_LEVELS }, (_, i) => ({
-    speed: Math.round(150 - i * 7),  // 150 -> 87 ms
-    bars:  i * 2,                    // 0 -> 18
+    speed: Math.round(150 - i * 7),
+    bars:  i * 2,
 }));
 
-// Difficulty modifiers
 const DIFF = [
     { sm: 1.55, bm: 0.4,  label: 'EASY'   },
     { sm: 1.0,  bm: 1.0,  label: 'NORMAL' },
     { sm: 0.65, bm: 1.6,  label: 'HARD'   },
 ];
 
-// Snake starting length increases in later levels
 function startLen(lvl) {
     if (lvl <= 2) return 3;
     if (lvl <= 5) return 5;
@@ -81,105 +145,155 @@ canvas.height = CH;
 const ctx = canvas.getContext('2d');
 
 // ================================================================
-// AUDIO (Web Audio chiptune)
+// AUDIO  --  multi-channel chiptune with pause support
 // ================================================================
 const Snd = (() => {
-    let ac = null, mGain, sGain, seqPos = 0, nextNote = 0, curTrack = null;
+    let ac = null, mGain, sGain;
+    let chState = [];      // [{ pos, nextNote }, ...]
+    let curTrack = null;
+    let isPaused = false;
 
-    // Sequences: [freq_hz, duration_beats]  (freq 0 = rest)
+    // Each track has two channels: melody (square) + bass (triangle)
+    // All loops are exactly 8 beats so channels stay in sync.
     const SEQ = {
-        menu: { bpm: 140, notes: [
-            [392,0.25],[440,0.25],[523,0.25],[440,0.25],
-            [392,0.5],[392,0.25],[330,0.25],
-            [349,0.25],[392,0.25],[440,0.25],[392,0.25],
-            [349,0.5],[0,0.25],[294,0.25],
-            [330,0.25],[392,0.25],[440,0.25],[523,0.25],
-            [587,0.5],[523,0.25],[440,0.25],
-            [392,0.25],[330,0.25],[294,0.25],[262,0.25],
-            [262,0.75],[0,0.25],
+        // C major  I - vi - IV - V  (C Am F G)  -- bright & hooky
+        menu: { bpm: 155, channels: [
+            { type: 'square',   vol: 0.30, notes: [
+                // melody
+                [659,0.25],[784,0.25],[659,0.25],[523,0.25],   // E5 G5 E5 C5
+                [440,0.25],[523,0.25],[659,0.25],[587,0.25],   // A4 C5 E5 D5
+                [349,0.25],[440,0.25],[523,0.25],[440,0.25],   // F4 A4 C5 A4
+                [392,0.25],[494,0.25],[587,0.25],[494,0.25],   // G4 B4 D5 B4
+                [523,0.25],[659,0.25],[784,0.25],[659,0.25],   // C5 E5 G5 E5
+                [440,0.25],[659,0.25],[523,0.25],[440,0.25],   // A4 E5 C5 A4
+                [349,0.25],[392,0.25],[440,0.25],[494,0.25],   // F4 G4 A4 B4
+                [523,0.75],[0,0.25],                            // C5 .
+            ]},
+            { type: 'triangle', vol: 0.20, notes: [
+                // bass roots (half-note pulses)
+                [131,0.5],[0,0.5],   // C3
+                [220,0.5],[0,0.5],   // A3
+                [175,0.5],[0,0.5],   // F3
+                [196,0.5],[0,0.5],   // G3
+                [131,0.5],[0,0.5],   // C3
+                [220,0.5],[0,0.5],   // A3
+                [175,0.5],[0,0.5],   // F3/G3
+                [131,1.0],            // C3
+            ]},
         ]},
-        game: { bpm: 175, notes: [
-            [523,0.25],[0,0.125],[659,0.125],[523,0.25],
-            [440,0.5],[0,0.25],[392,0.25],
-            [440,0.25],[0,0.125],[523,0.125],[659,0.25],
-            [784,0.5],[0,0.5],
-            [523,0.25],[0,0.125],[587,0.125],[523,0.25],
-            [494,0.5],[0,0.25],[440,0.25],
-            [349,0.25],[392,0.25],[440,0.25],[523,0.25],
-            [523,0.75],[0,0.25],
+        // A natural minor  i - VII - VI - VII  -- tense & driving
+        game: { bpm: 188, channels: [
+            { type: 'square',   vol: 0.30, notes: [
+                // melody
+                [440,0.25],[0,0.125],[494,0.125],[523,0.25],[494,0.25],  // A4 B4 C5 B4
+                [440,0.5],[0,0.25],[440,0.25],                            // A4 . A4
+                [523,0.25],[0,0.125],[587,0.125],[659,0.25],[587,0.25],  // C5 D5 E5 D5
+                [523,0.5],[0,0.5],                                        // C5 .
+                [587,0.25],[659,0.25],[587,0.25],[494,0.25],              // D5 E5 D5 B4
+                [440,0.5],[0,0.25],[392,0.25],                            // A4 . G4
+                [330,0.25],[392,0.25],[440,0.25],[494,0.25],              // E4 G4 A4 B4
+                [440,1.0],                                                 // A4
+            ]},
+            { type: 'triangle', vol: 0.22, notes: [
+                // walking bass
+                [110,0.5],[0,0.5],   // A2
+                [110,0.5],[0,0.5],   // A2
+                [131,0.5],[0,0.5],   // C3
+                [131,0.5],[0,0.5],   // C3
+                [147,0.5],[0,0.5],   // D3
+                [147,0.5],[0,0.5],   // D3
+                [165,0.5],[0,0.5],   // E3
+                [110,1.0],            // A2
+            ]},
         ]},
     };
 
     function init() {
         try {
             ac = new (window.AudioContext || window.webkitAudioContext)();
-            mGain = ac.createGain(); mGain.gain.value = 0.13; mGain.connect(ac.destination);
+            mGain = ac.createGain(); mGain.gain.value = 0.10; mGain.connect(ac.destination);
             sGain = ac.createGain(); sGain.gain.value = 0.35; sGain.connect(ac.destination);
         } catch(e) { ac = null; }
     }
 
-    function tone(freq, when, dur, type, dest) {
+    function tone(freq, when, dur, type, vol, dest) {
         if (!ac || freq <= 0) return;
         const o = ac.createOscillator(), g = ac.createGain();
         o.type = type || 'square';
         o.frequency.value = freq;
-        g.gain.setValueAtTime(0.4, when);
+        g.gain.setValueAtTime(vol || 0.35, when);
         g.gain.exponentialRampToValueAtTime(0.001, when + Math.max(dur * 0.85, 0.01));
         o.connect(g); g.connect(dest || mGain);
         o.start(when); o.stop(when + dur + 0.02);
     }
 
     function tick(musicOn) {
-        if (!ac || !curTrack || !musicOn) return;
+        if (!ac || !curTrack || !musicOn || isPaused) return;
         const seq = SEQ[curTrack];
         const spb = 60 / seq.bpm;
-        while (nextNote < ac.currentTime + 0.35) {
-            const [f, b] = seq.notes[seqPos];
-            tone(f, nextNote, b * spb * 0.82);
-            nextNote += b * spb;
-            seqPos = (seqPos + 1) % seq.notes.length;
-        }
+        seq.channels.forEach((ch, ci) => {
+            const st = chState[ci];
+            while (st.nextNote < ac.currentTime + 0.35) {
+                const [f, b] = ch.notes[st.pos];
+                tone(f, st.nextNote, b * spb * 0.82, ch.type, ch.vol);
+                st.nextNote += b * spb;
+                st.pos = (st.pos + 1) % ch.notes.length;
+            }
+        });
     }
 
     function play(t) {
         if (!ac || curTrack === t) return;
-        curTrack = t; seqPos = 0; nextNote = ac.currentTime;
+        curTrack = t; isPaused = false;
+        chState = SEQ[t].channels.map(() => ({ pos: 0, nextNote: ac.currentTime }));
+        mGain.gain.setTargetAtTime(0.10, ac.currentTime, 0.06);
     }
 
-    function stop() { curTrack = null; }
+    function stop() { curTrack = null; isPaused = false; }
+
+    function pauseMusic() {
+        if (!ac || !curTrack) return;
+        isPaused = true;
+        mGain.gain.setTargetAtTime(0, ac.currentTime, 0.03);
+    }
+
+    function resumeMusic() {
+        if (!ac || !curTrack) return;
+        isPaused = false;
+        const now = ac.currentTime;
+        mGain.gain.setTargetAtTime(0.10, now, 0.08);
+        chState.forEach(s => { s.nextNote = now + 0.05; });
+    }
 
     function resume() { if (ac && ac.state === 'suspended') ac.resume(); }
 
     function sfx(type, on) {
         if (!ac || !on) return;
         const now = ac.currentTime;
+        const t = (f, w, d, tp) => tone(f, w, d, tp || 'square', 0.4, sGain);
         if (type === 'eat') {
-            tone(880, now, 0.05, 'square', sGain);
-            tone(1100, now + 0.055, 0.05, 'square', sGain);
+            t(880, now, 0.05); t(1100, now + 0.055, 0.06);
         } else if (type === 'die') {
-            for (let i = 0; i < 6; i++) tone(280 - i * 22, now + i * 0.07, 0.1, 'sawtooth', sGain);
+            for (let i = 0; i < 7; i++) t(300 - i * 24, now + i * 0.07, 0.1, 'sawtooth');
         } else if (type === 'levelUp') {
-            [523, 659, 784, 1047].forEach((f, i) => tone(f, now + i * 0.1, 0.15, 'square', sGain));
+            [523, 659, 784, 1047, 1319].forEach((f, i) => t(f, now + i * 0.09, 0.14));
         } else if (type === 'nav') {
-            tone(440, now, 0.03, 'square', sGain);
+            t(440, now, 0.03);
         } else if (type === 'select') {
-            tone(523, now, 0.04, 'square', sGain);
-            tone(659, now + 0.04, 0.07, 'square', sGain);
+            t(523, now, 0.04); t(659, now + 0.04, 0.07);
         }
     }
 
-    return { init, tick, play, stop, resume, sfx };
+    return { init, tick, play, stop, pauseMusic, resumeMusic, resume, sfx };
 })();
 
 // ================================================================
-// HIGH SCORES (localStorage)
+// HIGH SCORES
 // ================================================================
 const HS_KEY = 'fok-snake-hs';
-
 function getScores() {
     try { return JSON.parse(localStorage.getItem(HS_KEY)) || []; } catch { return []; }
 }
-
 function addScore(name, sc, lvl) {
     const s = getScores();
     s.push({ name: (name.trim() || 'AAA').substring(0, MAX_NAME), score: sc, level: lvl });
@@ -190,32 +304,25 @@ function addScore(name, sc, lvl) {
 // ================================================================
 // APPLICATION STATE
 // ================================================================
-let phase = 'menu';            // menu | settings | scores | playing | dying | levelDone | nameEntry
-
-let menuSel     = 0;
-let settingsSel = 0;
+let phase = 'menu';
+let menuSel = 0, settingsSel = 0;
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES'];
 const SETTINGS_ITEMS = ['MUSIC', 'DIFFICULTY', 'BACK'];
-
 let cfg = { music: true, diff: 1 };
 
-// Game variables (valid during playing / dying / levelDone / nameEntry)
 let level, lives, score;
 let snake, dir, dirQueue;
 let gem, gemsDone, bars;
 let speed, stepAt, phaseAt, gemAt, deathMsg;
 
-// Name entry
 let nameStr = '', nameCharIdx = 0, nameReason = '';
-
-// FPS
 let fpsVal = 0, fpsFrames = 0, fpsLast = 0;
 
 // ================================================================
 // GAME LOGIC
 // ================================================================
-const ck  = p => `${p.x},${p.y}`;
-const ri  = n => Math.floor(Math.random() * n);
+const ck = p => `${p.x},${p.y}`;
+const ri = n => Math.floor(Math.random() * n);
 
 function freeCell(blocked) {
     let p;
@@ -223,10 +330,7 @@ function freeCell(blocked) {
     return p;
 }
 
-function startGame() {
-    level = 1; lives = START_LIVES; score = 0;
-    beginLevel();
-}
+function startGame() { level = 1; lives = START_LIVES; score = 0; beginLevel(); }
 
 function beginLevel() {
     const lcfg = LEVEL_CFG[level - 1];
@@ -238,64 +342,47 @@ function beginLevel() {
     snake    = Array.from({ length: sl }, (_, i) => ({ x: cx - i, y: cy }));
     dir      = { x: 1, y: 0 };
     dirQueue = [];
-    gem      = null;
-    gemsDone = 0;
-    bars     = [];
+    gem      = null; gemsDone = 0; bars = [];
     phase    = 'playing';
     stepAt   = performance.now() + speed;
     phaseAt  = 0;
 
-    const blocked = new Set([...snake, { x: cx + 1, y: cy }, { x: cx + 2, y: cy }].map(ck));
+    const blocked = new Set([...snake, { x: cx+1, y: cy }, { x: cx+2, y: cy }].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
-    for (let i = 0; i < numBars; i++) {
-        const b = freeCell(blocked);
-        blocked.add(ck(b));
-        bars.push(b);
-    }
+    for (let i = 0; i < numBars; i++) { const b = freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
+
     spawnGem();
+    Snd.resumeMusic();
     showHUD(true);
 }
 
 function spawnGem() {
     const blocked = new Set([...snake, ...bars].map(ck));
-    gem   = freeCell(blocked);
-    gemAt = performance.now();
+    gem = freeCell(blocked); gemAt = performance.now();
 }
 
 function step(now) {
-    // Apply next queued direction (skip reversals)
     while (dirQueue.length > 0) {
         const nd = dirQueue.shift();
         if (nd.x !== -dir.x || nd.y !== -dir.y) { dir = nd; break; }
     }
-
-    const head = {
-        x: (snake[0].x + dir.x + COLS) % COLS,
-        y: (snake[0].y + dir.y + ROWS) % ROWS,
-    };
+    const head = { x: (snake[0].x + dir.x + COLS) % COLS, y: (snake[0].y + dir.y + ROWS) % ROWS };
     const hk = ck(head);
 
     if (bars.some(b => ck(b) === hk)) { die(now); return; }
-
     const ate  = gem && ck(gem) === hk;
     const body = ate ? snake : snake.slice(0, -1);
     if (body.some(s => ck(s) === hk)) { die(now); return; }
 
     snake.unshift(head);
-
     if (ate) {
-        gemsDone++;
-        score += level * 100;
+        gemsDone++; score += level * 100;
         Snd.sfx('eat', cfg.music);
         if (gemsDone >= GEMS_PER_LEVEL) {
-            gem    = null;
-            score += level * 500;
-            phase  = 'levelDone';
-            phaseAt = now;
+            gem = null; score += level * 500;
+            phase = 'levelDone'; phaseAt = now;
             Snd.sfx('levelUp', cfg.music);
-        } else {
-            spawnGem();
-        }
+        } else spawnGem();
     } else {
         snake.pop();
     }
@@ -304,10 +391,10 @@ function step(now) {
 
 function die(now) {
     lives--;
-    phase    = 'dying';
-    phaseAt  = now;
+    phase = 'dying'; phaseAt = now;
     deathMsg = lives > 0 ? `LIFE LOST  (${lives} left)` : 'GAME OVER!';
     Snd.sfx('die', cfg.music);
+    Snd.pauseMusic();
 }
 
 // ================================================================
@@ -318,8 +405,7 @@ function showHUD(v) { hudEl.classList.toggle('hidden', !v); }
 function updateHUD() {
     document.getElementById('hv-lvl').textContent   = level;
     document.getElementById('hv-gems').textContent  = gemsDone;
-    document.getElementById('hv-lives').textContent =
-        '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, START_LIVES - lives));
+    document.getElementById('hv-lives').textContent = '♥'.repeat(Math.max(0,lives)) + '♡'.repeat(Math.max(0,START_LIVES-lives));
     document.getElementById('hv-score').textContent = score;
 }
 
@@ -328,29 +414,27 @@ function updateHUD() {
 // ================================================================
 function rr(x, y, w, h, r) {
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);   ctx.quadraticCurveTo(x + w, y,     x + w, y + r);
-    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);   ctx.quadraticCurveTo(x,     y + h, x,     y + h - r);
-    ctx.lineTo(x, y + r);       ctx.quadraticCurveTo(x,     y,     x + r, y);
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y);   ctx.quadraticCurveTo(x+w, y,   x+w, y+r);
+    ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    ctx.lineTo(x+r, y+h);   ctx.quadraticCurveTo(x,   y+h, x,     y+h-r);
+    ctx.lineTo(x, y+r);     ctx.quadraticCurveTo(x,   y,   x+r,   y);
     ctx.closePath();
 }
 
 function eyeOffsets(d) {
     const E = CS - 2;
-    if (d.x ===  1) return [[E - 5, 2],   [E - 5, E - 5]];
-    if (d.x === -1) return [[2,     2],   [2,     E - 5]];
-    if (d.y === -1) return [[2,     2],   [E - 5, 2    ]];
-    return                  [[2,     E-5], [E - 5, E - 5]];
+    if (d.x ===  1) return [[E-5, 2],   [E-5, E-5]];
+    if (d.x === -1) return [[2,   2],   [2,   E-5]];
+    if (d.y === -1) return [[2,   2],   [E-5, 2  ]];
+    return                  [[2,   E-5], [E-5, E-5]];
 }
 
 function drawGrid() {
-    ctx.fillStyle = '#07070e';
-    ctx.fillRect(0, 0, CW, CH);
-    ctx.strokeStyle = '#0d0d1a';
-    ctx.lineWidth = 0.5;
-    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CS, 0); ctx.lineTo(x*CS, CH); ctx.stroke(); }
-    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y*CS); ctx.lineTo(CW, y*CS); ctx.stroke(); }
+    ctx.fillStyle = '#07070e'; ctx.fillRect(0, 0, CW, CH);
+    ctx.strokeStyle = '#0d0d1a'; ctx.lineWidth = 0.5;
+    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CS,0); ctx.lineTo(x*CS,CH); ctx.stroke(); }
+    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0,y*CS); ctx.lineTo(CW,y*CS); ctx.stroke(); }
 }
 
 function drawOverlay(alpha) {
@@ -358,61 +442,56 @@ function drawOverlay(alpha) {
     ctx.fillRect(0, 0, CW, CH);
 }
 
-function ctext(text, x, y, color, size, bold) {
-    ctx.fillStyle  = color || '#7fff7f';
-    ctx.font       = `${bold !== false ? 'bold ' : ''}${size || 16}px "Courier New"`;
-    ctx.textAlign  = 'center';
-    ctx.textBaseline = 'middle';
+function ct(text, x, y, color, size, bold) {
+    ctx.fillStyle = color || '#7fff7f';
+    ctx.font = `${bold !== false ? 'bold ' : ''}${size || 16}px "Courier New"`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(text, x, y);
 }
 
 function menuItem(text, y, sel) {
     ctx.globalAlpha = sel ? 1 : 0.45;
     if (sel) { ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 14; }
-    ctext(sel ? ('> ' + text + ' <') : text, CW / 2, y, sel ? '#7fff7f' : '#aaa', 20);
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
+    ct(sel ? ('> ' + text + ' <') : text, CW/2, y, sel ? '#7fff7f' : '#aaa', 20);
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
 }
 
 function drawBar(b) {
-    const x = b.x*CS+1, y = b.y*CS+1, bw = CS-2, bh = CS-2;
-    ctx.fillStyle = '#3d2812'; ctx.fillRect(x, y, bw, bh);
-    ctx.fillStyle = '#5c3e20'; ctx.fillRect(x, y, bw, 3); ctx.fillRect(x, y, 3, bh);
-    ctx.fillStyle = '#231508'; ctx.fillRect(x+bw-3, y, 3, bh); ctx.fillRect(x, y+bh-3, bw, 3);
+    const x=b.x*CS+1, y=b.y*CS+1, bw=CS-2, bh=CS-2;
+    ctx.fillStyle='#3d2812'; ctx.fillRect(x,y,bw,bh);
+    ctx.fillStyle='#5c3e20'; ctx.fillRect(x,y,bw,3); ctx.fillRect(x,y,3,bh);
+    ctx.fillStyle='#231508'; ctx.fillRect(x+bw-3,y,3,bh); ctx.fillRect(x,y+bh-3,bw,3);
 }
 
 function drawGem(g, now) {
-    const cx = g.x*CS + CS/2, cy = g.y*CS + CS/2;
-    const t  = (now - gemAt) / 1000;
-    const r  = (CS/2 - 2) * (1 + 0.12 * Math.sin(t * 5));
-    ctx.save();
-    ctx.translate(cx, cy); ctx.rotate(t * 2);
-    const grd = ctx.createRadialGradient(0,0,0,0,0,r*2.2);
-    grd.addColorStop(0, 'rgba(0,255,255,0.25)'); grd.addColorStop(1, 'rgba(0,255,255,0)');
-    ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
+    const cx=g.x*CS+CS/2, cy=g.y*CS+CS/2;
+    const t=(now-gemAt)/1000, r=(CS/2-2)*(1+0.12*Math.sin(t*5));
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2);
+    const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
+    grd.addColorStop(0,'rgba(0,255,255,0.25)'); grd.addColorStop(1,'rgba(0,255,255,0)');
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
     ctx.beginPath();
     ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath();
-    const fg = ctx.createLinearGradient(0,-r,0,r);
+    const fg=ctx.createLinearGradient(0,-r,0,r);
     fg.addColorStop(0,'#ffffff'); fg.addColorStop(0.35,'#00ffff'); fg.addColorStop(1,'#006688');
-    ctx.fillStyle = fg; ctx.fill();
-    ctx.restore();
+    ctx.fillStyle=fg; ctx.fill(); ctx.restore();
 }
 
 function drawSnake(flash) {
     snake.forEach((seg, i) => {
-        const x = seg.x*CS+1, y = seg.y*CS+1, sw = CS-2, sh = CS-2;
-        const frac = 1 - i / Math.max(snake.length, 1);
-        if (i === 0) {
-            ctx.fillStyle = flash ? '#bb2222' : '#7fff7f';
-            if (!flash) { ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 10; }
+        const x=seg.x*CS+1, y=seg.y*CS+1, sw=CS-2, sh=CS-2;
+        const frac=1-i/Math.max(snake.length,1);
+        if (i===0) {
+            ctx.fillStyle=flash?'#bb2222':'#7fff7f';
+            if (!flash) { ctx.shadowColor='#7fff7f'; ctx.shadowBlur=10; }
         } else {
-            const l = Math.round(8 + frac * 33);
-            ctx.fillStyle = flash ? `hsl(0,55%,${l+8}%)` : `hsl(120,65%,${l}%)`;
+            const l=Math.round(8+frac*33);
+            ctx.fillStyle=flash?`hsl(0,55%,${l+8}%)`:`hsl(120,65%,${l}%)`;
         }
-        rr(x, y, sw, sh, i === 0 ? 5 : 3); ctx.fill(); ctx.shadowBlur = 0;
-        if (i === 0 && !flash) {
-            ctx.fillStyle = '#001500';
-            eyeOffsets(dir).forEach(([ox, oy]) => ctx.fillRect(x+ox, y+oy, 3, 3));
+        rr(x,y,sw,sh,i===0?5:3); ctx.fill(); ctx.shadowBlur=0;
+        if (i===0&&!flash) {
+            ctx.fillStyle='#001500';
+            eyeOffsets(dir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy,3,3));
         }
     });
 }
@@ -422,235 +501,234 @@ function drawSnake(flash) {
 // ================================================================
 function drawMenu() {
     drawGrid();
-    for (let y = 0; y < CH; y += 3) { ctx.fillStyle = 'rgba(0,0,0,0.05)'; ctx.fillRect(0, y, CW, 1); }
-    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 28;
-    ctext('S N A K E', CW/2, 92, '#7fff7f', 52);
-    ctx.shadowBlur = 0;
-    ctext('F O K   E D I T I O N', CW/2, 140, '#2a3a2a', 12);
-    MENU_ITEMS.forEach((item, i) => menuItem(item, 208 + i * 52, i === menuSel));
-    const diff = DIFF[cfg.diff].label;
-    ctext(`DIFFICULTY: ${diff}   MUSIC: ${cfg.music ? 'ON' : 'OFF'}`, CW/2, 375, '#2a3a2a', 11, false);
-    ctext('UP/DOWN  |  ENTER', CW/2, CH - 10, '#222', 10, false);
+    for (let y=0;y<CH;y+=3) { ctx.fillStyle='rgba(0,0,0,0.05)'; ctx.fillRect(0,y,CW,1); }
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=28;
+    ct('S N A K E', CW/2, 92, '#7fff7f', 52);
+    ctx.shadowBlur=0;
+    ct('F O K   E D I T I O N', CW/2, 140, '#2a3a2a', 12);
+    MENU_ITEMS.forEach((item,i)=>menuItem(item,208+i*52,i===menuSel));
+    ct(`DIFFICULTY: ${DIFF[cfg.diff].label}   MUSIC: ${cfg.music?'ON':'OFF'}`, CW/2, 374, '#2a3a2a', 11, false);
+    ct('UP/DOWN  |  OK to select', CW/2, CH-10, '#1e1e1e', 10, false);
 }
 
 function drawSettings() {
     drawGrid(); drawOverlay(0.92);
-    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 20;
-    ctext('SETTINGS', CW/2, 75, '#7fff7f', 30);
-    ctx.shadowBlur = 0;
-    const items = [
-        'MUSIC: ' + (cfg.music ? 'ON' : 'OFF'),
-        'DIFFICULTY: ' + DIFF[cfg.diff].label,
-        'BACK',
-    ];
-    items.forEach((item, i) => menuItem(item, 168 + i * 62, i === settingsSel));
-    ctext('ENTER to toggle / select   ESC to go back', CW/2, CH - 14, '#2a2a2a', 10, false);
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=20;
+    ct('SETTINGS', CW/2, 75, '#7fff7f', 30);
+    ctx.shadowBlur=0;
+    const items=['MUSIC: '+(cfg.music?'ON':'OFF'), 'DIFFICULTY: '+DIFF[cfg.diff].label, 'BACK'];
+    items.forEach((item,i)=>menuItem(item,168+i*62,i===settingsSel));
+    ct('OK to toggle/select   LEFT/< to go back', CW/2, CH-14, '#222', 10, false);
 }
 
 function drawScores() {
     drawGrid(); drawOverlay(0.92);
-    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 18;
-    ctext('HIGH SCORES', CW/2, 55, '#7fff7f', 26);
-    ctx.shadowBlur = 0;
-    const scores = getScores();
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=18;
+    ct('HIGH SCORES', CW/2, 52, '#7fff7f', 26);
+    ctx.shadowBlur=0;
+    const scores=getScores();
     if (!scores.length) {
-        ctext('No scores yet!', CW/2, CH/2, '#555', 16, false);
+        ct('No scores yet!', CW/2, CH/2, '#555', 16, false);
     } else {
-        ctx.font = '14px "Courier New"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        scores.slice(0, 8).forEach((s, i) => {
-            ctx.fillStyle = i === 0 ? '#ffd700' : i < 3 ? '#c0c0c0' : '#777';
-            const rank = (i + 1 + '.').padStart(3);
-            const name = s.name.padEnd(MAX_NAME);
-            const pts  = String(s.score).padStart(7);
-            ctx.fillText(`${rank}  ${name}  ${pts}  LVL ${s.level}`, CW/2, 100 + i * 30);
+        ctx.font='14px "Courier New"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        scores.slice(0,8).forEach((s,i)=>{
+            ctx.fillStyle=i===0?'#ffd700':i<3?'#c0c0c0':'#777';
+            const rank=(i+1+'.').padStart(3), name=s.name.padEnd(MAX_NAME), pts=String(s.score).padStart(7);
+            ctx.fillText(`${rank}  ${name}  ${pts}  LVL ${s.level}`, CW/2, 98+i*30);
         });
     }
-    ctext('Press any key to return', CW/2, CH - 14, '#2a2a2a', 10, false);
+    ct('Press OK or any key to return', CW/2, CH-14, '#222', 10, false);
 }
 
 function drawNameEntry(now) {
     drawGrid();
-    if (bars)  bars.forEach(b => drawBar(b));
-    if (gem)   drawGem(gem, now);
+    if (bars)  bars.forEach(b=>drawBar(b));
+    if (gem)   drawGem(gem,now);
     if (snake) drawSnake(false);
     drawOverlay(0.84);
 
-    const isWin = nameReason === 'win';
-    ctx.shadowColor = isWin ? '#ffd700' : '#ff5555'; ctx.shadowBlur = 22;
-    ctext(isWin ? 'YOU WIN!' : 'GAME OVER', CW/2, 68, isWin ? '#ffd700' : '#ff5555', 34);
-    ctx.shadowBlur = 0;
-    ctext(`SCORE: ${score}   LEVEL: ${level}`, CW/2, 108, '#aaa', 13, false);
-    ctext('ENTER YOUR NAME:', CW/2, 140, '#7fff7f', 13, false);
+    const isWin=nameReason==='win';
+    ctx.shadowColor=isWin?'#ffd700':'#ff5555'; ctx.shadowBlur=22;
+    ct(isWin?'YOU WIN!':'GAME OVER', CW/2, 65, isWin?'#ffd700':'#ff5555', 34);
+    ctx.shadowBlur=0;
+    ct(`SCORE: ${score}   LEVEL: ${level}`, CW/2, 106, '#aaa', 13, false);
+    ct('ENTER YOUR NAME:', CW/2, 136, '#7fff7f', 13, false);
 
-    // Slots
-    const sw = 30, sh = 40, gap = 5;
-    const totalW = MAX_NAME * (sw + gap) - gap;
-    const sx0    = Math.floor(CW/2 - totalW/2);
-    const sy     = 158;
+    const sw=30, sh=40, gap=5;
+    const totalW=MAX_NAME*(sw+gap)-gap;
+    const sx0=Math.floor(CW/2-totalW/2), sy=154;
 
-    for (let i = 0; i < MAX_NAME; i++) {
-        const sx  = sx0 + i * (sw + gap);
-        const act = i === nameStr.length && nameStr.length < MAX_NAME;
-        const has = i < nameStr.length;
-        ctx.fillStyle   = act ? '#142014' : '#0d0d18';
-        ctx.strokeStyle = act ? '#7fff7f' : '#2a2a3a';
-        ctx.lineWidth   = act ? 1.5 : 1;
-        rr(sx, sy, sw, sh, 3); ctx.fill(); ctx.stroke();
+    for (let i=0;i<MAX_NAME;i++) {
+        const sx=sx0+i*(sw+gap);
+        const act=i===nameStr.length&&nameStr.length<MAX_NAME, has=i<nameStr.length;
+        ctx.fillStyle=act?'#142014':'#0d0d18';
+        ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
+        rr(sx,sy,sw,sh,3); ctx.fill(); ctx.stroke();
         if (has) {
-            ctext(nameStr[i], sx + sw/2, sy + sh/2, '#7fff7f', 22);
+            ct(nameStr[i], sx+sw/2, sy+sh/2, '#7fff7f', 22);
         } else if (act) {
-            // Preview current cycling char (dim)
-            const ch = NAME_CHARS[nameCharIdx];
-            ctx.globalAlpha = 0.45;
-            ctext(ch === ' ' ? '_' : ch, sx + sw/2, sy + sh/2, '#7fff7f', 20);
-            ctx.globalAlpha = 1;
-            // Blinking underline
-            if (Math.floor(now / 400) % 2 === 0) {
-                ctx.fillStyle = '#7fff7f55';
-                ctx.fillRect(sx + 5, sy + sh - 6, sw - 10, 2);
-            }
+            const ch=NAME_CHARS[nameCharIdx];
+            ctx.globalAlpha=0.45;
+            ct(ch===' '?'_':ch, sx+sw/2, sy+sh/2, '#7fff7f', 20);
+            ctx.globalAlpha=1;
+            if (Math.floor(now/400)%2===0) { ctx.fillStyle='#7fff7f55'; ctx.fillRect(sx+5,sy+sh-6,sw-10,2); }
         }
     }
 
-    // Cycling char display (below slots)
-    const cycleY = sy + sh + 22;
-    if (nameStr.length < MAX_NAME) {
-        const ci   = nameCharIdx;
-        const prev = NAME_CHARS[(ci - 1 + NAME_CHARS.length) % NAME_CHARS.length];
-        const curr = NAME_CHARS[ci];
-        const next = NAME_CHARS[(ci + 1) % NAME_CHARS.length];
-        const disp = c => c === ' ' ? '_' : c;
-        ctext('(^)', CW/2, cycleY,      '#333', 11, false);
-        ctext(disp(prev), CW/2, cycleY + 16,  '#3a3a3a', 14, false);
-        ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 10;
-        ctext(disp(curr), CW/2, cycleY + 34,  '#7fff7f', 22);
-        ctx.shadowBlur = 0;
-        ctext(disp(next), CW/2, cycleY + 50,  '#3a3a3a', 14, false);
-        ctext('(v)', CW/2, cycleY + 64, '#333', 11, false);
+    // Cycling indicator
+    const cy2=sy+sh+22;
+    if (nameStr.length<MAX_NAME) {
+        const ci=nameCharIdx, disp=c=>c===' '?'_':c;
+        const prev=NAME_CHARS[(ci-1+NAME_CHARS.length)%NAME_CHARS.length];
+        const curr=NAME_CHARS[ci], next=NAME_CHARS[(ci+1)%NAME_CHARS.length];
+        ct('(^)', CW/2, cy2,      '#333', 11, false);
+        ct(disp(prev), CW/2, cy2+16,  '#3a3a3a', 14, false);
+        ctx.shadowColor='#7fff7f'; ctx.shadowBlur=10;
+        ct(disp(curr), CW/2, cy2+33,  '#7fff7f', 22);
+        ctx.shadowBlur=0;
+        ct(disp(next), CW/2, cy2+50,  '#3a3a3a', 14, false);
+        ct('(v)', CW/2, cy2+63, '#333', 11, false);
     }
 
-    ctext('UP/DOWN cycle  |  RIGHT/ENTER add letter  |  BACKSPACE delete', CW/2, CH - 24, '#2a2a2a', 10, false);
-    ctext('Or just type letters directly.  ENTER to confirm name.', CW/2, CH - 10, '#2a2a2a', 10, false);
+    ct('Type directly  or  UP/DOWN cycle + RIGHT to add  |  BACKSPACE delete  |  OK confirm', CW/2, CH-10, '#222', 10, false);
 }
 
 function drawGameBoard(now) {
     drawGrid();
-    bars.forEach(b => drawBar(b));
-    if (gem) drawGem(gem, now);
-
-    const dying = phase === 'dying';
-    const flash = dying && Math.floor((now - phaseAt) / 85) % 2 === 1;
+    bars.forEach(b=>drawBar(b));
+    if (gem) drawGem(gem,now);
+    const dying=phase==='dying', flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
     drawSnake(flash);
 
-    if (phase === 'levelDone') {
-        const a = Math.min(1, (now - phaseAt) / 150);
-        ctx.save(); ctx.globalAlpha = a;
-        ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 30;
-        ctext('LEVEL COMPLETE!', CW/2, CH/2, '#7fff7f', 30);
+    if (phase==='levelDone') {
+        const a=Math.min(1,(now-phaseAt)/150);
+        ctx.save(); ctx.globalAlpha=a;
+        ctx.shadowColor='#7fff7f'; ctx.shadowBlur=30;
+        ct('LEVEL COMPLETE!', CW/2, CH/2, '#7fff7f', 30);
         ctx.restore();
     }
-
     if (dying) {
-        const t = (now - phaseAt) / DEATH_DUR;
-        ctx.save(); ctx.globalAlpha = Math.min(1, t * 2.5);
-        ctx.shadowColor = '#ff4444'; ctx.shadowBlur = 20;
-        ctext(deathMsg, CW/2, CH/2, '#ff5555', 24);
+        const t=(now-phaseAt)/DEATH_DUR;
+        ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5);
+        ctx.shadowColor='#ff4444'; ctx.shadowBlur=20;
+        ct(deathMsg, CW/2, CH/2, '#ff5555', 24);
         ctx.restore();
     }
-
     updateHUD();
 }
 
 function drawFPS() {
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(CW - 56, 4, 52, 17);
-    ctx.fillStyle = '#7fff7f';
-    ctx.font      = '11px "Courier New"';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`${fpsVal} FPS`, CW - 5, 6);
+    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(CW-56,4,52,17);
+    ctx.fillStyle='#7fff7f'; ctx.font='11px "Courier New"';
+    ctx.textAlign='right'; ctx.textBaseline='top';
+    ctx.fillText(`${fpsVal} FPS`, CW-5, 6);
 }
 
 // ================================================================
-// INPUT
+// INPUT  (shared handler used by keyboard + dpad + touch)
 // ================================================================
 const GDIRS = {
-    ArrowUp:    { x: 0,  y: -1 },
-    ArrowDown:  { x: 0,  y:  1 },
-    ArrowLeft:  { x: -1, y:  0 },
-    ArrowRight: { x: 1,  y:  0 },
+    ArrowUp:    {x:0,y:-1}, ArrowDown:  {x:0,y:1},
+    ArrowLeft:  {x:-1,y:0}, ArrowRight: {x:1,y:0},
 };
 
-document.addEventListener('keydown', e => {
+function handleKey(key, pde) {
     Snd.resume();
+    if (key === 'm' || key === 'M') { toggleMute(); return; }
 
-    if (phase === 'menu') {
-        if (e.key === 'ArrowUp')   { menuSel = (menuSel - 1 + MENU_ITEMS.length) % MENU_ITEMS.length; Snd.sfx('nav', cfg.music); }
-        if (e.key === 'ArrowDown') { menuSel = (menuSel + 1) % MENU_ITEMS.length; Snd.sfx('nav', cfg.music); }
-        if (e.key === 'Enter' || e.key === ' ') {
-            Snd.sfx('select', cfg.music);
-            if      (menuSel === 0) { startGame(); }
-            else if (menuSel === 1) { phase = 'settings'; settingsSel = 0; }
-            else if (menuSel === 2) { phase = 'scores'; }
-            e.preventDefault();
-        }
-
-    } else if (phase === 'settings') {
-        if (e.key === 'ArrowUp')   { settingsSel = (settingsSel - 1 + SETTINGS_ITEMS.length) % SETTINGS_ITEMS.length; Snd.sfx('nav', cfg.music); }
-        if (e.key === 'ArrowDown') { settingsSel = (settingsSel + 1) % SETTINGS_ITEMS.length; Snd.sfx('nav', cfg.music); }
-        if (e.key === 'Enter' || e.key === ' ') {
-            Snd.sfx('select', cfg.music);
-            if      (settingsSel === 0) { cfg.music = !cfg.music; if (!cfg.music) Snd.stop(); }
-            else if (settingsSel === 1) { cfg.diff  = (cfg.diff + 1) % DIFF.length; }
-            else                        { phase = 'menu'; }
-        }
-        if (e.key === 'Escape') { phase = 'menu'; Snd.sfx('nav', cfg.music); }
-        e.preventDefault();
-
-    } else if (phase === 'scores') {
-        phase = 'menu'; e.preventDefault();
-
-    } else if (phase === 'playing') {
-        const d = GDIRS[e.key];
-        if (d) {
-            e.preventDefault();
-            // Anti-reversal check against last queued dir
-            const last = dirQueue.length > 0 ? dirQueue[dirQueue.length - 1] : dir;
-            if (!(d.x === -last.x && d.y === -last.y) && !(d.x === last.x && d.y === last.y)) {
-                if (dirQueue.length < 3) dirQueue.push(d);
-            }
-        }
-
-    } else if (phase === 'nameEntry') {
-        if (GDIRS[e.key]) e.preventDefault();
-
-        if (e.key === 'ArrowUp') {
-            nameCharIdx = (nameCharIdx - 1 + NAME_CHARS.length) % NAME_CHARS.length;
-            Snd.sfx('nav', cfg.music);
-        } else if (e.key === 'ArrowDown') {
-            nameCharIdx = (nameCharIdx + 1) % NAME_CHARS.length;
-            Snd.sfx('nav', cfg.music);
-        } else if ((e.key === 'ArrowRight' || e.key === 'Enter') && nameStr.length < MAX_NAME) {
-            nameStr += NAME_CHARS[nameCharIdx];
-            Snd.sfx('nav', cfg.music);
-            if (e.key === 'ArrowRight') return; // Enter also triggers confirm below
-        } else if (e.key === 'Backspace' || e.key === 'ArrowLeft') {
-            if (nameStr.length > 0) { nameStr = nameStr.slice(0, -1); Snd.sfx('nav', cfg.music); }
-            e.preventDefault(); return;
-        } else if (e.key.length === 1 && /^[a-zA-Z0-9 ]$/.test(e.key) && nameStr.length < MAX_NAME) {
-            nameStr += e.key.toUpperCase();
-            Snd.sfx('nav', cfg.music); return;
-        }
-
-        // ENTER confirms (whether we just added a char or not)
-        if (e.key === 'Enter') {
-            addScore(nameStr, score, level);
-            Snd.sfx('select', cfg.music);
-            phase = 'scores';  // show scores after entry
-            showHUD(false);
+    if (phase==='menu') {
+        if (key==='ArrowUp')               { menuSel=(menuSel-1+MENU_ITEMS.length)%MENU_ITEMS.length; Snd.sfx('nav',cfg.music); }
+        if (key==='ArrowDown')             { menuSel=(menuSel+1)%MENU_ITEMS.length; Snd.sfx('nav',cfg.music); }
+        if (key==='Enter'||key===' ') {
+            Snd.sfx('select',cfg.music);
+            if      (menuSel===0) startGame();
+            else if (menuSel===1) { phase='settings'; settingsSel=0; }
+            else if (menuSel===2)   phase='scores';
+            if (pde) pde();
         }
     }
+    else if (phase==='settings') {
+        if (key==='ArrowUp')   { settingsSel=(settingsSel-1+SETTINGS_ITEMS.length)%SETTINGS_ITEMS.length; Snd.sfx('nav',cfg.music); }
+        if (key==='ArrowDown') { settingsSel=(settingsSel+1)%SETTINGS_ITEMS.length; Snd.sfx('nav',cfg.music); }
+        if (key==='Enter'||key===' ') {
+            Snd.sfx('select',cfg.music);
+            if      (settingsSel===0) { cfg.music=!cfg.music; if (!cfg.music) Snd.stop(); }
+            else if (settingsSel===1)   cfg.diff=(cfg.diff+1)%DIFF.length;
+            else                        phase='menu';
+        }
+        if (key==='Escape'||key==='ArrowLeft') { phase='menu'; Snd.sfx('nav',cfg.music); }
+        if (pde) pde();
+    }
+    else if (phase==='scores') { phase='menu'; if (pde) pde(); }
+    else if (phase==='playing') {
+        const d=GDIRS[key];
+        if (d) {
+            if (pde) pde();
+            const last=dirQueue.length>0?dirQueue[dirQueue.length-1]:dir;
+            if (!(d.x===-last.x&&d.y===-last.y)&&!(d.x===last.x&&d.y===last.y)) {
+                if (dirQueue.length<3) dirQueue.push(d);
+            }
+        }
+    }
+    else if (phase==='nameEntry') {
+        if (GDIRS[key]&&pde) pde();
+        if (key==='ArrowUp')   { nameCharIdx=(nameCharIdx-1+NAME_CHARS.length)%NAME_CHARS.length; Snd.sfx('nav',cfg.music); }
+        else if (key==='ArrowDown') { nameCharIdx=(nameCharIdx+1)%NAME_CHARS.length; Snd.sfx('nav',cfg.music); }
+        else if (key==='ArrowRight') {
+            if (nameStr.length<MAX_NAME) { nameStr+=NAME_CHARS[nameCharIdx]; Snd.sfx('nav',cfg.music); }
+        }
+        else if (key==='Backspace'||key==='ArrowLeft') {
+            if (nameStr.length>0) { nameStr=nameStr.slice(0,-1); Snd.sfx('nav',cfg.music); }
+            if (pde) pde();
+        }
+        else if (key.length===1&&/^[a-zA-Z0-9 ]$/.test(key)&&nameStr.length<MAX_NAME) {
+            nameStr+=key.toUpperCase(); Snd.sfx('nav',cfg.music);
+        }
+        else if (key==='Enter') {
+            addScore(nameStr,score,level); Snd.sfx('select',cfg.music);
+            phase='scores'; showHUD(false);
+        }
+    }
+}
+
+document.addEventListener('keydown', e => handleKey(e.key, ()=>e.preventDefault()));
+
+// D-pad buttons
+const DPAD_MAP = { 'db-u':'ArrowUp','db-d':'ArrowDown','db-l':'ArrowLeft','db-r':'ArrowRight','db-ok':'Enter' };
+Object.entries(DPAD_MAP).forEach(([id,key]) => {
+    const el=document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('touchstart', e => { e.preventDefault(); handleKey(key,null); }, { passive:false });
+    el.addEventListener('click', () => handleKey(key,null));
 });
+
+// Mute toggle
+const muteBtn = document.getElementById('btn-mute');
+function toggleMute() {
+    cfg.music = !cfg.music;
+    if (!cfg.music) Snd.stop();
+    muteBtn.textContent = cfg.music ? 'SND' : 'MUT';
+    muteBtn.classList.toggle('muted', !cfg.music);
+}
+muteBtn.addEventListener('click', toggleMute);
+muteBtn.addEventListener('touchstart', e => { e.preventDefault(); toggleMute(); }, { passive: false });
+
+// Touch swipe on canvas
+let touchStart=null;
+canvas.addEventListener('touchstart', e=>{
+    e.preventDefault(); Snd.resume();
+    touchStart={ x:e.touches[0].clientX, y:e.touches[0].clientY };
+}, { passive:false });
+canvas.addEventListener('touchend', e=>{
+    if (!touchStart) return;
+    const dx=e.changedTouches[0].clientX-touchStart.x;
+    const dy=e.changedTouches[0].clientY-touchStart.y;
+    const adx=Math.abs(dx), ady=Math.abs(dy);
+    if (Math.max(adx,ady)<18) { handleKey('Enter',null); }  // tap = OK
+    else if (adx>ady) handleKey(dx>0?'ArrowRight':'ArrowLeft',null);
+    else              handleKey(dy>0?'ArrowDown':'ArrowUp',null);
+    touchStart=null;
+}, { passive:false });
 
 // ================================================================
 // MAIN LOOP
@@ -658,51 +736,36 @@ document.addEventListener('keydown', e => {
 function loop(now) {
     requestAnimationFrame(loop);
 
-    // FPS
     fpsFrames++;
-    if (now - fpsLast >= 500) {
-        fpsVal    = Math.round(fpsFrames * 1000 / (now - fpsLast));
-        fpsFrames = 0; fpsLast = now;
-    }
+    if (now-fpsLast>=500) { fpsVal=Math.round(fpsFrames*1000/(now-fpsLast)); fpsFrames=0; fpsLast=now; }
 
-    // Music
-    const wantTrack = ['menu', 'settings', 'scores'].includes(phase) ? 'menu'
-        : ['playing', 'dying', 'levelDone'].includes(phase) ? 'game'
-        : null;
-    if (cfg.music && wantTrack) Snd.play(wantTrack); else Snd.stop();
+    // Music track selection (pauseMusic handles muting during dying)
+    const wantTrack=['menu','settings','scores'].includes(phase)?'menu'
+        :['playing','dying','levelDone'].includes(phase)?'game':null;
+    if (cfg.music&&wantTrack) Snd.play(wantTrack); else if (!wantTrack) Snd.stop();
     Snd.tick(cfg.music);
 
     // Phase transitions
-    if (phase === 'playing' && now >= stepAt) {
-        stepAt = now + speed;
-        step(now);
+    if (phase==='playing'&&now>=stepAt) { stepAt=now+speed; step(now); }
+    if (phase==='dying'&&now-phaseAt>=DEATH_DUR) {
+        if (lives>0) beginLevel();
+        else { phase='nameEntry'; nameStr=''; nameCharIdx=0; nameReason='over'; showHUD(false); Snd.stop(); }
     }
-    if (phase === 'dying' && now - phaseAt >= DEATH_DUR) {
-        if (lives > 0) {
-            beginLevel();
-        } else {
-            phase = 'nameEntry'; nameStr = ''; nameCharIdx = 0; nameReason = 'over';
-            showHUD(false);
-        }
-    }
-    if (phase === 'levelDone' && now - phaseAt >= LEVELDONE_DUR) {
-        if (level < MAX_LEVELS) { level++; beginLevel(); }
-        else { phase = 'nameEntry'; nameStr = ''; nameCharIdx = 0; nameReason = 'win'; showHUD(false); }
+    if (phase==='levelDone'&&now-phaseAt>=LEVELDONE_DUR) {
+        if (level<MAX_LEVELS) { level++; beginLevel(); }
+        else { phase='nameEntry'; nameStr=''; nameCharIdx=0; nameReason='win'; showHUD(false); Snd.stop(); }
     }
 
     // Draw
-    if      (phase === 'menu')      { drawMenu();            showHUD(false); }
-    else if (phase === 'settings')  { drawSettings();        showHUD(false); }
-    else if (phase === 'scores')    { drawScores();          showHUD(false); }
-    else if (phase === 'nameEntry') { drawNameEntry(now);    }
-    else                            { drawGameBoard(now);    showHUD(true);  }
+    if      (phase==='menu')      { drawMenu();         showHUD(false); }
+    else if (phase==='settings')  { drawSettings();     showHUD(false); }
+    else if (phase==='scores')    { drawScores();       showHUD(false); }
+    else if (phase==='nameEntry') { drawNameEntry(now);                 }
+    else                          { drawGameBoard(now); showHUD(true);  }
 
     drawFPS();
 }
 
-// ================================================================
-// INIT
-// ================================================================
 Snd.init();
 requestAnimationFrame(loop);
 </script>
