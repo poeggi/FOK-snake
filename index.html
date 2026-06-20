@@ -153,7 +153,7 @@ const Snd = (() => {
             ]},
         ]},
         // CLASSIC style (2-channel, original tracks)
-        classicMenu: { bpm: 155, channels: [
+        classicMenu: { bpm: 100, channels: [
             { fn:'square', vol:0.30, notes:[
                 [659,0.25],[784,0.25],[659,0.25],[523,0.25],
                 [440,0.25],[523,0.25],[659,0.25],[587,0.25],
@@ -170,7 +170,7 @@ const Snd = (() => {
                 [175,0.5],[0,0.5],[131,1.0],
             ]},
         ]},
-        classicGame: { bpm: 188, channels: [
+        classicGame: { bpm: 120, channels: [
             { fn:'square', vol:0.30, notes:[
                 [440,0.25],[0,0.125],[494,0.125],[523,0.25],[494,0.25],
                 [440,0.5],[0,0.25],[440,0.25],
@@ -299,6 +299,8 @@ const Snd = (() => {
             t(392, now, 0.03);
         } else if (type === 'select') {
             t(523, now, 0.04); t(659, now + 0.045, 0.08);
+        } else if (type === 'bonus') {
+            [880,1047,1319,1568].forEach((f,i)=>t(f,now+i*0.055,0.10));
         }
     }
 
@@ -376,6 +378,8 @@ let level, lives, score;
 let snake, dir, dirQueue;
 let gem, gemsDone, bars;
 let speed, stepAt, phaseAt, gemAt, deathMsg, pauseAt;
+let spawnAt = 0, levelDoneWaiting = false;
+let pauseReadyAt = 0, escReadyAt = 0;
 let nameStr = '', nameCharIdx = 0, nameReason = '';
 let creditsScroll = 0;
 let fpsVal = 0, fpsFrames = 0, fpsLast = 0;
@@ -399,29 +403,47 @@ function beginLevel() {
     snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
     phase='playing'; stepAt=performance.now()+speed; phaseAt=0;
+    spawnAt=performance.now(); levelDoneWaiting=false;
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
     spawnGem(); Snd.resumeMusic(); showHUD(true);
 }
 
-function spawnGem() { gem=freeCell(new Set([...snake,...bars].map(ck))); gemAt=performance.now(); }
+let gemOptimal=0, gemSteps=0;
+function spawnGem() {
+    gem=freeCell(new Set([...snake,...bars].map(ck))); gemAt=performance.now();
+    // Manhattan distance with wrap-around on both axes
+    const dx=Math.min(Math.abs(gem.x-snake[0].x),COLS-Math.abs(gem.x-snake[0].x));
+    const dy=Math.min(Math.abs(gem.y-snake[0].y),ROWS-Math.abs(gem.y-snake[0].y));
+    gemOptimal=dx+dy; gemSteps=0;
+}
 
 function step(now) {
     while(dirQueue.length>0){ const nd=dirQueue.shift(); if(nd.x!==-dir.x||nd.y!==-dir.y){dir=nd;break;} }
     const head={x:(snake[0].x+dir.x+COLS)%COLS,y:(snake[0].y+dir.y+ROWS)%ROWS};
     const hk=ck(head);
-    if(bars.some(b=>ck(b)===hk)){die(now);return;}
+    const protect = now - spawnAt < 1000;
+    if(!protect && bars.some(b=>ck(b)===hk)){die(now);return;}
     const ate=gem&&ck(gem)===hk;
-    if((ate?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now);return;}
+    if(!protect && (ate?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now);return;}
+    if(!ate) gemSteps++;
     snake.unshift(head);
     if(ate){
-        gemsDone++; score+=level*100; Snd.sfx('eat',cfg.music);
+        gemsDone++;
+        const base=level*100;
+        const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
+        score+=bonus?base*2:base;
+        if(bonus){Snd.sfx('bonus',cfg.music);showBonus(now);}
+        else Snd.sfx('eat',cfg.music);
         if(gemsDone>=GEMS_PER_LEVEL){ gem=null; score+=level*500; phase='levelDone'; phaseAt=now; Snd.sfx('levelUp',cfg.music); }
         else spawnGem();
     } else snake.pop();
     updateHUD();
 }
+
+let bonusAt = -9999;
+function showBonus(now) { bonusAt = now; }
 
 function die(now) {
     lives--; phase='dying'; phaseAt=now;
@@ -430,8 +452,14 @@ function die(now) {
 }
 
 function togglePause() {
-    if(phase==='playing'){ phase='paused'; pauseAt=performance.now(); Snd.pauseMusic(); }
-    else if(phase==='paused'){ gemAt+=performance.now()-pauseAt; phase='playing'; stepAt=performance.now()+speed; Snd.resumeMusic(); }
+    if(phase==='playing'){
+        if(performance.now() < pauseReadyAt) return;
+        phase='paused'; pauseAt=performance.now(); Snd.pauseMusic();
+    } else if(phase==='paused'){
+        gemAt+=performance.now()-pauseAt; phase='playing'; stepAt=performance.now()+speed;
+        pauseReadyAt=performance.now()+1000;
+        Snd.resumeMusic();
+    }
 }
 
 // ================================================================
@@ -532,8 +560,11 @@ function drawMenu() {
     ct('F O K   E D I T I O N',CW/2,128,'#2a3a2a',12);
     MENU_ITEMS.forEach((item,i)=>menuItem(item,186+i*48,i===menuSel));
     const coins=getFOKoins();
-    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  FOKOINS: ${coins.toLocaleString()}`,CW/2,376,'#2a3a2a',11,false);
-    ct('UP/DOWN  |  ENTER to select',CW/2,CH-10,'#1a1a1a',10,false);
+    ctx.shadowColor='#ffd700'; ctx.shadowBlur=8;
+    ct(`FOKOINS: ${coins.toLocaleString()}`,CW/2,350,'#ffd700',14);
+    ctx.shadowBlur=0;
+    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,372,'#222',10,false);
+    ct('UP/DOWN  |  ENTER to select',CW/2,CH-8,'#1a1a1a',10,false);
 }
 
 function drawSettings() {
@@ -641,11 +672,16 @@ function drawGameBoard(now) {
     drawGrid(); bars.forEach(b=>drawBar(b));
     if(gem) drawGem(gem,now);
     const dying=phase==='dying',flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
+    const protect=phase==='playing'&&(now-spawnAt<1000);
+    if(protect&&Math.floor(now/130)%2===1) ctx.globalAlpha=0.22;
     drawSnake(flash);
+    ctx.globalAlpha=1;
     if(phase==='levelDone'){
         const a=Math.min(1,(now-phaseAt)/150);
         ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=30;
-        ct('LEVEL COMPLETE!',CW/2,CH/2,'#7fff7f',30); ctx.restore();
+        ct('LEVEL COMPLETE!',CW/2,CH/2-18,'#7fff7f',30); ctx.restore();
+        if(levelDoneWaiting&&Math.floor(now/520)%2===0)
+            ct('TAP OR PRESS ANY KEY',CW/2,CH/2+22,'#446644',13,false);
     }
     if(dying){
         const t=(now-phaseAt)/DEATH_DUR;
@@ -657,6 +693,15 @@ function drawGameBoard(now) {
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=24;
         ct('PAUSED',CW/2,CH/2-16,'#7fff7f',36); ctx.shadowBlur=0;
         ct('SPACE / | | to resume   ESC to quit menu',CW/2,CH/2+22,'#556655',12,false);
+    }
+    // Bonus x2 flash (fades out over 900ms)
+    const bonusAge=now-bonusAt;
+    if(bonusAge<900){
+        const a=1-bonusAge/900;
+        ctx.save(); ctx.globalAlpha=a;
+        ctx.shadowColor='#ffd700'; ctx.shadowBlur=30;
+        ct('x2 BONUS!',CW/2,CH/2-60,'#ffd700',28);
+        ctx.restore();
     }
     updateHUD();
 }
@@ -754,11 +799,15 @@ function handleKey(key, pde) {
     // Escape = quit confirm in-game, or back in menus
     if(key==='Escape'){
         if(phase==='playing'||phase==='paused'){
+            if(performance.now() < escReadyAt) return;
             prevPhase=phase; quitConfirmSel=1;
             if(phase==='playing') Snd.pauseMusic();
             phase='quitConfirm'; if(pde)pde(); return;
         }
-        if(phase==='quitConfirm'){ phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic(); if(pde)pde(); return; }
+        if(phase==='quitConfirm'){
+            phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic();
+            escReadyAt=performance.now()+1000; if(pde)pde(); return;
+        }
         if(phase==='settings'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
         if(phase==='scores'||phase==='credits'){ phase='menu'; if(pde)pde(); return; }
     }
@@ -794,9 +843,17 @@ function handleKey(key, pde) {
         if(key==='ArrowRight') quitConfirmSel=1;
         if(key==='Enter'||key==='y'||key==='Y'){
             if(quitConfirmSel===0){ phase='menu'; showHUD(false); Snd.stop(); }
-            else { phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic(); }
+            else { phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic(); escReadyAt=performance.now()+1000; }
         }
         if(pde)pde();
+    }
+    else if(phase==='levelDone'){
+        if(levelDoneWaiting){
+            levelDoneWaiting=false;
+            if(level<MAX_LEVELS){level++;beginLevel();}
+            else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='win';showHUD(false);Snd.stop();}
+            if(pde)pde();
+        }
     }
     else if(phase==='playing'){
         const d=GDIRS[key];
@@ -828,21 +885,31 @@ document.getElementById('btn-ok').addEventListener('click',()=>handleKey('Enter'
 document.getElementById('btn-pause').addEventListener('touchstart',e=>{e.preventDefault();handleKey(' ',null);},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
 
-// Canvas swipe (fallback)
-let touchStart=null;
+// Canvas swipe: direction fires immediately on touchmove threshold (not on touchend) for low latency
+let touchStart=null, swipeFired=false;
 canvas.addEventListener('touchstart',e=>{
     e.preventDefault(); Snd.resume();
-    if(phase==='nameEntry'){ nameInp.focus(); return; }  // open OS keyboard
-    touchStart={x:e.touches[0].clientX,y:e.touches[0].clientY};
+    if(phase==='nameEntry'){ nameInp.focus(); return; }
+    touchStart={x:e.touches[0].clientX,y:e.touches[0].clientY}; swipeFired=false;
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(!touchStart||swipeFired) return;
+    const dx=e.touches[0].clientX-touchStart.x,dy=e.touches[0].clientY-touchStart.y;
+    const adx=Math.abs(dx),ady=Math.abs(dy);
+    if(Math.max(adx,ady)<14) return;
+    swipeFired=true;
+    if(adx>ady) handleKey(dx>0?'ArrowRight':'ArrowLeft',null);
+    else         handleKey(dy>0?'ArrowDown':'ArrowUp',null);
 },{passive:false});
 canvas.addEventListener('touchend',e=>{
-    if(!touchStart)return;
-    const dx=e.changedTouches[0].clientX-touchStart.x,dy=e.changedTouches[0].clientY-touchStart.y;
-    const adx=Math.abs(dx),ady=Math.abs(dy);
-    if(Math.max(adx,ady)<18)handleKey('Enter',null);
-    else if(adx>ady)handleKey(dx>0?'ArrowRight':'ArrowLeft',null);
-    else handleKey(dy>0?'ArrowDown':'ArrowUp',null);
-    touchStart=null;
+    if(!touchStart) return;
+    if(!swipeFired){
+        // short tap: treat as confirm/enter
+        const dx=e.changedTouches[0].clientX-touchStart.x,dy=e.changedTouches[0].clientY-touchStart.y;
+        if(Math.abs(dx)<20&&Math.abs(dy)<20) handleKey('Enter',null);
+    }
+    touchStart=null; swipeFired=false;
 },{passive:false});
 
 // Mobile name entry via OS keyboard
@@ -898,9 +965,8 @@ function loop(now) {
         if(lives>0)beginLevel();
         else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='over';showHUD(false);Snd.stop();}
     }
-    if(phase==='levelDone'&&now-phaseAt>=LEVELDONE_DUR){
-        if(level<MAX_LEVELS){level++;beginLevel();}
-        else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='win';showHUD(false);Snd.stop();}
+    if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
+        levelDoneWaiting=true;
     }
 
     // Draw
