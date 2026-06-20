@@ -555,16 +555,21 @@ function drawMenu() {
     drawGrid();
     for(let y=0;y<CH;y+=3){ctx.fillStyle='rgba(0,0,0,0.05)';ctx.fillRect(0,y,CW,1);}
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=28;
-    ct('S N A K E',CW/2,82,'#7fff7f',50);
+    ct('S N A K E',CW/2,78,'#7fff7f',50);
     ctx.shadowBlur=0;
-    ct('F O K   E D I T I O N',CW/2,128,'#2a3a2a',12);
-    MENU_ITEMS.forEach((item,i)=>menuItem(item,186+i*48,i===menuSel));
+    ct('F O K   E D I T I O N',CW/2,122,'#2a3a2a',12);
+    MENU_ITEMS.forEach((item,i)=>menuItem(item,174+i*38,i===menuSel));
+    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#222',10,false);
+    ct('UP/DOWN  |  ENTER to select',CW/2,360,'#1a1a1a',10,false);
+    // FOKoins pinned to lower-right corner
     const coins=getFOKoins();
-    ctx.shadowColor='#ffd700'; ctx.shadowBlur=8;
-    ct(`FOKOINS: ${coins.toLocaleString()}`,CW/2,350,'#ffd700',14);
-    ctx.shadowBlur=0;
-    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,372,'#222',10,false);
-    ct('UP/DOWN  |  ENTER to select',CW/2,CH-8,'#1a1a1a',10,false);
+    ctx.save();
+    ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
+    ctx.fillStyle='#ffd700';
+    ctx.font='bold 12px "Courier New"';
+    ctx.textAlign='right'; ctx.textBaseline='bottom';
+    ctx.fillText(`FOKOINS: ${coins.toLocaleString()}`, CW-10, CH-8);
+    ctx.restore();
 }
 
 function drawSettings() {
