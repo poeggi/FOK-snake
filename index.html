@@ -874,11 +874,11 @@ function handleKey(key, pde) {
         else if(key==='ArrowDown'){nameCharIdx=(nameCharIdx+1)%NAME_CHARS.length;Snd.sfx('nav',cfg.music);}
         else if(key==='ArrowRight'){if(nameStr.length<MAX_NAME){nameStr+=NAME_CHARS[nameCharIdx];Snd.sfx('nav',cfg.music);}}
         else if(key==='Backspace'||key==='ArrowLeft'){if(nameStr.length>0){nameStr=nameStr.slice(0,-1);Snd.sfx('nav',cfg.music);}if(pde)pde();}
+        else if(key.length===1&&/^[a-zA-Z0-9 ]$/.test(key)&&nameStr.length<MAX_NAME){nameStr+=key.toUpperCase();Snd.sfx('nav',cfg.music);}
         else if(key==='Enter'){
             addScore(nameStr,score,level); Snd.sfx('select',cfg.music);
             phase='scores'; showHUD(false); nameInp.blur();
         }
-        // Note: letter keys come through the input event, not here
     }
 }
 
@@ -937,6 +937,8 @@ nameInp.addEventListener('keydown', e => {
     if (phase !== 'nameEntry') return;
     if (e.key === 'Enter') { handleKey('Enter', () => e.preventDefault()); }
     if (e.key === 'Backspace') { e.preventDefault(); if(nameStr.length>0){nameStr=nameStr.slice(0,-1);Snd.sfx('nav',cfg.music);} }
+    // Block input event for letter keys — global keydown handler already adds them
+    if (e.key.length === 1) e.preventDefault();
 });
 
 // Mute button
