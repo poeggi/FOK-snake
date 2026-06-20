@@ -22,39 +22,51 @@
         #hud {
             display: flex; flex-direction: column; gap: 3px;
             width: min(600px, calc(100vw - 16px));
-            font-size: 14px; letter-spacing: 1.2px;
+            font-size: 15px; letter-spacing: 1.2px;
             opacity: 1; transition: opacity 0.15s;
         }
         #hud.hidden { opacity: 0; pointer-events: none; }
         .hud-row { display: flex; justify-content: space-between; width: 100%; }
-        .hl { color: #444; } .hv { color: #7fff7f; font-weight: bold; }
+        .hl { color: #888; } .hv { color: #7fff7f; font-weight: bold; }
         #topbar {
             width: min(600px, calc(100vw - 16px));
             display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
         }
-        #fps-el { font: 11px 'Courier New',monospace; color: #4a7a4a; letter-spacing: 1px; }
+        #fps-el { font: 12px 'Courier New',monospace; color: #7aaa7a; letter-spacing: 1px; }
         #btn-mute {
-            width: 34px; height: 22px;
-            background: #0d180d; border: 1px solid #2a3a2a;
-            color: #7fff7f; font: 10px 'Courier New',monospace;
+            width: 38px; height: 24px;
+            background: #0d180d; border: 1px solid #3a5a3a;
+            color: #7fff7f; font: bold 11px 'Courier New',monospace;
             cursor: pointer; border-radius: 3px; padding: 0;
             -webkit-tap-highlight-color: transparent;
         }
         #btn-mute:hover { border-color: #7fff7f; }
-        #btn-mute.muted { color: #444; border-color: #222; }
+        #btn-mute.muted { color: #888; border-color: #444; }
         #wrap { width: min(600px, calc(100vw - 16px)); }
-        canvas#c { display: block; width: 100%; height: auto; border: 1px solid #1a1a2e; touch-action: none; }
+        canvas#c { display: block; width: 100%; height: auto; border: 1px solid #2a2a4e; touch-action: none; }
         #gamepad { display: none; align-items: center; justify-content: center; gap: 14px; }
         @media (pointer: coarse) { #gamepad { display: flex; } }
         #dpad-c { width: min(120px, 33vw); height: min(120px, 33vw); touch-action: none; display: block; }
         #left-btns, #side-btns { display: flex; flex-direction: column; gap: 10px; }
         .sbtn {
             width: 54px; height: 54px;
-            background: #0d180d; border: 1px solid #2a3a2a; color: #7fff7f;
+            background: #0d180d; border: 1px solid #3a5a3a; color: #7fff7f;
             font: bold 13px 'Courier New',monospace; cursor: pointer; border-radius: 6px;
             -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center;
         }
         .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
+        @media (orientation: landscape) and (max-height: 520px) {
+            body { flex-direction: row; flex-wrap: wrap; align-items: flex-start; padding: 4px 6px; gap: 4px; }
+            #topbar { width: 100%; order: 0; min-height: 26px; }
+            #hud { order: 1; width: 100%; flex-direction: row; gap: 12px; font-size: 12px; }
+            .hud-row { flex: 1; }
+            #wrap { order: 2; flex: 1; min-width: 0; width: auto; }
+            canvas#c { width: auto; height: calc(100dvh - 62px); max-width: 100%; }
+            #gamepad { order: 3; width: 126px; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+            #dpad-c { width: 88px; height: 88px; }
+            .sbtn { width: 44px; height: 44px; font-size: 11px; }
+            #left-btns, #side-btns { gap: 6px; }
+        }
         #name-inp {
             position: fixed; left: -9999px; top: 50%; width: 1px; height: 1px; opacity: 0;
         }
@@ -126,15 +138,15 @@ const ACHIEVEMENTS = [
       icon:{p:{A:'#44ccff',B:'#00ffff',C:'#aaffff'},d:['...A....','..ABA...','.ABCBA..','ABCCCBA.','.ABCBA..','..ABA...','...A....','........']}},
     { id:'level1',        name:'RISING SNAKE',  desc:'Complete level 1',
       icon:{p:{A:'#7fff7f',B:'#001500'},d:['.AAAAAA.','AAAAAAAA','AAAAAAAA','ABAAAAAB','AAAAAAAA','AAAAAAAA','.AAAAAA.','........']}},
-    { id:'fokoins_1k',    name:'POCKET CHANGE', desc:'Earn 1,000 FOKoins',
+    { id:'fokoins_1k',    name:'POCKET CHANGE', desc:'Earn 5,000 FOKoins',
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['...BB...','..AAAA..', '.ABBBBA.','.ABBBBA.','AABBBBA.','.ABBBBA.','..AAAA..','........']}},
     { id:'lucky_gem',     name:'LUCKY CATCH',   desc:'Collect a lucky gem',
       icon:{p:{A:'#ffd700',B:'#ffee88',C:'#cc8800'},d:['...A....','..ABA...','.ABCBA..','ABCCCBA.','.ABCBA..','..ABA...','...A....','........']}},
-    { id:'bonus_3',       name:'SPEEDSTER',     desc:'3 x2 bonuses in one level',
+    { id:'bonus_3',       name:'SPEEDSTER',     desc:'5 x2 bonuses in one level',
       icon:{p:{A:'#ffff44',B:'#aaaa00'},d:['....AAA.','...AA...','..AA....','BAAAAAAB','....AA..','...AA...','..AAA...','........']}},
     { id:'level5',        name:'HALFWAY HERO',  desc:'Reach level 5',
       icon:{p:{A:'#7fff7f'},d:['.AAAAAAA','.A......','.A......','.AAAAAAA','.......A','.......A','.AAAAAAA','........']}},
-    { id:'fokoins_10k',   name:'COIN HOARDER',  desc:'Earn 10,000 FOKoins',
+    { id:'fokoins_10k',   name:'COIN HOARDER',  desc:'Earn 50,000 FOKoins',
       icon:{p:{A:'#ffd700',B:'#cc8800',C:'#ffee44'},d:['..AAAA..', '.ACCCCA.','.ACCCCA.','AACCCCA.','AACCCCA.','.ACCCCA.','..AAAA..','........']}},
     { id:'epic_gem',      name:'EPIC HUNTER',   desc:'Collect an epic gem',
       icon:{p:{A:'#cc44ff',B:'#ff88ff',C:'#ffffff'},d:['...A....','..ABA...','.ABCBA..','ABCCCBA.','.ABCBA..','..ABA...','...A....','........']}},
@@ -142,22 +154,22 @@ const ACHIEVEMENTS = [
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['A..A..A.','AAAAAAA.','AAAAAAA.','AAAAAAA.','BAAAAAAB','BAAAAAAB','........','........']}},
     { id:'level10',       name:'CHAMPION',      desc:'Complete all 10 levels',
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['.AAAAA..','AAAAAAA.','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','BBBBBBB.','........']}},
-    { id:'fokoins_100k',  name:'DRAGON RICH',   desc:'Earn 100,000 FOKoins',
+    { id:'fokoins_100k',  name:'DRAGON RICH',   desc:'Earn 500,000 FOKoins',
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
-    { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 25,000 in one game',
+    { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 50,000 in one game',
       icon:{p:{A:'#ff4400',B:'#ff9900',C:'#ffdd00'},d:['...A....','..ABA...','.ABBBA..','ABBBBA..','ABCBBBA.','ABCCCBA.','.AAAAAA.','........']}},
 ];
 
 const SHOP_ITEMS = [
-    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:10000,
+    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000,
       icon:{p:{A:'#1a1a1a',B:'#333333'},d:['........','..AAAA..','..AAAA..','..AAAA..','.BBBBBB.','........','........','........']}},
-    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:10000,
+    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000,
       icon:{p:{A:'#aaaaaa',C:'#888888'},d:['..AAAA..', '.A....A.','.A....A.','.A....A.','..AAAA..','.....C..',  '....C...','...C....']}},
-    { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:5000,
+    { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:50000,
       icon:{p:{A:'#111111',B:'#1a3050'},d:['.AAA.AAA','ABBBABBB','ABBBABBB','.AAA.AAA','........','........','........','........']}},
-    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:20000,
+    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000,
       icon:{p:{A:'#ffd700',C:'#ff4444'},d:['A..A..A.','AAAAAAA.','ACAAACA.','AAAAAAA.','........','........','........','........']}},
-    { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:7000,
+    { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:250000,
       icon:{p:{A:'#cc2222',B:'#ff4444',C:'#aa0000'},d:['........','AA...AA.','ABBACBBA','AABACBAA','AA...AA.','........','........','........']}},
 ];
 
@@ -416,9 +428,9 @@ function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10)
 function addFOKoins(n) {
     const t = getFOKoins() + n;
     localStorage.setItem(FK_KEY, String(t));
-    if(t >= 1000)   unlockAch('fokoins_1k');
-    if(t >= 10000)  unlockAch('fokoins_10k');
-    if(t >= 100000) unlockAch('fokoins_100k');
+    if(t >= 5000)   unlockAch('fokoins_1k');
+    if(t >= 50000)  unlockAch('fokoins_10k');
+    if(t >= 500000) unlockAch('fokoins_100k');
 }
 function addScore(name, sc, lvl) {
     const s = getScores();
@@ -585,8 +597,8 @@ function step(now) {
             Snd.sfx('bonus',cfg.music);
         } else Snd.sfx('eat',cfg.music);
         unlockAch('first_gem');
-        if(bonus){ levelBonusCount++; if(levelBonusCount>=3) unlockAch('bonus_3'); }
-        if(score>=25000) unlockAch('score_25k');
+        if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); }
+        if(score>=50000) unlockAch('score_25k');
         if(gemsDone>=GEMS_PER_LEVEL){
             gem=null; score+=level*500;
             if(perfectLevel){ score+=level*1000; spawnFireworks(now); Snd.sfx('perfect',cfg.music); unlockAch('perfect_level'); }
@@ -684,9 +696,9 @@ function ct(text,x,y,color,size,bold) {
     ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(text,x,y);
 }
 function menuItem(text,y,sel) {
-    ctx.globalAlpha=sel?1:0.44;
+    ctx.globalAlpha=sel?1:0.78;
     if(sel){ctx.shadowColor='#7fff7f';ctx.shadowBlur=14;}
-    ct(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#aaa',20);
+    ct(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',20);
     ctx.shadowBlur=0; ctx.globalAlpha=1;
 }
 
@@ -874,11 +886,11 @@ function drawMenu() {
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=28;
     ct('S N A K E',CW/2,78,'#7fff7f',50);
     ctx.shadowBlur=0;
-    ct('F O K   E D I T I O N',CW/2,122,'#2a3a2a',12);
+    ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',13);
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
-    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#222',10,false);
-    ct('UP/DOWN  |  ENTER to select',CW/2,360,'#1a1a1a',10,false);
+    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#999',12,false);
+    ct('UP/DOWN  |  ENTER to select',CW/2,360,'#777',11,false);
     // FOKoins pinned to lower-right corner
     const coins=getFOKoins();
     ctx.save();
@@ -918,7 +930,7 @@ function drawSettings() {
         }
         ctx.restore();
     }
-    ct('LEFT/RIGHT to change color   OK to toggle   ESC to go back',CW/2,CH-14,'#222',10,false);
+    ct('LEFT/RIGHT to change   OK to toggle   ESC to go back',CW/2,CH-14,'#999',11,false);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -937,12 +949,12 @@ function drawScores() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=18; ct('HIGH SCORES',CW/2,50,'#7fff7f',26); ctx.shadowBlur=0;
     const scores=getScores();
-    if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#555',16,false); }
+    if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',16,false); }
     else {
         ctx.font='14px "Courier New"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         scores.slice(0,8).forEach((s,i)=>{
             const y=94+i*30;
-            ctx.fillStyle=i===0?'#ffd700':i<3?'#c0c0c0':'#777';
+            ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
             const rank=`${i+1}.`.padStart(3);
             const line=`${rank}  ${(s.name||'???').padEnd(MAX_NAME)}  ${String(s.score).padStart(7)}  LVL ${s.level}`;
             const tw=ctx.measureText(line).width;
@@ -956,7 +968,7 @@ function drawScores() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=8;
     ct(`TOTAL FOKOINS: ${coins.toLocaleString()}`,CW/2,CH-36,'#ffd700',13);
     ctx.shadowBlur=0;
-    ct('Any key or OK to return',CW/2,CH-14,'#222',10,false);
+    ct('Any key or OK to return',CW/2,CH-14,'#999',11,false);
 }
 
 function drawAchievements() {
@@ -973,31 +985,31 @@ function drawAchievements() {
         ctx.fillStyle=got?'rgba(0,60,0,0.28)':'rgba(10,10,10,0.28)';
         rr(x,y,aw,ah,4); ctx.fill();
         // Border
-        ctx.strokeStyle=got?'#4a8a4a':'#2a2a2a'; ctx.lineWidth=got?2:1;
+        ctx.strokeStyle=got?'#4a8a4a':'#444444'; ctx.lineWidth=got?2:1;
         rr(x,y,aw,ah,4); ctx.stroke();
-        // Icon (cs=2 → 16x16 drawn area)
+        // Icon
         ctx.save();
-        if(!got) ctx.globalAlpha=0.22;
+        if(!got) ctx.globalAlpha=0.35;
         drawPixelIcon(x+5,y+ah/2-9,a.icon,2);
         ctx.restore();
         // Name
         ctx.textAlign='left'; ctx.textBaseline='top';
         ctx.font='bold 10px "Courier New"';
-        ctx.fillStyle=got?'#7fff7f':'#3a3a3a';
+        ctx.fillStyle=got?'#7fff7f':'#888888';
         ctx.fillText(a.name,x+26,y+10);
         // Desc
-        ctx.font='8px "Courier New"';
-        ctx.fillStyle=got?'#446644':'#2a2a2a';
-        ctx.fillText(a.desc,x+26,y+26);
+        ctx.font='9px "Courier New"';
+        ctx.fillStyle=got?'#6aaa6a':'#777777';
+        ctx.fillText(a.desc,x+26,y+25);
         // Status
-        ctx.font='8px "Courier New"';
-        ctx.fillStyle=got?'#3a6a3a':'#222';
+        ctx.font='9px "Courier New"';
+        ctx.fillStyle=got?'#5a8a5a':'#666666';
         ctx.fillText(got?'UNLOCKED':'???',x+26,y+40);
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=ACHIEVEMENTS.filter(a=>achUnlocked[a.id]).length;
-    ct(`${total} / ${ACHIEVEMENTS.length} UNLOCKED`,CW/2,CH-26,'#446644',11,false);
-    ct('Any key or OK to return',CW/2,CH-10,'#222',9,false);
+    ct(`${total} / ${ACHIEVEMENTS.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',12,false);
+    ct('Any key or OK to return',CW/2,CH-10,'#999',11,false);
 }
 
 function drawAchPopups(now) {
@@ -1048,7 +1060,7 @@ function drawShop() {
         ctx.font='bold 11px "Courier New"';
         ctx.fillStyle=owned?'#7fff7f':sel?'#dddddd':'#aaaaaa';
         ctx.fillText(item.name,46,y+8);
-        ctx.font='9px "Courier New"'; ctx.fillStyle='#555555';
+        ctx.font='9px "Courier New"'; ctx.fillStyle='#999999';
         ctx.fillText(item.desc,46,y+24);
         ctx.textAlign='right';
         if(owned){
@@ -1057,7 +1069,7 @@ function drawShop() {
         } else {
             ctx.font='bold 10px "Courier New"'; ctx.fillStyle=canAfford?'#ffd700':'#553322';
             ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+12);
-            if(sel){ctx.font='8px "Courier New"';ctx.fillStyle=canAfford?'#3a7a3a':'#553322';
+            if(sel){ctx.font='9px "Courier New"';ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
                 ctx.fillText(canAfford?'ENTER to buy':'Not enough FK',CW-18,y+28);}
         }
     });
@@ -1065,7 +1077,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',11);
     ctx.shadowBlur=0;
-    ct('UP/DOWN navigate  |  ESC back',CW/2,CH-12,'#1a2a1a',9,false);
+    ct('UP/DOWN navigate  |  ESC back',CW/2,CH-12,'#888',11,false);
     // Purchase particles
     const now=performance.now();
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1100,14 +1112,14 @@ function drawCredits() {
                     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=22;
                     ct(val, CW/2, y+20, '#7fff7f', 34); ctx.shadowBlur=0; break;
                 case 'sub':
-                    ct(val, CW/2, y+10, '#2a4a2a', 12, false); break;
+                    ct(val, CW/2, y+10, '#5a8a5a', 13, false); break;
                 case 'hdr':
                     ctx.shadowColor='#00cccc'; ctx.shadowBlur=6;
                     ct(val, CW/2, y+12, '#00cccc', 13); ctx.shadowBlur=0; break;
                 case 'txt':
                     ct(val, CW/2, y+10, '#aaa', 14, false); break;
                 case 'sml':
-                    ct(val, CW/2, y+8, '#555', 11, false); break;
+                    ct(val, CW/2, y+8, '#999', 12, false); break;
                 case 'coins':
                     ctx.shadowColor='#ffd700'; ctx.shadowBlur=10;
                     ct(`YOUR FOKOINS: ${getFOKoins().toLocaleString()}`, CW/2, y+14, '#ffd700', 16);
@@ -1124,7 +1136,7 @@ function drawCredits() {
     ctx.restore();
     creditsScroll -= 0.8;
     if (creditsScroll < -(credTotalH())) creditsScroll = CH + 40;  // loop
-    ct('OK / ENTER to exit', CW/2, CH-12, '#1a2a1a', 10, false);
+    ct('OK / ENTER to exit', CW/2, CH-12, '#6a9a6a', 11, false);
 }
 
 function drawNameEntry(now) {
@@ -1151,14 +1163,14 @@ function drawNameEntry(now) {
     }
     const cy2=sy+sh+20,ci=nameCharIdx,disp=c=>c===' '?'_':c;
     if(nameStr.length<MAX_NAME){
-        ct('(^)',CW/2,cy2,'#333',11,false);
-        ct(disp(NAME_CHARS[(ci-1+NAME_CHARS.length)%NAME_CHARS.length]),CW/2,cy2+16,'#3a3a3a',14,false);
+        ct('(^)',CW/2,cy2,'#888',12,false);
+        ct(disp(NAME_CHARS[(ci-1+NAME_CHARS.length)%NAME_CHARS.length]),CW/2,cy2+16,'#999',14,false);
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=10;
         ct(disp(NAME_CHARS[ci]),CW/2,cy2+32,'#7fff7f',22); ctx.shadowBlur=0;
-        ct(disp(NAME_CHARS[(ci+1)%NAME_CHARS.length]),CW/2,cy2+48,'#3a3a3a',14,false);
-        ct('(v)',CW/2,cy2+62,'#333',11,false);
+        ct(disp(NAME_CHARS[(ci+1)%NAME_CHARS.length]),CW/2,cy2+48,'#999',14,false);
+        ct('(v)',CW/2,cy2+62,'#888',12,false);
     }
-    ct('TAP SCREEN to open keyboard  |  UP/DOWN + RIGHT to type  |  ENTER to confirm',CW/2,CH-10,'#222',10,false);
+    ct('TAP SCREEN to open keyboard  |  UP/DOWN + RIGHT to type  |  ENTER to confirm',CW/2,CH-10,'#999',11,false);
 }
 
 function drawGameBoard(now) {
@@ -1199,7 +1211,7 @@ function drawGameBoard(now) {
             }
         }
         if(levelDoneWaiting&&Math.floor(now/520)%2===0)
-            ct('TAP OR PRESS ANY KEY',CW/2,CH/2+(levelWasPerfect?58:22),'#446644',13,false);
+            ct('TAP OR PRESS ANY KEY',CW/2,CH/2+(levelWasPerfect?58:22),'#6aaa6a',14,false);
     }
     if(dying){
         const t=(now-phaseAt)/DEATH_DUR;
