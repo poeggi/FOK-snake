@@ -712,8 +712,8 @@ function drawMenu() {
     ctx.font='bold 12px "Courier New"';
     ctx.textAlign='right'; ctx.textBaseline='bottom';
     ctx.fillText(`FOKOINS: ${coins.toLocaleString()}`, CW-10, CH-8);
-    // Version lower-left
-    ctx.shadowBlur=0; ctx.fillStyle='#222'; ctx.font='10px "Courier New"';
+    // Version lower-left — same style as FPS display
+    ctx.shadowBlur=0; ctx.fillStyle='#4a7a4a'; ctx.font='11px "Courier New"';
     ctx.textAlign='left';
     ctx.fillText('v4', 10, CH-8);
     ctx.restore();
