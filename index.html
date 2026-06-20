@@ -23,383 +23,688 @@
             padding: 0 0 10px;
             font-size: 15px;
             letter-spacing: 1.5px;
+            opacity: 1;
+            transition: opacity 0.15s;
         }
+        #hud.hidden { opacity: 0; pointer-events: none; }
         .hl { color: #444; }
         .hv { color: #7fff7f; font-weight: bold; }
-        #wrap { position: relative; }
         canvas { display: block; border: 1px solid #1a1a2e; }
-        #ov {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background: rgba(7,7,14,0.88);
-        }
-        #ov.hidden { display: none; }
-        #ov-h1 {
-            font-size: 40px;
-            color: #7fff7f;
-            text-shadow: 0 0 24px rgba(127,255,127,0.4);
-            letter-spacing: 6px;
-            margin-bottom: 14px;
-        }
-        .ov-sub { font-size: 14px; color: #777; margin-bottom: 6px; letter-spacing: 1px; }
-        #ov-btn {
-            margin-top: 22px;
-            padding: 9px 32px;
-            font-family: inherit;
-            font-size: 16px;
-            letter-spacing: 3px;
-            background: transparent;
-            color: #7fff7f;
-            border: 1px solid #7fff7f;
-            cursor: pointer;
-        }
-        #ov-btn:hover { background: rgba(127,255,127,0.1); }
     </style>
 </head>
 <body>
-<div id="hud">
+<div id="hud" class="hidden">
     <span><span class="hl">LEVEL </span><span class="hv" id="hv-lvl">1</span></span>
     <span><span class="hl">GEMS </span><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span>
     <span><span class="hl">LIVES </span><span class="hv" id="hv-lives">&#9829;&#9829;&#9829;</span></span>
     <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
 </div>
-<div id="wrap">
-    <canvas id="c"></canvas>
-    <div id="ov">
-        <div id="ov-h1">SNAKE</div>
-        <div class="ov-sub" id="ov-s1">Collect 10 gems per level &mdash; 10 levels total</div>
-        <div class="ov-sub" id="ov-s2">Screen wraps &bull; 3 lives &bull; Arrow keys to move</div>
-        <button id="ov-btn">START GAME</button>
-    </div>
-</div>
+<canvas id="c"></canvas>
 <script>
-// ── Constants ────────────────────────────────────────────────────────
+// ================================================================
+// CONSTANTS
+// ================================================================
 const COLS = 30, ROWS = 20, CS = 20;
+const CW = COLS * CS, CH = ROWS * CS;          // 600 x 400
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
-const DEATH_DUR = 900, LEVELDONE_DUR = 1200;
+const DEATH_DUR = 900, LEVELDONE_DUR = 1400;
+const MAX_NAME = 8;
+const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
 
-const LEVEL_CFG = Array.from({length: MAX_LEVELS}, (_, i) => ({
-    speed: Math.round(190 - i * 13), // ms per step: 190 -> 71
-    bars:  i * 2,                    // barricades: 0 -> 18
+// Normal-difficulty speed (ms/step) and barricade count per level
+const LEVEL_CFG = Array.from({ length: MAX_LEVELS }, (_, i) => ({
+    speed: Math.round(150 - i * 7),  // 150 -> 87 ms
+    bars:  i * 2,                    // 0 -> 18
 }));
 
-// ── Canvas ───────────────────────────────────────────────────────────
+// Difficulty modifiers
+const DIFF = [
+    { sm: 1.55, bm: 0.4,  label: 'EASY'   },
+    { sm: 1.0,  bm: 1.0,  label: 'NORMAL' },
+    { sm: 0.65, bm: 1.6,  label: 'HARD'   },
+];
+
+// Snake starting length increases in later levels
+function startLen(lvl) {
+    if (lvl <= 2) return 3;
+    if (lvl <= 5) return 5;
+    if (lvl <= 8) return 7;
+    return 10;
+}
+
+// ================================================================
+// CANVAS
+// ================================================================
 const canvas = document.getElementById('c');
-canvas.width  = COLS * CS;
-canvas.height = ROWS * CS;
+canvas.width  = CW;
+canvas.height = CH;
 const ctx = canvas.getContext('2d');
 
-// ── Utilities ────────────────────────────────────────────────────────
-const cellKey = p => `${p.x},${p.y}`;
-const randInt = n => Math.floor(Math.random() * n);
+// ================================================================
+// AUDIO (Web Audio chiptune)
+// ================================================================
+const Snd = (() => {
+    let ac = null, mGain, sGain, seqPos = 0, nextNote = 0, curTrack = null;
 
-function randFreeCell(blocked) {
+    // Sequences: [freq_hz, duration_beats]  (freq 0 = rest)
+    const SEQ = {
+        menu: { bpm: 140, notes: [
+            [392,0.25],[440,0.25],[523,0.25],[440,0.25],
+            [392,0.5],[392,0.25],[330,0.25],
+            [349,0.25],[392,0.25],[440,0.25],[392,0.25],
+            [349,0.5],[0,0.25],[294,0.25],
+            [330,0.25],[392,0.25],[440,0.25],[523,0.25],
+            [587,0.5],[523,0.25],[440,0.25],
+            [392,0.25],[330,0.25],[294,0.25],[262,0.25],
+            [262,0.75],[0,0.25],
+        ]},
+        game: { bpm: 175, notes: [
+            [523,0.25],[0,0.125],[659,0.125],[523,0.25],
+            [440,0.5],[0,0.25],[392,0.25],
+            [440,0.25],[0,0.125],[523,0.125],[659,0.25],
+            [784,0.5],[0,0.5],
+            [523,0.25],[0,0.125],[587,0.125],[523,0.25],
+            [494,0.5],[0,0.25],[440,0.25],
+            [349,0.25],[392,0.25],[440,0.25],[523,0.25],
+            [523,0.75],[0,0.25],
+        ]},
+    };
+
+    function init() {
+        try {
+            ac = new (window.AudioContext || window.webkitAudioContext)();
+            mGain = ac.createGain(); mGain.gain.value = 0.13; mGain.connect(ac.destination);
+            sGain = ac.createGain(); sGain.gain.value = 0.35; sGain.connect(ac.destination);
+        } catch(e) { ac = null; }
+    }
+
+    function tone(freq, when, dur, type, dest) {
+        if (!ac || freq <= 0) return;
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.type = type || 'square';
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.4, when);
+        g.gain.exponentialRampToValueAtTime(0.001, when + Math.max(dur * 0.85, 0.01));
+        o.connect(g); g.connect(dest || mGain);
+        o.start(when); o.stop(when + dur + 0.02);
+    }
+
+    function tick(musicOn) {
+        if (!ac || !curTrack || !musicOn) return;
+        const seq = SEQ[curTrack];
+        const spb = 60 / seq.bpm;
+        while (nextNote < ac.currentTime + 0.35) {
+            const [f, b] = seq.notes[seqPos];
+            tone(f, nextNote, b * spb * 0.82);
+            nextNote += b * spb;
+            seqPos = (seqPos + 1) % seq.notes.length;
+        }
+    }
+
+    function play(t) {
+        if (!ac || curTrack === t) return;
+        curTrack = t; seqPos = 0; nextNote = ac.currentTime;
+    }
+
+    function stop() { curTrack = null; }
+
+    function resume() { if (ac && ac.state === 'suspended') ac.resume(); }
+
+    function sfx(type, on) {
+        if (!ac || !on) return;
+        const now = ac.currentTime;
+        if (type === 'eat') {
+            tone(880, now, 0.05, 'square', sGain);
+            tone(1100, now + 0.055, 0.05, 'square', sGain);
+        } else if (type === 'die') {
+            for (let i = 0; i < 6; i++) tone(280 - i * 22, now + i * 0.07, 0.1, 'sawtooth', sGain);
+        } else if (type === 'levelUp') {
+            [523, 659, 784, 1047].forEach((f, i) => tone(f, now + i * 0.1, 0.15, 'square', sGain));
+        } else if (type === 'nav') {
+            tone(440, now, 0.03, 'square', sGain);
+        } else if (type === 'select') {
+            tone(523, now, 0.04, 'square', sGain);
+            tone(659, now + 0.04, 0.07, 'square', sGain);
+        }
+    }
+
+    return { init, tick, play, stop, resume, sfx };
+})();
+
+// ================================================================
+// HIGH SCORES (localStorage)
+// ================================================================
+const HS_KEY = 'fok-snake-hs';
+
+function getScores() {
+    try { return JSON.parse(localStorage.getItem(HS_KEY)) || []; } catch { return []; }
+}
+
+function addScore(name, sc, lvl) {
+    const s = getScores();
+    s.push({ name: (name.trim() || 'AAA').substring(0, MAX_NAME), score: sc, level: lvl });
+    s.sort((a, b) => b.score - a.score);
+    localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10)));
+}
+
+// ================================================================
+// APPLICATION STATE
+// ================================================================
+let phase = 'menu';            // menu | settings | scores | playing | dying | levelDone | nameEntry
+
+let menuSel     = 0;
+let settingsSel = 0;
+const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES'];
+const SETTINGS_ITEMS = ['MUSIC', 'DIFFICULTY', 'BACK'];
+
+let cfg = { music: true, diff: 1 };
+
+// Game variables (valid during playing / dying / levelDone / nameEntry)
+let level, lives, score;
+let snake, dir, dirQueue;
+let gem, gemsDone, bars;
+let speed, stepAt, phaseAt, gemAt, deathMsg;
+
+// Name entry
+let nameStr = '', nameCharIdx = 0, nameReason = '';
+
+// FPS
+let fpsVal = 0, fpsFrames = 0, fpsLast = 0;
+
+// ================================================================
+// GAME LOGIC
+// ================================================================
+const ck  = p => `${p.x},${p.y}`;
+const ri  = n => Math.floor(Math.random() * n);
+
+function freeCell(blocked) {
     let p;
-    do { p = {x: randInt(COLS), y: randInt(ROWS)}; } while (blocked.has(cellKey(p)));
+    do { p = { x: ri(COLS), y: ri(ROWS) }; } while (blocked.has(ck(p)));
     return p;
 }
 
-// ── State ────────────────────────────────────────────────────────────
-let G = null;
-
-function newGame() {
-    G = { level: 1, lives: START_LIVES, score: 0 };
+function startGame() {
+    level = 1; lives = START_LIVES; score = 0;
     beginLevel();
 }
 
 function beginLevel() {
-    const cfg = LEVEL_CFG[G.level - 1];
+    const lcfg = LEVEL_CFG[level - 1];
+    const d    = DIFF[cfg.diff];
+    speed = Math.round(lcfg.speed * d.sm);
+
     const cx = Math.floor(COLS / 2), cy = Math.floor(ROWS / 2);
+    const sl = startLen(level);
+    snake    = Array.from({ length: sl }, (_, i) => ({ x: cx - i, y: cy }));
+    dir      = { x: 1, y: 0 };
+    dirQueue = [];
+    gem      = null;
+    gemsDone = 0;
+    bars     = [];
+    phase    = 'playing';
+    stepAt   = performance.now() + speed;
+    phaseAt  = 0;
 
-    G.snake    = [{x:cx,y:cy},{x:cx-1,y:cy},{x:cx-2,y:cy}];
-    G.dir      = {x:1, y:0};
-    G.nextDir  = {x:1, y:0};
-    G.gem      = null;
-    G.gemsDone = 0;
-    G.speed    = cfg.speed;
-    G.bars     = [];
-    G.phase    = 'playing';
-    G.stepAt   = performance.now() + G.speed;
-    G.phaseAt  = 0;
-
-    // Block spawn area so barricades don't overlap
-    const blocked = new Set(
-        [{x:cx,y:cy},{x:cx-1,y:cy},{x:cx-2,y:cy},
-         {x:cx+1,y:cy},{x:cx+2,y:cy},{x:cx+3,y:cy}].map(cellKey)
-    );
-
-    for (let i = 0; i < cfg.bars; i++) {
-        const b = randFreeCell(blocked);
-        blocked.add(cellKey(b));
-        G.bars.push(b);
+    const blocked = new Set([...snake, { x: cx + 1, y: cy }, { x: cx + 2, y: cy }].map(ck));
+    const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
+    for (let i = 0; i < numBars; i++) {
+        const b = freeCell(blocked);
+        blocked.add(ck(b));
+        bars.push(b);
     }
-
     spawnGem();
+    showHUD(true);
 }
 
 function spawnGem() {
-    const blocked = new Set([...G.snake, ...G.bars].map(cellKey));
-    G.gem   = randFreeCell(blocked);
-    G.gemAt = performance.now();
+    const blocked = new Set([...snake, ...bars].map(ck));
+    gem   = freeCell(blocked);
+    gemAt = performance.now();
 }
 
-// ── Game step ────────────────────────────────────────────────────────
 function step(now) {
-    G.dir = G.nextDir;
+    // Apply next queued direction (skip reversals)
+    while (dirQueue.length > 0) {
+        const nd = dirQueue.shift();
+        if (nd.x !== -dir.x || nd.y !== -dir.y) { dir = nd; break; }
+    }
+
     const head = {
-        x: (G.snake[0].x + G.dir.x + COLS) % COLS,
-        y: (G.snake[0].y + G.dir.y + ROWS) % ROWS,
+        x: (snake[0].x + dir.x + COLS) % COLS,
+        y: (snake[0].y + dir.y + ROWS) % ROWS,
     };
-    const hk = cellKey(head);
+    const hk = ck(head);
 
-    if (G.bars.some(b => cellKey(b) === hk)) { die(now); return; }
+    if (bars.some(b => ck(b) === hk)) { die(now); return; }
 
-    const ate = G.gem && cellKey(G.gem) === hk;
-    // When eating, tail stays (growth), so include full body in self-check
-    const body = ate ? G.snake : G.snake.slice(0, -1);
-    if (body.some(s => cellKey(s) === hk)) { die(now); return; }
+    const ate  = gem && ck(gem) === hk;
+    const body = ate ? snake : snake.slice(0, -1);
+    if (body.some(s => ck(s) === hk)) { die(now); return; }
 
-    G.snake.unshift(head);
+    snake.unshift(head);
 
     if (ate) {
-        G.gemsDone++;
-        G.score += G.level * 100;
-        if (G.gemsDone >= GEMS_PER_LEVEL) {
-            G.gem     = null;
-            G.score  += G.level * 500;
-            G.phase   = 'levelDone';
-            G.phaseAt = now;
+        gemsDone++;
+        score += level * 100;
+        Snd.sfx('eat', cfg.music);
+        if (gemsDone >= GEMS_PER_LEVEL) {
+            gem    = null;
+            score += level * 500;
+            phase  = 'levelDone';
+            phaseAt = now;
+            Snd.sfx('levelUp', cfg.music);
         } else {
             spawnGem();
         }
     } else {
-        G.snake.pop();
+        snake.pop();
     }
+    updateHUD();
 }
 
 function die(now) {
-    G.lives--;
-    G.phase   = 'dying';
-    G.phaseAt = now;
+    lives--;
+    phase    = 'dying';
+    phaseAt  = now;
+    deathMsg = lives > 0 ? `LIFE LOST  (${lives} left)` : 'GAME OVER!';
+    Snd.sfx('die', cfg.music);
 }
 
-// ── Draw ─────────────────────────────────────────────────────────────
-function draw(now) {
-    ctx.fillStyle = '#07070e';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+// ================================================================
+// HUD
+// ================================================================
+const hudEl = document.getElementById('hud');
+function showHUD(v) { hudEl.classList.toggle('hidden', !v); }
+function updateHUD() {
+    document.getElementById('hv-lvl').textContent   = level;
+    document.getElementById('hv-gems').textContent  = gemsDone;
+    document.getElementById('hv-lives').textContent =
+        '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, START_LIVES - lives));
+    document.getElementById('hv-score').textContent = score;
+}
 
+// ================================================================
+// DRAW HELPERS
+// ================================================================
+function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);   ctx.quadraticCurveTo(x + w, y,     x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);   ctx.quadraticCurveTo(x,     y + h, x,     y + h - r);
+    ctx.lineTo(x, y + r);       ctx.quadraticCurveTo(x,     y,     x + r, y);
+    ctx.closePath();
+}
+
+function eyeOffsets(d) {
+    const E = CS - 2;
+    if (d.x ===  1) return [[E - 5, 2],   [E - 5, E - 5]];
+    if (d.x === -1) return [[2,     2],   [2,     E - 5]];
+    if (d.y === -1) return [[2,     2],   [E - 5, 2    ]];
+    return                  [[2,     E-5], [E - 5, E - 5]];
+}
+
+function drawGrid() {
+    ctx.fillStyle = '#07070e';
+    ctx.fillRect(0, 0, CW, CH);
     ctx.strokeStyle = '#0d0d1a';
     ctx.lineWidth = 0.5;
-    for (let x = 0; x <= COLS; x++) {
-        ctx.beginPath(); ctx.moveTo(x*CS, 0); ctx.lineTo(x*CS, canvas.height); ctx.stroke();
+    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CS, 0); ctx.lineTo(x*CS, CH); ctx.stroke(); }
+    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y*CS); ctx.lineTo(CW, y*CS); ctx.stroke(); }
+}
+
+function drawOverlay(alpha) {
+    ctx.fillStyle = `rgba(7,7,14,${alpha || 0.88})`;
+    ctx.fillRect(0, 0, CW, CH);
+}
+
+function ctext(text, x, y, color, size, bold) {
+    ctx.fillStyle  = color || '#7fff7f';
+    ctx.font       = `${bold !== false ? 'bold ' : ''}${size || 16}px "Courier New"`;
+    ctx.textAlign  = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+}
+
+function menuItem(text, y, sel) {
+    ctx.globalAlpha = sel ? 1 : 0.45;
+    if (sel) { ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 14; }
+    ctext(sel ? ('> ' + text + ' <') : text, CW / 2, y, sel ? '#7fff7f' : '#aaa', 20);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+}
+
+function drawBar(b) {
+    const x = b.x*CS+1, y = b.y*CS+1, bw = CS-2, bh = CS-2;
+    ctx.fillStyle = '#3d2812'; ctx.fillRect(x, y, bw, bh);
+    ctx.fillStyle = '#5c3e20'; ctx.fillRect(x, y, bw, 3); ctx.fillRect(x, y, 3, bh);
+    ctx.fillStyle = '#231508'; ctx.fillRect(x+bw-3, y, 3, bh); ctx.fillRect(x, y+bh-3, bw, 3);
+}
+
+function drawGem(g, now) {
+    const cx = g.x*CS + CS/2, cy = g.y*CS + CS/2;
+    const t  = (now - gemAt) / 1000;
+    const r  = (CS/2 - 2) * (1 + 0.12 * Math.sin(t * 5));
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(t * 2);
+    const grd = ctx.createRadialGradient(0,0,0,0,0,r*2.2);
+    grd.addColorStop(0, 'rgba(0,255,255,0.25)'); grd.addColorStop(1, 'rgba(0,255,255,0)');
+    ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath();
+    const fg = ctx.createLinearGradient(0,-r,0,r);
+    fg.addColorStop(0,'#ffffff'); fg.addColorStop(0.35,'#00ffff'); fg.addColorStop(1,'#006688');
+    ctx.fillStyle = fg; ctx.fill();
+    ctx.restore();
+}
+
+function drawSnake(flash) {
+    snake.forEach((seg, i) => {
+        const x = seg.x*CS+1, y = seg.y*CS+1, sw = CS-2, sh = CS-2;
+        const frac = 1 - i / Math.max(snake.length, 1);
+        if (i === 0) {
+            ctx.fillStyle = flash ? '#bb2222' : '#7fff7f';
+            if (!flash) { ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 10; }
+        } else {
+            const l = Math.round(8 + frac * 33);
+            ctx.fillStyle = flash ? `hsl(0,55%,${l+8}%)` : `hsl(120,65%,${l}%)`;
+        }
+        rr(x, y, sw, sh, i === 0 ? 5 : 3); ctx.fill(); ctx.shadowBlur = 0;
+        if (i === 0 && !flash) {
+            ctx.fillStyle = '#001500';
+            eyeOffsets(dir).forEach(([ox, oy]) => ctx.fillRect(x+ox, y+oy, 3, 3));
+        }
+    });
+}
+
+// ================================================================
+// DRAW SCREENS
+// ================================================================
+function drawMenu() {
+    drawGrid();
+    for (let y = 0; y < CH; y += 3) { ctx.fillStyle = 'rgba(0,0,0,0.05)'; ctx.fillRect(0, y, CW, 1); }
+    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 28;
+    ctext('S N A K E', CW/2, 92, '#7fff7f', 52);
+    ctx.shadowBlur = 0;
+    ctext('F O K   E D I T I O N', CW/2, 140, '#2a3a2a', 12);
+    MENU_ITEMS.forEach((item, i) => menuItem(item, 208 + i * 52, i === menuSel));
+    const diff = DIFF[cfg.diff].label;
+    ctext(`DIFFICULTY: ${diff}   MUSIC: ${cfg.music ? 'ON' : 'OFF'}`, CW/2, 375, '#2a3a2a', 11, false);
+    ctext('UP/DOWN  |  ENTER', CW/2, CH - 10, '#222', 10, false);
+}
+
+function drawSettings() {
+    drawGrid(); drawOverlay(0.92);
+    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 20;
+    ctext('SETTINGS', CW/2, 75, '#7fff7f', 30);
+    ctx.shadowBlur = 0;
+    const items = [
+        'MUSIC: ' + (cfg.music ? 'ON' : 'OFF'),
+        'DIFFICULTY: ' + DIFF[cfg.diff].label,
+        'BACK',
+    ];
+    items.forEach((item, i) => menuItem(item, 168 + i * 62, i === settingsSel));
+    ctext('ENTER to toggle / select   ESC to go back', CW/2, CH - 14, '#2a2a2a', 10, false);
+}
+
+function drawScores() {
+    drawGrid(); drawOverlay(0.92);
+    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 18;
+    ctext('HIGH SCORES', CW/2, 55, '#7fff7f', 26);
+    ctx.shadowBlur = 0;
+    const scores = getScores();
+    if (!scores.length) {
+        ctext('No scores yet!', CW/2, CH/2, '#555', 16, false);
+    } else {
+        ctx.font = '14px "Courier New"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        scores.slice(0, 8).forEach((s, i) => {
+            ctx.fillStyle = i === 0 ? '#ffd700' : i < 3 ? '#c0c0c0' : '#777';
+            const rank = (i + 1 + '.').padStart(3);
+            const name = s.name.padEnd(MAX_NAME);
+            const pts  = String(s.score).padStart(7);
+            ctx.fillText(`${rank}  ${name}  ${pts}  LVL ${s.level}`, CW/2, 100 + i * 30);
+        });
     }
-    for (let y = 0; y <= ROWS; y++) {
-        ctx.beginPath(); ctx.moveTo(0, y*CS); ctx.lineTo(canvas.width, y*CS); ctx.stroke();
+    ctext('Press any key to return', CW/2, CH - 14, '#2a2a2a', 10, false);
+}
+
+function drawNameEntry(now) {
+    drawGrid();
+    if (bars)  bars.forEach(b => drawBar(b));
+    if (gem)   drawGem(gem, now);
+    if (snake) drawSnake(false);
+    drawOverlay(0.84);
+
+    const isWin = nameReason === 'win';
+    ctx.shadowColor = isWin ? '#ffd700' : '#ff5555'; ctx.shadowBlur = 22;
+    ctext(isWin ? 'YOU WIN!' : 'GAME OVER', CW/2, 68, isWin ? '#ffd700' : '#ff5555', 34);
+    ctx.shadowBlur = 0;
+    ctext(`SCORE: ${score}   LEVEL: ${level}`, CW/2, 108, '#aaa', 13, false);
+    ctext('ENTER YOUR NAME:', CW/2, 140, '#7fff7f', 13, false);
+
+    // Slots
+    const sw = 30, sh = 40, gap = 5;
+    const totalW = MAX_NAME * (sw + gap) - gap;
+    const sx0    = Math.floor(CW/2 - totalW/2);
+    const sy     = 158;
+
+    for (let i = 0; i < MAX_NAME; i++) {
+        const sx  = sx0 + i * (sw + gap);
+        const act = i === nameStr.length && nameStr.length < MAX_NAME;
+        const has = i < nameStr.length;
+        ctx.fillStyle   = act ? '#142014' : '#0d0d18';
+        ctx.strokeStyle = act ? '#7fff7f' : '#2a2a3a';
+        ctx.lineWidth   = act ? 1.5 : 1;
+        rr(sx, sy, sw, sh, 3); ctx.fill(); ctx.stroke();
+        if (has) {
+            ctext(nameStr[i], sx + sw/2, sy + sh/2, '#7fff7f', 22);
+        } else if (act) {
+            // Preview current cycling char (dim)
+            const ch = NAME_CHARS[nameCharIdx];
+            ctx.globalAlpha = 0.45;
+            ctext(ch === ' ' ? '_' : ch, sx + sw/2, sy + sh/2, '#7fff7f', 20);
+            ctx.globalAlpha = 1;
+            // Blinking underline
+            if (Math.floor(now / 400) % 2 === 0) {
+                ctx.fillStyle = '#7fff7f55';
+                ctx.fillRect(sx + 5, sy + sh - 6, sw - 10, 2);
+            }
+        }
     }
 
-    if (!G) return;
+    // Cycling char display (below slots)
+    const cycleY = sy + sh + 22;
+    if (nameStr.length < MAX_NAME) {
+        const ci   = nameCharIdx;
+        const prev = NAME_CHARS[(ci - 1 + NAME_CHARS.length) % NAME_CHARS.length];
+        const curr = NAME_CHARS[ci];
+        const next = NAME_CHARS[(ci + 1) % NAME_CHARS.length];
+        const disp = c => c === ' ' ? '_' : c;
+        ctext('(^)', CW/2, cycleY,      '#333', 11, false);
+        ctext(disp(prev), CW/2, cycleY + 16,  '#3a3a3a', 14, false);
+        ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 10;
+        ctext(disp(curr), CW/2, cycleY + 34,  '#7fff7f', 22);
+        ctx.shadowBlur = 0;
+        ctext(disp(next), CW/2, cycleY + 50,  '#3a3a3a', 14, false);
+        ctext('(v)', CW/2, cycleY + 64, '#333', 11, false);
+    }
 
-    G.bars.forEach(b => drawBar(b));
+    ctext('UP/DOWN cycle  |  RIGHT/ENTER add letter  |  BACKSPACE delete', CW/2, CH - 24, '#2a2a2a', 10, false);
+    ctext('Or just type letters directly.  ENTER to confirm name.', CW/2, CH - 10, '#2a2a2a', 10, false);
+}
 
-    if (G.gem) drawGem(G.gem, now);
+function drawGameBoard(now) {
+    drawGrid();
+    bars.forEach(b => drawBar(b));
+    if (gem) drawGem(gem, now);
 
-    const dying = G.phase === 'dying';
-    const flash = dying && Math.floor((now - G.phaseAt) / 85) % 2 === 1;
-    G.snake.forEach((seg, i) => drawSeg(seg, i, G.snake.length, flash));
+    const dying = phase === 'dying';
+    const flash = dying && Math.floor((now - phaseAt) / 85) % 2 === 1;
+    drawSnake(flash);
 
-    // Phase overlay text on canvas
-    if (G.phase === 'levelDone') {
-        const alpha = Math.min(1, (now - G.phaseAt) / 150);
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.shadowColor = '#7fff7f';
-        ctx.shadowBlur  = 30;
-        ctx.fillStyle   = '#7fff7f';
-        ctx.font        = 'bold 30px "Courier New"';
-        ctx.textAlign   = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('LEVEL COMPLETE!', canvas.width / 2, canvas.height / 2);
+    if (phase === 'levelDone') {
+        const a = Math.min(1, (now - phaseAt) / 150);
+        ctx.save(); ctx.globalAlpha = a;
+        ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 30;
+        ctext('LEVEL COMPLETE!', CW/2, CH/2, '#7fff7f', 30);
         ctx.restore();
     }
 
     if (dying) {
-        const t = (now - G.phaseAt) / DEATH_DUR;
-        const msg = G.lives > 0
-            ? `LIFE LOST  (${G.lives} left)`
-            : 'GAME OVER!';
-        ctx.save();
-        ctx.globalAlpha  = Math.min(1, t * 2.5);
-        ctx.shadowColor  = '#ff4444';
-        ctx.shadowBlur   = 20;
-        ctx.fillStyle    = '#ff5555';
-        ctx.font         = 'bold 26px "Courier New"';
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
+        const t = (now - phaseAt) / DEATH_DUR;
+        ctx.save(); ctx.globalAlpha = Math.min(1, t * 2.5);
+        ctx.shadowColor = '#ff4444'; ctx.shadowBlur = 20;
+        ctext(deathMsg, CW/2, CH/2, '#ff5555', 24);
         ctx.restore();
     }
 
-    // HUD
-    document.getElementById('hv-lvl').textContent   = G.level;
-    document.getElementById('hv-gems').textContent  = G.gemsDone;
-    document.getElementById('hv-lives').textContent =
-        '♥'.repeat(Math.max(0, G.lives)) +
-        '♡'.repeat(Math.max(0, START_LIVES - G.lives));
-    document.getElementById('hv-score').textContent = G.score;
+    updateHUD();
 }
 
-function drawBar(b) {
-    const x = b.x*CS+1, y = b.y*CS+1, W = CS-2, H = CS-2;
-    ctx.fillStyle = '#3d2812';
-    ctx.fillRect(x, y, W, H);
-    ctx.fillStyle = '#5c3e20';
-    ctx.fillRect(x, y, W, 3);
-    ctx.fillRect(x, y, 3, H);
-    ctx.fillStyle = '#231508';
-    ctx.fillRect(x+W-3, y, 3, H);
-    ctx.fillRect(x, y+H-3, W, 3);
+function drawFPS() {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(CW - 56, 4, 52, 17);
+    ctx.fillStyle = '#7fff7f';
+    ctx.font      = '11px "Courier New"';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${fpsVal} FPS`, CW - 5, 6);
 }
 
-function drawGem(g, now) {
-    const cx = g.x*CS + CS/2;
-    const cy = g.y*CS + CS/2;
-    const t  = (now - G.gemAt) / 1000;
-    const r  = (CS/2 - 2) * (1 + 0.12 * Math.sin(t * 5));
-
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(t * 2);
-
-    const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.2);
-    grd.addColorStop(0, 'rgba(0,255,255,0.25)');
-    grd.addColorStop(1, 'rgba(0,255,255,0)');
-    ctx.fillStyle = grd;
-    ctx.beginPath(); ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2); ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(0, -r); ctx.lineTo(r * 0.65, 0);
-    ctx.lineTo(0, r);  ctx.lineTo(-r * 0.65, 0);
-    ctx.closePath();
-    const fg = ctx.createLinearGradient(0, -r, 0, r);
-    fg.addColorStop(0,    '#ffffff');
-    fg.addColorStop(0.35, '#00ffff');
-    fg.addColorStop(1,    '#006688');
-    ctx.fillStyle = fg;
-    ctx.fill();
-
-    ctx.restore();
-}
-
-function drawSeg(seg, i, len, flash) {
-    const x = seg.x*CS+1, y = seg.y*CS+1, W = CS-2, H = CS-2;
-    const frac = 1 - i / Math.max(len, 1);
-
-    if (i === 0) {
-        ctx.fillStyle = flash ? '#bb2222' : '#7fff7f';
-        if (!flash) { ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 10; }
-    } else {
-        const l = Math.round(8 + frac * 33);
-        ctx.fillStyle = flash
-            ? `hsl(0,55%,${l + 8}%)`
-            : `hsl(120,65%,${l}%)`;
-    }
-
-    roundRect(x, y, W, H, i === 0 ? 5 : 3);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    if (i === 0 && !flash) {
-        ctx.fillStyle = '#001500';
-        eyeOffsets(G.dir).forEach(([ox, oy]) => ctx.fillRect(x + ox, y + oy, 3, 3));
-    }
-}
-
-function eyeOffsets(d) {
-    const E = CS - 2; // 18
-    if (d.x ===  1) return [[E-5, 2],   [E-5, E-5]];
-    if (d.x === -1) return [[2,   2],   [2,   E-5]];
-    if (d.y === -1) return [[2,   2],   [E-5, 2  ]];
-    return                  [[2,   E-5], [E-5, E-5]];
-}
-
-function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x+r, y);
-    ctx.lineTo(x+w-r, y);   ctx.quadraticCurveTo(x+w, y,   x+w, y+r);
-    ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
-    ctx.lineTo(x+r, y+h);   ctx.quadraticCurveTo(x,   y+h, x,     y+h-r);
-    ctx.lineTo(x, y+r);     ctx.quadraticCurveTo(x,   y,   x+r,   y);
-    ctx.closePath();
-}
-
-// ── Overlay ──────────────────────────────────────────────────────────
-const ovEl  = document.getElementById('ov');
-const ovH1  = document.getElementById('ov-h1');
-const ovS1  = document.getElementById('ov-s1');
-const ovS2  = document.getElementById('ov-s2');
-const ovBtn = document.getElementById('ov-btn');
-let ovOpen  = false;
-
-function showOv(h1, s1, s2, btn) {
-    if (ovOpen) return;
-    ovOpen = true;
-    ovH1.textContent = h1;
-    ovS1.textContent = s1;
-    ovS2.textContent = s2;
-    ovBtn.textContent = btn;
-    ovEl.classList.remove('hidden');
-}
-
-function hideOv() {
-    ovOpen = false;
-    ovEl.classList.add('hidden');
-}
-
-ovBtn.addEventListener('click', () => { hideOv(); newGame(); });
-
-// ── Main loop ────────────────────────────────────────────────────────
-function loop(now) {
-    requestAnimationFrame(loop);
-
-    if (G) {
-        if (G.phase === 'playing' && now >= G.stepAt) {
-            G.stepAt = now + G.speed;
-            step(now);
-        }
-        if (G.phase === 'dying' && now - G.phaseAt >= DEATH_DUR) {
-            G.lives > 0 ? beginLevel() : (G.phase = 'over');
-        }
-        if (G.phase === 'levelDone' && now - G.phaseAt >= LEVELDONE_DUR) {
-            G.level < MAX_LEVELS ? (G.level++, beginLevel()) : (G.phase = 'win');
-        }
-        if (G.phase === 'over') showOv('GAME OVER', `Score: ${G.score}`, `Reached level ${G.level}`, 'PLAY AGAIN');
-        if (G.phase === 'win')  showOv('YOU WIN!',  `Final score: ${G.score}`, 'All 10 levels conquered!', 'PLAY AGAIN');
-    }
-
-    draw(now);
-}
-
-requestAnimationFrame(loop);
-
-// ── Input ────────────────────────────────────────────────────────────
-const DIRS = {
-    ArrowUp:    {x:0,  y:-1},
-    ArrowDown:  {x:0,  y:1},
-    ArrowLeft:  {x:-1, y:0},
-    ArrowRight: {x:1,  y:0},
+// ================================================================
+// INPUT
+// ================================================================
+const GDIRS = {
+    ArrowUp:    { x: 0,  y: -1 },
+    ArrowDown:  { x: 0,  y:  1 },
+    ArrowLeft:  { x: -1, y:  0 },
+    ArrowRight: { x: 1,  y:  0 },
 };
 
 document.addEventListener('keydown', e => {
-    const d = DIRS[e.key];
-    if (!d) return;
-    e.preventDefault();
-    if (!G || G.phase !== 'playing') return;
-    if (d.x !== -G.dir.x || d.y !== -G.dir.y) G.nextDir = d;
+    Snd.resume();
+
+    if (phase === 'menu') {
+        if (e.key === 'ArrowUp')   { menuSel = (menuSel - 1 + MENU_ITEMS.length) % MENU_ITEMS.length; Snd.sfx('nav', cfg.music); }
+        if (e.key === 'ArrowDown') { menuSel = (menuSel + 1) % MENU_ITEMS.length; Snd.sfx('nav', cfg.music); }
+        if (e.key === 'Enter' || e.key === ' ') {
+            Snd.sfx('select', cfg.music);
+            if      (menuSel === 0) { startGame(); }
+            else if (menuSel === 1) { phase = 'settings'; settingsSel = 0; }
+            else if (menuSel === 2) { phase = 'scores'; }
+            e.preventDefault();
+        }
+
+    } else if (phase === 'settings') {
+        if (e.key === 'ArrowUp')   { settingsSel = (settingsSel - 1 + SETTINGS_ITEMS.length) % SETTINGS_ITEMS.length; Snd.sfx('nav', cfg.music); }
+        if (e.key === 'ArrowDown') { settingsSel = (settingsSel + 1) % SETTINGS_ITEMS.length; Snd.sfx('nav', cfg.music); }
+        if (e.key === 'Enter' || e.key === ' ') {
+            Snd.sfx('select', cfg.music);
+            if      (settingsSel === 0) { cfg.music = !cfg.music; if (!cfg.music) Snd.stop(); }
+            else if (settingsSel === 1) { cfg.diff  = (cfg.diff + 1) % DIFF.length; }
+            else                        { phase = 'menu'; }
+        }
+        if (e.key === 'Escape') { phase = 'menu'; Snd.sfx('nav', cfg.music); }
+        e.preventDefault();
+
+    } else if (phase === 'scores') {
+        phase = 'menu'; e.preventDefault();
+
+    } else if (phase === 'playing') {
+        const d = GDIRS[e.key];
+        if (d) {
+            e.preventDefault();
+            // Anti-reversal check against last queued dir
+            const last = dirQueue.length > 0 ? dirQueue[dirQueue.length - 1] : dir;
+            if (!(d.x === -last.x && d.y === -last.y) && !(d.x === last.x && d.y === last.y)) {
+                if (dirQueue.length < 3) dirQueue.push(d);
+            }
+        }
+
+    } else if (phase === 'nameEntry') {
+        if (GDIRS[e.key]) e.preventDefault();
+
+        if (e.key === 'ArrowUp') {
+            nameCharIdx = (nameCharIdx - 1 + NAME_CHARS.length) % NAME_CHARS.length;
+            Snd.sfx('nav', cfg.music);
+        } else if (e.key === 'ArrowDown') {
+            nameCharIdx = (nameCharIdx + 1) % NAME_CHARS.length;
+            Snd.sfx('nav', cfg.music);
+        } else if ((e.key === 'ArrowRight' || e.key === 'Enter') && nameStr.length < MAX_NAME) {
+            nameStr += NAME_CHARS[nameCharIdx];
+            Snd.sfx('nav', cfg.music);
+            if (e.key === 'ArrowRight') return; // Enter also triggers confirm below
+        } else if (e.key === 'Backspace' || e.key === 'ArrowLeft') {
+            if (nameStr.length > 0) { nameStr = nameStr.slice(0, -1); Snd.sfx('nav', cfg.music); }
+            e.preventDefault(); return;
+        } else if (e.key.length === 1 && /^[a-zA-Z0-9 ]$/.test(e.key) && nameStr.length < MAX_NAME) {
+            nameStr += e.key.toUpperCase();
+            Snd.sfx('nav', cfg.music); return;
+        }
+
+        // ENTER confirms (whether we just added a char or not)
+        if (e.key === 'Enter') {
+            addScore(nameStr, score, level);
+            Snd.sfx('select', cfg.music);
+            phase = 'scores';  // show scores after entry
+            showHUD(false);
+        }
+    }
 });
+
+// ================================================================
+// MAIN LOOP
+// ================================================================
+function loop(now) {
+    requestAnimationFrame(loop);
+
+    // FPS
+    fpsFrames++;
+    if (now - fpsLast >= 500) {
+        fpsVal    = Math.round(fpsFrames * 1000 / (now - fpsLast));
+        fpsFrames = 0; fpsLast = now;
+    }
+
+    // Music
+    const wantTrack = ['menu', 'settings', 'scores'].includes(phase) ? 'menu'
+        : ['playing', 'dying', 'levelDone'].includes(phase) ? 'game'
+        : null;
+    if (cfg.music && wantTrack) Snd.play(wantTrack); else Snd.stop();
+    Snd.tick(cfg.music);
+
+    // Phase transitions
+    if (phase === 'playing' && now >= stepAt) {
+        stepAt = now + speed;
+        step(now);
+    }
+    if (phase === 'dying' && now - phaseAt >= DEATH_DUR) {
+        if (lives > 0) {
+            beginLevel();
+        } else {
+            phase = 'nameEntry'; nameStr = ''; nameCharIdx = 0; nameReason = 'over';
+            showHUD(false);
+        }
+    }
+    if (phase === 'levelDone' && now - phaseAt >= LEVELDONE_DUR) {
+        if (level < MAX_LEVELS) { level++; beginLevel(); }
+        else { phase = 'nameEntry'; nameStr = ''; nameCharIdx = 0; nameReason = 'win'; showHUD(false); }
+    }
+
+    // Draw
+    if      (phase === 'menu')      { drawMenu();            showHUD(false); }
+    else if (phase === 'settings')  { drawSettings();        showHUD(false); }
+    else if (phase === 'scores')    { drawScores();          showHUD(false); }
+    else if (phase === 'nameEntry') { drawNameEntry(now);    }
+    else                            { drawGameBoard(now);    showHUD(true);  }
+
+    drawFPS();
+}
+
+// ================================================================
+// INIT
+// ================================================================
+Snd.init();
+requestAnimationFrame(loop);
 </script>
 </body>
 </html>
