@@ -465,7 +465,13 @@ const Snd = (() => {
 const HS_KEY = 'fok-snake-hs';
 const FK_KEY = 'fok-snake-coins';
 const CFG_KEY = 'fok-snake-cfg';
-function getScores() { try { return JSON.parse(localStorage.getItem(HS_KEY)) || []; } catch { return []; } }
+function getScores() {
+    try {
+        const raw = localStorage.getItem(HS_KEY);
+        if(raw === null) return [{name:'P.SNAKE',score:42,level:1,color:0,shopItems:{},date:'26.11.97'}];
+        return JSON.parse(raw) || [];
+    } catch { return []; }
+}
 function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10) || 0; }
 function addFOKoins(n) {
     const t = getFOKoins() + n;
@@ -476,7 +482,10 @@ function addFOKoins(n) {
 }
 function addScore(name, sc, lvl) {
     const s = getScores();
-    s.push({ name: (name.trim() || 'AAA').substring(0, MAX_NAME), score: sc, level: lvl, color: cfg.snakeColor || 0 });
+    const now = new Date();
+    const date = `${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getFullYear()).slice(-2)}`;
+    s.push({ name:(name.trim()||'AAA').substring(0,MAX_NAME), score:sc, level:lvl,
+             color:cfg.snakeColor||0, shopItems:{...(cfg.shopItems||{})}, date });
     s.sort((a, b) => b.score - a.score);
     localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10)));
     addFOKoins(sc);
@@ -990,22 +999,47 @@ function drawMiniSnake(x, y, colorIdx) {
     ctx.shadowBlur=0;
 }
 
+function drawScoreHead(cx, cy, colorIdx, si) {
+    const sc = SNAKE_COLORS[colorIdx || 0];
+    const scale = 0.55;
+    ctx.save();
+    ctx.translate(cx - Math.round(CS*scale/2), cy - Math.round(CS*scale/2));
+    ctx.scale(scale, scale);
+    // Head body
+    ctx.fillStyle = sc.head;
+    ctx.shadowColor = sc.head; ctx.shadowBlur = 3;
+    rr(1, 1, CS-2, CS-2, 5); ctx.fill(); ctx.shadowBlur = 0;
+    // Eyes fixed facing right (dir irrelevant in scores screen)
+    ctx.fillStyle = '#001500';
+    ctx.fillRect(13, 2, 3, 3); ctx.fillRect(13, 16, 3, 3);
+    // Accessories (back-to-front; shades/monocle inlined to avoid global dir dependency)
+    if(si) {
+        if(si.bow)     drawAccessoryBow(0, 0);
+        if(si.shades)  { ctx.fillStyle='#111'; [3.5,17.5].forEach(ey=>{ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();}); }
+        if(si.monocle) { ctx.strokeStyle='#ccc'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(14.5,3.5,3.5,0,Math.PI*2); ctx.stroke(); }
+        if(si.cylinder) drawAccessoryCylinder(0, 0);
+        if(si.crown)    drawAccessoryCrown(0, 0);
+    }
+    ctx.restore();
+}
+
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=18; ct('HIGH SCORES',CW/2,50,'#7fff7f',26); ctx.shadowBlur=0;
     const scores=getScores();
     if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',16,false); }
     else {
-        ctx.font='14px "Courier New"'; ctx.textAlign='left'; ctx.textBaseline='middle';
+        ctx.font='13px "Courier New"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         scores.slice(0,8).forEach((s,i)=>{
             const y=94+i*30;
             ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
             const rank=`${i+1}.`.padStart(3);
-            const line=`${rank}  ${(s.name||'???').padEnd(MAX_NAME)}  ${String(s.score).padStart(7)}  LVL ${s.level}`;
+            const lvl=String(s.level).padStart(2);
+            const line=`${rank}  ${(s.name||'???').padEnd(MAX_NAME)}  ${String(s.score).padStart(7)}  LV${lvl}  ${s.date||'--.--.--'}`;
             const tw=ctx.measureText(line).width;
             const tx=CW/2-tw/2;
             ctx.fillText(line,tx,y);
-            drawMiniSnake(tx-26, y, s.color||0);
+            drawScoreHead(tx-18, y, s.color||0, s.shopItems||{});
         });
         ctx.textAlign='center';
     }
