@@ -611,6 +611,8 @@ let spawnAt = 0, levelDoneWaiting = false;
 let pauseReadyAt = 0, escReadyAt = 0;
 let perfectLevel = true, levelWasPerfect = false, fireworks = [];
 let levelBonusCount = 0, epicLevelCount = 0;
+let boostDir=null, boostSince=0, boosting=false;
+const BOOST_GRACE=180;
 let perfectCount = 0, luckyCount = 0;
 let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameReason = '';
@@ -639,6 +641,7 @@ function beginLevel() {
     phase='playing'; stepAt=performance.now()+speed; phaseAt=0;
     spawnAt=performance.now(); levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
+    boosting=false; boostDir=null;
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
@@ -1589,7 +1592,14 @@ function handleKey(key, pde) {
     }
 }
 
-document.addEventListener('keydown', e=>handleKey(e.key,()=>e.preventDefault()));
+document.addEventListener('keydown', e=>{
+    handleKey(e.key,()=>e.preventDefault());
+    if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+});
+document.addEventListener('keyup', e=>{
+    const d=GDIRS[e.key];
+    if(d&&boostDir&&d.x===boostDir.x&&d.y===boostDir.y){boostDir=null;boosting=false;}
+});
 
 // Side buttons
 document.getElementById('btn-ok').addEventListener('touchstart',e=>{e.preventDefault();handleKey('Enter',null);},{passive:false});
@@ -1677,7 +1687,12 @@ function loop(now) {
     Snd.tick(cfg.music);
 
     // Transitions
-    if(phase==='playing'&&now>=stepAt){stepAt=now+speed;step(now);}
+    if(phase==='playing'){
+        if(boostDir&&boostDir.x===dir.x&&boostDir.y===dir.y&&dirQueue.length===0){
+            if(!boosting&&now-boostSince>=BOOST_GRACE)boosting=true;
+        }else boosting=false;
+        if(now>=stepAt){const es=boosting?Math.max(40,Math.round(speed/2)):speed;stepAt=now+es;step(now);}
+    }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(lives>0)beginLevel();
         else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='over';showHUD(false);Snd.stop();}
