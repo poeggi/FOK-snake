@@ -55,17 +55,31 @@
             -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center;
         }
         .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
+        #side-info { display: contents; }
         @media (orientation: landscape) and (max-height: 520px) {
-            body { flex-direction: row; flex-wrap: wrap; align-items: flex-start; padding: 4px 6px; gap: 4px; }
-            #topbar { width: 100%; order: 0; min-height: 26px; }
-            #hud { order: 1; width: 100%; flex-direction: row; gap: 12px; font-size: 12px; }
-            .hud-row { flex: 1; }
-            #wrap { order: 2; flex: 1; min-width: 0; width: auto; }
-            canvas#c { width: auto; height: calc(100dvh - 62px); max-width: 100%; }
-            #gamepad { order: 3; width: 126px; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+            body {
+                flex-direction: row; align-items: stretch; justify-content: center;
+                padding: 6px; gap: 8px; height: 100dvh; min-height: unset; overflow: hidden;
+            }
+            #side-info {
+                display: flex; flex-direction: column; justify-content: center;
+                align-items: flex-start; gap: 14px; width: 118px; flex-shrink: 0;
+            }
+            #topbar { width: auto; padding: 0; gap: 8px; }
+            #hud { width: auto; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: 0.8px; }
+            .hud-row { flex-direction: column; gap: 3px; }
+            #wrap {
+                flex: 1; min-width: 0; width: auto;
+                display: flex; align-items: center; justify-content: center;
+            }
+            canvas#c { width: auto; height: calc(100dvh - 12px); max-width: 100%; border: none; }
+            #gamepad {
+                width: 118px; flex-shrink: 0; flex-direction: column;
+                align-items: center; justify-content: center; gap: 8px;
+            }
             #dpad-c { width: 88px; height: 88px; }
             .sbtn { width: 44px; height: 44px; font-size: 11px; }
-            #left-btns, #side-btns { gap: 6px; }
+            #left-btns, #side-btns { gap: 8px; }
         }
         #name-inp {
             position: fixed; left: -9999px; top: 50%; width: 1px; height: 1px; opacity: 0;
@@ -73,19 +87,21 @@
     </style>
 </head>
 <body>
-<div id="hud" class="hidden">
-    <div class="hud-row">
-        <span><span class="hl">LEVEL </span><span class="hv" id="hv-lvl">1</span></span>
-        <span><span class="hl">LIVES </span><span class="hv" id="hv-lives">&#9829;&#9829;&#9829;</span></span>
+<div id="side-info">
+    <div id="topbar">
+        <button id="btn-mute" title="Toggle music (M)">SND</button>
+        <span id="fps-el"></span>
     </div>
-    <div class="hud-row">
-        <span><span class="hl">GEMS </span><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span>
-        <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
+    <div id="hud" class="hidden">
+        <div class="hud-row">
+            <span><span class="hl">LEVEL </span><span class="hv" id="hv-lvl">1</span></span>
+            <span><span class="hl">LIVES </span><span class="hv" id="hv-lives">&#9829;&#9829;&#9829;</span></span>
+        </div>
+        <div class="hud-row">
+            <span><span class="hl">GEMS </span><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span>
+            <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
+        </div>
     </div>
-</div>
-<div id="topbar">
-    <button id="btn-mute" title="Toggle music (M)">SND</button>
-    <span id="fps-el"></span>
 </div>
 <div id="wrap">
     <canvas id="c"></canvas>
