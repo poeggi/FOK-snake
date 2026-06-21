@@ -1362,8 +1362,10 @@ function drawGameBoard(now) {
                 ctx.restore();
             }
         }
-        if(levelDoneWaiting&&Math.floor(now/520)%2===0)
-            ct('TAP OR PRESS ANY KEY',CW/2,CH/2+(levelWasPerfect?50:22),'#6aaa6a',8,false);
+        if(levelDoneWaiting&&Math.floor(now/520)%2===0){
+            ctx.save(); ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
+            ctx.fillStyle='#4a7a4a'; ctx.fillText('TAP OR PRESS ANY KEY',CW/2,CH-8); ctx.restore();
+        }
     }
     if(dying){
         const t=(now-phaseAt)/DEATH_DUR;
