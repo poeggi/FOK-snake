@@ -61,7 +61,7 @@
         #side-info { display: contents; }
         @media (min-width: 700px) and (min-height: 500px) {
             #wrap, #hud, #topbar {
-                width: min(calc((100vh - 100px) * 1.5), calc(100vw - 32px), 600px);
+                width: min(calc((100vh - 100px) * 1.5), calc(100vw - 32px), 800px);
             }
         }
         /* Portrait touch: push canvas well up to give controls breathing room */
@@ -1738,6 +1738,17 @@ function syncLandscapePanels() {
 window.addEventListener('resize', syncLandscapePanels);
 window.addEventListener('orientationchange', () => setTimeout(syncLandscapePanels, 120));
 requestAnimationFrame(syncLandscapePanels);
+
+// Scale SND/FPS font to match canvas display size when the canvas is CSS-upscaled beyond its 600px native width
+function syncFontScale() {
+    const scale = document.getElementById('c').getBoundingClientRect().width / CW;
+    const sz = Math.round(8 * scale) + 'px';
+    fpsEl.style.fontSize = sz;
+    muteBtn.style.fontSize = sz;
+}
+window.addEventListener('resize', syncFontScale);
+window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120));
+requestAnimationFrame(syncFontScale);
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
