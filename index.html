@@ -56,6 +56,11 @@
         }
         .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
         #side-info { display: contents; }
+        @media (min-width: 700px) and (min-height: 500px) {
+            #wrap, #hud, #topbar {
+                width: min(calc((100vh - 100px) * 1.5), calc(100vw - 32px), 900px);
+            }
+        }
         @media (orientation: landscape) and (max-height: 520px) {
             body {
                 flex-direction: row; align-items: stretch; justify-content: center;
