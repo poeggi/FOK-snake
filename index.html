@@ -1065,7 +1065,7 @@ function drawMenu() {
     ctx.save();
     ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
-    ctx.fillText('v6', 10, CH-8);
+    ctx.fillText('v7', 10, CH-8);
     ctx.textAlign='center';
     ctx.fillText('UP/DOWN  |  ENTER to select', CW/2, CH-8);
     ctx.fillStyle='#ffd700'; ctx.textAlign='right';
@@ -1657,6 +1657,35 @@ function handleKey(key, pde) {
 }
 
 canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
+
+// Swipe/gesture control on game canvas — 30px chunks, L-shapes work naturally
+let _swipeBase=null, _swipeLastDir=null;
+canvas.addEventListener('touchstart',e=>{
+    e.preventDefault(); Snd.resume();
+    const t=e.touches[0];
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null;
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(!_swipeBase) return;
+    const t=e.touches[0];
+    const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
+    if(Math.hypot(dx,dy)<30) return;
+    const key=Math.abs(dx)>=Math.abs(dy)?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
+    handleKey(key,null);
+    if(phase==='playing'&&key!==_swipeLastDir){const d=GDIRS[key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+    _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+    e.preventDefault();
+    if(_swipeBase){
+        const t=e.changedTouches[0];
+        if(Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<30&&phase!=='playing') handleKey('Enter',null);
+    }
+    _swipeBase=null; _swipeLastDir=null;
+    if(phase==='playing'){boostDir=null;boosting=false;}
+},{passive:false});
+
 document.addEventListener('keydown', e=>{
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
