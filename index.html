@@ -30,6 +30,7 @@
         #hud.hidden { opacity: 0; pointer-events: none; }
         .hud-row { display: flex; justify-content: space-between; width: 100%; }
         .hl { color: #888; } .hv { color: #7fff7f; }
+        #hv-lives { font-size: 18px; line-height: 12px; vertical-align: middle; }
         #topbar {
             width: min(600px, calc(100vw - 16px));
             display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
@@ -202,6 +203,36 @@ const ACHIEVEMENTS = [
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
     { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 50,000 in one game',
       icon:{p:{A:'#ff4400',B:'#ff9900',C:'#ffdd00'},d:['...A....','..ABA...','.ABBBA..','ABBBBA..','ABCBBBA.','ABCCCBA.','.AAAAAA.','........']}},
+];
+
+const EXPERT_ACHIEVEMENTS = [
+    { id:'score_100k',  name:'SCORE HUNTER',  desc:'Score 100,000 in one game',
+      icon:{p:{A:'#ff8800',B:'#cc5500'},
+      d:['A.AA.AA.','AAAAAAAA','ABBBBBBA','ABBBBBBA','ABBBBBBA','AAAAAAAA','.AAAAAA.','........']}},
+    { id:'fokoins_1m',  name:'MILLIONAIRE',   desc:'Earn 1,000,000 total FOKoins',
+      icon:{p:{A:'#00ddff'},
+      d:['...A....','..AAA...','.AAAAA..','AAAAAAA.','.AAAAA..','..AAA...','...A....','........']}},
+    { id:'hard_champ',  name:'IRON SNAKE',    desc:'Beat all 10 levels on hard',
+      icon:{p:{A:'#cccccc',B:'#888888'},
+      d:['.AAAAAA.','AAAAAAAA','ABBBBBBA','ABBBBBBA','.AAAAAA.','..AAAA..','...AA...','........']}},
+    { id:'triple_perf', name:'TRIPLE ACE',    desc:'3 perfect levels in one game',
+      icon:{p:{A:'#ffd700'},
+      d:['......AA','....AAAA','..AAAAAA','AAAAAAAA','........','........','........','........']}},
+    { id:'no_deaths',   name:'UNTOUCHABLE',   desc:'Beat level 10 with max lives',
+      icon:{p:{A:'#00ff88'},
+      d:['.AA.AA..','AAAAAAA.','.AAAAA..','.AAAAA..','..AAA...','...A....','........','........']}},
+    { id:'shop_full',   name:'BIG SPENDER',   desc:'Own all shop items',
+      icon:{p:{A:'#cc8800',B:'#996600',C:'#ffcc44'},
+      d:['..CCCC..','..C..C..','CCCCCCCC','CBBBBBBC','CBBBBBBC','CBBBBBBC','CCCCCCCC','........']}},
+    { id:'lucky_streak',name:'LUCKY STREAK',  desc:'3 lucky gems in one game',
+      icon:{p:{A:'#00cc44'},
+      d:['.AA.AA..','AAAAAAA.','AAAAAAA.','..AAAA..','..AAAA..','...AA...','...AA...','........']}},
+    { id:'epic_double', name:'EPIC DOUBLE',   desc:'2 epic gems in one level',
+      icon:{p:{A:'#cc44ff',B:'#9900cc'},
+      d:['.A..A...','AAA.AAA.','.A..A...','........','........','........','........','........']}},
+    { id:'fokoins_5m',  name:'DRAGON LORD',   desc:'Earn 5,000,000 total FOKoins',
+      icon:{p:{A:'#cc2200',B:'#ff6600',C:'#ffcc00'},
+      d:['AAAAAAAA','ABBBBBBA','ABCCCCBA','ABCCCCBA','ABBBBBBA','AAAAAAAA','.AAAAAA.','........']}},
 ];
 
 const SHOP_ITEMS = [
@@ -478,9 +509,11 @@ function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10)
 function addFOKoins(n) {
     const t = getFOKoins() + n;
     localStorage.setItem(FK_KEY, String(t));
-    if(t >= 5000)   unlockAch('fokoins_1k');
-    if(t >= 50000)  unlockAch('fokoins_10k');
-    if(t >= 500000) unlockAch('fokoins_100k');
+    if(t >= 5000)     unlockAch('fokoins_1k');
+    if(t >= 50000)    unlockAch('fokoins_10k');
+    if(t >= 500000)   unlockAch('fokoins_100k');
+    if(t >= 1000000)  unlockAch('fokoins_1m');
+    if(t >= 5000000)  unlockAch('fokoins_5m');
 }
 function addScore(name, sc, lvl) {
     const s = getScores();
@@ -576,7 +609,9 @@ let speed, stepAt, phaseAt, gemAt, deathMsg, pauseAt;
 let spawnAt = 0, levelDoneWaiting = false;
 let pauseReadyAt = 0, escReadyAt = 0;
 let perfectLevel = true, levelWasPerfect = false, fireworks = [];
-let levelBonusCount = 0;
+let levelBonusCount = 0, epicLevelCount = 0;
+let perfectCount = 0, luckyCount = 0;
+let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameReason = '';
 let creditsScroll = 0;
 let purchaseParticles = [], purchaseAnimAt = 0;
@@ -592,7 +627,7 @@ const ck = p => `${p.x},${p.y}`;
 const ri = n => Math.floor(Math.random() * n);
 function freeCell(blocked) { let p; do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p))); return p; }
 
-function startGame() { level=1; lives=START_LIVES; score=0; beginLevel(); }
+function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; beginLevel(); }
 
 function beginLevel() {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
@@ -602,7 +637,7 @@ function beginLevel() {
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
     phase='playing'; stepAt=performance.now()+speed; phaseAt=0;
     spawnAt=performance.now(); levelDoneWaiting=false;
-    perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0;
+    perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
@@ -643,24 +678,34 @@ function step(now) {
             showBonus(now,bonus?'EPIC x200!':'EPIC x100!');
             Snd.sfx('epic_eat',cfg.music);
             unlockAch('epic_gem');
+            epicLevelCount++; if(epicLevelCount>=2) unlockAch('epic_double');
         } else if(tier===1){
             showBonus(now,bonus?'LUCKY x20!':'LUCKY x10!');
             Snd.sfx('lucky_eat',cfg.music);
             unlockAch('lucky_gem');
+            luckyCount++; if(luckyCount>=3) unlockAch('lucky_streak');
         } else if(bonus){
             showBonus(now,'x2 BONUS!');
             Snd.sfx('bonus',cfg.music);
         } else Snd.sfx('eat',cfg.music);
         unlockAch('first_gem');
         if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); }
-        if(score>=50000) unlockAch('score_25k');
+        if(score>=50000)  unlockAch('score_25k');
+        if(score>=100000) unlockAch('score_100k');
         if(gemsDone>=GEMS_PER_LEVEL){
             gem=null; score+=level*500;
-            if(perfectLevel){ score+=level*1000; spawnFireworks(now); Snd.sfx('perfect',cfg.music); unlockAch('perfect_level'); }
-            else Snd.sfx('levelUp',cfg.music);
+            if(perfectLevel){
+                score+=level*1000; spawnFireworks(now); Snd.sfx('perfect',cfg.music);
+                unlockAch('perfect_level');
+                perfectCount++; if(perfectCount>=3) unlockAch('triple_perf');
+            } else Snd.sfx('levelUp',cfg.music);
             unlockAch('level1');
             if(level>=5)  unlockAch('level5');
-            if(level>=10) unlockAch('level10');
+            if(level>=10){
+                unlockAch('level10');
+                if(cfg.diff===2)               unlockAch('hard_champ');
+                if(lives>=START_LIVES)         unlockAch('no_deaths');
+            }
             phase='levelDone'; phaseAt=now;
         } else spawnGem();
     } else snake.pop();
@@ -1054,31 +1099,33 @@ function drawScores() {
 
 function drawAchievements() {
     drawGrid(); drawOvBg(0.92);
-    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct('ACHIEVEMENTS',CW/2,36,'#7fff7f',16); ctx.shadowBlur=0;
+    const expert=ACHIEVEMENTS.every(a=>achUnlocked[a.id]);
+    const onExpert=expert&&achPage===0;
+    const list=onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
+    const titleColor=onExpert?'#ff8800':'#7fff7f';
+    ctx.shadowColor=titleColor; ctx.shadowBlur=16; ct('ACHIEVEMENTS',CW/2,26,titleColor,16); ctx.shadowBlur=0;
+    if(expert){
+        ct(onExpert?'< EXPERT  1/2 >':'< BASE  2/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',8);
+    }
     const cols=3, aw=188, ah=68, gx=4, gy=4;
     const ox=(CW-(cols*aw+(cols-1)*gx))/2;
-    const oy=64;
-    ACHIEVEMENTS.forEach((a,i)=>{
+    const oy=expert?54:64;
+    list.forEach((a,i)=>{
         const col=i%cols, row=Math.floor(i/cols);
         const x=ox+col*(aw+gx), y=oy+row*(ah+gy);
         const got=!!achUnlocked[a.id];
-        // Background
         ctx.fillStyle=got?'rgba(0,60,0,0.28)':'rgba(10,10,10,0.28)';
         rr(x,y,aw,ah,4); ctx.fill();
-        // Border
         ctx.strokeStyle=got?'#4a8a4a':'#444444'; ctx.lineWidth=got?2:1;
         rr(x,y,aw,ah,4); ctx.stroke();
-        // Icon
         ctx.save();
         if(!got) ctx.globalAlpha=0.35;
         drawPixelIcon(x+5,y+ah/2-9,a.icon,2);
         ctx.restore();
-        // Name
         ctx.textAlign='left'; ctx.textBaseline='top';
         ctx.font='8px "Press Start 2P"';
         ctx.fillStyle=got?'#7fff7f':'#888888';
         ctx.fillText(a.name,x+26,y+10);
-        // Desc — word-wrap to 2 lines
         ctx.font='7px "Press Start 2P"';
         ctx.fillStyle=got?'#6aaa6a':'#777777';
         const _mw=aw-32; let _d1=a.desc,_d2='';
@@ -1088,15 +1135,15 @@ function drawAchievements() {
         }
         ctx.fillText(_d1,x+26,y+24);
         if(_d2) ctx.fillText(_d2,x+26,y+34);
-        // Status (fixed at bottom of cell)
         ctx.font='7px "Press Start 2P"';
         ctx.fillStyle=got?'#5a8a5a':'#666666';
         ctx.fillText(got?'UNLOCKED':'???',x+26,y+50);
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    const total=ACHIEVEMENTS.filter(a=>achUnlocked[a.id]).length;
-    ct(`${total} / ${ACHIEVEMENTS.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',8,false);
-    ct('Any key or OK to return',CW/2,CH-10,'#999',8,false);
+    const total=list.filter(a=>achUnlocked[a.id]).length;
+    ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',8,false);
+    const hint=expert?'LEFT/RIGHT  SWITCH PAGE   ENTER to return':'Any key or OK to return';
+    ct(hint,CW/2,CH-10,'#999',8,false);
 }
 
 function drawAchPopups(now) {
@@ -1427,7 +1474,8 @@ function handleKey(key, pde) {
             escReadyAt=performance.now()+1000; if(pde)pde(); return;
         }
         if(phase==='settings'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
-        if(phase==='scores'||phase==='credits'||phase==='achievements'||phase==='shop'){ phase='menu'; if(pde)pde(); return; }
+        if(phase==='scores'||phase==='credits'||phase==='shop'){ phase='menu'; if(pde)pde(); return; }
+        if(phase==='achievements'){ phase='menu'; if(pde)pde(); return; }
     }
 
     if(phase==='menu'){
@@ -1438,7 +1486,7 @@ function handleKey(key, pde) {
             if(menuSel===0)startGame();
             else if(menuSel===1){phase='settings';settingsSel=0;}
             else if(menuSel===2)phase='scores';
-            else if(menuSel===3)phase='achievements';
+            else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){phase='shop';shopSel=0;purchaseAnimAt=0;}
             else{phase='credits';creditsScroll=CH+40;}
             if(pde)pde();
@@ -1466,7 +1514,12 @@ function handleKey(key, pde) {
         if(key==='ArrowRight'&&settingsSel===4){cfg.handed=1;applyHandedness();saveCfg();Snd.sfx('nav',cfg.music);}
         if(pde)pde();
     }
-    else if(phase==='scores'||phase==='credits'||phase==='achievements'){ phase='menu'; if(pde)pde(); }
+    else if(phase==='scores'||phase==='credits'){ phase='menu'; if(pde)pde(); }
+    else if(phase==='achievements'){
+        const _ea=ACHIEVEMENTS.every(a=>achUnlocked[a.id]);
+        if(_ea&&(key==='ArrowLeft'||key==='ArrowRight')){achPage=1-achPage;Snd.sfx('nav',cfg.music);if(pde)pde();}
+        else{phase='menu';if(pde)pde();}
+    }
     else if(phase==='shop'){
         if(key==='ArrowUp'){ shopSel=(shopSel-1+SHOP_ITEMS.length)%SHOP_ITEMS.length; Snd.sfx('nav',cfg.music); }
         else if(key==='ArrowDown'){ shopSel=(shopSel+1)%SHOP_ITEMS.length; Snd.sfx('nav',cfg.music); }
@@ -1476,6 +1529,7 @@ function handleKey(key, pde) {
             if(item&&!si[item.id]&&getFOKoins()>=item.price){
                 localStorage.setItem(FK_KEY,String(getFOKoins()-item.price));
                 si[item.id]=true; saveCfg();
+                if(SHOP_ITEMS.every(s=>si[s.id])) unlockAch('shop_full');
                 triggerPurchaseAnim(); Snd.sfx('perfect',cfg.music);
             }
         }
