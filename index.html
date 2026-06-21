@@ -1643,9 +1643,11 @@ function handleKey(key, pde) {
     }
 }
 
+canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 document.addEventListener('keydown', e=>{
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+    if(phase==='playing') canvas.style.cursor='none';
 });
 document.addEventListener('keyup', e=>{
     const d=GDIRS[e.key];
