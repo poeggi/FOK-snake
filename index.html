@@ -1507,9 +1507,20 @@ function dpadDir(e, cvs) {
     return Math.abs(x)>Math.abs(y)?(x>0?'ArrowRight':'ArrowLeft'):(y>0?'ArrowDown':'ArrowUp');
 }
 
-dpadCanvas.addEventListener('touchstart',e=>{e.preventDefault();Snd.resume();dpadActive=dpadDir(e,dpadCanvas);handleKey(dpadActive,null);drawDpad(dpadActive);},{passive:false});
-dpadCanvas.addEventListener('touchmove',e=>{e.preventDefault();const d=dpadDir(e,dpadCanvas);if(d!==dpadActive){dpadActive=d;handleKey(dpadActive,null);drawDpad(dpadActive);}},{passive:false});
-dpadCanvas.addEventListener('touchend',e=>{e.preventDefault();dpadActive=null;drawDpad(null);},{passive:false});
+dpadCanvas.addEventListener('touchstart',e=>{
+    e.preventDefault(); Snd.resume();
+    dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null); drawDpad(dpadActive);
+    if(phase==='playing'){const d=GDIRS[dpadActive];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+},{passive:false});
+dpadCanvas.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    const d=dpadDir(e,dpadCanvas);
+    if(d!==dpadActive){
+        dpadActive=d; handleKey(dpadActive,null); drawDpad(dpadActive);
+        if(phase==='playing'){const gd=GDIRS[dpadActive];if(gd){boostDir=gd;boostSince=performance.now();boosting=false;}else{boostDir=null;boosting=false;}}
+    }
+},{passive:false});
+dpadCanvas.addEventListener('touchend',e=>{e.preventDefault();dpadActive=null;drawDpad(null);boostDir=null;boosting=false;},{passive:false});
 dpadCanvas.addEventListener('click',e=>{handleKey(dpadDir(e,dpadCanvas),null);});
 drawDpad(null);
 
