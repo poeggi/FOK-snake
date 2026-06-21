@@ -966,7 +966,15 @@ function drawSnake(flash) {
         }
         rr(x,y,sw,sh,i===0?5:3); ctx.fill(); ctx.shadowBlur=0;
         if(i===0&&!flash){
-            ctx.fillStyle='#001500'; eyeOffsets(dir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy,3,3));
+            const eyeDir=dirQueue.length>0?dirQueue[0]:dir;
+            ctx.fillStyle='#001500'; eyeOffsets(eyeDir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy,3,3));
+            if(dirQueue.length>0&&(dirQueue[0].x!==dir.x||dirQueue[0].y!==dir.y)){
+                const qd=dirQueue[0];
+                const mx=Math.round(x+sw/2+qd.x*(sw/2-3)), my=Math.round(y+sh/2+qd.y*(sh/2-3));
+                ctx.save(); ctx.globalAlpha=0.75; ctx.fillStyle='#aaffaa';
+                ctx.shadowColor='#7fff7f'; ctx.shadowBlur=5;
+                ctx.fillRect(mx-1,my-1,3,3); ctx.restore();
+            }
             const si=cfg.shopItems||{};
             if(si.shades)    drawAccessoryShades(x,y);
             if(si.monocle)   drawAccessoryMonocle(x,y);
