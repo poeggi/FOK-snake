@@ -1622,6 +1622,27 @@ function loop(now) {
 
 requestAnimationFrame(loop);
 
+// Align SND button and FPS to the actual canvas top/bottom edges in landscape.
+// CSS can't know where the canvas ends up when it's width-constrained, so JS measures it.
+const _lsq = window.matchMedia('(orientation: landscape) and (max-height: 520px)');
+function syncLandscapePanels() {
+    const si = document.getElementById('side-info');
+    const fe = document.getElementById('fps-el');
+    if(!_lsq.matches) {
+        si.style.paddingTop = si.style.paddingBottom = fe.style.bottom = '';
+        return;
+    }
+    const r = document.getElementById('c').getBoundingClientRect();
+    const t = Math.max(0, Math.round(r.top));
+    const b = Math.max(0, Math.round(window.innerHeight - r.bottom));
+    si.style.paddingTop = t + 'px';
+    si.style.paddingBottom = b + 'px';
+    fe.style.bottom = b + 'px';
+}
+window.addEventListener('resize', syncLandscapePanels);
+window.addEventListener('orientationchange', () => setTimeout(syncLandscapePanels, 120));
+requestAnimationFrame(syncLandscapePanels);
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 }
