@@ -943,19 +943,16 @@ function drawMenu() {
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
     ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#999',12,false);
-    ct('UP/DOWN  |  ENTER to select',CW/2,360,'#777',11,false);
-    // FOKoins pinned to lower-right corner
+    // Bottom bar: version left, hint center, FOKoins right — all same font as FOK EDITION
     const coins=getFOKoins();
     ctx.save();
-    ctx.shadowColor='#ffd700'; ctx.shadowBlur=2;
-    ctx.fillStyle='#ffd700';
-    ctx.font='bold 12px "Courier New"';
-    ctx.textAlign='right'; ctx.textBaseline='bottom';
-    ctx.fillText(`FOKOINS: ${coins.toLocaleString()}`, CW-10, CH-8);
-    // Version lower-left — same style as FPS display
-    ctx.shadowBlur=0; ctx.fillStyle='#4a7a4a'; ctx.font='11px "Courier New"';
-    ctx.textAlign='left';
+    ctx.font='13px "Courier New"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
+    ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
     ctx.fillText('v5', 10, CH-8);
+    ctx.textAlign='center';
+    ctx.fillText('UP/DOWN  |  ENTER to select', CW/2, CH-8);
+    ctx.fillStyle='#ffd700'; ctx.textAlign='right';
+    ctx.fillText(`FOKOINS: ${coins.toLocaleString()}`, CW-10, CH-8);
     ctx.restore();
 }
 
