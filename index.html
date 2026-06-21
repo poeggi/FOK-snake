@@ -652,6 +652,23 @@ function beginLevel() {
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
+    // ~10% of bars extend into a 2-cell unit; no wrapping so rendering stays simple
+    const _bl=bars.length;
+    for(let i=0;i<_bl;i++){
+        const b=bars[i];
+        if(Math.random()>=0.1) continue;
+        const dirs=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+        dirs.sort(()=>Math.random()-0.5);
+        for(const d of dirs){
+            const nx=b.x+d.x, ny=b.y+d.y;
+            if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+            const nk=ck({x:nx,y:ny});
+            if(!blocked.has(nk)){
+                blocked.add(nk); bars.push({x:nx,y:ny,paired:true});
+                b.pairEnd={x:nx,y:ny}; break;
+            }
+        }
+    }
     spawnGem(); renderBarsOffscreen(); Snd.resumeMusic(); showHUD(true);
 }
 
@@ -839,12 +856,17 @@ function menuItem(text,y,sel) {
 
 // High-contrast barricades (>4.5:1 on dark bg) - bright amber brick
 function drawBar(b, c=ctx) {
-    const x=b.x*CS+1,y=b.y*CS+1,bw=CS-2,bh=CS-2;
+    if(b.paired && !b.pairEnd) return; // second cell of a pair — drawn by its partner
+    const isPair=!!b.pairEnd;
+    const x=isPair?Math.min(b.x,b.pairEnd.x)*CS+1:b.x*CS+1;
+    const y=isPair?Math.min(b.y,b.pairEnd.y)*CS+1:b.y*CS+1;
+    const bw=(isPair?Math.abs(b.pairEnd.x-b.x)+1:1)*CS-2;
+    const bh=(isPair?Math.abs(b.pairEnd.y-b.y)+1:1)*CS-2;
     c.fillStyle='#cc4400'; c.fillRect(x,y,bw,bh);
-    // mortar lines for brick pattern
+    // mortar lines: cross for 2-cell (marks the join), T-shape for single
     c.fillStyle='#5a1a00';
     c.fillRect(x,y+Math.floor(bh/2),bw,1);
-    c.fillRect(x+Math.floor(bw/2),y,1,Math.floor(bh/2));
+    c.fillRect(x+Math.floor(bw/2),y,1,isPair?bh:Math.floor(bh/2));
     // 3D bevel
     c.fillStyle='#ff7700'; c.fillRect(x,y,bw,2); c.fillRect(x,y,2,bh);
     c.fillStyle='#661800'; c.fillRect(x+bw-2,y,2,bh); c.fillRect(x,y+bh-2,bw,2);
