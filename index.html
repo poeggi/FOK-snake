@@ -1078,14 +1078,20 @@ function drawAchievements() {
         ctx.font='8px "Press Start 2P"';
         ctx.fillStyle=got?'#7fff7f':'#888888';
         ctx.fillText(a.name,x+26,y+10);
-        // Desc
+        // Desc — word-wrap to 2 lines
         ctx.font='7px "Press Start 2P"';
         ctx.fillStyle=got?'#6aaa6a':'#777777';
-        ctx.fillText(a.desc,x+26,y+24);
-        // Status
+        const _mw=aw-32; let _d1=a.desc,_d2='';
+        if(ctx.measureText(_d1).width>_mw){
+            const _ws=a.desc.split(' '); let _l='';
+            for(const _w of _ws){const _t=_l?_l+' '+_w:_w;if(ctx.measureText(_t).width<=_mw)_l=_t;else{_d2=a.desc.slice(_l.length+1);break;}}_d1=_l;
+        }
+        ctx.fillText(_d1,x+26,y+24);
+        if(_d2) ctx.fillText(_d2,x+26,y+34);
+        // Status (fixed at bottom of cell)
         ctx.font='7px "Press Start 2P"';
         ctx.fillStyle=got?'#5a8a5a':'#666666';
-        ctx.fillText(got?'UNLOCKED':'???',x+26,y+38);
+        ctx.fillText(got?'UNLOCKED':'???',x+26,y+50);
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=ACHIEVEMENTS.filter(a=>achUnlocked[a.id]).length;
