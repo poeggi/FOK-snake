@@ -61,26 +61,27 @@
                 width: min(calc((100vh - 100px) * 1.5), calc(100vw - 32px), 800px);
             }
         }
-        /* Portrait touch: push canvas up, give controls more space */
+        /* Portrait touch: push canvas well up to give controls breathing room */
         @media (pointer: coarse) and (orientation: portrait) {
-            body { padding-top: 2px; padding-bottom: 48px; }
-            #gamepad { margin-top: 18px; }
+            body { padding-top: 0; padding-bottom: 64px; }
+            #gamepad { margin-top: 28px; }
         }
         @media (orientation: landscape) and (max-height: 520px) {
             body {
                 flex-direction: row; align-items: stretch; justify-content: center;
-                padding: 6px; gap: 8px; height: 100dvh; min-height: unset; overflow: hidden;
+                /* No vertical padding so canvas fills full screen height.
+                   Tiny horizontal padding keeps panels off the screen edge. */
+                padding: 0 3px; gap: 6px; height: 100dvh; min-height: unset; overflow: hidden;
             }
-            /* Left info panel: narrow to shift canvas left; padding insets SND/FPS from canvas edges */
+            /* Left info panel — 80px keeps HUD text legible; SND/FPS inset 16px from canvas edges */
             #side-info {
                 display: flex; flex-direction: column; justify-content: flex-start;
                 align-items: flex-start; gap: 14px;
-                width: 88px; flex-shrink: 0;
+                width: 80px; flex-shrink: 0; overflow: hidden;
                 position: relative;
                 padding: 16px 0;
             }
             #topbar { width: auto; padding: 0; gap: 8px; }
-            /* FPS anchored 16px from canvas bottom — mirrors the top padding */
             #fps-el { position: absolute; bottom: 16px; left: 0; }
             #hud { width: auto; flex-direction: column; gap: 6px; font-size: 11px; letter-spacing: 0.5px; }
             .hud-row { flex-direction: column; gap: 3px; }
@@ -88,13 +89,14 @@
                 flex: 1; min-width: 0; width: auto;
                 display: flex; align-items: center; justify-content: center;
             }
+            /* Formula: 100dvh * 1.5 fills full height; 100% caps to available wrap width */
             canvas#c {
-                width: min(calc((100dvh - 12px) * 1.5), 100%);
+                width: min(calc(100dvh * 1.5), 100%);
                 height: auto;
             }
-            /* Right controls panel: wider to balance the narrower left panel */
+            /* Right controls panel — 160px gives d-pad comfortable margins */
             #gamepad {
-                width: 172px; flex-shrink: 0; flex-direction: column;
+                width: 160px; flex-shrink: 0; flex-direction: column;
                 align-items: center; justify-content: center; gap: 18px;
             }
             #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); }
