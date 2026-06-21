@@ -30,8 +30,7 @@
         #hud.hidden { opacity: 0; pointer-events: none; }
         .hud-row { display: flex; justify-content: space-between; width: 100%; }
         .hl { color: #888; } .hv { color: #7fff7f; }
-        #lives-group { display: inline-flex; align-items: baseline; gap: 2px; }
-        #hv-lives { font-size: 16px; line-height: 1; }
+        #lives-group { display: inline-flex; align-items: center; gap: 4px; }
         #topbar {
             width: min(600px, calc(100vw - 16px));
             display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
@@ -125,7 +124,7 @@
     <div id="hud" class="hidden">
         <div class="hud-row">
             <span><span class="hl">LEVEL </span><span class="hv" id="hv-lvl">1</span></span>
-            <span id="lives-group"><span class="hl">LIVES</span><span class="hv" id="hv-lives">&#9829;&#9829;&#9829;</span></span>
+            <span id="lives-group"><span class="hl">LIVES</span><canvas id="hv-lives-cv" width="48" height="12"></canvas></span>
         </div>
         <div class="hud-row">
             <span><span class="hl">GEMS </span><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span>
@@ -155,6 +154,7 @@
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
+const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
 const DEATH_DUR = 900, LEVELDONE_DUR = 1400;
 const MAX_NAME = 8;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
@@ -765,8 +765,14 @@ function showHUD(v) { hudEl.classList.toggle('hidden',!v); }
 function updateHUD() {
     document.getElementById('hv-lvl').textContent   = level;
     document.getElementById('hv-gems').textContent  = gemsDone;
-    document.getElementById('hv-lives').textContent = '♥'.repeat(Math.max(0,lives))+'♡'.repeat(Math.max(0,START_LIVES-lives));
     document.getElementById('hv-score').textContent = score;
+    const hcv=document.getElementById('hv-lives-cv'), hc=hcv.getContext('2d');
+    hc.clearRect(0,0,48,12);
+    for(let i=0;i<START_LIVES;i++){
+        hc.fillStyle=i<lives?'#7fff7f':'#1e3a1e';
+        const ox=i*16;
+        HEART_PX.forEach((row,ry)=>row.forEach((px,rx)=>{if(px)hc.fillRect(ox+rx*2,ry*2,2,2);}));
+    }
 }
 
 // ================================================================
