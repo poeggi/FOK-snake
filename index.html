@@ -31,20 +31,21 @@
         .hud-row { display: flex; justify-content: space-between; width: 100%; }
         .hl { color: #888; } .hv { color: #7fff7f; }
         #lives-group { display: inline-flex; align-items: center; gap: 4px; }
+        .hv-wrap { display: inline-flex; align-items: baseline; }
         #topbar {
             width: min(600px, calc(100vw - 16px));
             display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
         }
         #fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; }
         #btn-mute {
-            width: 38px; height: 24px;
             background: #0d180d; border: 1px solid #3a5a3a;
-            color: #7fff7f; font: 8px 'Press Start 2P',monospace;
-            cursor: pointer; border-radius: 3px; padding: 0;
-            -webkit-tap-highlight-color: transparent;
+            cursor: pointer; border-radius: 3px; padding: 3px;
+            display: flex; align-items: center; justify-content: center;
+            -webkit-tap-highlight-color: transparent; line-height: 0;
         }
+        #btn-mute canvas { image-rendering: pixelated; display: block; }
         #btn-mute:hover { border-color: #7fff7f; }
-        #btn-mute.muted { color: #888; border-color: #444; }
+        #btn-mute.muted { border-color: #5a2a2a; }
         #wrap { width: min(600px, calc(100vw - 16px)); }
         canvas#c { display: block; width: 100%; height: auto; border: 1px solid #2a2a4e; touch-action: none; }
         #gamepad { display: none; align-items: center; justify-content: center; gap: 26px; }
@@ -87,7 +88,9 @@
             #topbar { width: auto; padding: 0; gap: 8px; }
             #fps-el { position: absolute; bottom: 16px; left: 0; }
             #hud { width: auto; flex-direction: column; gap: 6px; letter-spacing: 0; }
-            .hud-row { flex-direction: column; gap: 3px; }
+            .hud-row { flex-direction: column; gap: 8px; }
+            .hud-row > span { display: flex; flex-direction: column; gap: 2px; }
+            #lives-group { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
             #wrap {
                 flex: 1; min-width: 0; width: auto;
                 display: flex; align-items: center; justify-content: center;
@@ -118,7 +121,7 @@
 <body>
 <div id="side-info">
     <div id="topbar">
-        <button id="btn-mute" title="Toggle music (M)">SND</button>
+        <button id="btn-mute" title="Toggle music (M)"><canvas id="btn-mute-cv" width="16" height="16"></canvas></button>
         <span id="fps-el"></span>
     </div>
     <div id="hud" class="hidden">
@@ -127,7 +130,7 @@
             <span id="lives-group"><span class="hl">LIVES</span><canvas id="hv-lives-cv" width="48" height="12"></canvas></span>
         </div>
         <div class="hud-row">
-            <span><span class="hl">GEMS </span><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span>
+            <span><span class="hl">GEMS</span><span class="hv-wrap"><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span></span>
             <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
         </div>
     </div>
@@ -155,6 +158,8 @@ const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
+const SPEAKER_ON  = [[0,0,1,0,0,0,0,0],[0,1,1,0,0,0,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,0],[1,1,1,1,0,1,0,0],[1,1,1,1,0,0,1,0],[0,1,1,0,0,0,0,1],[0,0,1,0,0,0,0,0]];
+const SPEAKER_OFF = [[0,0,1,0,0,0,0,0],[0,1,1,0,0,0,0,0],[1,1,1,1,0,1,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,1],[0,1,1,0,0,0,0,0],[0,0,1,0,0,0,0,0]];
 const DEATH_DUR = 900, LEVELDONE_DUR = 1400;
 const MAX_NAME = 8;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
@@ -1664,7 +1669,16 @@ nameInp.addEventListener('keydown', e => {
 
 // Mute button
 const muteBtn = document.getElementById('btn-mute');
-function updateMuteBtn(){ muteBtn.textContent=cfg.music?'SND':'MUT'; muteBtn.classList.toggle('muted',!cfg.music); }
+function updateMuteBtn(){
+    const on=cfg.music; muteBtn.classList.toggle('muted',!on);
+    const cv=document.getElementById('btn-mute-cv'), c=cv.getContext('2d');
+    c.clearRect(0,0,16,16);
+    (on?SPEAKER_ON:SPEAKER_OFF).forEach((row,ry)=>row.forEach((p,rx)=>{
+        if(!p)return;
+        c.fillStyle=(!on&&rx>=5)?'#aa3333':(on?'#7fff7f':'#555555');
+        c.fillRect(rx*2,ry*2,2,2);
+    }));
+}
 function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.stop(); updateMuteBtn(); saveCfg(); }
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
@@ -1744,7 +1758,8 @@ function syncFontScale() {
     const scale = document.getElementById('c').getBoundingClientRect().width / CW;
     const sz = Math.round(8 * scale) + 'px';
     fpsEl.style.fontSize = sz;
-    muteBtn.style.fontSize = sz;
+    const mcv = document.getElementById('btn-mute-cv');
+    if(mcv){ const iconPx=Math.round(16*scale)+'px'; mcv.style.width=mcv.style.height=iconPx; }
 }
 window.addEventListener('resize', syncFontScale);
 window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120));
