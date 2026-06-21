@@ -1855,7 +1855,20 @@ window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120
 requestAnimationFrame(syncFontScale);
 
 if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').then(reg => {
+            // On startup: bypass HTTP cache and check for a new SW immediately.
+            // If one is found it installs, skipWaiting activates it, controllerchange fires, we reload.
+            reg.update();
+        });
+        // When a new SW takes control, reload once so the fresh code actually runs.
+        let _reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (_reloading) return;
+            _reloading = true;
+            window.location.reload();
+        });
+    });
 }
 </script>
 </body>
