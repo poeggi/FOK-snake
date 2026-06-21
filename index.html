@@ -102,6 +102,10 @@
             #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); }
             .sbtn { width: 46px; height: 46px; font-size: 11px; }
             #left-btns, #side-btns { gap: 12px; }
+            /* Left-handed: controls move to left panel, info to right; canvas leans right */
+            body.lefty #gamepad   { order: 1; }
+            body.lefty #wrap      { order: 2; }
+            body.lefty #side-info { order: 3; }
         }
         #name-inp {
             position: fixed; left: -9999px; top: 50%; width: 1px; height: 1px; opacity: 0;
@@ -548,9 +552,11 @@ function credTotalH() { let h=0; for(const[t,v] of CRED) h += t==='gap' ? v : (C
 let phase = 'menu';
 let menuSel = 0, settingsSel = 0, shopSel = 0, quitConfirmSel = 1, prevPhase = 'playing';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
-const SETTINGS_ITEMS = ['MUSIC', 'MUSIC STYLE', 'DIFFICULTY', 'SNAKE COLOR', 'BACK'];
-let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {} };
+const SETTINGS_ITEMS = ['MUSIC', 'MUSIC STYLE', 'DIFFICULTY', 'SNAKE COLOR', 'LAYOUT', 'BACK'];
+let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, handed: 0 };
 loadCfg();
+function applyHandedness() { document.body.classList.toggle('lefty', cfg.handed === 1); }
+applyHandedness();
 
 let level, lives, score;
 let snake, dir, dirQueue;
@@ -953,12 +959,13 @@ function drawSettings() {
         'MUSIC STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
         'DIFFICULTY: '+DIFF[cfg.diff].label,
         'SNAKE COLOR: '+sc.name,
+        'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
         'BACK',
     ];
-    items.forEach((item,i)=>menuItem(item,112+i*48,i===settingsSel));
+    items.forEach((item,i)=>menuItem(item,96+i*46,i===settingsSel));
     // Small snake preview for color setting
     if(settingsSel===3){
-        const py=112+3*48, px=CW/2+116;
+        const py=96+3*46, px=CW/2+116;
         ctx.save();
         for(let k=0;k<5;k++){
             const frac=1-k/5, l=Math.round(10+frac*40);
@@ -1402,14 +1409,17 @@ function handleKey(key, pde) {
             else if(settingsSel===1){cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.stop();}
             else if(settingsSel===2)cfg.diff=(cfg.diff+1)%DIFF.length;
             else if(settingsSel===3)cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;
+            else if(settingsSel===4){cfg.handed=(cfg.handed+1)%2;applyHandedness();}
             else phase='menu';
             saveCfg();
         }
         if(key==='ArrowLeft'){
             if(settingsSel===3){cfg.snakeColor=(cfg.snakeColor-1+SNAKE_COLORS.length)%SNAKE_COLORS.length;saveCfg();Snd.sfx('nav',cfg.music);}
+            else if(settingsSel===4){cfg.handed=0;applyHandedness();saveCfg();Snd.sfx('nav',cfg.music);}
             else{phase='menu';Snd.sfx('nav',cfg.music);}
         }
         if(key==='ArrowRight'&&settingsSel===3){cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;saveCfg();Snd.sfx('nav',cfg.music);}
+        if(key==='ArrowRight'&&settingsSel===4){cfg.handed=1;applyHandedness();saveCfg();Snd.sfx('nav',cfg.music);}
         if(pde)pde();
     }
     else if(phase==='scores'||phase==='credits'||phase==='achievements'){ phase='menu'; if(pde)pde(); }
