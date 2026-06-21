@@ -61,28 +61,28 @@
                 width: min(calc((100vh - 100px) * 1.5), calc(100vw - 32px), 800px);
             }
         }
-        /* Portrait touch: nudge canvas up to give controls more breathing room */
+        /* Portrait touch: push canvas up, give controls more space */
         @media (pointer: coarse) and (orientation: portrait) {
-            body { padding-top: 4px; padding-bottom: 20px; }
-            #gamepad { margin-top: 6px; }
+            body { padding-top: 2px; padding-bottom: 48px; }
+            #gamepad { margin-top: 18px; }
         }
         @media (orientation: landscape) and (max-height: 520px) {
             body {
                 flex-direction: row; align-items: stretch; justify-content: center;
                 padding: 6px; gap: 8px; height: 100dvh; min-height: unset; overflow: hidden;
             }
-            /* Left info panel: narrower so canvas shifts left, giving controls more room */
+            /* Left info panel: narrow to shift canvas left; padding insets SND/FPS from canvas edges */
             #side-info {
                 display: flex; flex-direction: column; justify-content: flex-start;
                 align-items: flex-start; gap: 14px;
-                width: 108px; flex-shrink: 0;
+                width: 88px; flex-shrink: 0;
                 position: relative;
-                padding: 4px 0 4px;
+                padding: 16px 0;
             }
             #topbar { width: auto; padding: 0; gap: 8px; }
-            /* FPS pinned to bottom of left panel */
-            #fps-el { position: absolute; bottom: 4px; left: 0; }
-            #hud { width: auto; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: 0.8px; }
+            /* FPS anchored 16px from canvas bottom — mirrors the top padding */
+            #fps-el { position: absolute; bottom: 16px; left: 0; }
+            #hud { width: auto; flex-direction: column; gap: 6px; font-size: 11px; letter-spacing: 0.5px; }
             .hud-row { flex-direction: column; gap: 3px; }
             #wrap {
                 flex: 1; min-width: 0; width: auto;
@@ -92,9 +92,9 @@
                 width: min(calc((100dvh - 12px) * 1.5), 100%);
                 height: auto;
             }
-            /* Right controls panel: wider so d-pad and buttons have more room */
+            /* Right controls panel: wider to balance the narrower left panel */
             #gamepad {
-                width: 152px; flex-shrink: 0; flex-direction: column;
+                width: 172px; flex-shrink: 0; flex-direction: column;
                 align-items: center; justify-content: center; gap: 18px;
             }
             #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); }
