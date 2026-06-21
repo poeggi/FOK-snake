@@ -512,14 +512,15 @@ function getScores() {
     } catch { return []; }
 }
 function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10) || 0; }
+let _cachedFOKoins = getFOKoins();
 function addFOKoins(n) {
-    const t = getFOKoins() + n;
-    localStorage.setItem(FK_KEY, String(t));
-    if(t >= 5000)     unlockAch('fokoins_1k');
-    if(t >= 50000)    unlockAch('fokoins_10k');
-    if(t >= 500000)   unlockAch('fokoins_100k');
-    if(t >= 1000000)  unlockAch('fokoins_1m');
-    if(t >= 5000000)  unlockAch('fokoins_5m');
+    _cachedFOKoins += n;
+    localStorage.setItem(FK_KEY, String(_cachedFOKoins));
+    if(_cachedFOKoins >= 5000)    unlockAch('fokoins_1k');
+    if(_cachedFOKoins >= 50000)   unlockAch('fokoins_10k');
+    if(_cachedFOKoins >= 500000)  unlockAch('fokoins_100k');
+    if(_cachedFOKoins >= 1000000) unlockAch('fokoins_1m');
+    if(_cachedFOKoins >= 5000000) unlockAch('fokoins_5m');
 }
 function addScore(name, sc, lvl) {
     const s = getScores();
@@ -651,7 +652,7 @@ function beginLevel() {
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
-    spawnGem(); Snd.resumeMusic(); showHUD(true);
+    spawnGem(); renderBarsOffscreen(); Snd.resumeMusic(); showHUD(true);
 }
 
 let gemOptimal=0, gemSteps=0;
@@ -770,17 +771,25 @@ function togglePause() {
 // HUD
 // ================================================================
 const hudEl = document.getElementById('hud');
+const _hudLvlEl=document.getElementById('hv-lvl');
+const _hudGemsEl=document.getElementById('hv-gems');
+const _hudScoreEl=document.getElementById('hv-score');
+const _hudLivesCv=document.getElementById('hv-lives-cv');
+const _hudLivesCtx=_hudLivesCv.getContext('2d');
+let _hudCache={level:-1,gemsDone:-1,score:-1,lives:-1};
 function showHUD(v) { hudEl.classList.toggle('hidden',!v); }
 function updateHUD() {
-    document.getElementById('hv-lvl').textContent   = level;
-    document.getElementById('hv-gems').textContent  = gemsDone;
-    document.getElementById('hv-score').textContent = score;
-    const hcv=document.getElementById('hv-lives-cv'), hc=hcv.getContext('2d');
-    hc.clearRect(0,0,48,12);
-    for(let i=0;i<START_LIVES;i++){
-        hc.fillStyle=i<lives?'#7fff7f':'#1e3a1e';
-        const ox=i*16;
-        HEART_PX.forEach((row,ry)=>row.forEach((px,rx)=>{if(px)hc.fillRect(ox+rx*2,ry*2,2,2);}));
+    if(level!==_hudCache.level){       _hudLvlEl.textContent=level;      _hudCache.level=level; }
+    if(gemsDone!==_hudCache.gemsDone){ _hudGemsEl.textContent=gemsDone;  _hudCache.gemsDone=gemsDone; }
+    if(score!==_hudCache.score){       _hudScoreEl.textContent=score;    _hudCache.score=score; }
+    if(lives!==_hudCache.lives){
+        _hudCache.lives=lives;
+        _hudLivesCtx.clearRect(0,0,48,12);
+        for(let i=0;i<START_LIVES;i++){
+            _hudLivesCtx.fillStyle=i<lives?'#7fff7f':'#1e3a1e';
+            const ox=i*16;
+            HEART_PX.forEach((row,ry)=>row.forEach((px,rx)=>{if(px)_hudLivesCtx.fillRect(ox+rx*2,ry*2,2,2);}));
+        }
     }
 }
 
@@ -799,12 +808,22 @@ function eyeOffsets(d) {
     if(d.x===1)  return [[E-5,2],[E-5,E-5]]; if(d.x===-1) return [[2,2],[2,E-5]];
     if(d.y===-1) return [[2,2],[E-5,2]];      return [[2,E-5],[E-5,E-5]];
 }
-function drawGrid() {
-    ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
-    ctx.strokeStyle='#0d0d1a'; ctx.lineWidth=0.5;
-    for(let x=0;x<=COLS;x++){ctx.beginPath();ctx.moveTo(x*CS,0);ctx.lineTo(x*CS,CH);ctx.stroke();}
-    for(let y=0;y<=ROWS;y++){ctx.beginPath();ctx.moveTo(0,y*CS);ctx.lineTo(CW,y*CS);ctx.stroke();}
-}
+const _gridCanvas=document.createElement('canvas'); _gridCanvas.width=CW; _gridCanvas.height=CH;
+const _scanCanvas=document.createElement('canvas'); _scanCanvas.width=CW; _scanCanvas.height=CH;
+const _barsCanvas=document.createElement('canvas'); _barsCanvas.width=CW; _barsCanvas.height=CH;
+const _barsCtx=_barsCanvas.getContext('2d');
+(()=>{
+    const g=_gridCanvas.getContext('2d');
+    g.fillStyle='#07070e'; g.fillRect(0,0,CW,CH);
+    g.strokeStyle='#0d0d1a'; g.lineWidth=0.5; g.beginPath();
+    for(let x=0;x<=COLS;x++){g.moveTo(x*CS,0);g.lineTo(x*CS,CH);}
+    for(let y=0;y<=ROWS;y++){g.moveTo(0,y*CS);g.lineTo(CW,y*CS);}
+    g.stroke();
+    const s=_scanCanvas.getContext('2d');
+    s.fillStyle='rgba(0,0,0,0.05)';
+    for(let y=0;y<CH;y+=3) s.fillRect(0,y,CW,1);
+})();
+function drawGrid() { ctx.drawImage(_gridCanvas, 0, 0); }
 function drawOvBg(a) { ctx.fillStyle=`rgba(7,7,14,${a||0.88})`; ctx.fillRect(0,0,CW,CH); }
 function ct(text,x,y,color,size) {
     ctx.fillStyle=color||'#7fff7f';
@@ -819,16 +838,19 @@ function menuItem(text,y,sel) {
 }
 
 // High-contrast barricades (>4.5:1 on dark bg) - bright amber brick
-function drawBar(b) {
+function drawBar(b, c=ctx) {
     const x=b.x*CS+1,y=b.y*CS+1,bw=CS-2,bh=CS-2;
-    ctx.fillStyle='#cc4400'; ctx.fillRect(x,y,bw,bh);
+    c.fillStyle='#cc4400'; c.fillRect(x,y,bw,bh);
     // mortar lines for brick pattern
-    ctx.fillStyle='#5a1a00';
-    ctx.fillRect(x,y+Math.floor(bh/2),bw,1);
-    ctx.fillRect(x+Math.floor(bw/2),y,1,Math.floor(bh/2));
+    c.fillStyle='#5a1a00';
+    c.fillRect(x,y+Math.floor(bh/2),bw,1);
+    c.fillRect(x+Math.floor(bw/2),y,1,Math.floor(bh/2));
     // 3D bevel
-    ctx.fillStyle='#ff7700'; ctx.fillRect(x,y,bw,2); ctx.fillRect(x,y,2,bh);
-    ctx.fillStyle='#661800'; ctx.fillRect(x+bw-2,y,2,bh); ctx.fillRect(x,y+bh-2,bw,2);
+    c.fillStyle='#ff7700'; c.fillRect(x,y,bw,2); c.fillRect(x,y,2,bh);
+    c.fillStyle='#661800'; c.fillRect(x+bw-2,y,2,bh); c.fillRect(x,y+bh-2,bw,2);
+}
+function renderBarsOffscreen() {
+    _barsCtx.clearRect(0,0,CW,CH); bars.forEach(b=>drawBar(b,_barsCtx));
 }
 
 function drawGem(g,now) {
@@ -1006,7 +1028,7 @@ function drawSnake(flash) {
 // ================================================================
 function drawMenu() {
     drawGrid();
-    for(let y=0;y<CH;y+=3){ctx.fillStyle='rgba(0,0,0,0.05)';ctx.fillRect(0,y,CW,1);}
+    ctx.drawImage(_scanCanvas, 0, 0);
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=28;
     ct('S N A K E',CW/2,78,'#7fff7f',40);
     ctx.shadowBlur=0;
@@ -1015,7 +1037,7 @@ function drawMenu() {
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
     ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#999',8,false);
     // Bottom bar: version left, hint center, FOKoins right — all same font as FOK EDITION
-    const coins=getFOKoins();
+    const coins=_cachedFOKoins;
     ctx.save();
     ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
@@ -1114,7 +1136,7 @@ function drawScores() {
         });
         ctx.textAlign='center';
     }
-    const coins=getFOKoins();
+    const coins=_cachedFOKoins;
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=3;
     ct(`TOTAL FOKOINS: ${coins.toLocaleString()}`,CW/2,CH-36,'#ffd700',8);
     ctx.shadowBlur=0;
@@ -1206,7 +1228,7 @@ function drawAchPopups(now) {
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=20; ct('SHOP',CW/2,28,'#ffd700',18); ctx.shadowBlur=0;
-    const coins=getFOKoins(), si=cfg.shopItems||{};
+    const coins=_cachedFOKoins, si=cfg.shopItems||{};
     const startY=56, rowH=58;
     SHOP_ITEMS.forEach((item,i)=>{
         const y=startY+i*rowH, sel=i===shopSel, owned=!!si[item.id], canAfford=coins>=item.price;
@@ -1280,7 +1302,7 @@ function drawCredits() {
                     ct(val, CW/2, y+6, '#999', 8, false); break;
                 case 'coins':
                     ctx.shadowColor='#ffd700'; ctx.shadowBlur=3;
-                    ct(`YOUR FOKOINS: ${getFOKoins().toLocaleString()}`, CW/2, y+9, '#ffd700', 8);
+                    ct(`YOUR FOKOINS: ${_cachedFOKoins.toLocaleString()}`, CW/2, y+9, '#ffd700', 8);
                     ctx.shadowBlur=0; break;
                 case 'secret':
                     ctx.shadowColor='#ff4444'; ctx.shadowBlur=14;
@@ -1332,7 +1354,7 @@ function drawNameEntry(now) {
 }
 
 function drawGameBoard(now) {
-    drawGrid(); bars.forEach(b=>drawBar(b));
+    drawGrid(); ctx.drawImage(_barsCanvas, 0, 0);
     if(gem) drawGem(gem,now);
     const dying=phase==='dying',flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
     const protect=phase==='playing'&&(now-spawnAt<1000);
@@ -1341,9 +1363,8 @@ function drawGameBoard(now) {
     ctx.globalAlpha=1;
     // Fireworks particles (perfect level)
     if(fireworks.length>0){
-        const fwNow=performance.now();
         fireworks=fireworks.filter(p=>{
-            if(fwNow<p.startAt) return true;
+            if(now<p.startAt) return true;
             p.life++; p.x+=p.vx; p.y+=p.vy; p.vy+=0.055; p.vx*=0.97;
             if(p.life>=p.maxLife) return false;
             const a=(1-p.life/p.maxLife)*0.92;
@@ -1403,7 +1424,7 @@ function drawGameBoard(now) {
 
 function drawQuitConfirm() {
     drawGrid();
-    if(bars)  bars.forEach(b=>drawBar(b));
+    if(bars)  ctx.drawImage(_barsCanvas, 0, 0);
     if(gem)   drawGem(gem, performance.now());
     if(snake) drawSnake(false);
     drawOvBg(0.72);
@@ -1552,8 +1573,8 @@ function handleKey(key, pde) {
         else if(key==='Enter'){
             const item=SHOP_ITEMS[shopSel];
             const si=cfg.shopItems||(cfg.shopItems={});
-            if(item&&!si[item.id]&&getFOKoins()>=item.price){
-                localStorage.setItem(FK_KEY,String(getFOKoins()-item.price));
+            if(item&&!si[item.id]&&_cachedFOKoins>=item.price){
+                _cachedFOKoins-=item.price; localStorage.setItem(FK_KEY,String(_cachedFOKoins));
                 si[item.id]=true; saveCfg();
                 if(SHOP_ITEMS.every(s=>si[s.id])) unlockAch('shop_full');
                 triggerPurchaseAnim(); Snd.sfx('perfect',cfg.music);
@@ -1670,9 +1691,11 @@ nameInp.addEventListener('keydown', e => {
 
 // Mute button
 const muteBtn = document.getElementById('btn-mute');
+const _muteCv = document.getElementById('btn-mute-cv');
+const _muteCvCtx = _muteCv.getContext('2d');
 function updateMuteBtn(){
     const on=cfg.music; muteBtn.classList.toggle('muted',!on);
-    const cv=document.getElementById('btn-mute-cv'), c=cv.getContext('2d');
+    const c=_muteCvCtx;
     c.clearRect(0,0,16,16);
     (on?SPEAKER_ON:SPEAKER_OFF).forEach((row,ry)=>row.forEach((p,rx)=>{
         if(!p)return;
@@ -1743,7 +1766,7 @@ function syncLandscapePanels() {
         si.style.paddingTop = si.style.paddingBottom = fe.style.bottom = '';
         return;
     }
-    const r = document.getElementById('c').getBoundingClientRect();
+    const r = canvas.getBoundingClientRect();
     const t = Math.max(0, Math.round(r.top));
     const b = Math.max(0, Math.round(window.innerHeight - r.bottom));
     si.style.paddingTop = t + 'px';
@@ -1756,11 +1779,10 @@ requestAnimationFrame(syncLandscapePanels);
 
 // Scale SND/FPS font to match canvas display size when the canvas is CSS-upscaled beyond its 600px native width
 function syncFontScale() {
-    const scale = document.getElementById('c').getBoundingClientRect().width / CW;
+    const scale = canvas.getBoundingClientRect().width / CW;
     const sz = Math.round(8 * scale) + 'px';
     fpsEl.style.fontSize = sz;
-    const mcv = document.getElementById('btn-mute-cv');
-    if(mcv){ const iconPx=Math.round(16*scale)+'px'; mcv.style.width=mcv.style.height=iconPx; }
+    const iconPx=Math.round(16*scale)+'px'; _muteCv.style.width=_muteCv.style.height=iconPx;
 }
 window.addEventListener('resize', syncFontScale);
 window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120));
