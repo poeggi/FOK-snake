@@ -1859,7 +1859,7 @@ if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js').then(reg => {
             // On startup: bypass HTTP cache and check for a new SW immediately.
             // If one is found it installs, skipWaiting activates it, controllerchange fires, we reload.
-            reg.update();
+            if (navigator.onLine) reg.update().catch(() => {});
         });
         // When a new SW takes control, reload once so the fresh code actually runs.
         let _reloading = false;
