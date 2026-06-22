@@ -1277,8 +1277,9 @@ function drawShop() {
             ctx.font='8px "Press Start 2P"';
             ctx.fillStyle=worn?'#7fff7f':'#4a7a9a';
             ctx.fillText(worn?'WORN':'OWNED',CW-18,y+14);
-            if(sel){ctx.font='7px "Press Start 2P"';ctx.fillStyle=worn?'#cc5555':'#5aaa5a';
-                ctx.fillText(worn?'SPACE to remove':'SPACE to wear',CW-18,y+30);}
+            ctx.font='7px "Press Start 2P"';
+            if(sel){ctx.fillStyle=worn?'#cc5555':'#5aaa5a';ctx.fillText(worn?'SPACE to remove':'SPACE to wear',CW-18,y+30);}
+            else{ctx.fillStyle='#555';ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+30);}
         } else {
             ctx.font='8px "Press Start 2P"'; ctx.fillStyle=canAfford?'#ffd700':'#553322';
             ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+14);
