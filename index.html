@@ -285,7 +285,7 @@ const ctx = canvas.getContext('2d');
 // AUDIO
 // ================================================================
 const Snd = (() => {
-    let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5;
+    let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5, _justInited = false;
     let chState = [], curTrack = null, isPaused = false;
 
     const SEQ = {
@@ -369,8 +369,9 @@ const Snd = (() => {
         if (ac) return;
         try {
             ac = new (window.AudioContext || window.webkitAudioContext)();
-            mGain = ac.createGain(); mGain.gain.value = 0.32 * _vol; mGain.connect(ac.destination);
+            mGain = ac.createGain(); mGain.gain.value = 0; mGain.connect(ac.destination);
             sGain = ac.createGain(); sGain.gain.value = 0.58 * _sfxVol; sGain.connect(ac.destination);
+            _justInited = true;
         } catch(e) { ac = null; }
     }
 
@@ -422,7 +423,13 @@ const Snd = (() => {
         curTrack = t; isPaused = false;
         chState = SEQ[t].channels.map(() => ({ pos: 0, nextNote: ac.currentTime }));
         mGain.gain.cancelScheduledValues(ac.currentTime);
-        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+        if (_justInited) {
+            _justInited = false;
+            mGain.gain.setValueAtTime(0, ac.currentTime);
+            mGain.gain.linearRampToValueAtTime(0.32 * _vol, ac.currentTime + 1.0);
+        } else {
+            mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+        }
     }
 
     function stop() {
@@ -1060,27 +1067,26 @@ function drawSnake(flash) {
 // ================================================================
 function drawSplash(now) {
     const elapsed = (now - phaseAt) / 1000;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, CW, CH);
-    for (let y = 0; y < CH; y += 3) { ctx.fillStyle = 'rgba(0,255,0,0.025)'; ctx.fillRect(0, y, CW, 1); }
 
-    // Title
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '20px "Press Start 2P"';
-    ctx.shadowColor = '#33ff33'; ctx.shadowBlur = 22;
-    ctx.fillStyle = '#33ff33';
-    ctx.fillText('FOK SNAKE', CW/2, 58);
+    // Background matches menu: grid + scan line overlay
+    drawGrid();
+    ctx.drawImage(_scanCanvas, 0, 0);
+
+    // Title block: identical to drawMenu
+    ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 28;
+    ct('S N A K E', CW/2, 78, '#7fff7f', 40);
     ctx.shadowBlur = 0;
+    ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', 8);
 
     // Coin drop animation
     // Cycle: DROP=1.4s fall, ENTER=0.28s slot entry, rest = pause
     const CYCLE = 3.2, DROP = 1.4, ENTER = 0.28;
     const t = elapsed % CYCLE;
-    const coinX = CW/2, slotY = 272, startY = 122, rY = 18;
+    const coinX = CW/2, slotY = 292, startY = 152, rY = 18;
 
-    // Spin: tied to drop progress (not wall-clock) so entry is always face-on.
-    // 1.5 revolutions during DROP means spinAngle ends at 3pi -> |cos(3pi)|=1 -> full face.
-    const dropProgress = Math.min(t, DROP) / DROP; // 0->1 during drop, frozen after
+    // Spin: tied to drop progress so entry is always face-on.
+    // 1.5 revolutions -> spinAngle ends at 3pi -> |cos(3pi)|=1 -> full face at slot.
+    const dropProgress = Math.min(t, DROP) / DROP;
     const spinAngle = dropProgress * 1.5 * Math.PI * 2;
     const rX = Math.max(2, Math.abs(Math.cos(spinAngle)) * rY);
 
@@ -1091,31 +1097,24 @@ function drawSplash(now) {
         coinY = startY + (slotY - startY - rY) * p * p * p;
     } else if (t < DROP + ENTER) {
         const p = (t - DROP) / ENTER;
-        coinY = (slotY - rY) + rY * p; // slides into slot
+        coinY = (slotY - rY) + rY * p;
     } else {
         showCoin = false;
     }
 
-    // Slot housing (wider than coin face = 2*rY = 36px, opening is 44px)
+    // Slot housing (44px opening, wider than coin face = 36px)
     ctx.fillStyle = '#1a1a1a'; ctx.fillRect(coinX - 46, slotY - 9, 92, 18);
     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(coinX - 42, slotY - 6, 84, 12);
     ctx.fillStyle = '#111';    ctx.fillRect(coinX - 22, slotY - 5, 44, 10);
 
     if (showCoin) {
         ctx.save();
-        // Clip coin below slot line so it disappears as it enters
         if (t >= DROP) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
-
-        // Drop shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.beginPath(); ctx.ellipse(coinX+2, coinY+3, rX, rY*0.3, 0, 0, Math.PI*2); ctx.fill();
-
-        // Coin body
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath(); ctx.ellipse(coinX+2, coinY+4, rX, rY*0.3, 0, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle = '#ffd700';
         ctx.beginPath(); ctx.ellipse(coinX, coinY, rX, rY, 0, 0, Math.PI*2); ctx.fill();
         ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2; ctx.stroke();
-
-        // Inner rim (only when face is wide enough to show it)
         if (rX > 7) {
             ctx.strokeStyle = '#ffe97a'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.ellipse(coinX, coinY, rX - 5, rY - 5, 0, 0, Math.PI*2); ctx.stroke();
@@ -1130,18 +1129,19 @@ function drawSplash(now) {
         ctx.fillRect(coinX - 46, slotY - 28, 92, 56);
     }
 
-    // INSERT COIN blinking text
+    // INSERT COIN blinking
     if (Math.floor(elapsed * 1.5) % 2 === 0) {
-        ctx.font = '14px "Press Start 2P"';
-        ctx.fillStyle = '#ffff00'; ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 18;
-        ctx.fillText('INSERT COIN', CW/2, 330);
+        ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 18;
+        ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
         ctx.shadowBlur = 0;
     }
 
-    ctx.font = '7px "Press Start 2P"';
-    ctx.fillStyle = '#3a3a3a';
-    ctx.fillText('any key  |  tap  |  click', CW/2, 372);
-    ctx.textBaseline = 'alphabetic';
+    // Bottom hint: matches menu bottom bar style
+    ctx.save();
+    ctx.font = '8px "Press Start 2P"'; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#555';
+    ctx.fillText('any key  |  tap  |  click', CW/2, CH - 8);
+    ctx.restore();
 }
 
 function drawMenu() {
