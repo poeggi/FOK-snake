@@ -1995,9 +1995,13 @@ canvas.addEventListener('touchend',e=>{
     if(phase==='credits'){creditsSpeed=0.8;}
 },{passive:false});
 
-// Restore audio on pointer gestures mid-game (background resume etc.).
-// Uses tryResume (no init) so we never call ac.resume() from an untrusted pointerdown
-// on iOS Safari — that would block the subsequent trusted touchstart from unlocking audio.
+// First touchstart anywhere on the page — fires in capture phase before all element
+// handlers, guaranteed trusted on iOS Safari. Unlocks the AudioContext exactly once.
+// After this resolves the AC is running; every other Snd.resume() call is a no-op.
+document.addEventListener('touchstart', () => Snd.resume(), {once:true, capture:true, passive:true});
+// Restore audio on pointer gestures mid-game (background resume, desktop mouse, etc.).
+// tryResume skips init so pointerdown never calls ac.resume() before touchstart does,
+// avoiding the iOS Safari issue where an untrusted pending resume blocks the trusted one.
 document.addEventListener('pointerdown', () => Snd.tryResume(), {capture:true, passive:true});
 // Pause audio when app goes to background, resume when it returns
 document.addEventListener('visibilitychange', () => {
