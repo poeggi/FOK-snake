@@ -380,7 +380,7 @@ const Snd = (() => {
         o.type = type || 'square'; o.frequency.value = freq;
         if (detune) o.detune.value = detune;
         g.gain.setValueAtTime(0, when);
-        g.gain.linearRampToValueAtTime(vol, when + Math.min(0.008, dur * 0.08));
+        g.gain.linearRampToValueAtTime(vol, when + Math.max(0.010, Math.min(0.020, dur * 0.15)));
         g.gain.exponentialRampToValueAtTime(0.001, when + Math.max(dur * 0.88, 0.02));
         o.connect(g); g.connect(dest || mGain);
         o.start(when); o.stop(when + dur + 0.02);
@@ -421,14 +421,19 @@ const Snd = (() => {
         if (!ac || curTrack === t) return;
         curTrack = t; isPaused = false;
         chState = SEQ[t].channels.map(() => ({ pos: 0, nextNote: ac.currentTime }));
-        mGain.gain.setTargetAtTime(0.32, ac.currentTime, 0.08);
+        mGain.gain.cancelScheduledValues(ac.currentTime);
+        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
     }
 
-    function stop() { curTrack = null; isPaused = false; mGain.gain.setTargetAtTime(0, (ac||{currentTime:0}).currentTime, 0.04); }
+    function stop() {
+        curTrack = null; isPaused = false;
+        if (ac && mGain) { mGain.gain.cancelScheduledValues(ac.currentTime); mGain.gain.setTargetAtTime(0, ac.currentTime, 0.04); }
+    }
 
     function pauseMusic() {
         if (!ac || !curTrack) return;
         isPaused = true;
+        mGain.gain.cancelScheduledValues(ac.currentTime);
         mGain.gain.setTargetAtTime(0, ac.currentTime, 0.04);
     }
 
@@ -437,24 +442,21 @@ const Snd = (() => {
         isPaused = false;
         const now = ac.currentTime;
         chState.forEach(s => { s.nextNote = now + 0.05; });
-        mGain.gain.setTargetAtTime(0.32, now, 0.10);
+        mGain.gain.cancelScheduledValues(now);
+        mGain.gain.setTargetAtTime(0.32 * _vol, now, 0.10);
     }
 
     function resume() {
-        if (!ac) { init(); curTrack = null; }
+        if (!ac) { init(); }
         if (ac && ac.state === 'suspended') {
             ac.resume().then(() => {
-                if (curTrack) chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
-                else curTrack = null;
+                if (curTrack && SEQ[curTrack]) {
+                    chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
+                    mGain.gain.cancelScheduledValues(ac.currentTime);
+                    mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+                }
             });
         }
-    }
-
-    // Create AC on first user gesture (starts in running state, no resume needed)
-    function unlock() {
-        if (!ac) { init(); curTrack = null; return; }
-        if (ac.state === 'suspended') ac.resume().then(() => { curTrack = null; });
-        else curTrack = null;
     }
 
     function sfx(type, on) {
@@ -489,15 +491,21 @@ const Snd = (() => {
         }
     }
 
-    function setVol(v){ _vol=v; if(mGain) mGain.gain.value=0.32*v; }
+    function setVol(v) {
+        _vol = v;
+        if (mGain && curTrack && !isPaused) {
+            mGain.gain.cancelScheduledValues(ac.currentTime);
+            mGain.gain.setTargetAtTime(0.32 * v, ac.currentTime, 0.04);
+        }
+    }
     function setSfxVol(v){ _sfxVol=v; if(sGain) sGain.gain.value=0.58*v; }
-    return { init, tick, play, stop, pauseMusic, resumeMusic, resume, unlock, sfx, setVol, setSfxVol };
+    return { init, tick, play, stop, pauseMusic, resumeMusic, resume, sfx, setVol, setSfxVol };
 })();
 
-// First interaction unlocks audio so menu music starts immediately
+// First interaction creates the AudioContext so menu music starts immediately
 (function() {
     function onFirst() {
-        Snd.unlock();
+        Snd.resume();
         document.removeEventListener('keydown', onFirst);
         document.removeEventListener('pointerdown', onFirst);
     }
@@ -1701,9 +1709,10 @@ function handleKey(key, pde) {
         if(pde)pde();
     }
     else if(phase==='quitConfirm'){
-        if(key==='ArrowLeft') quitConfirmSel=0;
-        if(key==='ArrowRight') quitConfirmSel=1;
+        if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfx('nav',cfg.music); }
+        if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfx('nav',cfg.music); }
         if(key==='Enter'||key==='y'||key==='Y'){
+            Snd.sfx('select',cfg.music);
             if(quitConfirmSel===0){ phase='menu'; showHUD(false); Snd.stop(); }
             else { phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic(); escReadyAt=performance.now()+1000; }
         }
