@@ -163,6 +163,27 @@ const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0
 // ON: ) arc pair at cols 5-7. OFF: X at cols 5-7 (corners col 5&7, crossing col 6).
 const SPEAKER_ON  = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,0],[1,1,1,1,0,1,0,0],[1,1,1,1,0,0,1,0],[0,0,1,1,0,0,0,1],[0,0,0,1,0,0,0,0]];
 const SPEAKER_OFF = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,0],[1,1,1,1,0,1,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,1],[0,0,1,1,0,0,0,0],[0,0,0,1,0,0,0,0]];
+// 18x18 at 2px/pixel = 36x36 total (matches rY=18). 1=dark rim, 2=face gold, 3=inner groove.
+const COIN_PX = [
+    [0,0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+    [0,0,0,1,1,1,2,2,2,2,2,2,1,1,1,0,0,0],
+    [0,0,1,1,2,2,2,2,2,2,2,2,2,2,1,1,0,0],
+    [0,1,1,2,2,2,3,3,3,3,3,3,2,2,2,1,1,0],
+    [0,1,2,2,2,3,2,2,2,2,2,2,3,2,2,2,1,0],
+    [1,1,2,2,3,2,2,2,2,2,2,2,2,3,2,2,1,1],
+    [1,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,1],
+    [1,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,1],
+    [1,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,1],
+    [1,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,1],
+    [1,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,1],
+    [1,2,2,2,3,2,2,2,2,2,2,2,2,3,2,2,2,1],
+    [1,1,2,2,3,2,2,2,2,2,2,2,2,3,2,2,1,1],
+    [0,1,2,2,2,3,2,2,2,2,2,2,3,2,2,2,1,0],
+    [0,1,1,2,2,2,3,3,3,3,3,3,2,2,2,1,1,0],
+    [0,0,1,1,2,2,2,2,2,2,2,2,2,2,1,1,0,0],
+    [0,0,0,1,1,1,2,2,2,2,2,2,1,1,1,0,0,0],
+    [0,0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+];
 const DEATH_DUR = 900, LEVELDONE_DUR = 1400, READY_DUR = 1000, GO_DUR = 300;
 const MAX_NAME = 8;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
@@ -1082,22 +1103,22 @@ function drawSplash(now) {
     // Cycle: DROP=1.4s fall, ENTER=0.28s slot entry, rest = pause
     const CYCLE = 3.2, DROP = 1.4, ENTER = 0.28;
     const t = elapsed % CYCLE;
-    const coinX = CW/2, slotY = 292, startY = 152, rY = 18;
+    const coinX = CW/2, slotY = 292, startY = 152;
 
     // Spin: tied to drop progress so entry is always face-on.
     // 1.5 revolutions -> spinAngle ends at 3pi -> |cos(3pi)|=1 -> full face at slot.
     const dropProgress = Math.min(t, DROP) / DROP;
     const spinAngle = dropProgress * 1.5 * Math.PI * 2;
-    const rX = Math.max(2, Math.abs(Math.cos(spinAngle)) * rY);
+    const scaleX = Math.max(0.08, Math.abs(Math.cos(spinAngle)));
 
     // Fall: cubic ease-in (slow start, fast end = realistic gravity)
     let coinY = startY, showCoin = true;
     if (t < DROP) {
         const p = t / DROP;
-        coinY = startY + (slotY - startY - rY) * p * p * p;
+        coinY = startY + (slotY - startY - 18) * p * p * p;
     } else if (t < DROP + ENTER) {
         const p = (t - DROP) / ENTER;
-        coinY = (slotY - rY) + rY * p;
+        coinY = (slotY - 18) + 18 * p;
     } else {
         showCoin = false;
     }
@@ -1110,15 +1131,17 @@ function drawSplash(now) {
     if (showCoin) {
         ctx.save();
         if (t >= DROP) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
+        // Shadow in screen coords before applying coin transform
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.beginPath(); ctx.ellipse(coinX+2, coinY+4, rX, rY*0.3, 0, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = '#ffd700';
-        ctx.beginPath(); ctx.ellipse(coinX, coinY, rX, rY, 0, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2; ctx.stroke();
-        if (rX > 7) {
-            ctx.strokeStyle = '#ffe97a'; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.ellipse(coinX, coinY, rX - 5, rY - 5, 0, 0, Math.PI*2); ctx.stroke();
-        }
+        ctx.beginPath(); ctx.ellipse(coinX+3, coinY+5, 18*scaleX, 5, 0, 0, Math.PI*2); ctx.fill();
+        // Pixel coin: translate to center, squish x-axis for spin, draw 18x18 grid at 2px/pixel
+        ctx.translate(coinX, coinY);
+        ctx.scale(scaleX, 1);
+        COIN_PX.forEach((row, ry) => row.forEach((p, rx) => {
+            if (!p) return;
+            ctx.fillStyle = p === 1 ? '#b8860b' : p === 2 ? '#ffd700' : '#cc8800';
+            ctx.fillRect(-18 + rx*2, -18 + ry*2, 2, 2);
+        }));
         ctx.restore();
     }
 
