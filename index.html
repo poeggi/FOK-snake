@@ -370,6 +370,7 @@ const Snd = (() => {
         try {
             ac = new (window.AudioContext || window.webkitAudioContext)();
             console.log('[Snd] AC created, state:', ac.state);
+            ac.addEventListener('statechange', () => console.log('[Snd] AC statechange ->', ac.state));
             mGain = ac.createGain(); mGain.gain.value = 0.32 * _vol; mGain.connect(ac.destination);
             sGain = ac.createGain(); sGain.gain.value = 0.58 * _sfxVol; sGain.connect(ac.destination);
         } catch(e) { ac = null; console.log('[Snd] AC creation failed:', e); }
@@ -451,11 +452,11 @@ const Snd = (() => {
         mGain.gain.setTargetAtTime(0.32 * _vol, now, 0.10);
     }
 
-    function resume() {
+    function resume(label) {
         if (!ac) { init(); }
-        console.log('[Snd] resume(), ac.state:', ac ? ac.state : 'no AC');
+        console.log('[Snd] resume('+label+'), ac.state:', ac ? ac.state : 'no AC');
         if (ac && ac.state === 'suspended') {
-            console.log('[Snd] calling ac.resume()...');
+            console.log('[Snd] calling ac.resume() from:', label);
             ac.resume().then(() => {
                 console.log('[Snd] ac.resume() resolved, state now:', ac.state, 'curTrack:', curTrack);
                 if (curTrack && SEQ[curTrack]) {
@@ -535,8 +536,8 @@ const Snd = (() => {
 
 // First interaction creates the AudioContext so menu music starts immediately
 (function() {
-    function onFirst() {
-        Snd.resume();
+    function onFirst(e) {
+        Snd.resume('onFirst:'+e.type);
         document.removeEventListener('keydown', onFirst);
         document.removeEventListener('pointerdown', onFirst);
     }
@@ -1629,7 +1630,7 @@ drawDpad(null);
 const GDIRS={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
 
 function handleKey(key, pde) {
-    Snd.resume();
+    Snd.resume(key);
 
     // Global: mute (suppressed during name entry so M is typeable)
     if((key==='m'||key==='M')&&phase!=='nameEntry'){ toggleMute(); return; }
