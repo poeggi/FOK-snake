@@ -163,7 +163,7 @@ const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0
 // ON: ) arc pair at cols 5-7. OFF: X at cols 5-7 (corners col 5&7, crossing col 6).
 const SPEAKER_ON  = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,0],[1,1,1,1,0,1,0,0],[1,1,1,1,0,0,1,0],[0,0,1,1,0,0,0,1],[0,0,0,1,0,0,0,0]];
 const SPEAKER_OFF = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,0],[1,1,1,1,0,1,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,1],[0,0,1,1,0,0,0,0],[0,0,0,1,0,0,0,0]];
-const DEATH_DUR = 900, LEVELDONE_DUR = 1400;
+const DEATH_DUR = 900, LEVELDONE_DUR = 1400, READY_DUR = 1000, GO_DUR = 300;
 const MAX_NAME = 8;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
 
@@ -210,7 +210,7 @@ const ACHIEVEMENTS = [
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['.AAAAA..','AAAAAAA.','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','BBBBBBB.','........']}},
     { id:'fokoins_100k',  name:'DRAGON RICH',   desc:'Earn 500,000 FOKoins',
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
-    { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 50,000 in one game',
+    { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 64,000 in one game',
       icon:{p:{A:'#ff4400',B:'#ff9900',C:'#ffdd00'},d:['...A....','..ABA...','.ABBBA..','ABBBBA..','ABCBBBA.','ABCCCBA.','.AAAAAA.','........']}},
 ];
 
@@ -439,8 +439,8 @@ const Snd = (() => {
     }
 
     function resume() {
-        if (!ac) { init(); curTrack = null; return; }
-        if (ac.state === 'suspended') {
+        if (!ac) { init(); curTrack = null; }
+        if (ac && ac.state === 'suspended') {
             ac.resume().then(() => {
                 if (curTrack) chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
                 else curTrack = null;
@@ -604,7 +604,7 @@ function credTotalH() { let h=0; for(const[t,v] of CRED) h += t==='gap' ? v : (C
 // ================================================================
 // APP STATE
 // ================================================================
-// phases: menu|settings|scores|credits|playing|paused|dying|levelDone|nameEntry|quitConfirm
+// phases: menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|nameEntry|quitConfirm
 let phase = 'menu';
 let menuSel = 0, settingsSel = 0, shopSel = 0, quitConfirmSel = 1, prevPhase = 'playing';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
@@ -651,8 +651,8 @@ function beginLevel() {
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2), sl=startLen(level);
     snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
-    phase='playing'; stepAt=performance.now()+speed; phaseAt=0;
-    spawnAt=performance.now(); levelDoneWaiting=false;
+    phase='levelReady'; stepAt=0; phaseAt=performance.now();
+    spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     boosting=false; boostDir=null;
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
@@ -724,7 +724,7 @@ function step(now) {
         } else Snd.sfx('eat',cfg.music);
         unlockAch('first_gem');
         if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); }
-        if(score>=50000)  unlockAch('score_25k');
+        if(score>=64000)  unlockAch('score_25k');
         if(score>=100000) unlockAch('score_100k');
         if(gemsDone>=GEMS_PER_LEVEL){
             gem=null; score+=level*500;
@@ -1440,6 +1440,19 @@ function drawGameBoard(now) {
             ctx.fillStyle='#4a7a4a'; ctx.fillText('TAP OR PRESS ANY KEY',CW/2,CH-8); ctx.restore();
         }
     }
+    if(phase==='levelReady'){
+        const t=now-phaseAt, goPhase=t>=READY_DUR;
+        drawOvBg(0.72);
+        if(!goPhase){
+            ctx.shadowColor='#7fff7f'; ctx.shadowBlur=20;
+            ct(`LEVEL ${level}`,CW/2,CH/2-18,'#7fff7f',20); ctx.shadowBlur=0;
+            ct('GET READY',CW/2,CH/2+14,'#aaa',8,false);
+        } else {
+            const a=Math.min(1,(t-READY_DUR)/80);
+            ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#ffff44'; ctx.shadowBlur=30;
+            ct('GO!',CW/2,CH/2,'#ffff44',28); ctx.shadowBlur=0; ctx.restore();
+        }
+    }
     if(dying){
         const t=(now-phaseAt)/DEATH_DUR;
         ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5); ctx.shadowColor='#ff4444'; ctx.shadowBlur=20;
@@ -1855,7 +1868,7 @@ function loop(now) {
     // Music routing (skip paused / quitConfirm states)
     if(phase!=='paused'&&phase!=='quitConfirm'){
         const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop'].includes(phase);
-        const gamePhase=['playing','dying','levelDone'].includes(phase);
+        const gamePhase=['playing','levelReady','dying','levelDone'].includes(phase);
         const wt=menuPhase?menuTrack():gamePhase?gameTrack():null;
         if(cfg.music&&wt) Snd.play(wt);
         else if(!wt&&!menuPhase&&!gamePhase) Snd.stop();
@@ -1868,6 +1881,9 @@ function loop(now) {
             if(!boosting&&now-boostSince>=BOOST_GRACE&&cfg.turbo!==false)boosting=true;
         }else boosting=false;
         if(now>=stepAt){const es=boosting?Math.max(40,Math.round(speed/2)):speed;stepAt=now+es;step(now);}
+    }
+    if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
+        phase='playing'; stepAt=now+speed; spawnAt=now; phaseAt=0;
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(lives>0)beginLevel();
