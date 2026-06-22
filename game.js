@@ -464,7 +464,7 @@ function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10)
 let _cachedFOKoins = getFOKoins();
 function addFOKoins(n) {
     _cachedFOKoins += n;
-    localStorage.setItem(FK_KEY, String(_cachedFOKoins));
+    try { localStorage.setItem(FK_KEY, String(_cachedFOKoins)); } catch {}
     if(_cachedFOKoins >= 5000)    unlockAch('fokoins_1k');
     if(_cachedFOKoins >= 50000)   unlockAch('fokoins_10k');
     if(_cachedFOKoins >= 500000)  unlockAch('fokoins_100k');
@@ -478,7 +478,7 @@ function addScore(name, sc, lvl) {
     s.push({ name:(name.trim()||'AAA').substring(0,MAX_NAME), score:sc, level:lvl,
              color:cfg.snakeColor||0, shopItems:{...(cfg.wornItems||{})}, date });
     s.sort((a, b) => b.score - a.score);
-    localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10)));
+    try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch {}
     addFOKoins(sc);
 }
 function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} }
@@ -588,7 +588,12 @@ function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGam
 // ================================================================
 const ck = p => `${p.x},${p.y}`;
 const ri = n => Math.floor(Math.random() * n);
-function freeCell(blocked) { let p; do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p))); return p; }
+function freeCell(blocked) {
+    let p, tries=0;
+    do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p)) && ++tries<1000);
+    if(tries>=1000) { for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) { p={x,y}; if(!blocked.has(ck(p))) return p; } }
+    return p;
+}
 
 function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; beginLevel(); }
 
@@ -1730,7 +1735,7 @@ function handleKey(key, pde) {
             const item=SHOP_ITEMS[shopSel];
             const si=cfg.shopItems||(cfg.shopItems={});
             if(item&&_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
-                _cachedFOKoins-=item.price; localStorage.setItem(FK_KEY,String(_cachedFOKoins));
+                _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch {}
                 si[item.id]=true;
                 if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
                 saveCfg();
@@ -1782,9 +1787,9 @@ function handleKey(key, pde) {
         else if(key==='Backspace'||key==='ArrowLeft'){if(nameStr.length>0){nameStr=nameStr.slice(0,-1);Snd.sfx('nav',cfg.music);}if(pde)pde();}
         else if(key.length===1&&/^[a-zA-Z0-9 ]$/.test(key)&&nameStr.length<MAX_NAME){nameStr+=key.toUpperCase();Snd.sfx('nav',cfg.music);}
         else if(key==='Enter'){
-            localStorage.setItem('lastSName', nameStr.trim()||'PLISSKEN');
+            try { localStorage.setItem('lastSName', nameStr.trim()||'PLISSKEN'); } catch {}
             addScore(nameStr,score,level); Snd.sfx('select',cfg.music);
-            _scoreboardCache=getScores(); phase='scores'; showHUD(false); nameInp.blur();
+            _scoreboardCache=getScores(); phase='scores'; showHUD(false); setTimeout(()=>nameInp.blur(),10);
         }
     }
 }
@@ -1975,7 +1980,7 @@ function loop(now) {
     drawAchPopups(now);
 }
 
-requestAnimationFrame(loop);
+document.fonts.ready.then(() => requestAnimationFrame(loop));
 
 // Align SND button and FPS to the actual canvas top/bottom edges in landscape.
 // CSS can't know where the canvas ends up when it's width-constrained, so JS measures it.
