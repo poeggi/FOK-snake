@@ -1680,6 +1680,7 @@ function leaveSplash() {
     phase = 'menu'; phaseAt = performance.now();
     document.getElementById('btn-mute').style.visibility = '';
     document.getElementById('fps-el').style.visibility = '';
+    document.getElementById('btn-esc').style.visibility = '';
 }
 
 function handleKey(key, pde) {
@@ -1864,7 +1865,7 @@ canvas.addEventListener('touchstart',e=>{
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
-    if(!_swipeBase) return;
+    if(!_swipeBase||splashTouchActive) return;
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     _swipeLastMoveAt=now;
@@ -1890,6 +1891,7 @@ canvas.addEventListener('touchmove',e=>{
 },{passive:false});
 canvas.addEventListener('touchend',e=>{
     e.preventDefault();
+    if(splashTouchActive){ _swipeBase=null; _swipeLastDir=null; return; } // let handler #2 clear the flag
     if(_swipeBase){
         const t=e.changedTouches[0];
         if(Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&phase!=='playing'&&cfg.touchSelect) handleKey('Enter',null);
@@ -1899,6 +1901,8 @@ canvas.addEventListener('touchend',e=>{
     if(phase==='credits'){creditsSpeed=0.8;}
 },{passive:false});
 
+// Unlock audio on any pointer gesture (covers btn-ok and other non-canvas touches)
+document.addEventListener('pointerdown', () => Snd.resume(), {capture:true, passive:true});
 document.addEventListener('keydown', e=>{
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
@@ -1915,6 +1919,7 @@ document.getElementById('btn-ok').addEventListener('touchstart',e=>{e.preventDef
 document.getElementById('btn-ok').addEventListener('click',()=>handleKey('Enter',null));
 document.getElementById('btn-pause').addEventListener('touchstart',e=>{e.preventDefault();handleKey(' ',null);},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
+document.getElementById('btn-esc').style.visibility='hidden';
 document.getElementById('btn-esc').addEventListener('touchstart',e=>{e.preventDefault();handleKey('Escape',null);},{passive:false});
 document.getElementById('btn-esc').addEventListener('click',()=>handleKey('Escape',null));
 
@@ -1927,7 +1932,7 @@ canvas.addEventListener('touchstart',e=>{
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
-    if(!touchStart||swipeFired) return;
+    if(!touchStart||swipeFired||splashTouchActive) return;
     const dx=e.touches[0].clientX-touchStart.x,dy=e.touches[0].clientY-touchStart.y;
     const adx=Math.abs(dx),ady=Math.abs(dy);
     if(Math.max(adx,ady)<14) return;
