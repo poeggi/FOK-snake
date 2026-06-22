@@ -328,6 +328,13 @@ const Snd = (() => {
         mGain.gain.setTargetAtTime(0.32 * _vol, now, 0.10);
     }
 
+    // TODO: iOS Safari cold-start audio init is not fully reliable. On a fresh
+    // browser session the first ac.resume() call silently hangs even inside a
+    // trusted touchstart gesture; audio only starts on the second user interaction.
+    // The controllerchange wasControlled guard (SW registration block) reduces the
+    // problem but does not eliminate it for sessions where a SW update fires a
+    // programmatic reload. No reliable workaround found yet without a dedicated
+    // "tap to enable audio" UI step.
     function resume() {
         if (!ac) { init(); }
         if (ac && ac.state === 'suspended') {
