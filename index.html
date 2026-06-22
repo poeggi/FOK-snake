@@ -122,8 +122,8 @@
 <body>
 <div id="side-info">
     <div id="topbar">
-        <button id="btn-mute" title="Toggle music (M)"><canvas id="btn-mute-cv" width="16" height="16"></canvas></button>
-        <span id="fps-el"></span>
+        <button id="btn-mute" title="Toggle music (M)" style="display:none"><canvas id="btn-mute-cv" width="16" height="16"></canvas></button>
+        <span id="fps-el" style="display:none"></span>
     </div>
     <div id="hud" class="hidden">
         <div class="hud-row">
@@ -1678,6 +1678,8 @@ const GDIRS={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRi
 function leaveSplash() {
     Snd.resume();
     phase = 'menu'; phaseAt = performance.now();
+    document.getElementById('btn-mute').style.display = '';
+    document.getElementById('fps-el').style.display = '';
 }
 
 function handleKey(key, pde) {
