@@ -563,7 +563,29 @@ const Snd = (() => {
         _bgSuspended = true;
         setTimeout(() => { try { if (ac && ac.state === 'running') ac.suspend(); } catch(e){} }, 120);
     }
-    return { init, tick, play, stop, pauseMusic, resumeMusic, resume, sfx, setVol, setSfxVol, suspend };
+    // Like resume() but never creates the AC — safe to call from untrusted events
+    // (pointerdown on iOS). Only resumes if the AC already exists and is suspended.
+    function tryResume() {
+        if (!ac || ac.state !== 'suspended') return;
+        ac.resume().then(() => {
+            const wasBg = _bgSuspended;
+            _bgSuspended = false;
+            if (curTrack && SEQ[curTrack]) {
+                const flush = wasBg ? 0.45 : 0.05;
+                chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + flush }));
+                if (!isPaused) {
+                    mGain.gain.cancelScheduledValues(ac.currentTime);
+                    if (wasBg) {
+                        mGain.gain.setValueAtTime(0, ac.currentTime);
+                        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime + 0.45, 0.05);
+                    } else {
+                        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+                    }
+                }
+            }
+        });
+    }
+    return { init, tick, play, stop, pauseMusic, resumeMusic, resume, tryResume, sfx, setVol, setSfxVol, suspend };
 })();
 
 // Audio is initialized from the splash screen interaction, which guarantees a clean
@@ -1920,7 +1942,10 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 // Pause cooldown: if finger stops moving for 200ms the higher threshold resets to 30px,
 // so deliberate re-moves after a pause feel as responsive as the first direction.
 // Splash: any pointer or touch on canvas exits splash and unlocks audio
-canvas.addEventListener('pointerdown', e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } });
+// Mouse/stylus only: touch devices use the touchstart handler below so that
+// leaveSplash() → Snd.resume() → ac.resume() always runs inside a trusted touchstart,
+// not inside a pointerdown (which iOS Safari won't honour for AudioContext unlock).
+canvas.addEventListener('pointerdown', e => { if (phase === 'splash' && e.pointerType !== 'touch') { e.preventDefault(); leaveSplash(false); } });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } }, { passive: false });
 
 const SWIPE_1=30, SWIPE_N=40, SWIPE_SAME=40, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
@@ -1970,8 +1995,10 @@ canvas.addEventListener('touchend',e=>{
     if(phase==='credits'){creditsSpeed=0.8;}
 },{passive:false});
 
-// Unlock audio on any pointer gesture (covers btn-ok and other non-canvas touches)
-document.addEventListener('pointerdown', () => Snd.resume(), {capture:true, passive:true});
+// Restore audio on pointer gestures mid-game (background resume etc.).
+// Uses tryResume (no init) so we never call ac.resume() from an untrusted pointerdown
+// on iOS Safari — that would block the subsequent trusted touchstart from unlocking audio.
+document.addEventListener('pointerdown', () => Snd.tryResume(), {capture:true, passive:true});
 // Pause audio when app goes to background, resume when it returns
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) { Snd.suspend(); }
