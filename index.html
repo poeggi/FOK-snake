@@ -1902,7 +1902,7 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 canvas.addEventListener('pointerdown', e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } }, { passive: false });
 
-const SWIPE_1=30, SWIPE_N=40, SWIPE_SAME=60, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
+const SWIPE_1=30, SWIPE_N=40, SWIPE_SAME=40, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0;
 canvas.addEventListener('touchstart',e=>{
