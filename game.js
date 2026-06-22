@@ -1821,20 +1821,20 @@ canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preven
 const nameInp = document.getElementById('name-inp');
 const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
-let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0;
+let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null;
 canvas.addEventListener('touchstart',e=>{
     e.preventDefault(); Snd.resume();
     if(phase==='nameEntry'){ nameInp.focus(); }
     const t=e.touches[0];
-    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now();
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY};
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
     if(!_swipeBase||_splashTouchPending) return;
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
-    _swipeLastMoveAt=now;
     const t=e.touches[0];
+    if(!_swipeLastMovePos||Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y)>=5){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
     const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
     const dist=Math.hypot(dx,dy);
     if(dist<SWIPE_1) return;
@@ -1862,7 +1862,7 @@ canvas.addEventListener('touchend',e=>{
         const t=e.changedTouches[0];
         if(Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&phase!=='playing'&&cfg.touchSelect) handleKey('Enter',null);
     }
-    _swipeBase=null; _swipeLastDir=null;
+    _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null;
     if(phase==='playing'){boostDir=null;boosting=false;}
     if(phase==='credits'){creditsSpeed=0.8;}
 },{passive:false});
