@@ -502,6 +502,29 @@ const Snd = (() => {
     return { init, tick, play, stop, pauseMusic, resumeMusic, resume, sfx, setVol, setSfxVol };
 })();
 
+// TODO: Audio initialization is broken across platforms -- do not remove until confirmed fixed.
+//
+// Observed symptoms (as of 2026-06-22):
+//   - iOS Safari / iOS PWA: music starts only after the SECOND keypress, never after the first.
+//   - Firefox Windows: music never starts on any keypress (up/down arrows etc.); only starts
+//     when entering a sub-menu (phase change) or toggling mute/unmute in the main menu.
+//   - Both platforms: audible pop/click artifact when first sound plays (SFX or music onset).
+//
+// Root cause is not fully understood. The Web Audio autoplay policy requires a user gesture
+// before AudioContext.resume() takes effect, but the current resume()/onFirst path does not
+// reliably unlock the AC on the first gesture across all browsers. The pop likely originates
+// from AC initialization or the first oscillator start on a fresh context despite the 10ms
+// attack ramp added to tone().
+//
+// Approaches to investigate:
+//   - iOS 2nd-press: pointerdown may fire before keydown; the first gesture may create AC but
+//     not resume it; the second gesture actually resumes. Try calling ac.resume() inside a
+//     dedicated touchstart/pointerdown handler that is registered before any game handlers.
+//   - Firefox: resume() may be called outside a trusted user-gesture stack frame by the time
+//     it reaches ac.resume(); check whether the call is synchronous in the event handler.
+//   - Pop: try playing a 1ms silent oscillator at gain 0 immediately after AC creation to
+//     prime the audio pipeline before any real sound is scheduled.
+
 // First interaction creates the AudioContext so menu music starts immediately
 (function() {
     function onFirst() {
