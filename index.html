@@ -593,7 +593,7 @@ const CRED = [
     ['txt','The one person who reached Level 10.'],['txt','You know who you are.'],['gap',40],
     ['hdr','IN MEMORIAM'],
     ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',50],
-    ['coins'],['sml','(spend them on absolutely nothing. for now.)'],['gap',50],
+    ['coins'],['sml','(spend them in the SHOP)'],['gap',50],
     ['sml','(C) 2025 FOK STUDIOS'],['sml','All rights reserved to nobody in particular.'],
     ['gap',30],['txt','PRESS OK OR ENTER TO EXIT'],['gap',280],
     ['secret','No Eastereggs here ;)'],['gap',240],
@@ -1626,7 +1626,7 @@ function handleKey(key, pde) {
         if(pde)pde();
     }
     else if(phase==='credits'){
-        if(key==='ArrowDown'){creditsSpeed=1.6;if(pde)pde();}
+        if(key==='ArrowDown'){creditsSpeed=3.2;if(pde)pde();}
         else if(key==='ArrowUp'){creditsSpeed=0.4;if(pde)pde();}
         else{phase='menu';creditsSpeed=0.8;if(pde)pde();}
     }
