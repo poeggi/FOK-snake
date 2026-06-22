@@ -628,7 +628,7 @@ const BOOST_GRACE=180;
 let perfectCount = 0, luckyCount = 0;
 let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameReason = '';
-let creditsScroll = 0;
+let creditsScroll = 0, creditsSpeed = 0.8;
 let purchaseParticles = [], purchaseAnimAt = 0;
 let fpsVal = 0, fpsFrames = 0, fpsLast = 0;
 
@@ -1348,9 +1348,9 @@ function drawCredits() {
         y += h;
     }
     ctx.restore();
-    creditsScroll -= 0.8;
+    creditsScroll -= creditsSpeed;
     if (creditsScroll < -(credTotalH())) creditsScroll = CH + 40;  // loop
-    ct('OK / ENTER to exit', CW/2, CH-12, '#6a9a6a', 8, false);
+    ct('UP slow  DOWN fast  |  ENTER exit', CW/2, CH-12, '#6a9a6a', 8, false);
 }
 
 function drawNameEntry(now) {
@@ -1580,7 +1580,7 @@ function handleKey(key, pde) {
             else if(menuSel===2)phase='scores';
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){phase='shop';shopSel=0;purchaseAnimAt=0;}
-            else{phase='credits';creditsScroll=CH+40;}
+            else{phase='credits';creditsScroll=CH+40;creditsSpeed=0.8;}
             if(pde)pde();
         }
     }
@@ -1606,7 +1606,12 @@ function handleKey(key, pde) {
         if(key==='ArrowRight'&&settingsSel===4){cfg.handed=1;applyHandedness();saveCfg();Snd.sfx('nav',cfg.music);}
         if(pde)pde();
     }
-    else if(phase==='scores'||phase==='credits'){ phase='menu'; if(pde)pde(); }
+    else if(phase==='credits'){
+        if(key==='ArrowDown'){creditsSpeed=Math.min(creditsSpeed*2,6.4);if(pde)pde();}
+        else if(key==='ArrowUp'){creditsSpeed=Math.max(creditsSpeed/2,0.1);if(pde)pde();}
+        else{phase='menu';creditsSpeed=0.8;if(pde)pde();}
+    }
+    else if(phase==='scores'){ phase='menu'; if(pde)pde(); }
     else if(phase==='achievements'){
         const _ea=ACHIEVEMENTS.every(a=>achUnlocked[a.id]);
         if(_ea&&(key==='ArrowLeft'||key==='ArrowRight')){achPage=1-achPage;Snd.sfx('nav',cfg.music);if(pde)pde();}
