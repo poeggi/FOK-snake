@@ -54,7 +54,6 @@
         #gamepad { display: none; align-items: center; justify-content: center; gap: 26px; }
         @media (pointer: coarse) { #gamepad { display: flex; } }
         #gamepad.splash { opacity: 0.2; }
-        #gamepad.splash, #gamepad.splash * { pointer-events: none; }
         #dpad-c { width: min(120px, 33vw); height: min(120px, 33vw); touch-action: none; display: block; }
         #left-btns, #side-btns { display: flex; flex-direction: column; gap: 14px; }
         .sbtn {
@@ -1699,7 +1698,7 @@ function drawDpad(active) {
         dpc.save();
         dpc.beginPath(); dpc.moveTo(s.pts[0][0],s.pts[0][1]); dpc.lineTo(s.pts[1][0],s.pts[1][1]); dpc.lineTo(s.pts[2][0],s.pts[2][1]); dpc.closePath(); dpc.clip();
         dpc.fillStyle=pressed?'#1a3a1a':'#0a180a'; dpc.fillRect(0,0,S,S);
-        dpc.fillStyle=pressed?'#7fff7f':'#3a6a3a';
+        dpc.fillStyle='#7fff7f';
         dpc.shadowColor=pressed?'#7fff7f':'transparent'; dpc.shadowBlur=pressed?10:0;
         dpc.font='bold 20px "Courier New"'; dpc.textAlign='center'; dpc.textBaseline='middle';
         dpc.fillText(s.label,s.lx,s.ly);
