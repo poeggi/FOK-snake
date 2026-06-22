@@ -150,7 +150,7 @@ const ctx = canvas.getContext('2d');
 // ================================================================
 const Snd = (() => {
     let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5, _justInited = false;
-    let chState = [], curTrack = null, isPaused = false, _bgSuspended = false, _resuming = false;
+    let chState = [], curTrack = null, isPaused = false, _bgSuspended = false, _resuming = false, _resumingTimer = 0;
 
     const SEQ = {
         // NEW style (3-channel)
@@ -329,8 +329,11 @@ const Snd = (() => {
         if (!ac) { init(); }
         if (ac && ac.state === 'suspended' && !_resuming) {
             _resuming = true;
+            // Safety valve: if the Promise never settles (iOS silent-hang), unblock after 400ms
+            // so the next user gesture can retry via tryResume().
+            _resumingTimer = setTimeout(() => { _resuming = false; }, 400);
             ac.resume().then(() => {
-                _resuming = false;
+                clearTimeout(_resumingTimer); _resuming = false;
                 const wasBg = _bgSuspended;
                 _bgSuspended = false;
                 if (curTrack && SEQ[curTrack]) {
@@ -358,7 +361,7 @@ const Snd = (() => {
                     mGain.gain.cancelScheduledValues(ac.currentTime);
                     mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
                 }
-            }).catch(() => { _resuming = false; });
+            }).catch(() => { clearTimeout(_resumingTimer); _resuming = false; });
         } else if (_bgSuspended) {
             // AC wasn't auto-suspended by browser but we silenced the gain; restore it.
             _bgSuspended = false;
@@ -420,10 +423,9 @@ const Snd = (() => {
     // Like resume() but never creates the AC — safe to call from untrusted events
     // (pointerdown on iOS). Only resumes if the AC already exists and is suspended.
     function tryResume() {
-        if (!ac || ac.state !== 'suspended' || _resuming) return;
-        _resuming = true;
+        if (!ac || ac.state !== 'suspended') return;
         ac.resume().then(() => {
-            _resuming = false;
+            _resuming = false; clearTimeout(_resumingTimer);
             const wasBg = _bgSuspended;
             _bgSuspended = false;
             if (curTrack && SEQ[curTrack]) {
@@ -439,7 +441,7 @@ const Snd = (() => {
                     }
                 }
             }
-        }).catch(() => { _resuming = false; });
+        }).catch(() => {});
     }
     return { init, tick, play, stop, pauseMusic, resumeMusic, resume, tryResume, sfx, setVol, setSfxVol, suspend };
 })();
@@ -555,7 +557,7 @@ let phase = 'splash';
 let menuSel = 0, settingsSel = 0, shopSel = 0, quitConfirmSel = 1, prevPhase = 'playing';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
 const SETTINGS_COUNT = 10;
-let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false };
+let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: true };
 loadCfg();
 if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
 Snd.setVol(cfg.volume ?? 1);
@@ -1808,7 +1810,12 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 // Mouse/stylus only: touch devices use the touchstart handler below so that
 // leaveSplash() → Snd.resume() → init() plays a silent buffer + ac.resume() inside a trusted element touchstart,
 // not inside a pointerdown (which iOS Safari won't honour for AudioContext unlock).
-canvas.addEventListener('pointerdown', e => { if (phase === 'splash' && e.pointerType !== 'touch') { e.preventDefault(); leaveSplash(false); } });
+canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') return;
+    e.preventDefault();
+    if (phase === 'splash') { leaveSplash(false); }
+    else if (phase !== 'playing') { handleKey('Enter', null); }
+});
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
@@ -1862,6 +1869,10 @@ canvas.addEventListener('touchend',e=>{
 
 // Restore audio on pointer gestures mid-game (background resume, desktop mouse, etc.).
 document.addEventListener('pointerdown', () => Snd.tryResume(), {capture:true, passive:true});
+// touchend is a trusted iOS Safari gesture and fires even when touchstart called
+// e.preventDefault(). Gives the audio context a second unlock attempt if the
+// touchstart-based ac.resume() promise silently hung (iOS WebKit quirk).
+document.addEventListener('touchend', () => Snd.tryResume(), {passive:true});
 // Pause audio when app goes to background, resume when it returns
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) { Snd.suspend(); }
