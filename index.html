@@ -20,7 +20,9 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             min-height: 100vh; padding: 8px; gap: 10px;
             font-family: 'Press Start 2P', 'Courier New', monospace; color: #ccc;
-            user-select: none; overflow: hidden;
+            user-select: none; -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            overflow: hidden;
         }
         #hud {
             display: flex; flex-direction: column; gap: 3px;
@@ -424,6 +426,7 @@ const Snd = (() => {
 
     function tick(musicOn) {
         if (!ac || !curTrack || !musicOn || isPaused) return;
+        if (ac.state !== 'running') return;
         const seq = SEQ[curTrack], spb = 60 / seq.bpm;
         seq.channels.forEach((ch, ci) => {
             const st = chState[ci];
@@ -475,13 +478,30 @@ const Snd = (() => {
         if (!ac) { init(); }
         if (ac && ac.state === 'suspended') {
             ac.resume().then(() => {
+                const wasBg = _bgSuspended;
+                _bgSuspended = false;
                 if (curTrack && SEQ[curTrack]) {
-                    chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
-                }
-                // Restore gain only if we muted it for background suspension.
-                // Do NOT touch mGain when resuming from splash (play() owns the fade-in there).
-                if (_bgSuspended && !isPaused && curTrack) {
-                    _bgSuspended = false;
+                    if (wasBg) {
+                        // Background resume: mute for 0.45s so the up-to-0.4s lookahead
+                        // notes that were pre-scheduled before suspension expire silently,
+                        // then start fresh from that point.
+                        const flush = 0.45;
+                        chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + flush }));
+                        if (!isPaused) {
+                            mGain.gain.cancelScheduledValues(ac.currentTime);
+                            mGain.gain.setValueAtTime(0, ac.currentTime);
+                            mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime + flush, 0.05);
+                        }
+                    } else {
+                        // Initial iOS unlock: tick() was blocked while suspended so no stale
+                        // notes; just reset position and restore gain immediately.
+                        chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
+                        if (!isPaused) {
+                            mGain.gain.cancelScheduledValues(ac.currentTime);
+                            mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+                        }
+                    }
+                } else if (!wasBg && !isPaused && curTrack) {
                     mGain.gain.cancelScheduledValues(ac.currentTime);
                     mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
                 }
@@ -1727,7 +1747,6 @@ function leaveSplash(fromTouch = false) {
     phase = 'menu'; phaseAt = performance.now();
     document.getElementById('btn-mute').style.visibility = '';
     document.getElementById('fps-el').style.visibility = '';
-    document.getElementById('btn-esc').style.visibility = '';
     document.getElementById('gamepad').classList.remove('splash');
 }
 
@@ -1975,8 +1994,8 @@ document.getElementById('btn-ok').addEventListener('touchstart',e=>{e.preventDef
 document.getElementById('btn-ok').addEventListener('click',()=>handleKey('Enter',null));
 document.getElementById('btn-pause').addEventListener('touchstart',e=>{e.preventDefault();handleKey(' ',null);},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
-document.getElementById('btn-esc').style.visibility='hidden';
 document.getElementById('gamepad').classList.add('splash');
+drawDpad(null);
 document.getElementById('btn-esc').addEventListener('touchstart',e=>{e.preventDefault();handleKey('Escape',null);},{passive:false});
 document.getElementById('btn-esc').addEventListener('click',()=>handleKey('Escape',null));
 
