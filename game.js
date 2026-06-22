@@ -255,6 +255,7 @@ const Snd = (() => {
         g.gain.exponentialRampToValueAtTime(0.001, when + Math.max(dur * 0.88, 0.02));
         o.connect(g); g.connect(dest || mGain);
         o.start(when); o.stop(when + dur + 0.02);
+        o.onended = () => { o.disconnect(); g.disconnect(); };
     }
 
     function fatTone(freq, when, dur, vol) {
@@ -279,6 +280,7 @@ const Snd = (() => {
         const seq = SEQ[curTrack], spb = 60 / seq.bpm;
         seq.channels.forEach((ch, ci) => {
             const st = chState[ci];
+            if (st.nextNote < ac.currentTime) st.nextNote = ac.currentTime;
             while (st.nextNote < ac.currentTime + 0.40) {
                 const [f, b] = ch.notes[st.pos];
                 schedNote(ch, f, st.nextNote, b * spb * 0.84);
@@ -609,7 +611,7 @@ function beginLevel() {
         const b=bars[i];
         if(Math.random()>=0.1) continue;
         const dirs=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
-        dirs.sort(()=>Math.random()-0.5);
+        for(let i=dirs.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[dirs[i],dirs[j]]=[dirs[j],dirs[i]];}
         for(const d of dirs){
             const nx=b.x+d.x, ny=b.y+d.y;
             if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
