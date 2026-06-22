@@ -1747,8 +1747,8 @@ function handleKey(key, pde) {
             escReadyAt=performance.now()+1000; if(pde)pde(); return;
         }
         if(phase==='settings'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
-        if(phase==='scores'||phase==='credits'||phase==='shop'){ phase='menu'; if(pde)pde(); return; }
-        if(phase==='achievements'){ phase='menu'; if(pde)pde(); return; }
+        if(phase==='scores'||phase==='credits'||phase==='shop'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
+        if(phase==='achievements'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
     }
 
     if(phase==='menu'){
