@@ -123,12 +123,14 @@ const SHOP_ITEMS = [
 
 function drawPixelIcon(x, y, icon, cs) {
     icon.d.forEach((row, ry) => {
-        [...row].forEach((c, rx) => {
+        let rx = 0;
+        for (const c of row) {
             if(c !== '.' && icon.p[c]){
                 ctx.fillStyle = icon.p[c];
                 ctx.fillRect(Math.round(x+rx*cs), Math.round(y+ry*cs), Math.ceil(cs), Math.ceil(cs));
             }
-        });
+            rx++;
+        }
     });
 }
 
@@ -261,8 +263,7 @@ const Snd = (() => {
         if      (ch.fn === 'fat')    fatTone(freq, when, dur, ch.vol);
         else if (ch.fn === 'tri')    tone(freq, when, dur, 'triangle', ch.vol, 0);
         else if (ch.fn === 'square') tone(freq, when, dur, 'square',   ch.vol, 0);
-        else if (ch.fn === 'bass')   tone(freq, when, dur, 'sine',     ch.vol, 0);
-        else if (ch.fn === 'pad')    tone(freq, when, dur, 'sine',     ch.vol, 0);
+        else if (ch.fn === 'bass' || ch.fn === 'pad') tone(freq, when, dur, 'sine', ch.vol, 0);
         else if (ch.fn === 'stab')   tone(freq, when, dur, 'sawtooth', ch.vol, 0);
     }
 
@@ -532,6 +533,7 @@ const CRED = [
 ];
 const CRED_H = { title:30, sub:16, hdr:20, txt:16, sml:14, coins:20, secret:20 };
 function credTotalH() { let h=0; for(const[t,v] of CRED) h += t==='gap' ? v : (CRED_H[t]||22); return h; }
+const CRED_TOTAL_H = credTotalH();
 
 // ================================================================
 // APP STATE
@@ -540,7 +542,7 @@ function credTotalH() { let h=0; for(const[t,v] of CRED) h += t==='gap' ? v : (C
 let phase = 'splash';
 let menuSel = 0, settingsSel = 0, shopSel = 0, quitConfirmSel = 1, prevPhase = 'playing';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
-const SETTINGS_ITEMS = ['MUSIC', 'MUSIC STYLE', 'VOLUME', 'SFX VOLUME', 'TURBO', 'DIFFICULTY', 'SNAKE COLOR', 'LAYOUT', 'TOUCH SELECT', 'BACK'];
+const SETTINGS_COUNT = 10;
 let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false };
 loadCfg();
 if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
@@ -564,7 +566,7 @@ let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameReason = '';
 let creditsScroll = 0, creditsSpeed = 0.8;
 let purchaseParticles = [], purchaseAnimAt = 0;
-let fpsVal = 0, fpsFrames = 0, fpsLast = 0;
+let fpsFrames = 0, fpsLast = 0;
 
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -1077,7 +1079,7 @@ function drawMenu() {
     ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',8);
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
-    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#555',8,false);
+    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#555',8);
     // Bottom bar: version left, hint center, FOKoins right — all same font as FOK EDITION
     const coins=_cachedFOKoins;
     ctx.save();
@@ -1137,7 +1139,7 @@ function drawSettings() {
         }
         ctx.restore();
     }
-    ct('LEFT/RIGHT to change   OK to toggle   ESC back',CW/2,CH-14,'#999',8,false);
+    ct('LEFT/RIGHT to change   OK to toggle   ESC back',CW/2,CH-14,'#999',8);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -1176,11 +1178,12 @@ function drawScoreHead(cx, cy, colorIdx, si) {
     ctx.restore();
 }
 
+let _scoreboardCache = null;
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=20; ct('HIGH SCORES',CW/2,28,'#7fff7f',18); ctx.shadowBlur=0;
-    const scores=getScores();
-    if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',8,false); }
+    const scores=_scoreboardCache||[];
+    if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',8); }
     else {
         ctx.font='8px "Press Start 2P"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         scores.slice(0,8).forEach((s,i)=>{
@@ -1200,7 +1203,7 @@ function drawScores() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=3;
     ct(`TOTAL FOKOINS: ${coins.toLocaleString()}`,CW/2,CH-36,'#ffd700',8);
     ctx.shadowBlur=0;
-    ct('Any key or OK to return',CW/2,CH-14,'#999',8,false);
+    ct('Any key or OK to return',CW/2,CH-14,'#999',8);
 }
 
 function drawAchievements() {
@@ -1215,7 +1218,7 @@ function drawAchievements() {
     if(expert){
         ct(onExpert?'< EXPERT  1/2 >':'< BASE  2/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',8);
     } else if(allBase&&!donated){
-        ct('DONATE in SHOP to unlock EXPERT page',CW/2,42,'#ff4488',7,false);
+        ct('DONATE in SHOP to unlock EXPERT page',CW/2,42,'#ff4488',7);
     }
     const cols=3, aw=188, ah=68, gx=4, gy=4;
     const ox=(CW-(cols*aw+(cols-1)*gx))/2;
@@ -1251,9 +1254,9 @@ function drawAchievements() {
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
-    ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',8,false);
+    ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',8);
     const hint=expert?'LEFT/RIGHT  SWITCH PAGE   ENTER to return':'Any key or OK to return';
-    ct(hint,CW/2,CH-10,'#999',8,false);
+    ct(hint,CW/2,CH-10,'#999',8);
 }
 
 function drawAchPopups(now) {
@@ -1340,7 +1343,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=2;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',8);
     ctx.shadowBlur=0;
-    ct('ENTER buy  |  SPACE wear/remove  |  ESC back',CW/2,CH-12,'#888',8,false);
+    ct('ENTER buy  |  SPACE wear/remove  |  ESC back',CW/2,CH-12,'#888',8);
     // Purchase particles
     const now=performance.now();
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1375,14 +1378,14 @@ function drawCredits() {
                     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=22;
                     ct(val, CW/2, y+15, '#7fff7f', 20); ctx.shadowBlur=0; break;
                 case 'sub':
-                    ct(val, CW/2, y+7, '#5a8a5a', 8, false); break;
+                    ct(val, CW/2, y+7, '#5a8a5a', 8); break;
                 case 'hdr':
                     ctx.shadowColor='#00cccc'; ctx.shadowBlur=6;
                     ct(val, CW/2, y+9, '#00cccc', 8); ctx.shadowBlur=0; break;
                 case 'txt':
-                    ct(val, CW/2, y+7, '#aaa', 8, false); break;
+                    ct(val, CW/2, y+7, '#aaa', 8); break;
                 case 'sml':
-                    ct(val, CW/2, y+6, '#999', 8, false); break;
+                    ct(val, CW/2, y+6, '#999', 8); break;
                 case 'coins':
                     ctx.shadowColor='#ffd700'; ctx.shadowBlur=3;
                     ct(`YOUR FOKOINS: ${_cachedFOKoins.toLocaleString()}`, CW/2, y+9, '#ffd700', 8);
@@ -1398,8 +1401,8 @@ function drawCredits() {
     }
     ctx.restore();
     creditsScroll -= creditsSpeed;
-    if (creditsScroll < -(credTotalH())) creditsScroll = CH + 40;  // loop
-    ct('HOLD UP slow  HOLD DOWN fast  |  ENTER exit', CW/2, CH-12, '#6a9a6a', 8, false);
+    if (creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
+    ct('HOLD UP slow  HOLD DOWN fast  |  ENTER exit', CW/2, CH-12, '#6a9a6a', 8);
 }
 
 function drawNameEntry(now) {
@@ -1411,8 +1414,8 @@ function drawNameEntry(now) {
     const isWin=nameReason==='win';
     ctx.shadowColor=isWin?'#ffd700':'#ff5555'; ctx.shadowBlur=22;
     ct(isWin?'YOU WIN!':'GAME OVER',CW/2,60,isWin?'#ffd700':'#ff5555',26); ctx.shadowBlur=0;
-    ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,100,'#aaa',8,false);
-    ct('ENTER YOUR NAME:',CW/2,128,'#7fff7f',8,false);
+    ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,100,'#aaa',8);
+    ct('ENTER YOUR NAME:',CW/2,128,'#7fff7f',8);
     const sw=30,sh=40,gap=5,totalW=MAX_NAME*(sw+gap)-gap,sx0=Math.floor(CW/2-totalW/2),sy=146;
     for(let i=0;i<MAX_NAME;i++){
         const sx=sx0+i*(sw+gap),act=i===nameStr.length&&nameStr.length<MAX_NAME,has=i<nameStr.length;
@@ -1426,14 +1429,14 @@ function drawNameEntry(now) {
     }
     const cy2=sy+sh+20,ci=nameCharIdx,disp=c=>c===' '?'_':c;
     if(nameStr.length<MAX_NAME){
-        ct('(^)',CW/2,cy2,'#888',8,false);
-        ct(disp(NAME_CHARS[(ci-1+NAME_CHARS.length)%NAME_CHARS.length]),CW/2,cy2+14,'#999',8,false);
+        ct('(^)',CW/2,cy2,'#888',8);
+        ct(disp(NAME_CHARS[(ci-1+NAME_CHARS.length)%NAME_CHARS.length]),CW/2,cy2+14,'#999',8);
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=10;
         ct(disp(NAME_CHARS[ci]),CW/2,cy2+28,'#7fff7f',14); ctx.shadowBlur=0;
-        ct(disp(NAME_CHARS[(ci+1)%NAME_CHARS.length]),CW/2,cy2+38,'#999',8,false);
-        ct('(v)',CW/2,cy2+50,'#888',8,false);
+        ct(disp(NAME_CHARS[(ci+1)%NAME_CHARS.length]),CW/2,cy2+38,'#999',8);
+        ct('(v)',CW/2,cy2+50,'#888',8);
     }
-    ct('TAP to type  |  UP/DOWN+RIGHT  |  ENTER',CW/2,CH-10,'#999',8,false);
+    ct('TAP to type  |  UP/DOWN+RIGHT  |  ENTER',CW/2,CH-10,'#999',8);
 }
 
 function drawGameBoard(now) {
@@ -1468,7 +1471,7 @@ function drawGameBoard(now) {
                 ctx.shadowColor='#ffd700'; ctx.shadowBlur=22;
                 ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',14);
                 ctx.shadowBlur=0;
-                ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',8,false);
+                ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',8);
                 ctx.restore();
             }
         }
@@ -1483,7 +1486,7 @@ function drawGameBoard(now) {
         if(!goPhase){
             ctx.shadowColor='#7fff7f'; ctx.shadowBlur=20;
             ct(`LEVEL ${level}`,CW/2,CH/2-18,'#7fff7f',20); ctx.shadowBlur=0;
-            ct('GET READY',CW/2,CH/2+14,'#aaa',8,false);
+            ct('GET READY',CW/2,CH/2+14,'#aaa',8);
         } else {
             const a=Math.min(1,(t-READY_DUR)/80);
             ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#ffff44'; ctx.shadowBlur=30;
@@ -1508,7 +1511,7 @@ function drawGameBoard(now) {
     if(bonusAge<flashDur&&bonusLabel){
         const a=1-bonusAge/flashDur;
         const isEpic=bonusLabel.startsWith('EPIC'),isLucky=bonusLabel.startsWith('LUCKY');
-        const col=isEpic?`hsl(${(now/6)%360},100%,70%)`:isLucky?'#ffd700':'#ffd700';
+        const col=isEpic?`hsl(${(now/6)%360},100%,70%)`:'#ffd700';
         const sz=isEpic?22:16;
         ctx.save(); ctx.globalAlpha=a;
         ctx.shadowColor=col; ctx.shadowBlur=isEpic?40:30;
@@ -1658,7 +1661,7 @@ function handleKey(key, pde) {
             Snd.sfx('select',cfg.music);
             if(menuSel===0)startGame();
             else if(menuSel===1){phase='settings';settingsSel=0;}
-            else if(menuSel===2)phase='scores';
+            else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){phase='shop';shopSel=0;purchaseAnimAt=0;}
             else{phase='credits';creditsScroll=CH+40;creditsSpeed=0.8;}
@@ -1666,8 +1669,8 @@ function handleKey(key, pde) {
         }
     }
     else if(phase==='settings'){
-        if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_ITEMS.length)%SETTINGS_ITEMS.length;Snd.sfx('nav',cfg.music);}
-        if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_ITEMS.length;Snd.sfx('nav',cfg.music);}
+        if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_COUNT)%SETTINGS_COUNT;Snd.sfx('nav',cfg.music);}
+        if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_COUNT;Snd.sfx('nav',cfg.music);}
         if(key==='Enter'){
             Snd.sfx('select',cfg.music);
             if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.stop();updateMuteBtn();}
@@ -1747,7 +1750,7 @@ function handleKey(key, pde) {
         if(levelDoneWaiting){
             levelDoneWaiting=false;
             if(level<MAX_LEVELS){level++;beginLevel();}
-            else{phase='nameEntry';nameStr=localStorage.getItem('lastSName')||'PLISSKEN';nameCharIdx=0;nameReason='win';showHUD(false);Snd.stop();}
+            else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='win';showHUD(false);Snd.stop();}
             if(pde)pde();
         }
     }
@@ -1769,7 +1772,7 @@ function handleKey(key, pde) {
         else if(key==='Enter'){
             localStorage.setItem('lastSName', nameStr.trim()||'PLISSKEN');
             addScore(nameStr,score,level); Snd.sfx('select',cfg.music);
-            phase='scores'; showHUD(false); nameInp.blur();
+            _scoreboardCache=getScores(); phase='scores'; showHUD(false); nameInp.blur();
         }
     }
 }
@@ -1791,6 +1794,7 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 canvas.addEventListener('pointerdown', e => { if (phase === 'splash' && e.pointerType !== 'touch') { e.preventDefault(); leaveSplash(false); } });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } }, { passive: false });
 
+const nameInp = document.getElementById('name-inp');
 const SWIPE_1=30, SWIPE_N=40, SWIPE_SAME=40, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0;
@@ -1869,13 +1873,11 @@ document.getElementById('btn-ok').addEventListener('click',()=>handleKey('Enter'
 document.getElementById('btn-pause').addEventListener('touchstart',e=>{e.preventDefault();handleKey(' ',null);},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
 document.getElementById('gamepad').classList.add('splash');
-drawDpad(null);
 document.getElementById('btn-esc').addEventListener('touchstart',e=>{e.preventDefault();handleKey('Escape',null);},{passive:false});
 document.getElementById('btn-esc').addEventListener('click',()=>handleKey('Escape',null));
 
 
 // Mobile name entry via OS keyboard
-const nameInp = document.getElementById('name-inp');
 nameInp.addEventListener('input', e => {
     if (phase !== 'nameEntry') return;
     if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward') {
@@ -1923,7 +1925,7 @@ updateMuteBtn();
 function loop(now) {
     requestAnimationFrame(loop);
     fpsFrames++;
-    if(now-fpsLast>=500){fpsVal=Math.round(fpsFrames*1000/(now-fpsLast));fpsFrames=0;fpsLast=now;fpsEl.textContent=`${fpsVal} FPS`;}
+    if(now-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(now-fpsLast))} FPS`;fpsFrames=0;fpsLast=now;}
 
     // Music routing (skip splash/paused/quitConfirm states)
     if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'){
@@ -1947,7 +1949,7 @@ function loop(now) {
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(lives>0)beginLevel();
-        else{phase='nameEntry';nameStr=localStorage.getItem('lastSName')||'PLISSKEN';nameCharIdx=0;nameReason='over';showHUD(false);Snd.stop();}
+        else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='over';showHUD(false);Snd.stop();}
     }
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
