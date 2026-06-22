@@ -1072,47 +1072,62 @@ function drawSplash(now) {
     ctx.fillText('FOK SNAKE', CW/2, 58);
     ctx.shadowBlur = 0;
 
-    // Coin drop animation (2.4s cycle)
-    const cycle = 2.4, t = elapsed % cycle;
-    const coinX = CW/2, slotY = 272, startY = 128;
-    const spinAngle = elapsed * 3 * Math.PI * 2;
-    const rX = Math.max(2, Math.abs(Math.cos(spinAngle)) * 18), rY = 18;
+    // Coin drop animation
+    // Cycle: DROP=1.4s fall, ENTER=0.28s slot entry, rest = pause
+    const CYCLE = 3.2, DROP = 1.4, ENTER = 0.28;
+    const t = elapsed % CYCLE;
+    const coinX = CW/2, slotY = 272, startY = 122, rY = 18;
 
+    // Spin: tied to drop progress (not wall-clock) so entry is always face-on.
+    // 1.5 revolutions during DROP means spinAngle ends at 3pi -> |cos(3pi)|=1 -> full face.
+    const dropProgress = Math.min(t, DROP) / DROP; // 0->1 during drop, frozen after
+    const spinAngle = dropProgress * 1.5 * Math.PI * 2;
+    const rX = Math.max(2, Math.abs(Math.cos(spinAngle)) * rY);
+
+    // Fall: cubic ease-in (slow start, fast end = realistic gravity)
     let coinY = startY, showCoin = true;
-    if (t < 1.0) {
-        const p = t / 1.0; coinY = startY + (slotY - startY - rY) * p * p;
-    } else if (t < 1.25) {
-        coinY = slotY - rY + rY * ((t - 1.0) / 0.25); // enters slot
+    if (t < DROP) {
+        const p = t / DROP;
+        coinY = startY + (slotY - startY - rY) * p * p * p;
+    } else if (t < DROP + ENTER) {
+        const p = (t - DROP) / ENTER;
+        coinY = (slotY - rY) + rY * p; // slides into slot
     } else {
         showCoin = false;
     }
 
-    // Slot housing
-    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(coinX - 28, slotY - 8, 56, 16);
-    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(coinX - 24, slotY - 5, 48, 10);
-    ctx.fillStyle = '#000';    ctx.fillRect(coinX - 10, slotY - 4, 20, 8);
+    // Slot housing (wider than coin face = 2*rY = 36px, opening is 44px)
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(coinX - 46, slotY - 9, 92, 18);
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(coinX - 42, slotY - 6, 84, 12);
+    ctx.fillStyle = '#111';    ctx.fillRect(coinX - 22, slotY - 5, 44, 10);
 
     if (showCoin) {
         ctx.save();
-        if (t >= 1.0) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
+        // Clip coin below slot line so it disappears as it enters
+        if (t >= DROP) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
+
+        // Drop shadow
         ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.beginPath(); ctx.ellipse(coinX+2, coinY+3, rX, rY*0.35, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(coinX+2, coinY+3, rX, rY*0.3, 0, 0, Math.PI*2); ctx.fill();
+
+        // Coin body
         ctx.fillStyle = '#ffd700';
         ctx.beginPath(); ctx.ellipse(coinX, coinY, rX, rY, 0, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2;
-        ctx.stroke();
-        if (rX > 5) {
+        ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2; ctx.stroke();
+
+        // Inner rim (only when face is wide enough to show it)
+        if (rX > 7) {
             ctx.strokeStyle = '#ffe97a'; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.ellipse(coinX, coinY, rX-5, rY-5, 0, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.ellipse(coinX, coinY, rX - 5, rY - 5, 0, 0, Math.PI*2); ctx.stroke();
         }
         ctx.restore();
     }
 
-    // Flash on insert
-    if (t >= 1.0 && t < 1.35) {
-        const f = 1 - (t - 1.0) / 0.35;
-        ctx.fillStyle = `rgba(255,215,0,${f * 0.35})`;
-        ctx.fillRect(coinX-35, slotY-24, 70, 48);
+    // Golden flash on insert
+    if (t >= DROP && t < DROP + 0.4) {
+        const f = 1 - (t - DROP) / 0.4;
+        ctx.fillStyle = `rgba(255,215,0,${f * 0.32})`;
+        ctx.fillRect(coinX - 46, slotY - 28, 92, 56);
     }
 
     // INSERT COIN blinking text
@@ -1829,7 +1844,7 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 // so deliberate re-moves after a pause feel as responsive as the first direction.
 // Splash: any pointer or touch on canvas exits splash and unlocks audio
 canvas.addEventListener('pointerdown', e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(); } });
-canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(); } }, { passive: false });
+canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(); splashTouchActive = true; } }, { passive: false });
 
 const SWIPE_1=30, SWIPE_N=40, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
@@ -1896,7 +1911,7 @@ document.getElementById('btn-esc').addEventListener('touchstart',e=>{e.preventDe
 document.getElementById('btn-esc').addEventListener('click',()=>handleKey('Escape',null));
 
 // Canvas swipe: direction fires immediately on touchmove threshold (not on touchend) for low latency
-let touchStart=null, swipeFired=false;
+let touchStart=null, swipeFired=false, splashTouchActive=false;
 canvas.addEventListener('touchstart',e=>{
     e.preventDefault(); Snd.resume();
     if(phase==='nameEntry'){ nameInp.focus(); return; }
@@ -1913,6 +1928,7 @@ canvas.addEventListener('touchmove',e=>{
     else         handleKey(dy>0?'ArrowDown':'ArrowUp',null);
 },{passive:false});
 canvas.addEventListener('touchend',e=>{
+    if(splashTouchActive){ splashTouchActive=false; touchStart=null; swipeFired=false; return; }
     if(!touchStart) return;
     if(!swipeFired){
         // short tap: treat as confirm/enter
