@@ -1098,7 +1098,7 @@ function drawMenu() {
     ctx.save();
     ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
-    ctx.fillText('v1.0', 10, CH-8);
+    ctx.fillText('v1', 10, CH-8);
     ctx.textAlign='center';
     ctx.fillText('UP/DOWN  |  ENTER to select', CW/2, CH-8);
     ctx.fillStyle='#ffd700'; ctx.textAlign='right';
