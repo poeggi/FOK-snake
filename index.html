@@ -1093,7 +1093,7 @@ function drawSettings() {
         'TOUCH SELECT: '+(cfg.touchSelect?'ON':'OFF'),
         'BACK',
     ];
-    const startY=46, rowH=32;
+    const startY=58, rowH=32;
     items.forEach((item,i)=>menuItem(item,startY+i*rowH,i===settingsSel));
     // Volume bar when selected
     if(settingsSel===2){
