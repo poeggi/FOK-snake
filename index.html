@@ -1684,7 +1684,10 @@ function leaveSplash() {
 
 function handleKey(key, pde) {
     if (phase === 'splash') {
-        if (key === 'Escape' || key === 'Tab') return;
+        // Only meaningful keys exit splash; F-keys/Escape/modifiers fall through so
+        // the browser still handles F5 (refresh), F11 (fullscreen), etc.
+        const splashOk = key.length === 1 || key === 'Enter' || key.startsWith('Arrow') || key === 'Backspace';
+        if (!splashOk) return;
         leaveSplash(); if (pde) pde(); return;
     }
     Snd.resume();
