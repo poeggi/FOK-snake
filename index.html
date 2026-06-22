@@ -307,7 +307,7 @@ const ctx = canvas.getContext('2d');
 // ================================================================
 const Snd = (() => {
     let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5, _justInited = false;
-    let chState = [], curTrack = null, isPaused = false;
+    let chState = [], curTrack = null, isPaused = false, _bgSuspended = false;
 
     const SEQ = {
         // NEW style (3-channel)
@@ -478,12 +478,24 @@ const Snd = (() => {
         if (!ac) { init(); }
         if (ac && ac.state === 'suspended') {
             ac.resume().then(() => {
-                // Only restart note scheduling — do NOT touch mGain here.
-                // play() already scheduled the 1-second linear fade-in and owns mGain.
                 if (curTrack && SEQ[curTrack]) {
                     chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
                 }
+                // Restore gain only if we muted it for background suspension.
+                // Do NOT touch mGain when resuming from splash (play() owns the fade-in there).
+                if (_bgSuspended && !isPaused && curTrack) {
+                    _bgSuspended = false;
+                    mGain.gain.cancelScheduledValues(ac.currentTime);
+                    mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+                }
             });
+        } else if (_bgSuspended) {
+            // AC wasn't auto-suspended by browser but we silenced the gain; restore it.
+            _bgSuspended = false;
+            if (!isPaused && curTrack) {
+                mGain.gain.cancelScheduledValues(ac.currentTime);
+                mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+            }
         }
     }
 
@@ -527,7 +539,14 @@ const Snd = (() => {
         }
     }
     function setSfxVol(v){ _sfxVol=v; if(sGain) sGain.gain.value=0.58*v; }
-    function suspend() { if (ac && ac.state === 'running') ac.suspend(); }
+    function suspend() {
+        if (!ac || ac.state !== 'running') return;
+        // Fade to silence first so the hard suspension doesn't clip oscillators mid-cycle.
+        mGain.gain.cancelScheduledValues(ac.currentTime);
+        mGain.gain.setTargetAtTime(0, ac.currentTime, 0.02);
+        _bgSuspended = true;
+        setTimeout(() => { try { if (ac && ac.state === 'running') ac.suspend(); } catch(e){} }, 120);
+    }
     return { init, tick, play, stop, pauseMusic, resumeMusic, resume, sfx, setVol, setSfxVol, suspend };
 })();
 
