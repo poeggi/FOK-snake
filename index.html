@@ -1681,7 +1681,10 @@ function leaveSplash() {
 }
 
 function handleKey(key, pde) {
-    if (phase === 'splash') { leaveSplash(); if (pde) pde(); return; }
+    if (phase === 'splash') {
+        if (key === 'Escape' || key === 'Tab') return;
+        leaveSplash(); if (pde) pde(); return;
+    }
     Snd.resume();
 
     // Global: mute (suppressed during name entry so M is typeable)
