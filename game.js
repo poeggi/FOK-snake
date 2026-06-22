@@ -1386,7 +1386,7 @@ function drawShop() {
 
 function drawCredits() {
     drawGrid(); drawOvBg(0.93);
-    ctx.save(); ctx.beginPath(); ctx.rect(0,0,CW,CH); ctx.clip();
+    ctx.save(); ctx.beginPath(); ctx.rect(0,0,CW,CH-24); ctx.clip();
     let y = creditsScroll;
     for (const [type, val] of CRED) {
         if (type === 'gap') { y += val; continue; }
@@ -1819,7 +1819,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { e.preventDefault(); leaveSplash(true); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
-const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=40, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
+const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0;
 canvas.addEventListener('touchstart',e=>{
@@ -1841,7 +1841,7 @@ canvas.addEventListener('touchmove',e=>{
     const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
     if(ang>=DZ_LO&&ang<=DZ_HI) return;
     const key=ang<DZ_LO?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
-    // opposite or first: 20px; 90-deg turn: 30px; same dir: 40px (boost prevention)
+    // opposite or first: 20px; 90-deg turn: 30px; same dir: 50px (boost prevention)
     const thresh=(!_swipeLastDir||_isOpp(key,_swipeLastDir))?SWIPE_1:key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
     if(dist<thresh) return;
     handleKey(key,null);
