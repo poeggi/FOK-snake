@@ -1863,7 +1863,7 @@ canvas.addEventListener('touchend',e=>{
     if(_splashTouchPending){ _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null; return; }
     if(_swipeBase){
         const t=e.changedTouches[0];
-        if(Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&phase!=='playing'&&cfg.touchSelect) handleKey('Enter',null);
+        if(Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&phase!=='playing'&&cfg.touchSelect) handleKey('Enter',null);
     }
     _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null;
     if(phase==='playing'){boostDir=null;boosting=false;}
