@@ -914,7 +914,7 @@ function drawSplash(now) {
     // Coin drop animation
     // Cycle: DROP=1.4s fall, ENTER=0.28s slot entry, rest = pause
     const CYCLE = 3.2, DROP = 1.4, ENTER = 0.28;
-    const t = elapsed % CYCLE;
+    const t = (elapsed + DROP + ENTER) % CYCLE;
     const coinX = CW/2, slotY = 292, startY = 152;
 
     // Spin: tied to drop progress so entry is always face-on.
