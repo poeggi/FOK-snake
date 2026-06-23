@@ -912,41 +912,46 @@ function drawSplash(now) {
     ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', 8);
 
     // Coin drop animation
-    // Cycle: DROP=1.4s fall, ENTER=0.28s slot entry, rest = pause
-    const CYCLE = 3.2, DROP = 1.4, ENTER = 0.28;
-    const t = (elapsed + DROP + ENTER) % CYCLE;
+    // Cycle order: dark lead | DROP fall | ENTER slot entry | INSERT COIN blink | dark tail (1 frame)
+    const DARK_LEAD = 0.5, DROP = 1.4, ENTER = 0.28, DARK_TAIL = 0.017;
+    const CYCLE = DARK_LEAD + DROP + ENTER + 1.0 + DARK_TAIL;
+    const t = elapsed % CYCLE;
     const coinX = CW/2, slotY = 292, startY = 152;
 
-    // Spin: tied to drop progress so entry is always face-on.
-    // 1.5 revolutions -> spinAngle ends at 3pi -> |cos(3pi)|=1 -> full face at slot.
-    const dropProgress = Math.min(t, DROP) / DROP;
+    const T_DROP  = DARK_LEAD;
+    const T_ENTER = DARK_LEAD + DROP;
+    const T_DONE  = DARK_LEAD + DROP + ENTER;
+    const T_TAIL  = CYCLE - DARK_TAIL;
+
+    // Spin angle tied to drop progress so entry is always face-on
+    const dropT = t - T_DROP;
+    const dropProgress = Math.min(Math.max(dropT, 0), DROP) / DROP;
     const spinAngle = dropProgress * 1.5 * Math.PI * 2;
     const scaleX = Math.max(0.08, Math.abs(Math.cos(spinAngle)));
 
     // Fall: cubic ease-in (slow start, fast end = realistic gravity)
-    let coinY = startY, showCoin = true;
-    if (t < DROP) {
-        const p = t / DROP;
-        coinY = startY + (slotY - startY - 18) * p * p * p;
-    } else if (t < DROP + ENTER) {
-        const p = (t - DROP) / ENTER;
-        coinY = (slotY - 18) + 18 * p;
-    } else {
-        showCoin = false;
+    let coinY = startY, showCoin = false;
+    if (t >= T_DROP && t < T_DONE) {
+        showCoin = true;
+        if (dropT < DROP) {
+            const p = dropT / DROP;
+            coinY = startY + (slotY - startY - 18) * p * p * p;
+        } else {
+            const p = (dropT - DROP) / ENTER;
+            coinY = (slotY - 18) + 18 * p;
+        }
     }
 
-    // Slot housing (44px opening, wider than coin face = 36px)
+    // Slot housing always drawn (44px opening, wider than coin face = 36px)
     ctx.fillStyle = '#1a1a1a'; ctx.fillRect(coinX - 46, slotY - 9, 92, 18);
     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(coinX - 42, slotY - 6, 84, 12);
     ctx.fillStyle = '#111';    ctx.fillRect(coinX - 22, slotY - 5, 44, 10);
 
     if (showCoin) {
         ctx.save();
-        if (t >= DROP) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
-        // Shadow in screen coords before applying coin transform
+        if (t >= T_ENTER) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.beginPath(); ctx.ellipse(coinX+3, coinY+5, 18*scaleX, 5, 0, 0, Math.PI*2); ctx.fill();
-        // Pixel coin: translate to center, squish x-axis for spin, draw 12x12 grid at 3px/pixel
         ctx.translate(coinX, coinY);
         ctx.scale(scaleX, 1);
         const coinFace = Math.cos(spinAngle) >= 0 ? COIN_ONE : COIN_STAR;
@@ -971,18 +976,20 @@ function drawSplash(now) {
         ctx.restore();
     }
 
-    // Golden flash on insert
-    if (t >= DROP && t < DROP + 0.4) {
-        const f = 1 - (t - DROP) / 0.4;
+    // Golden flash on insert — only during ENTER phase
+    if (t >= T_ENTER && t < T_ENTER + 0.4) {
+        const f = 1 - (t - T_ENTER) / 0.4;
         ctx.fillStyle = `rgba(255,215,0,${f * 0.32})`;
         ctx.fillRect(coinX - 46, slotY - 28, 92, 56);
     }
 
-    // INSERT COIN blinking
-    if (Math.floor(elapsed * 1.5) % 2 === 0) {
-        ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 18;
-        ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
-        ctx.shadowBlur = 0;
+    // INSERT COIN blinking — only between done and tail (hidden during lead, coin, and tail)
+    if (t >= T_DONE && t < T_TAIL) {
+        if (Math.floor(elapsed * 1.5) % 2 === 0) {
+            ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 18;
+            ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
+            ctx.shadowBlur = 0;
+        }
     }
 
     // Bottom hint: matches menu bottom bar style
