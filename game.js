@@ -603,7 +603,8 @@ function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luck
 function beginLevel() {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
     speed = Math.round(lcfg.speed * d.sm);
-    const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2), sl=startLen(level);
+    const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
+    const sl = (level > 1 && cfg.diff === 2) ? snake.length : startLen(level);
     snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
     phase='levelReady'; stepAt=0; phaseAt=performance.now();
