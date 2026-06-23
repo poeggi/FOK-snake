@@ -42,15 +42,23 @@ const DEATH_DUR = 900, LEVELDONE_DUR = 1400, READY_DUR = 1000, GO_DUR = 300;
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';
 
-const LEVEL_CFG = Array.from({ length: MAX_LEVELS }, (_, i) => ({
-    speed: Math.round(220 - i * 15),
-    bars: i * 2,
-}));
+const LEVEL_CFG = [
+    { easy:260, normal:210, hard:150, bars:0  },
+    { easy:240, normal:190, hard:140, bars:2  },
+    { easy:220, normal:180, hard:130, bars:4  },
+    { easy:210, normal:160, hard:120, bars:6  },
+    { easy:190, normal:150, hard:110, bars:8  },
+    { easy:170, normal:140, hard:100, bars:10 },
+    { easy:150, normal:120, hard:90,  bars:12 },
+    { easy:140, normal:110, hard:80,  bars:14 },
+    { easy:120, normal:90,  hard:70,  bars:16 },
+    { easy:100, normal:80,  hard:60,  bars:18 },
+];
 
 const DIFF = [
-    { sm: 1.2,  bm: 0.4,  label: 'EASY'   },
-    { sm: 1.0,  bm: 1.0,  label: 'NORMAL' },
-    { sm: 0.62, bm: 1.6,  label: 'HARD'   },
+    { bm: 0.4,  label: 'EASY'   },
+    { bm: 1.0,  label: 'NORMAL' },
+    { bm: 1.6,  label: 'HARD'   },
 ];
 
 const SNAKE_COLORS = [

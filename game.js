@@ -486,7 +486,7 @@ function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luck
 
 function beginLevel() {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
-    speed = Math.round(lcfg.speed * d.sm);
+    speed = lcfg[['easy','normal','hard'][cfg.diff]];
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
     const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
     _levelStartLen = sl;
@@ -1917,7 +1917,7 @@ function loop(now) {
         if(boostDir&&boostDir.x===dir.x&&boostDir.y===dir.y&&dirQueue.length===0){
             if(!boosting&&now-boostSince>=BOOST_GRACE&&cfg.turbo!==false)boosting=true;
         }else boosting=false;
-        if(now>=stepAt){const es=boosting?Math.max(40,Math.round(speed/2)):speed;stepAt=now+es;step(now);}
+        if(now>=stepAt){const es=boosting?Math.max(40,Math.round(speed/20)*10):speed;stepAt=now+es;step(now);}
     }
     if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
         phase='playing'; stepAt=now+speed; spawnAt=now; phaseAt=0;
