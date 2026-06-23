@@ -1002,7 +1002,7 @@ function drawMenu() {
     ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',8);
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
-    ct(`DIFF: ${DIFF[cfg.diff].label}  |  MUSIC: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#555',8);
+    ct(`DIFF: ${DIFF[cfg.diff].label}  |  AUDIO: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#555',8);
     // Bottom bar: version left, hint center, FOKoins right — all same font as FOK EDITION
     const coins=_cachedFOKoins;
     ctx.save();
@@ -1023,7 +1023,7 @@ function drawSettings() {
     const vol=Math.round((cfg.volume??1)*10);
     const sfxv=Math.round((cfg.sfxVol??0.5)*10);
     const items = [
-        'MUSIC: '+(cfg.music?'ON':'OFF'),
+        'AUDIO: '+(cfg.music?'ON':'OFF'),
         'MUSIC STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
         'VOLUME: '+Math.round((cfg.volume??1)*100)+'%',
         'SFX VOL: '+Math.round((cfg.sfxVol??0.5)*100)+'%',
