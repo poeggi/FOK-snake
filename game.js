@@ -73,7 +73,7 @@ const Snd = (() => {
             ]},
         ]},
         // CLASSIC style (2-channel, original tracks)
-        classicMenu: { bpm: 100, channels: [
+        classicMenu: { bpm: 85, channels: [
             { fn:'square', vol:0.30, notes:[
                 [659,0.25],[784,0.25],[659,0.25],[523,0.25],
                 [440,0.25],[523,0.25],[659,0.25],[587,0.25],
@@ -90,7 +90,7 @@ const Snd = (() => {
                 [175,0.5],[0,0.5],[131,1.0],
             ]},
         ]},
-        classicGame: { bpm: 120, channels: [
+        classicGame: { bpm: 100, channels: [
             { fn:'square', vol:0.30, notes:[
                 [440,0.25],[0,0.125],[494,0.125],[523,0.25],[494,0.25],
                 [440,0.5],[0,0.25],[440,0.25],

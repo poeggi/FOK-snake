@@ -18,6 +18,7 @@ body {
     width: min(600px, calc(100vw - 16px));
     font-size: 12px; letter-spacing: 0;
     opacity: 1; transition: opacity 0.15s;
+    order: 1;
 }
 #hud.hidden { opacity: 0; pointer-events: none; }
 .hud-row { display: flex; justify-content: space-between; width: 100%; }
@@ -27,6 +28,7 @@ body {
 #topbar {
     width: min(600px, calc(100vw - 16px));
     display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
+    order: 2;
 }
 #fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; }
 #btn-mute {
@@ -38,9 +40,9 @@ body {
 #btn-mute canvas { image-rendering: pixelated; display: block; }
 #btn-mute:hover { border-color: #7fff7f; }
 #btn-mute.muted { border-color: #5a2a2a; }
-#wrap { width: min(600px, calc(100vw - 16px)); }
+#wrap { width: min(600px, calc(100vw - 16px)); order: 3; }
 #c { display: block; width: 100%; height: auto; border: 1px solid #2a2a4e; touch-action: none; }
-#gamepad { display: none; align-items: center; justify-content: center; gap: 26px; }
+#gamepad { display: none; align-items: center; justify-content: center; gap: 26px; order: 4; }
 @media (pointer: coarse) { #gamepad { display: flex; } }
 #gamepad.splash #left-btns, #gamepad.splash #dpad-c { opacity: 0.2; }
 #dpad-c { width: min(120px, 33vw); height: min(120px, 33vw); touch-action: none; display: block; }
@@ -78,7 +80,7 @@ body {
         position: relative;
         padding: 16px 0;
     }
-    #topbar { width: auto; padding: 0; gap: 8px; }
+    #topbar { width: auto; padding: 0; gap: 8px; order: 0; }
     #fps-el { position: absolute; bottom: 16px; left: 0; }
     #hud { width: auto; flex-direction: column; gap: 8px; }
     .hud-row { flex-direction: column; gap: 8px; }
