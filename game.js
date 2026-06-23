@@ -1773,12 +1773,12 @@ canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { leaveSpl
 const nameInp = document.getElementById('name-inp');
 const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
-let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0;
+let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false;
 canvas.addEventListener('touchstart',e=>{
     Snd.resume(); e.preventDefault();
     if(phase==='nameEntry'){ nameInp.focus(); }
     const t=e.touches[0];
-    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now();
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false;
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
@@ -1796,7 +1796,7 @@ canvas.addEventListener('touchmove',e=>{
     // opposite or first: 20px (30px while boosting); 90-deg turn: 30px; same dir: 50px (boost prevention)
     const thresh=(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(boosting?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
     if(dist<thresh) return;
-    handleKey(key,null);
+    _swipedThisTouch=true; handleKey(key,null);
     if(phase==='playing'){
         const d=GDIRS[key];
         if(d){
@@ -1812,7 +1812,7 @@ canvas.addEventListener('touchend',e=>{
     if(_splashTouchPending){ _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null; return; }
     if(_swipeBase){
         const t=e.changedTouches[0];
-        const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&performance.now()-_swipeTouchStartAt>40;
+        const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
         if(phase!=='playing'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
     }
     _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null;
