@@ -11,17 +11,31 @@ const SPEAKER_ON  = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,1],[1,1,1,1,0,0,1,0],[1,1,
 const SPEAKER_OFF = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,0],[1,1,1,1,0,1,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,1],[0,0,1,1,0,0,0,0],[0,0,0,1,0,0,0,0]];
 // 12x12 at 3px/pixel = 36x36 total (matches rY=18). Same cell size as heart/speaker after CSS scale.
 // 1=dark rim (#b8860b), 2=face gold (#ffd700), 3=inner groove (#cc8800).
-const COIN_PX = [
+const COIN_ONE=[
     [0,0,0,1,1,1,1,1,1,0,0,0],
     [0,0,1,1,2,2,2,2,1,1,0,0],
+    [0,1,1,2,2,3,3,2,2,1,1,0],
+    [1,1,2,2,3,3,3,2,2,2,1,1],
+    [1,2,2,2,2,3,3,2,2,2,2,1],
+    [1,2,2,2,2,3,3,2,2,2,2,1],
+    [1,2,2,2,2,3,3,2,2,2,2,1],
+    [1,2,2,2,2,3,3,2,2,2,2,1],
+    [1,1,2,3,3,3,3,3,2,2,1,1],
     [0,1,1,2,2,2,2,2,2,1,1,0],
+    [0,0,1,1,2,2,2,2,1,1,0,0],
+    [0,0,0,1,1,1,1,1,1,0,0,0],
+];
+const COIN_STAR=[
+    [0,0,0,1,1,1,1,1,1,0,0,0],
+    [0,0,1,1,2,2,2,2,1,1,0,0],
+    [0,1,1,2,2,3,3,2,2,1,1,0],
     [1,1,2,2,3,3,3,3,2,2,1,1],
-    [1,2,2,3,2,2,2,2,3,2,2,1],
-    [1,2,2,3,2,2,2,2,3,2,2,1],
-    [1,2,2,3,2,2,2,2,3,2,2,1],
-    [1,2,2,3,2,2,2,2,3,2,2,1],
+    [1,2,2,2,2,3,3,2,2,2,2,1],
+    [1,2,3,3,3,3,3,3,3,3,2,1],
+    [1,2,3,3,3,3,3,3,3,3,2,1],
+    [1,2,2,2,2,3,3,2,2,2,2,1],
     [1,1,2,2,3,3,3,3,2,2,1,1],
-    [0,1,1,2,2,2,2,2,2,1,1,0],
+    [0,1,1,2,2,3,3,2,2,1,1,0],
     [0,0,1,1,2,2,2,2,1,1,0,0],
     [0,0,0,1,1,1,1,1,1,0,0,0],
 ];
@@ -1068,9 +1082,23 @@ function drawSplash(now) {
         // Pixel coin: translate to center, squish x-axis for spin, draw 12x12 grid at 3px/pixel
         ctx.translate(coinX, coinY);
         ctx.scale(scaleX, 1);
-        COIN_PX.forEach((row, ry) => row.forEach((p, rx) => {
+        const coinFace = Math.cos(spinAngle) >= 0 ? COIN_ONE : COIN_STAR;
+        const hlCol = 5.5 + (Math.cos(spinAngle) < 0 ? -1 : 1) * 5 * Math.sin(spinAngle);
+        const faceOn = Math.abs(Math.cos(spinAngle));
+        coinFace.forEach((row, ry) => row.forEach((p, rx) => {
             if (!p) return;
-            ctx.fillStyle = p === 1 ? '#b8860b' : p === 2 ? '#ffd700' : '#cc8800';
+            const edgeDark = 1 - 0.32 * Math.hypot((rx-5.5)/5.5, (ry-5.5)/5.5);
+            const gd = rx - hlCol;
+            const glare = faceOn * 0.7 * Math.exp(-gd*gd / 5);
+            let r, g, b;
+            if (p === 1) {
+                r=(118+55*glare)*edgeDark; g=(78+38*glare)*edgeDark; b=(4+16*glare)*edgeDark;
+            } else if (p === 2) {
+                r=Math.min(255,(205+50*glare)*edgeDark); g=Math.min(255,(145+70*glare)*edgeDark); b=Math.min(255,(8+22*glare)*edgeDark);
+            } else {
+                r=Math.min(255,255*edgeDark+8*glare); g=Math.min(255,(220+35*glare)*edgeDark); b=Math.min(255,(52+48*glare)*edgeDark);
+            }
+            ctx.fillStyle=`rgb(${r|0},${g|0},${b|0})`;
             ctx.fillRect(-18 + rx*3, -18 + ry*3, 3, 3);
         }));
         ctx.restore();
