@@ -568,7 +568,7 @@ Snd.setSfxVol(cfg.sfxVol ?? 0.5);
 function applyHandedness() { document.body.classList.toggle('lefty', cfg.handed === 1); }
 applyHandedness();
 
-let level, lives, score;
+let level, lives, score, _levelStartLen = 0;
 let snake, dir, dirQueue;
 let gem, gemsDone, bars;
 let speed, stepAt, phaseAt = performance.now(), gemAt, deathMsg, pauseAt;
@@ -600,13 +600,14 @@ function freeCell(blocked) {
     return p;
 }
 
-function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; beginLevel(); }
+function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; beginLevel(); }
 
 function beginLevel() {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
     speed = Math.round(lcfg.speed * d.sm);
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
-    const sl = (level > 1 && cfg.diff === 2) ? snake.length : startLen(level);
+    const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
+    _levelStartLen = sl;
     snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
     phase='levelReady'; stepAt=0; phaseAt=performance.now();
@@ -1785,7 +1786,7 @@ function handleKey(key, pde) {
     else if(phase==='levelDone'){
         if(levelDoneWaiting){
             levelDoneWaiting=false;
-            if(level<MAX_LEVELS){level++;beginLevel();}
+            if(level<MAX_LEVELS){_levelStartLen=cfg.diff===2?snake.length:0;level++;beginLevel();}
             else{phase='nameEntry';nameStr='';nameCharIdx=0;nameReason='win';showHUD(false);Snd.stop();}
             if(pde)pde();
         }
