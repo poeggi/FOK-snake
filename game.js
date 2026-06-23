@@ -73,7 +73,7 @@ const Snd = (() => {
             ]},
         ]},
         // CLASSIC style (2-channel, original tracks)
-        classicMenu: { bpm: 85, channels: [
+        classicMenu: { bpm: 60, channels: [
             { fn:'square', vol:0.30, notes:[
                 [659,0.25],[784,0.25],[659,0.25],[523,0.25],
                 [440,0.25],[523,0.25],[659,0.25],[587,0.25],
