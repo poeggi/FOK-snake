@@ -1243,7 +1243,7 @@ function drawAchievements() {
     const onExpert=expert&&achPage===0;
     const list=onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
     const titleColor=onExpert?'#ff8800':'#7fff7f';
-    ctx.shadowColor=titleColor; ctx.shadowBlur=16; ct('ACHIEVEMENTS',CW/2,26,titleColor,16); ctx.shadowBlur=0;
+    ctx.shadowColor=titleColor; ctx.shadowBlur=20; ct('ACHIEVEMENTS',CW/2,28,titleColor,18); ctx.shadowBlur=0;
     if(expert){
         ct(onExpert?'< EXPERT  1/2 >':'< BASE  2/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',8);
     } else if(allBase&&!donated){
