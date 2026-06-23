@@ -35,7 +35,7 @@ const LEVEL_CFG = Array.from({ length: MAX_LEVELS }, (_, i) => ({
 }));
 
 const DIFF = [
-    { sm: 1.6,  bm: 0.4,  label: 'EASY'   },
+    { sm: 1.2,  bm: 0.4,  label: 'EASY'   },
     { sm: 1.0,  bm: 1.0,  label: 'NORMAL' },
     { sm: 0.62, bm: 1.6,  label: 'HARD'   },
 ];
