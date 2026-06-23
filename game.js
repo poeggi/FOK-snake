@@ -959,7 +959,7 @@ function drawSplash(now) {
             const glare = faceOn * 0.7 * Math.exp(-gd*gd / 5);
             let r, g, b;
             if (p === 1) {
-                r=(118+55*glare)*edgeDark; g=(78+38*glare)*edgeDark; b=(4+16*glare)*edgeDark;
+                r=(168+55*glare)*edgeDark; g=(118+38*glare)*edgeDark; b=(6+16*glare)*edgeDark;
             } else if (p === 2) {
                 r=Math.min(255,(205+50*glare)*edgeDark); g=Math.min(255,(145+70*glare)*edgeDark); b=Math.min(255,(8+22*glare)*edgeDark);
             } else {
