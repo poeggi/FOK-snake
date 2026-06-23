@@ -1907,7 +1907,7 @@ canvas.addEventListener('touchmove',e=>{
         if(d){
             if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){clearBoost();}
             else if(_swipeLastDir&&key===_swipeLastDir){boostDir=d;boosting=true;boostSince=performance.now();}
-            else{clearBoost();} // first swipe or 90-deg turn: no boost
+            else if(!(boosting&&boostDir&&d.x===boostDir.x&&d.y===boostDir.y)){clearBoost();} // first swipe or 90-deg turn: no boost
         }
     }
     _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
