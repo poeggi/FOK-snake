@@ -985,7 +985,7 @@ function drawSplash(now) {
 
     // INSERT COIN blinking — hidden during dark lead and dark tail, blinks throughout the rest
     if (t >= DARK_LEAD && t < T_TAIL) {
-        if (Math.floor(elapsed * 1.5) % 2 === 0) {
+        if (Math.floor((t - DARK_LEAD) * 1.5) % 2 === 0) {
             ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 18;
             ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
             ctx.shadowBlur = 0;
