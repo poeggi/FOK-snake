@@ -1,6 +1,6 @@
 // Bump this string with every deployment to force cache refresh on all clients
 const CACHE = 'snake-v1.26';
-const ASSETS = ['./', './manifest.json', './icon.svg', './fonts/PressStart2P-Regular.woff2', './style.css', './game.js'];
+const ASSETS = ['./', './manifest.json', './icon.svg', './fonts/PressStart2P-Regular.woff2', './style.css', './assets.js', './game.js'];
 
 self.addEventListener('install', e => {
     e.waitUntil(
