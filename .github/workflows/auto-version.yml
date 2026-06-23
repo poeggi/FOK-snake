@@ -1,0 +1,43 @@
+name: Auto version bump
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: ver
+        run: |
+          LATEST_TAG=$(git tag -l 'v[0-9]*' --sort=-version:refname | grep -E '^v[0-9]+$' | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            MAJOR=1
+            MINOR=$(git log --oneline | grep -vc "Auto-bump version")
+          else
+            MAJOR=${LATEST_TAG#v}
+            MINOR=$(git log "${LATEST_TAG}..HEAD" --oneline | grep -vc "Auto-bump version")
+          fi
+          echo "cache=snake-v${MAJOR}.${MINOR}" >> $GITHUB_OUTPUT
+          echo "display=v${MAJOR}.${MINOR}" >> $GITHUB_OUTPUT
+
+      - name: Update SW cache string
+        run: |
+          sed -i "s/const CACHE = 'snake-v[^']*'/const CACHE = '${{ steps.ver.outputs.cache }}'/" sw.js
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet sw.js || (
+            git add sw.js &&
+            git commit -m "Auto-bump version to ${{ steps.ver.outputs.display }}" &&
+            git push
+          )
