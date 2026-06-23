@@ -82,7 +82,7 @@ body {
     }
     #topbar { width: auto; padding: 0; gap: 8px; order: 0; }
     #fps-el { position: absolute; bottom: 16px; left: 0; }
-    #hud { width: auto; flex-direction: column; gap: 8px; }
+    #hud { width: auto; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: auto; }
     .hud-row { flex-direction: column; gap: 8px; }
     .hud-row > span { display: flex; flex-direction: column; gap: 2px; }
     #lives-group { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 3px; }
