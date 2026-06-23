@@ -1900,6 +1900,10 @@ updateMuteBtn();
 
 // ================================================================
 // MAIN LOOP
+// TODO(multiplayer): game logic (tick check, phase transitions) is coupled to
+// RAF/rendering. For multiplayer, decouple into a fixed-timestep logic loop
+// (setInterval or manual accumulator) so game state advances independently of
+// display refresh rate and can be driven/validated by a server clock.
 // ================================================================
 function loop(now) {
     requestAnimationFrame(loop);
