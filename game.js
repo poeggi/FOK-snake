@@ -1412,12 +1412,12 @@ function drawGameBoard(now) {
         drawOvBg(0.72);
         if(!goPhase){
             ctx.shadowColor='#7fff7f'; ctx.shadowBlur=20;
-            ct(`LEVEL ${level}`,CW/2,CH/2-26,'#7fff7f',18); ctx.shadowBlur=0;
-            ct('GET READY',CW/2,CH/2+30,'#aaa',14);
+            ct(`LEVEL ${level}`,CW/2,CH/2-18,'#7fff7f',18); ctx.shadowBlur=0;
+            ct('GET READY',CW/2,CH/2+38,'#aaa',14);
         } else {
             const a=Math.min(1,(t-READY_DUR)/80);
             ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#ffff44'; ctx.shadowBlur=30;
-            ct('GO!',CW/2,CH/2,'#ffff44',28); ctx.shadowBlur=0; ctx.restore();
+            ct('GO!',CW/2,CH/2+10,'#ffff44',28); ctx.shadowBlur=0; ctx.restore();
         }
     }
     if(dying){
@@ -1428,7 +1428,7 @@ function drawGameBoard(now) {
     if(phase==='paused'){
         drawOvBg(0.55);
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=24;
-        ct('PAUSED',CW/2,CH/2,'#7fff7f',28); ctx.shadowBlur=0;
+        ct('PAUSED',CW/2,CH/2+10,'#7fff7f',28); ctx.shadowBlur=0;
         ctx.save(); ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
         ctx.fillStyle='#4a7a4a'; ctx.fillText('SPACE / PSE to resume   ESC to quit menu',CW/2,CH-8); ctx.restore();
     }
@@ -1451,13 +1451,13 @@ function drawGameBoard(now) {
 function drawConfirmYesNo(title, sel) {
     const YES_X=CW/2-80, NO_X=CW/2+80;
     ctx.shadowColor='#ff9900'; ctx.shadowBlur=18;
-    ct(title,CW/2,CH/2-26,'#ff9900',18); ctx.shadowBlur=0;
+    ct(title,CW/2,CH/2-18,'#ff9900',18); ctx.shadowBlur=0;
     ctx.globalAlpha=sel===0?1:0.35;
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=sel===0?14:0;
-    ct(sel===0?'> YES <':'  YES  ',YES_X,CH/2+30,'#7fff7f',14);
+    ct(sel===0?'> YES <':'  YES  ',YES_X,CH/2+38,'#7fff7f',14);
     ctx.globalAlpha=sel===1?1:0.35;
     ctx.shadowColor='#ff5555'; ctx.shadowBlur=sel===1?14:0;
-    ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+30,'#ff5555',14);
+    ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',14);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
     ctx.save(); ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center';
     ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT to choose   ENTER confirm   ESC cancel',CW/2,CH-8); ctx.restore();
