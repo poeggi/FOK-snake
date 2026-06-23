@@ -578,6 +578,7 @@ let perfectLevel = true, levelWasPerfect = false, fireworks = [];
 let levelBonusCount = 0, epicLevelCount = 0;
 let boostDir=null, boostSince=0, boosting=false;
 const BOOST_GRACE=180;
+function clearBoost(){boostDir=null;boosting=false;}
 let perfectCount = 0, luckyCount = 0;
 let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameReason = '';
@@ -613,7 +614,7 @@ function beginLevel() {
     phase='levelReady'; stepAt=0; phaseAt=performance.now();
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
-    boosting=false; boostDir=null;
+    clearBoost();
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
@@ -1904,9 +1905,9 @@ canvas.addEventListener('touchmove',e=>{
     if(phase==='playing'){
         const d=GDIRS[key];
         if(d){
-            if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){boostDir=null;boosting=false;}
-            else if(_swipeLastDir&&key===_swipeLastDir){boostDir=d;boostSince=performance.now();boosting=false;}
-            else{boostDir=null;boosting=false;} // first swipe or 90-deg turn: no boost
+            if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){clearBoost();}
+            else if(_swipeLastDir&&key===_swipeLastDir){boostDir=d;boosting=true;boostSince=performance.now();}
+            else{clearBoost();} // first swipe or 90-deg turn: no boost
         }
     }
     _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
