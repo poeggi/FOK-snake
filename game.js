@@ -1773,12 +1773,12 @@ canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { leaveSpl
 const nameInp = document.getElementById('name-inp');
 const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
-let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null;
+let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0;
 canvas.addEventListener('touchstart',e=>{
     Snd.resume(); e.preventDefault();
     if(phase==='nameEntry'){ nameInp.focus(); }
     const t=e.touches[0];
-    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY};
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now();
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
@@ -1812,7 +1812,7 @@ canvas.addEventListener('touchend',e=>{
     if(_splashTouchPending){ _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null; return; }
     if(_swipeBase){
         const t=e.changedTouches[0];
-        const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir;
+        const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&performance.now()-_swipeTouchStartAt>80;
         if(phase!=='playing'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
     }
     _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null;
