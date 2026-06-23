@@ -5,9 +5,11 @@ const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
-// Cone body (cols 0-3). ON: stepped arcs col5=inner(2px), col6=mid(4px), col7=outer(6px). OFF: X at cols 5-7.
-const SPEAKER_ON  = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,1],[1,1,1,1,0,1,0,1],[1,1,1,1,0,1,0,1],[1,1,1,1,0,1,0,1],[1,1,1,1,0,1,0,1],[0,0,1,1,0,0,0,1],[0,0,0,1,0,0,0,0]];
-const SPEAKER_OFF = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,0],[1,1,1,1,0,1,0,1],[1,1,1,1,0,0,1,0],[1,1,1,1,0,0,1,0],[1,1,1,1,0,1,0,1],[0,0,1,1,0,0,0,0],[0,0,0,1,0,0,0,0]];
+// Speaker split into two 8x8 icons drawn side by side (total 32x16px at CS=2)
+// BODY: cone only (cols 0-3). WAVES: 3 arcs inner(col1,rows3-4) mid(col3,rows2-5) outer(col5,rows1-6). X: diagonal cross for muted.
+const SPEAKER_BODY  = [[0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,0],[1,1,1,1,0,0,0,0],[1,1,1,1,0,0,0,0],[1,1,1,1,0,0,0,0],[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,0,0],[0,0,0,1,0,0,0,0]];
+const SPEAKER_WAVES = [[0,0,0,0,0,0,0,0],[0,0,0,0,0,1,0,0],[0,0,0,1,0,1,0,0],[0,1,0,1,0,1,0,0],[0,1,0,1,0,1,0,0],[0,0,0,1,0,1,0,0],[0,0,0,0,0,1,0,0],[0,0,0,0,0,0,0,0]];
+const SPEAKER_X     = [[0,0,0,0,0,0,0,0],[0,1,0,0,0,1,0,0],[0,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,0,0],[0,1,0,0,0,1,0,0],[0,0,0,0,0,0,0,0]];
 // Pixel art standard: CS=2 (1 artwork pixel = 2x2 screen pixels)
 // Icons (achievements, shop, speaker): 8x8 artwork -> 16x16px on screen
 // Coin: 16x16 artwork -> 32x32px on screen

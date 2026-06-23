@@ -405,7 +405,7 @@ loadAch();
 // CREDITS DATA
 // ================================================================
 const CRED = [
-    ['gap',50],['title','S N A K E'],['sub','FOK EDITION'],['gap',60],
+    ['gap',50],['title','S N A K E'],['sub','F O K   E D I T I O N'],['gap',60],
     ['hdr','--- CREDITS ---'],['gap',40],
     ['hdr','CONCEPTUAL SUPERVISION'],['txt','Jonas and Kai P.'],['gap',28],
     ['hdr','CREATIVE DIRECTION'],['txt','Jonas P.'],['gap',28],
@@ -425,11 +425,11 @@ const CRED = [
     ['hdr','IN MEMORIAM'],
     ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',50],
     ['coins'],['sml','(spend them in the SHOP)'],['gap',50],
-    ['sml','(C) 2026 FOK STUDIOS'],['sml','All rights reserved to nobody in particular.'],
+    ['sml','(C) 2026 FOK STUDIOS'],['sml','All wrongs reserved.'],
     ['gap',30],['txt','PRESS OK OR ENTER TO EXIT'],['gap',280],
     ['secret','No Eastereggs here ;)'],['gap',240],
 ];
-const CRED_H = { title:30, sub:16, hdr:20, txt:16, sml:14, coins:20, secret:20 };
+const CRED_H = { title:54, sub:22, hdr:28, txt:26, sml:24, coins:28, secret:28 };
 function credTotalH() { let h=0; for(const[t,v] of CRED) h += t==='gap' ? v : (CRED_H[t]||22); return h; }
 const CRED_TOTAL_H = credTotalH();
 
@@ -1107,7 +1107,7 @@ function drawMiniSnake(x, y, colorIdx) {
 
 function drawScoreHead(cx, cy, colorIdx, si) {
     const sc = SNAKE_COLORS[colorIdx || 0];
-    const scale = 0.55;
+    const scale = 1;
     ctx.save();
     ctx.translate(cx - Math.round(CS*scale/2), cy - Math.round(CS*scale/2));
     ctx.scale(scale, scale);
@@ -1136,25 +1136,19 @@ function drawScores() {
     const scores=_scoreboardCache||[];
     if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',8); }
     else {
-        ctx.font='8px "Press Start 2P"'; ctx.textAlign='left'; ctx.textBaseline='middle';
+        ctx.font='14px "Press Start 2P"'; ctx.textBaseline='middle';
         scores.slice(0,8).forEach((s,i)=>{
-            const y=94+i*30;
+            const y=90+i*28;
             ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
-            const rank=`${i+1}.`.padStart(3);
-            const lvl=String(s.level).padStart(2);
             const diff=['E','N','H'][s.diff??1]??'N';
-            const line=`${rank}  ${(s.name||'???').padEnd(MAX_NAME)}  ${String(s.score).padStart(7)}  LV${lvl}  ${diff}  ${s.date||'--.--.--'}`;
-            const tw=ctx.measureText(line).width;
-            const tx=CW/2-tw/2;
-            ctx.fillText(line,tx,y);
-            drawScoreHead(tx+tw+18, y, s.color||0, s.shopItems||{});
+            ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
+            ctx.textAlign='right'; ctx.fillText(String(s.score), 348, y);
+            ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level}`, 360, y);
+            ctx.textAlign='left';  ctx.fillText(s.date||'--.--.--', 418, y);
+            drawScoreHead(568, y, s.color||0, s.shopItems||{});
         });
         ctx.textAlign='center';
     }
-    const coins=_cachedFOKoins;
-    ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
-    ct(`TOTAL FOKOINS: ${coins.toLocaleString()}`,CW/2,CH-36,'#ffd700',8);
-    ctx.shadowBlur=0;
     ct('Any key or OK to return',CW/2,CH-14,'#999',8);
 }
 
@@ -1326,28 +1320,28 @@ function drawCredits() {
     for (const [type, val] of CRED) {
         if (type === 'gap') { y += val; continue; }
         const h = CRED_H[type] || 22;
+        const yc = y + h/2;
         if (y > -50 && y < CH + 20) {
             switch (type) {
                 case 'title':
-                    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16;
-                    ct(val, CW/2, y+15, '#7fff7f', 18); ctx.shadowBlur=0; break;
+                    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=38;
+                    ct(val, CW/2, yc, '#7fff7f', 40); ctx.shadowBlur=0; break;
                 case 'sub':
-                    ct(val, CW/2, y+7, '#5a8a5a', 8); break;
+                    ct(val, CW/2, yc, '#4a7a4a', 8); break;
                 case 'hdr':
                     ctx.shadowColor='#00cccc'; ctx.shadowBlur=6;
-                    ct(val, CW/2, y+9, '#00cccc', 8); ctx.shadowBlur=0; break;
+                    ct(val, CW/2, yc, '#00cccc', 14); ctx.shadowBlur=0; break;
                 case 'txt':
-                    ct(val, CW/2, y+7, '#aaa', 8); break;
+                    ct(val, CW/2, yc, '#aaa', 14); break;
                 case 'sml':
-                    ct(val, CW/2, y+6, '#999', 8); break;
+                    ct(val, CW/2, yc, '#999', 14); break;
                 case 'coins':
                     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
-                    ct(`YOUR FOKOINS: ${_cachedFOKoins.toLocaleString()}`, CW/2, y+9, '#ffd700', 8);
+                    ct(`YOUR FOKOINS: ${_cachedFOKoins.toLocaleString()}`, CW/2, yc, '#ffd700', 14);
                     ctx.shadowBlur=0; break;
                 case 'secret':
                     ctx.shadowColor='#ff4444'; ctx.shadowBlur=14;
-                    ctx.font='8px "Press Start 2P"'; ctx.textAlign='center'; ctx.textBaseline='middle';
-                    ctx.fillStyle='#ff5555'; ctx.fillText(val, CW/2, y+9);
+                    ct(val, CW/2, yc, '#ff5555', 14);
                     ctx.shadowBlur=0; break;
             }
         }
@@ -1550,11 +1544,12 @@ function drawDpad(active) {
     const S=DSIZE, H=S/2;
     dpc.clearRect(0,0,S,S);
     const sectors=[
-        {key:'ArrowUp',    pts:[[H,H],[0,0],[S,0]],  lx:H,      ly:H*0.34,  label:'\u2191'},
-        {key:'ArrowRight', pts:[[H,H],[S,0],[S,S]],  lx:H*1.65, ly:H,       label:'\u2192'},
-        {key:'ArrowDown',  pts:[[H,H],[S,S],[0,S]],  lx:H,      ly:H*1.65,  label:'\u2193'},
-        {key:'ArrowLeft',  pts:[[H,H],[0,S],[0,0]],  lx:H*0.35, ly:H,       label:'\u2190'},
+        {key:'ArrowUp',    pts:[[H,H],[0,0],[S,0]],  lx:H,      ly:H*0.34,  dir:'u'},
+        {key:'ArrowRight', pts:[[H,H],[S,0],[S,S]],  lx:H*1.65, ly:H,       dir:'r'},
+        {key:'ArrowDown',  pts:[[H,H],[S,S],[0,S]],  lx:H,      ly:H*1.65,  dir:'d'},
+        {key:'ArrowLeft',  pts:[[H,H],[0,S],[0,0]],  lx:H*0.35, ly:H,       dir:'l'},
     ];
+    const bh=16, bw=13; // arrow triangle half-height and half-base
     sectors.forEach(s=>{
         const pressed=s.key===active;
         dpc.save();
@@ -1562,8 +1557,13 @@ function drawDpad(active) {
         dpc.fillStyle=pressed?'#1a3a1a':'#0a180a'; dpc.fillRect(0,0,S,S);
         dpc.fillStyle='#7fff7f';
         dpc.shadowColor=pressed?'#7fff7f':'transparent'; dpc.shadowBlur=pressed?10:0;
-        dpc.font='bold 20px "Courier New"'; dpc.textAlign='center'; dpc.textBaseline='middle';
-        dpc.fillText(s.label,s.lx,s.ly);
+        const cx=s.lx, cy=s.ly;
+        dpc.beginPath();
+        if(s.dir==='u'){dpc.moveTo(cx,cy-bh);dpc.lineTo(cx+bw,cy+bh);dpc.lineTo(cx-bw,cy+bh);}
+        if(s.dir==='r'){dpc.moveTo(cx+bh,cy);dpc.lineTo(cx-bh,cy-bw);dpc.lineTo(cx-bh,cy+bw);}
+        if(s.dir==='d'){dpc.moveTo(cx,cy+bh);dpc.lineTo(cx+bw,cy-bh);dpc.lineTo(cx-bw,cy-bh);}
+        if(s.dir==='l'){dpc.moveTo(cx-bh,cy);dpc.lineTo(cx+bh,cy-bw);dpc.lineTo(cx+bh,cy+bw);}
+        dpc.closePath(); dpc.fill();
         dpc.restore();
     });
     dpc.strokeStyle='#1e321e'; dpc.lineWidth=3;
@@ -1934,13 +1934,19 @@ const _muteCvCtx = _muteCv.getContext('2d');
 function updateMuteBtn(){
     const on=cfg.music; muteBtn.classList.toggle('muted',!on);
     const c=_muteCvCtx;
-    c.clearRect(0,0,16,16);
+    c.clearRect(0,0,32,16);
     const spkHi  = ['#ccffcc','#ccffcc','#bbffbb','#7fff7f','#7fff7f','#55cc55','#3a993a','#3a993a'];
     const spkLo  = ['#888888','#888888','#7a7a7a','#555555','#555555','#404040','#2a2a2a','#2a2a2a'];
-    (on?SPEAKER_ON:SPEAKER_OFF).forEach((row,ry)=>row.forEach((p,rx)=>{
+    SPEAKER_BODY.forEach((row,ry)=>row.forEach((p,rx)=>{
         if(!p)return;
-        c.fillStyle=(!on&&rx>=5)?'#aa3333':(on?spkHi[ry]:spkLo[ry]);
+        c.fillStyle=on?spkHi[ry]:spkLo[ry];
         c.fillRect(rx*2,ry*2,2,2);
+    }));
+    const sigil=on?SPEAKER_WAVES:SPEAKER_X;
+    sigil.forEach((row,ry)=>row.forEach((p,rx)=>{
+        if(!p)return;
+        c.fillStyle=on?spkHi[ry]:'#aa3333';
+        c.fillRect(rx*2+16,ry*2,2,2);
     }));
 }
 function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.stop(); updateMuteBtn(); saveCfg(); }
@@ -2031,7 +2037,8 @@ function syncFontScale() {
     const scale = canvas.getBoundingClientRect().width / CW;
     const sz = Math.round(8 * scale) + 'px';
     fpsEl.style.fontSize = sz;
-    const iconPx=Math.round(16*scale)+'px'; _muteCv.style.width=_muteCv.style.height=iconPx;
+    const iconH=Math.round(16*scale); _muteCv.style.height=iconH+'px'; _muteCv.style.width=(iconH*2)+'px';
+    fpsEl.style.height=(iconH+8)+'px'; // match speaker: canvas + 2*padding + 2*border
 }
 window.addEventListener('resize', syncFontScale);
 window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120));
