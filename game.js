@@ -555,11 +555,11 @@ const CRED_TOTAL_H = credTotalH();
 // ================================================================
 // APP STATE
 // ================================================================
-// phases: splash|menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|nameEntry|quitConfirm
+// phases: splash|menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|nameEntry|quitConfirm|resetConfirm
 let phase = 'splash';
 let menuSel = 0, settingsSel = 0, shopSel = 0, quitConfirmSel = 1, prevPhase = 'playing';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
-const SETTINGS_COUNT = 10;
+const SETTINGS_COUNT = 11;
 let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: true, cfgVer: 1 };
 loadCfg();
 if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
@@ -1136,9 +1136,10 @@ function drawSettings() {
         'SNAKE COLOR: '+sc.name,
         'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
         'TOUCH SELECT: '+(cfg.touchSelect?'ON':'OFF'),
+        'RESET STATS',
         'BACK',
     ];
-    const startY=58, rowH=32;
+    const startY=50, rowH=28;
     items.forEach((item,i)=>menuItem(item,startY+i*rowH,i===settingsSel));
     // Volume bars when selected
     if(settingsSel===2){
@@ -1166,7 +1167,7 @@ function drawSettings() {
         }
         ctx.restore();
     }
-    ct('LEFT/RIGHT to change   OK to toggle   ESC back',CW/2,CH-14,'#999',8);
+    ct('LEFT/RIGHT to change   OK/ENTER toggle   ESC back',CW/2,CH-10,'#555',8);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -1549,25 +1550,44 @@ function drawGameBoard(now) {
     updateHUD();
 }
 
+function drawConfirmYesNo(title, sel) {
+    const YES_X=CW/2-80, NO_X=CW/2+80;
+    ctx.shadowColor='#ff9900'; ctx.shadowBlur=18;
+    ct(title,CW/2,CH/2-46,'#ff9900',18); ctx.shadowBlur=0;
+    ctx.globalAlpha=sel===0?1:0.35;
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=sel===0?14:0;
+    ct(sel===0?'> YES <':'  YES  ',YES_X,CH/2+10,'#7fff7f',14);
+    ctx.globalAlpha=sel===1?1:0.35;
+    ctx.shadowColor='#ff5555'; ctx.shadowBlur=sel===1?14:0;
+    ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+10,'#ff5555',14);
+    ctx.globalAlpha=1; ctx.shadowBlur=0;
+    ctx.save(); ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center';
+    ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT to choose   ENTER confirm   ESC cancel',CW/2,CH-8); ctx.restore();
+}
 function drawQuitConfirm() {
     drawGrid();
     if(bars)  ctx.drawImage(_barsCanvas, 0, 0);
     if(gem)   drawGem(gem, performance.now());
     if(snake) drawSnake(false);
     drawOvBg(0.72);
-    ctx.shadowColor='#ff9900'; ctx.shadowBlur=18;
-    ct('QUIT TO MENU?',CW/2,CH/2-46,'#ff9900',20); ctx.shadowBlur=0;
-    const YES_X=CW/2-80, NO_X=CW/2+80;
-    ctx.globalAlpha=quitConfirmSel===0?1:0.35;
-    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=quitConfirmSel===0?14:0;
-    ct(quitConfirmSel===0?'> YES <':'  YES  ',YES_X,CH/2+10,'#7fff7f',14);
-    ctx.globalAlpha=quitConfirmSel===1?1:0.35;
-    ctx.shadowColor='#ff5555'; ctx.shadowBlur=quitConfirmSel===1?14:0;
-    ct(quitConfirmSel===1?'> NO <':'  NO   ',NO_X,CH/2+10,'#ff5555',14);
-    ctx.globalAlpha=1; ctx.shadowBlur=0;
-    ctx.save(); ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-    ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT to choose   ENTER confirm   ESC cancel',CW/2,CH-8); ctx.restore();
+    drawConfirmYesNo('QUIT TO MENU?', quitConfirmSel);
     showHUD(false);
+}
+function drawResetConfirm() {
+    drawSettings();
+    drawOvBg(0.80);
+    ct('RESET ALL STATS?',CW/2,CH/2-54,'#ff5555',16);
+    ctx.font='8px "Press Start 2P"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='#888';
+    ctx.fillText('scores  fokoins  achievements  shop',CW/2,CH/2-24);
+    drawConfirmYesNo('', quitConfirmSel);
+}
+function resetStats() {
+    const keys = [HS_KEY, FK_KEY, ACH_KEY, 'lastSName'];
+    keys.forEach(k=>{ try { localStorage.removeItem(k); } catch {} });
+    _cachedFOKoins = 0;
+    achUnlocked = {}; achPopups = []; _scoreboardCache = null;
+    cfg.shopItems = {}; cfg.wornItems = null; saveCfg();
 }
 
 const fpsEl = document.getElementById('fps-el');
@@ -1687,6 +1707,7 @@ function handleKey(key, pde) {
             phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic();
             escReadyAt=performance.now()+1000; if(pde)pde(); return;
         }
+        if(phase==='resetConfirm'){ phase='settings'; if(pde)pde(); return; }
         if(phase==='settings'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
         if(phase==='scores'||phase==='credits'||phase==='shop'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
         if(phase==='achievements'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
@@ -1718,6 +1739,7 @@ function handleKey(key, pde) {
             else if(settingsSel===6)cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;
             else if(settingsSel===7){cfg.handed=(cfg.handed+1)%2;applyHandedness();}
             else if(settingsSel===8){cfg.touchSelect=!cfg.touchSelect;}
+            else if(settingsSel===9){quitConfirmSel=1;phase='resetConfirm';return;}
             else phase='menu';
             saveCfg();
         }
@@ -1781,6 +1803,16 @@ function handleKey(key, pde) {
             Snd.sfx('select',cfg.music);
             if(quitConfirmSel===0){ phase='menu'; showHUD(false); Snd.stop(); }
             else { phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic(); escReadyAt=performance.now()+1000; }
+        }
+        if(pde)pde();
+    }
+    else if(phase==='resetConfirm'){
+        if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfx('nav',cfg.music); }
+        if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfx('nav',cfg.music); }
+        if(key==='Enter'){
+            Snd.sfx('select',cfg.music);
+            if(quitConfirmSel===0){ resetStats(); }
+            phase='settings'; quitConfirmSel=1;
         }
         if(pde)pde();
     }
@@ -1969,8 +2001,8 @@ function loop(now) {
     if(now-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(now-fpsLast))} FPS`;fpsFrames=0;fpsLast=now;}
 
     // Music routing (skip splash/paused/quitConfirm states)
-    if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'){
-        const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop'].includes(phase);
+    if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'){
+        const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm'].includes(phase);
         const gamePhase=['playing','levelReady','dying','levelDone'].includes(phase);
         const wt=menuPhase?menuTrack():gamePhase?gameTrack():null;
         if(cfg.music&&wt) Snd.play(wt);
@@ -2006,6 +2038,7 @@ function loop(now) {
     else if(phase==='credits')      {drawCredits();        showHUD(false);}
     else if(phase==='nameEntry')    {drawNameEntry(now);}
     else if(phase==='quitConfirm')  {drawQuitConfirm();}
+    else if(phase==='resetConfirm') {drawResetConfirm();}
     else                            {drawGameBoard(now);   showHUD(true);}
     drawAchPopups(now);
 }
