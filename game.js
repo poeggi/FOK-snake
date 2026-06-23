@@ -1010,7 +1010,9 @@ function drawSnake(flash) {
 // SCREENS
 // ================================================================
 function drawSplash(now) {
-    const elapsed = (now - phaseAt) / 1000;
+    const elapsed = _splashFast
+        ? _splashFastBase + (now - _splashFastStart) / 1000 * 4
+        : (now - phaseAt) / 1000;
 
     // Background matches menu: grid + scan line overlay
     drawGrid();
@@ -1086,7 +1088,7 @@ function drawSplash(now) {
     ctx.save();
     ctx.font = '8px "Press Start 2P"'; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
     ctx.fillStyle = '#555';
-    ctx.fillText('any key  |  tap  |  click', CW/2, CH - 8);
+    ctx.fillText('enter  |  tap  |  click', CW/2, CH - 8);
     ctx.restore();
 }
 
@@ -1606,14 +1608,16 @@ function dpadDir(e, cvs) {
 
 dpadCanvas.addEventListener('touchstart',e=>{
     Snd.resume(); e.preventDefault();
-    dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null); drawDpad(dpadActive);
+    dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null);
+    drawDpad(phase==='splash'?null:dpadActive);
     if(phase==='playing'){const d=GDIRS[dpadActive];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
 },{passive:false});
 dpadCanvas.addEventListener('touchmove',e=>{
     e.preventDefault();
     const d=dpadDir(e,dpadCanvas);
     if(d!==dpadActive){
-        dpadActive=d; handleKey(dpadActive,null); drawDpad(dpadActive);
+        dpadActive=d; handleKey(dpadActive,null);
+        drawDpad(phase==='splash'?null:dpadActive);
         if(phase==='playing'){const gd=GDIRS[dpadActive];if(gd){boostDir=gd;boostSince=performance.now();boosting=false;}else{boostDir=null;boosting=false;}}
     }
 },{passive:false});
@@ -1627,7 +1631,9 @@ drawDpad(null);
 const GDIRS={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
 
 let _splashLeftAt = 0, _splashTouchPending = false;
+let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
 function leaveSplash(fromTouch = false) {
+    _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
     Snd.resume();
     _splashLeftAt = performance.now();
     _splashTouchPending = fromTouch;
@@ -1639,6 +1645,12 @@ function leaveSplash(fromTouch = false) {
 
 function handleKey(key, pde) {
     if (phase === 'splash') {
+        if (key === 'ArrowDown' && !_splashFast) {
+            _splashFast = true;
+            _splashFastStart = performance.now();
+            _splashFastBase = (performance.now() - phaseAt) / 1000;
+            return;
+        }
         // Only meaningful keys exit splash; F-keys/Escape/modifiers fall through so
         // the browser still handles F5 (refresh), F11 (fullscreen), etc.
         const splashOk = key.length === 1 || key === 'Enter';
