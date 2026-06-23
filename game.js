@@ -1828,8 +1828,10 @@ document.addEventListener('pointerdown', () => Snd.tryResume(), {capture:true, p
 document.addEventListener('touchend', () => Snd.tryResume(), {passive:true});
 // Pause audio when app goes to background, resume when it returns
 document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { Snd.suspend(); }
-    else if (cfg.music) { Snd.resume(); }
+    if (document.hidden) {
+        if (phase === 'playing') { phase = 'paused'; pauseAt = performance.now(); Snd.pauseMusic(); }
+        Snd.suspend();
+    } else if (cfg.music) { Snd.resume(); }
 });
 document.addEventListener('keydown', e=>{
     handleKey(e.key,()=>e.preventDefault());
