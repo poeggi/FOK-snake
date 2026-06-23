@@ -1833,6 +1833,9 @@ document.addEventListener('visibilitychange', () => {
         Snd.suspend();
     } else if (cfg.music) { Snd.resume(); }
 });
+window.addEventListener('blur', () => {
+    if (phase === 'playing') { phase = 'paused'; pauseAt = performance.now(); Snd.pauseMusic(); }
+});
 document.addEventListener('keydown', e=>{
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
