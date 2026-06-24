@@ -1839,8 +1839,11 @@ canvas.addEventListener('touchmove',e=>{
     const dist=Math.hypot(dx,dy);
     if(dist<SWIPE_1) return;
     const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
-    if(ang>=DZ_LO&&ang<=DZ_HI) return;
-    const key=ang<DZ_LO?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
+    const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
+    const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
+    const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
+    if(ang>=dzLo&&ang<=dzHi) return;
+    const key=ang<dzLo?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
     // opposite or first: 20px (30px while boosting); 90-deg turn: 30px; same dir: 50px (boost prevention)
     const thresh=(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(boosting?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
     if(dist<thresh) return;
