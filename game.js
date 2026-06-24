@@ -1379,34 +1379,42 @@ function drawNameEntry(now) {
         ctx.fillStyle=act?'#142014':'#0d0d18'; ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
         rr(sx,sy,sw,sh,3); ctx.fill(); ctx.stroke();
         const flashing=has&&i===_nameFlashPos&&now-_nameFlashAt<350;
-        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=flashing?14:1; ct(nameStr[i]===' '?'_':nameStr[i],sx+sw/2,sy+sh/2,flashing?'#ffffff':'#7fff7f',14); ctx.shadowBlur=0; }
+        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=flashing?14:1; if(nameStr[i]===' '){ctx.shadowBlur=0;ctx.fillStyle=flashing?'#ffffff':'#4a7a4a';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(nameStr[i],sx+sw/2,sy+sh/2,flashing?'#ffffff':'#7fff7f',14);} ctx.shadowBlur=0; }
         else if(act){
-            const gc=NAME_CHARS[nameCharIdx],gcD=gc===' '?'_':gc==='\r'?'\u21B5':gc; ctx.globalAlpha=0.42; ct(gcD,sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.globalAlpha=1;
+            const gc=NAME_CHARS[nameCharIdx]; ctx.globalAlpha=0.42; if(gc===' '){ctx.fillStyle='#7fff7f';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(gc==='\r'?'\u21B5':gc,sx+sw/2,sy+sh/2,'#7fff7f',14);} ctx.globalAlpha=1;
             if(Math.floor(now/400)%2===0){ctx.fillStyle='#7fff7f55';ctx.fillRect(sx+5,sy+sh-6,sw-10,2);}
         }
     }
-    const selY=sy+sh+90,ci=nameCharIdx,disp=c=>c===' '?'_':c==='\r'?'\u21B5':c;
+    const selY=sy+sh+90,ci=nameCharIdx;
     {
-        // selection highlight box
         ctx.fillStyle='#0d1e0d'; rr(CW/2-20,selY-12,40,22,3); ctx.fill();
         ctx.strokeStyle='#2a5a2a'; ctx.lineWidth=1; rr(CW/2-20,selY-12,40,22,3); ctx.stroke();
-        // 5-item wheel: d = -2..+2
         for(let d=-2;d<=2;d++){
-            const idx=(ci+d+NAME_CHARS.length)%NAME_CHARS.length;
-            const ch=disp(NAME_CHARS[idx]);
-            const y=selY+d*22;
-            if(d===0){
-                ctx.shadowColor='#7fff7f'; ctx.shadowBlur=12;
-                ct(ch,CW/2,y,'#7fff7f',14); ctx.shadowBlur=0;
+            const raw=NAME_CHARS[(ci+d+NAME_CHARS.length)%NAME_CHARS.length];
+            const y=selY+d*22, sz=d===0?14:8;
+            const col=d===0?'#7fff7f':Math.abs(d)===1?'#888':'#555';
+            const al=d===0?1:Math.abs(d)===2?0.35:0.75;
+            if(d===0){ctx.shadowColor='#7fff7f';ctx.shadowBlur=12;}
+            ctx.globalAlpha=al;
+            if(raw===' '){
+                // spacebar visual: horizontal bar
+                const bw=d===0?22:14;
+                ctx.fillStyle=col;
+                ctx.fillRect(Math.round(CW/2-bw/2),Math.round(y+sz*0.35),bw,2);
+            } else if(raw==='\r'){
+                // enter key: symbol inside a key-shaped box
+                const bw=d===0?28:20,bh=d===0?20:14;
+                ctx.strokeStyle=col; ctx.lineWidth=1;
+                rr(Math.round(CW/2-bw/2),Math.round(y-bh/2),bw,bh,2); ctx.stroke();
+                ct('\u21B5',CW/2,y,col,sz);
             } else {
-                ctx.globalAlpha=Math.abs(d)===2?0.35:0.75;
-                ct(ch,CW/2,y,Math.abs(d)===1?'#888':'#555',8);
-                ctx.globalAlpha=1;
+                ct(raw,CW/2,y,col,sz);
             }
+            ctx.globalAlpha=1;
+            if(d===0){ctx.shadowBlur=0;}
         }
-        // up/down scroll arrows (filled triangles)
         ctx.fillStyle='rgba(127,255,127,0.45)';
-        const ax=CW/2, uay=selY-2*22-18, day=selY+2*22+18;
+        const ax=CW/2,uay=selY-2*22-18,day=selY+2*22+18;
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }

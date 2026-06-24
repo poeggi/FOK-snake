@@ -20,7 +20,7 @@ const SYM_ONE = { w:4, h:6, px:[[2,0],[1,1],[2,1],[2,2],[2,3],[2,4],[2,5]] };
 const SYM_YEN = { w:5, h:7, px:[[0,0],[4,0],[1,1],[3,1],[2,2],[0,3],[1,3],[2,3],[3,3],[4,3],[2,4],[0,5],[1,5],[2,5],[3,5],[4,5],[2,6]] };
 const DEATH_DUR = 900, LEVELDONE_DUR = 1400, READY_DUR = 1000, GO_DUR = 300;
 const MAX_NAME = 15;
-const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_ \r';
+const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_-!?.,\'"#$@&()+ \r';
 
 const LEVEL_CFG = [
     { easy:260, normal:210, hard:150, bars:0  },
