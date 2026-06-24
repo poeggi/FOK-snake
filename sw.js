@@ -1,6 +1,6 @@
 // Bump this string with every deployment to force cache refresh on all clients
-// version snake-v1.72, released 2026-06-24 22:51 +0200
-const CACHE = 'snake-v1.72';
+// version snake-v1.73, released 2026-06-24 23:13 +0200
+const CACHE = 'snake-v1.73';
 const ASSETS = ['./', './manifest.json', './icon.svg', './fonts/PressStart2P-Regular.woff2', './style.css', './assets.js', './game.js'];
 
 self.addEventListener('install', e => {

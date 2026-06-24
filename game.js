@@ -30,7 +30,7 @@ const ctx = canvas.getContext('2d');
 // AUDIO
 // ================================================================
 const Snd = (() => {
-    let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5, _justInited = false;
+    let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5;
     let chState = [], curTrack = null, isPaused = false, _bgSuspended = false;
 
     const SEQ = {
@@ -116,12 +116,20 @@ const Snd = (() => {
             ac = new (window.AudioContext || window.webkitAudioContext)();
             mGain = ac.createGain(); mGain.gain.value = 0; mGain.connect(ac.destination);
             sGain = ac.createGain(); sGain.gain.value = 0.58 * _sfxVol; sGain.connect(ac.destination);
-            _justInited = true;
-            // iOS Safari requires audio data to flow through the context during the
-            // user gesture. A 1-sample silent buffer satisfies that requirement and
-            // causes the context to unlock even before ac.resume() resolves.
-            const buf = ac.createBuffer(1, 1, 22050);
-            const src = ac.createBufferSource();
+            // onstatechange fires reliably on every suspended->running transition,
+            // regardless of which ac.resume() call (first or retry) finally succeeded.
+            ac.onstatechange = () => {
+                if (ac.state !== 'running') return;
+                const wasBg = _bgSuspended; _bgSuspended = false;
+                if (!curTrack || !SEQ[curTrack] || isPaused) return;
+                // background resume: push nextNote ahead so stale queued notes don't pile up
+                const flush = wasBg ? 0.45 : 0.05;
+                chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + flush }));
+                mGain.gain.cancelScheduledValues(ac.currentTime);
+                mGain.gain.setValueAtTime(0.32 * _vol, ac.currentTime);
+            };
+            // 1-sample silent buffer: prompts iOS to treat this context as user-gesture-unlocked
+            const buf = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource();
             src.buffer = buf; src.connect(ac.destination); src.start(0);
         } catch(e) { ac = null; }
     }
@@ -171,20 +179,14 @@ const Snd = (() => {
         });
     }
 
-    // TODO: AUDIO MYSTERY -- structured refactoring needed.
-    // Music scheduling (tick/play) does NOT wake the iOS audio pipeline; only real
-    // audio events (sfx oscillators being started) do. The 1-sample buffer below is
-    // an attempt to replicate that, but it is not reliable. The real fix requires
-    // rethinking how the pipeline is primed: events start the pipeline, music does not.
     function play(t) {
         if (!ac || curTrack === t) return;
         curTrack = t; isPaused = false;
         chState = SEQ[t].channels.map(() => ({ pos: 0, nextNote: ac.currentTime }));
-        _justInited = false;
-        const _pb = ac.createBuffer(1, 1, 22050), _ps = ac.createBufferSource();
-        _ps.buffer = _pb; _ps.connect(ac.destination); _ps.start(0);
-        mGain.gain.cancelScheduledValues(ac.currentTime);
-        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
+        if (ac.state === 'running') {
+            mGain.gain.cancelScheduledValues(ac.currentTime);
+            mGain.gain.setValueAtTime(0.32 * _vol, ac.currentTime);
+        }
     }
 
     function stop() {
@@ -205,50 +207,18 @@ const Snd = (() => {
         const now = ac.currentTime;
         chState.forEach(s => { s.nextNote = now + 0.05; });
         mGain.gain.cancelScheduledValues(now);
-        mGain.gain.setTargetAtTime(0.32 * _vol, now, 0.10);
+        mGain.gain.setValueAtTime(0.32 * _vol, now);
     }
 
     function resume() {
         if (!ac) { init(); }
-        if (ac && ac.state === 'suspended') {
-            // Multiple concurrent calls are safe (spec-idempotent). No guard needed --
-            // iOS cold-start silently hangs the first call; every subsequent gesture
-            // retries freely until one succeeds.
-            ac.resume().then(() => {
-                const wasBg = _bgSuspended;
-                _bgSuspended = false;
-                if (curTrack && SEQ[curTrack]) {
-                    if (wasBg) {
-                        const flush = 0.45;
-                        chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + flush }));
-                        if (!isPaused) {
-                            mGain.gain.cancelScheduledValues(ac.currentTime);
-                            mGain.gain.setValueAtTime(0, ac.currentTime);
-                            mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime + flush, 0.05);
-                        }
-                    } else {
-                        chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + 0.05 }));
-                        if (!isPaused) {
-                            mGain.gain.cancelScheduledValues(ac.currentTime);
-                            mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
-                        }
-                    }
-                } else if (!wasBg && !isPaused && curTrack) {
-                    mGain.gain.cancelScheduledValues(ac.currentTime);
-                    mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
-                }
-            }).catch(() => {});
-        } else if (_bgSuspended) {
-            _bgSuspended = false;
-            if (!isPaused && curTrack) {
-                mGain.gain.cancelScheduledValues(ac.currentTime);
-                mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
-            }
-        }
+        // iOS cold-start silently hangs the first ac.resume() call; retrying on
+        // every gesture is safe (spec-idempotent). onstatechange handles the reaction.
+        if (ac && ac.state === 'suspended') { ac.resume().catch(() => {}); }
     }
 
     function sfx(type, on) {
-        if (!ac || !on) return;
+        if (!ac || !on || ac.state !== 'running') return;
         const now = ac.currentTime;
         const t = (f, w, d, tp) => tone(f, w, d, tp || 'square', 0.42, 0, sGain);
         if (type === 'eat') {
@@ -283,9 +253,9 @@ const Snd = (() => {
 
     function setVol(v) {
         _vol = v;
-        if (mGain && curTrack && !isPaused) {
+        if (mGain && curTrack && !isPaused && ac && ac.state === 'running') {
             mGain.gain.cancelScheduledValues(ac.currentTime);
-            mGain.gain.setTargetAtTime(0.32 * v, ac.currentTime, 0.04);
+            mGain.gain.setValueAtTime(0.32 * v, ac.currentTime);
         }
     }
     function setSfxVol(v){ _sfxVol=v; if(sGain) sGain.gain.value=0.58*v; }
@@ -297,27 +267,9 @@ const Snd = (() => {
         _bgSuspended = true;
         setTimeout(() => { try { if (ac && ac.state === 'running') ac.suspend(); } catch(e){} }, 120);
     }
-    // Like resume() but never creates the AC -- safe to call from untrusted events
-    // (pointerdown on iOS). Only resumes if the AC already exists and is suspended.
+    // Like resume() but never creates the AC -- safe to call from untrusted events.
     function tryResume() {
-        if (!ac || ac.state !== 'suspended') return;
-        ac.resume().then(() => {
-            const wasBg = _bgSuspended;
-            _bgSuspended = false;
-            if (curTrack && SEQ[curTrack]) {
-                const flush = wasBg ? 0.45 : 0.05;
-                chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + flush }));
-                if (!isPaused) {
-                    mGain.gain.cancelScheduledValues(ac.currentTime);
-                    if (wasBg) {
-                        mGain.gain.setValueAtTime(0, ac.currentTime);
-                        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime + 0.45, 0.05);
-                    } else {
-                        mGain.gain.setTargetAtTime(0.32 * _vol, ac.currentTime, 0.08);
-                    }
-                }
-            }
-        }).catch(() => {});
+        if (ac && ac.state === 'suspended') { ac.resume().catch(() => {}); }
     }
     return { init, tick, play, stop, pauseMusic, resumeMusic, resume, tryResume, sfx, setVol, setSfxVol, suspend };
 })();
@@ -1370,10 +1322,10 @@ function drawNameEntry(now) {
     drawOvBg(0.84);
     const isWin=nameReason==='win';
     ctx.shadowColor=isWin?'#ffd700':'#ff5555'; ctx.shadowBlur=24;
-    ct(isWin?'YOU WIN!':'GAME OVER',CW/2,60,isWin?'#ffd700':'#ff5555',26); ctx.shadowBlur=0;
-    ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,100,'#aaa',8);
-    ct('ENTER YOUR NAME:',CW/2,128,'#7fff7f',8);
-    const sw=30,sh=40,gap=5,totalW=MAX_NAME*(sw+gap)-gap,sx0=Math.floor(CW/2-totalW/2),sy=146;
+    ct(isWin?'YOU WIN!':'GAME OVER',CW/2,36,isWin?'#ffd700':'#ff5555',26); ctx.shadowBlur=0;
+    ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,76,'#aaa',8);
+    ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',8);
+    const sw=30,sh=40,gap=5,totalW=MAX_NAME*(sw+gap)-gap,sx0=Math.floor(CW/2-totalW/2),sy=122;
     for(let i=0;i<MAX_NAME;i++){
         const sx=sx0+i*(sw+gap),act=i===nameCursorPos,has=i<nameStr.length&&!act;
         ctx.fillStyle=act?'#142014':'#0d0d18'; ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
