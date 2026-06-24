@@ -1819,7 +1819,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { leaveSplash(true); e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
-const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=200;
+const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=100;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false;
 canvas.addEventListener('touchstart',e=>{
