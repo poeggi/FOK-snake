@@ -869,7 +869,7 @@ function drawSnake(flash) {
             ctx.fillStyle=flash?'#bb2222':sc.head;
             if(!flash){ctx.shadowColor=sc.head;ctx.shadowBlur=10;}
         } else {
-            const l=Math.round(8+frac*33);
+            const l=Math.round(41*(0.5+0.5*frac));
             ctx.fillStyle=flash?`hsl(0,55%,${l+8}%)`:`hsl(${sc.h},65%,${l}%)`;
         }
         rr(x,y,sw,sh,i===0?5:3); ctx.fill(); ctx.shadowBlur=0;
@@ -1833,7 +1833,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { leaveSplash(true); e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
-const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=100;
+const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false;
 canvas.addEventListener('touchstart',e=>{
