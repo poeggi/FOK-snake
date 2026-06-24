@@ -72,16 +72,16 @@ body {
            Tiny horizontal padding keeps panels off the screen edge. */
         padding: 0 3px; gap: 6px; height: 100dvh; min-height: unset;
     }
-    /* Left info panel — 100px keeps HUD text legible; SND/FPS inset 16px from canvas edges */
+    /* Side info panel — 100px; floats left or right depending on handed setting */
     #side-info {
         display: flex; flex-direction: column; justify-content: flex-start;
-        align-items: flex-start; gap: 14px;
+        align-items: center; gap: 14px;
         width: 100px; flex-shrink: 0; overflow: hidden;
         position: relative;
-        padding: 16px 0;
+        padding: 16px 4px;
     }
     #topbar { width: auto; padding: 0; gap: 8px; order: 0; }
-    #fps-el { position: absolute; bottom: 16px; left: 0; }
+    #fps-el { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); }
     #hud { width: auto; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: auto; }
     .hud-row { flex-direction: column; gap: 8px; }
     .hud-row > span { display: flex; flex-direction: column; gap: 2px; }
