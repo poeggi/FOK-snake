@@ -43,7 +43,7 @@ body {
 #wrap { width: min(600px, calc(100vw - 16px)); order: 3; }
 #c { display: block; width: 100%; height: auto; border: 1px solid #2a2a4e; touch-action: none; }
 #gamepad { display: none; order: 4; }
-#dpad-c { touch-action: none; display: block; }
+#dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {
     background: #0d180d; border: 1px solid #3a5a3a; color: #7fff7f;
     font: 8px 'Press Start 2P',monospace; cursor: pointer; border-radius: 6px;
@@ -51,18 +51,16 @@ body {
 }
 .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
 @media (pointer: coarse) {
-    #gamepad {
-        display: grid; grid-template-columns: 1fr 1fr;
-        width: min(150px, 45vw); gap: 8px;
-    }
+    #gamepad { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     #btn-esc   { grid-column: 1; grid-row: 1; }
     #btn-pause { grid-column: 2; grid-row: 1; }
-    #dpad-c    { grid-column: 1 / span 2; grid-row: 2; width: 100%; aspect-ratio: 1; }
+    #dpad-c    { grid-column: 1 / span 2; grid-row: 2; width: min(150px, 45vw); height: min(150px, 45vw); }
     #btn-ok    { grid-column: 1; grid-row: 3; }
     #btn-start { grid-column: 2; grid-row: 3; }
     #gamepad.splash #dpad-c { opacity: 0.2; }
-    .sbtn { width: 100%; height: 48px; }
+    .sbtn { height: 48px; }
 }
+.sbtn.dim { opacity: 0.3; pointer-events: none; }
 #side-info { display: contents; }
 @media (min-width: 700px) and (min-height: 500px) {
     #wrap, #hud, #topbar {
@@ -109,7 +107,7 @@ body {
         display: flex; flex-direction: column; flex-shrink: 0;
         width: 160px; align-items: center; justify-content: center; gap: 12px;
     }
-    #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); aspect-ratio: unset; }
+    #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); }
     .sbtn { width: 140px; height: 40px; }
     /* Left-handed: controls move to left panel, info to right; canvas leans right */
     body.lefty #gamepad   { order: 1; }

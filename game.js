@@ -1383,13 +1383,13 @@ function drawNameEntry(now) {
         const sx=sx0+i*(sw+gap),act=i===nameCursorPos,has=i<nameStr.length&&!act;
         ctx.fillStyle=act?'#142014':'#0d0d18'; ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
         rr(sx,sy,sw,sh,3); ctx.fill(); ctx.stroke();
-        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=1; ct(nameStr[i]===' '?'-':nameStr[i],sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.shadowBlur=0; }
+        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=1; ct(nameStr[i]===' '?'_':nameStr[i],sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.shadowBlur=0; }
         else if(act){
             const gc=NAME_CHARS[nameCharIdx]; ctx.globalAlpha=0.42; ct(gc===' '?'-':gc,sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.globalAlpha=1;
             if(Math.floor(now/400)%2===0){ctx.fillStyle='#7fff7f55';ctx.fillRect(sx+5,sy+sh-6,sw-10,2);}
         }
     }
-    const selY=sy+sh+90,ci=nameCharIdx,disp=c=>c===' '?'-':c==='\r'?'<-':c;
+    const selY=sy+sh+90,ci=nameCharIdx,disp=c=>c===' '?'_':c==='\r'?'<-':c;
     {
         // selection highlight box
         ctx.fillStyle='#0d1e0d'; rr(CW/2-20,selY-12,40,22,3); ctx.fill();
@@ -1582,7 +1582,6 @@ function drawDpad(active) {
     });
     dpc.strokeStyle='#1e321e'; dpc.lineWidth=3;
     dpc.beginPath(); dpc.moveTo(0,0); dpc.lineTo(S,S); dpc.moveTo(S,0); dpc.lineTo(0,S); dpc.stroke();
-    dpc.strokeStyle='#2a3a2a'; dpc.lineWidth=1; dpc.strokeRect(0.5,0.5,S-1,S-1);
 }
 
 function dpadDir(e, cvs) {
@@ -1655,6 +1654,7 @@ function handleKey(key, pde) {
     // Space = pause toggle (playing/paused only)
     if(key===' '){
         if(phase==='playing'||phase==='paused'){ togglePause(); if(pde)pde(); return; }
+        if(phase==='credits'){ creditsSpeed=creditsSpeed>0?0:0.8; if(pde)pde(); return; }
     }
 
     // Escape = quit confirm in-game, or back in menus
@@ -2005,8 +2005,21 @@ updateMuteBtn();
 // (setInterval or manual accumulator) so game state advances independently of
 // display refresh rate and can be driven/validated by a server clock.
 // ================================================================
+const _btnPause = document.getElementById('btn-pause');
+const _btnStart = document.getElementById('btn-start');
+let _dimPhase = null;
+function _updateBtnDim() {
+    if(phase===_dimPhase) return;
+    _dimPhase=phase;
+    const gameplay=['playing','paused','dying','levelReady','levelDone'].includes(phase);
+    const noAction=['settings','scores','achievements','shop'].includes(phase);
+    _btnPause.classList.toggle('dim', noAction);
+    _btnStart.classList.toggle('dim', gameplay || noAction);
+}
+
 function loop(now) {
     requestAnimationFrame(loop);
+    _updateBtnDim();
     fpsFrames++;
     if(now-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(now-fpsLast))} FPS`;fpsFrames=0;fpsLast=now;}
 
