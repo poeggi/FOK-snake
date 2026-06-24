@@ -1418,7 +1418,7 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
-    ct('UP/DN: scroll  OK: confirm  LR: move  ESC: del',CW/2,CH-10,'#999',8);
+    ct('UP/DN scroll  LR move  ||: space  OK confirm  ESC del',CW/2,CH-10,'#999',8);
 }
 
 function drawGameBoard(now) {
@@ -1519,7 +1519,7 @@ function drawConfirmYesNo(title, sel) {
     ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',14);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
     ctx.save(); ctx.font='8px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center';
-    ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT to choose   ENTER confirm   ESC cancel',CW/2,CH-8); ctx.restore();
+    ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT choose   A:OK/ENTER confirm   ESC cancel',CW/2,CH-8); ctx.restore();
 }
 function drawQuitConfirm() {
     drawGrid();
@@ -1670,8 +1670,9 @@ function handleKey(key, pde) {
     // Global: mute (suppressed during name entry so M is typeable)
     if((key==='m'||key==='M')&&phase!=='nameEntry'){ toggleMute(); return; }
 
-    // Space = pause toggle (playing/paused only)
+    // Space = pause toggle (playing/paused), credits speed toggle, or space char in nameEntry
     if(key===' '){
+        if(phase==='nameEntry'){ nameCharIdx=NAME_CHARS.indexOf(' '); handleKey('NameAdd',pde); return; }
         if(phase==='playing'||phase==='paused'){ togglePause(); if(pde)pde(); return; }
         if(phase==='credits'){ _creditsNormal=_creditsNormal>0?0:0.8; creditsSpeed=_creditsNormal; if(pde)pde(); return; }
     }
@@ -2039,7 +2040,7 @@ function _updateBtnDim() {
     _dimPhase=phase;
     const gameplay=['playing','paused','dying','levelReady','levelDone'].includes(phase);
     const noAction=['settings','scores','achievements','shop','credits'].includes(phase);
-    _btnPause.classList.toggle('dim', !['playing','paused','credits','shop'].includes(phase));
+    _btnPause.classList.toggle('dim', !['playing','paused','credits','shop','nameEntry'].includes(phase));
     _btnStart.classList.toggle('dim', gameplay || noAction);
 }
 
