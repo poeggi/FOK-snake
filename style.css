@@ -65,7 +65,7 @@ body {
     body { padding-top: 0; padding-bottom: 64px; }
     #gamepad { margin-top: 28px; }
 }
-@media (orientation: landscape) and (max-height: 520px) {
+@media (pointer: coarse) and (orientation: landscape) {
     body {
         flex-direction: row; align-items: stretch; justify-content: center;
         /* No vertical padding so canvas fills full screen height.
