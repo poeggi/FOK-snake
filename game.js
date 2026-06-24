@@ -1,4 +1,4 @@
-// ================================================================
+﻿// ================================================================
 // CONSTANTS (static data in assets.js)
 // ================================================================
 
@@ -463,6 +463,7 @@ function clearBoost(){boostDir=null;boosting=false;}
 let perfectCount = 0, luckyCount = 0;
 let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
+let _nameFlashAt = 0, _nameFlashPos = -1;
 let creditsScroll = 0, creditsSpeed = 0.8;
 let purchaseParticles = [], purchaseAnimAt = 0;
 let fpsFrames = 0, fpsLast = 0;
@@ -1383,13 +1384,14 @@ function drawNameEntry(now) {
         const sx=sx0+i*(sw+gap),act=i===nameCursorPos,has=i<nameStr.length&&!act;
         ctx.fillStyle=act?'#142014':'#0d0d18'; ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
         rr(sx,sy,sw,sh,3); ctx.fill(); ctx.stroke();
-        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=1; ct(nameStr[i]===' '?'_':nameStr[i],sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.shadowBlur=0; }
+        const flashing=has&&i===_nameFlashPos&&now-_nameFlashAt<350;
+        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=flashing?14:1; ct(nameStr[i]===' '?'_':nameStr[i],sx+sw/2,sy+sh/2,flashing?'#ffffff':'#7fff7f',14); ctx.shadowBlur=0; }
         else if(act){
-            const gc=NAME_CHARS[nameCharIdx]; ctx.globalAlpha=0.42; ct(gc===' '?'-':gc,sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.globalAlpha=1;
+            const gc=NAME_CHARS[nameCharIdx],gcD=gc===' '?'_':gc==='\r'?'\u21B5':gc; ctx.globalAlpha=0.42; ct(gcD,sx+sw/2,sy+sh/2,'#7fff7f',14); ctx.globalAlpha=1;
             if(Math.floor(now/400)%2===0){ctx.fillStyle='#7fff7f55';ctx.fillRect(sx+5,sy+sh-6,sw-10,2);}
         }
     }
-    const selY=sy+sh+90,ci=nameCharIdx,disp=c=>c===' '?'_':c==='\r'?'<-':c;
+    const selY=sy+sh+90,ci=nameCharIdx,disp=c=>c===' '?'_':c==='\r'?'\u21B5':c;
     {
         // selection highlight box
         ctx.fillStyle='#0d1e0d'; rr(CW/2-20,selY-12,40,22,3); ctx.fill();
@@ -1414,7 +1416,7 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
-    ct('TYPE  |  UP/DN+OK=add  |  LR=move  ESC=del  ENTER',CW/2,CH-10,'#999',8);
+    ct('UP/DN: scroll  OK: confirm  LR: move  ESC: del',CW/2,CH-10,'#999',8);
 }
 
 function drawGameBoard(now) {
@@ -1809,17 +1811,25 @@ function handleKey(key, pde) {
             if(nameCursorPos<nameStr.length){nameCursorPos++;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfx('nav',cfg.music);}
         }
         else if(key==='NameAdd'){
-            if(NAME_CHARS[nameCharIdx]==='\r'){
+            const ch=NAME_CHARS[nameCharIdx];
+            if(ch==='\r'){
                 if(!nameStr.trim()) return;
                 try{localStorage.setItem('lastSName',nameStr);}catch{}
                 addScore(nameStr,score,level);Snd.sfx('select',cfg.music);
                 _scoreboardCache=getScores();phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
             } else if(nameCursorPos<nameStr.length){
-                nameStr=nameStr.slice(0,nameCursorPos)+NAME_CHARS[nameCharIdx]+nameStr.slice(nameCursorPos+1);
+                nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);
                 nameCursorPos=Math.min(nameCursorPos+1,nameStr.length);
+                _nameFlashPos=nameCursorPos-1; _nameFlashAt=performance.now();
                 Snd.sfx('nav',cfg.music);
             } else if(nameStr.length<MAX_NAME){
-                nameStr+=NAME_CHARS[nameCharIdx];nameCursorPos++;
+                nameStr+=ch; nameCursorPos++;
+                _nameFlashPos=nameCursorPos-1; _nameFlashAt=performance.now();
+                Snd.sfx('nav',cfg.music);
+            } else {
+                // name full and cursor at end: wrap to start so user can replace
+                nameCursorPos=0;
+                const ci=NAME_CHARS.indexOf(nameStr[0]); if(ci>=0)nameCharIdx=ci;
                 Snd.sfx('nav',cfg.music);
             }
         }
@@ -2013,7 +2023,7 @@ function _updateBtnDim() {
     _dimPhase=phase;
     const gameplay=['playing','paused','dying','levelReady','levelDone'].includes(phase);
     const noAction=['settings','scores','achievements','shop'].includes(phase);
-    _btnPause.classList.toggle('dim', noAction);
+    _btnPause.classList.toggle('dim', !['playing','paused','credits'].includes(phase));
     _btnStart.classList.toggle('dim', gameplay || noAction);
 }
 
