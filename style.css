@@ -72,11 +72,11 @@ body {
            Tiny horizontal padding keeps panels off the screen edge. */
         padding: 0 3px; gap: 6px; height: 100dvh; min-height: unset;
     }
-    /* Left info panel — 80px keeps HUD text legible; SND/FPS inset 16px from canvas edges */
+    /* Left info panel — 100px keeps HUD text legible; SND/FPS inset 16px from canvas edges */
     #side-info {
         display: flex; flex-direction: column; justify-content: flex-start;
         align-items: flex-start; gap: 14px;
-        width: 80px; flex-shrink: 0; overflow: hidden;
+        width: 100px; flex-shrink: 0; overflow: hidden;
         position: relative;
         padding: 16px 0;
     }

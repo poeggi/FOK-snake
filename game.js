@@ -949,27 +949,41 @@ function drawSplash(now) {
     ctx.fillStyle = '#111'; ctx.fillRect(coinX - 16, slotY - 2, 32, 4);
     if (slotFlashF > 0) {
         // Sparks: [dx, dy, speed, fadeScale] - burst from slot edge, gravity pulls down
+        // speed >= 90 renders bright white; slower sparks render gold
         const sparkDefs = [
-            [-0.55,-1,72,1],   [0,-1,80,1],      [0.55,-1,72,1],
-            [-1.1,-0.85,58,1], [1.1,-0.85,58,1],
-            [-0.25,-1,95,1],   [0.25,-1,95,1],
-            [-1.4,-0.45,44,1], [1.4,-0.45,44,1],
-            [-0.8,-0.65,65,1], [0.8,-0.65,65,1],
+            [-0.55,-1,72,1],    [0,-1,80,1],       [0.55,-1,72,1],
+            [-1.1,-0.85,58,1],  [1.1,-0.85,58,1],
+            [-0.25,-1,95,1],    [0.25,-1,95,1],
+            [-1.4,-0.45,44,1],  [1.4,-0.45,44,1],
+            [-0.8,-0.65,65,1],  [0.8,-0.65,65,1],
             [0,-0.75,108,1],
             [-0.4,-0.9,118,0.7],[0.4,-0.9,118,0.7],
             [-1.6,-0.2,38,0.8], [1.6,-0.2,38,0.8],
             [-0.15,-1,135,0.5], [0.15,-1,135,0.5],
             [-1.0,-1.0,50,0.9], [1.0,-1.0,50,0.9],
             [-0.7,-0.3,30,0.7], [0.7,-0.3,30,0.7],
+            // extra spread
+            [-0.75,-0.75,62,1], [0.75,-0.75,62,1],
+            [-1.2,-0.5,48,0.9], [1.2,-0.5,48,0.9],
+            [-0.35,-0.95,85,1], [0.35,-0.95,85,1],
+            [-1.8,0.1,33,0.8],  [1.8,0.1,33,0.8],
+            [-1.3,-0.15,40,0.8],[1.3,-0.15,40,0.8],
+            [-0.6,-0.5,55,0.9], [0.6,-0.5,55,0.9],
+            // extra fast bright
+            [-0.1,-1,148,0.4],  [0.1,-1,148,0.4],
+            [0,-1,125,0.6],
+            [-0.5,-0.85,102,0.7],[0.5,-0.85,102,0.7],
+            [-0.2,-0.98,92,0.8], [0.2,-0.98,92,0.8],
         ];
-        const sparkCols = ['#ffd700','#ffcc00','#ffff66','#ff9900','#fff5a0','#ffaa00'];
+        const sparkCols  = ['#ffd700','#ffcc00','#ffff66','#ff9900','#fff5a0','#ffaa00'];
+        const sparkBright = ['#ffffff','#ffffd0','#ffffe8'];
         const grav = 55, sp = 1 - slotFlashF;
         ctx.save();
         sparkDefs.forEach(([dx,dy,spd,fade],i) => {
             const sx = coinX + dx*spd*sp;
             const sy = slotY  + dy*spd*sp + grav*sp*sp;
             ctx.globalAlpha = Math.pow(slotFlashF, fade);
-            ctx.fillStyle = sparkCols[i % sparkCols.length];
+            ctx.fillStyle = spd>=90 ? sparkBright[i%sparkBright.length] : sparkCols[i%sparkCols.length];
             ctx.fillRect(Math.round(sx/2)*2, Math.round(sy/2)*2, 2, 2);
         });
         ctx.globalAlpha = 1;
