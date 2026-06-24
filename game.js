@@ -1593,11 +1593,23 @@ function dpadDir(e, cvs) {
     return Math.abs(x)>Math.abs(y)?(x>0?'ArrowRight':'ArrowLeft'):(y>0?'ArrowDown':'ArrowUp');
 }
 
+const _DPAD_DELAY=400, _DPAD_RATE=150;
+const _DPAD_GAME=new Set(['playing','paused','dying','levelReady','levelDone']);
+let _dpadRepeatTimer=null;
+function _clearDpadRepeat(){if(_dpadRepeatTimer){clearTimeout(_dpadRepeatTimer);_dpadRepeatTimer=null;}}
+function _startDpadRepeat(dir){
+    _clearDpadRepeat();
+    if(_DPAD_GAME.has(phase)) return;
+    function fire(){if(_DPAD_GAME.has(phase)){_clearDpadRepeat();return;}handleKey(dir,null);_dpadRepeatTimer=setTimeout(fire,_DPAD_RATE);}
+    _dpadRepeatTimer=setTimeout(fire,_DPAD_DELAY);
+}
+
 dpadCanvas.addEventListener('touchstart',e=>{
     Snd.resume(); e.preventDefault();
     dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null);
     drawDpad(phase==='splash'?null:dpadActive);
     if(phase==='playing'){const d=GDIRS[dpadActive];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+    _startDpadRepeat(dpadActive);
 },{passive:false});
 dpadCanvas.addEventListener('touchmove',e=>{
     e.preventDefault();
@@ -1606,9 +1618,11 @@ dpadCanvas.addEventListener('touchmove',e=>{
         dpadActive=d; handleKey(dpadActive,null);
         drawDpad(phase==='splash'?null:dpadActive);
         if(phase==='playing'){const gd=GDIRS[dpadActive];if(gd){boostDir=gd;boostSince=performance.now();boosting=false;}else{boostDir=null;boosting=false;}}
+        _startDpadRepeat(dpadActive);
     }
 },{passive:false});
-dpadCanvas.addEventListener('touchend',e=>{e.preventDefault();dpadActive=null;drawDpad(null);boostDir=null;boosting=false;},{passive:false});
+dpadCanvas.addEventListener('touchend',e=>{e.preventDefault();dpadActive=null;drawDpad(null);boostDir=null;boosting=false;_clearDpadRepeat();},{passive:false});
+dpadCanvas.addEventListener('touchcancel',e=>{dpadActive=null;drawDpad(null);boostDir=null;boosting=false;_clearDpadRepeat();});
 dpadCanvas.addEventListener('click',e=>{handleKey(dpadDir(e,dpadCanvas),null);});
 drawDpad(null);
 

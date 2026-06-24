@@ -105,10 +105,10 @@ body {
     /* Right controls panel — ESC, A:OK, dpad, PAUSE, START stacked top to bottom */
     #gamepad {
         display: flex; flex-direction: column; flex-shrink: 0;
-        width: 160px; align-items: center; justify-content: center; gap: 12px;
+        width: min(120px, 28vw); align-items: center; justify-content: center; gap: 12px;
     }
     #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); }
-    .sbtn { width: 140px; height: 40px; }
+    .sbtn { width: min(120px, 28vw); height: 40px; }
     /* Left-handed: controls move to left panel, info to right; canvas leans right */
     body.lefty #gamepad   { order: 1; }
     body.lefty #wrap      { order: 2; }
