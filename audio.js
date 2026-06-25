@@ -121,10 +121,13 @@ const Snd = (() => {
         if (!_ctx || !_currentTrack || !SEQ[_currentTrack] || _musicIsPaused) return;
         if (_bgSuspended) {
             _bgSuspended = false;
-            _channelState = SEQ[_currentTrack].channels.map(() => ({ pos: 0, nextNote: _ctx.currentTime + 0.45 }));
+            _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
+            _musicGain.gain.setValueAtTime(0, _ctx.currentTime);
+            _musicGain.gain.setTargetAtTime(0.5 * _musicVol, _ctx.currentTime, 0.02);
+            return;
         }
         _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _musicGain.gain.setValueAtTime(0.32 * _musicVol, _ctx.currentTime);
+        _musicGain.gain.setValueAtTime(0.5 * _musicVol, _ctx.currentTime);
     }
 
     // ── Audio context lifecycle ───────────────────────────────────
@@ -136,27 +139,21 @@ const Snd = (() => {
         try {
             _ctx = new (window.AudioContext || window.webkitAudioContext)();
             _musicGain = _ctx.createGain(); _musicGain.gain.value = 0; _musicGain.connect(_ctx.destination);
-            _sfxGain = _ctx.createGain(); _sfxGain.gain.value = 0.58 * _sfxVol; _sfxGain.connect(_ctx.destination);
+            _sfxGain = _ctx.createGain(); _sfxGain.gain.value = 0.5 *_sfxVol; _sfxGain.connect(_ctx.destination);
             _ctx.onstatechange = () => { if (_ctx.state === 'running') _onContextRunning(); };
             _ctx.resume().catch(() => {});
         } catch(e) { _ctx = null; }
     }
 
     function audioPreWarm() {
-        // Prime the pipeline at load: fire a real sfx through it at near-zero gain,
-        // then restore sfx bus to configured level. Self-destructs after ~175ms.
+        // Prime the AC at load: fire a silent buffer to register audio work with the
+        // browser, attempt resume, then suspend so the next gesture does a real resume.
         if (!_ctx) return;
-        _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _sfxGain.gain.setValueAtTime(0.01, _ctx.currentTime);
-        // 1-sample silent buffer: additional iOS hint that this context has audio work
+        // 1-sample silent buffer: iOS hint that this context has audio work
         const buf = _ctx.createBuffer(1, 1, 22050), src = _ctx.createBufferSource();
         src.buffer = buf; src.connect(_ctx.destination); src.start(0);
-        // sfxPlay('coin');
         _ctx.resume().catch(() => {});
-        // _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _sfxGain.gain.setValueAtTime(0.58 * _sfxVol, _ctx.currentTime + 0.5);
         _ctx.suspend().catch(() => {});
-        // _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
     }
 
     function audioResume() {
@@ -188,7 +185,7 @@ const Snd = (() => {
         // Set gain unconditionally: on a suspended AC, setValueAtTime at the frozen
         // currentTime applies immediately when AC resumes and time advances past it.
         _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _musicGain.gain.setValueAtTime(0.32 * _musicVol, _ctx.currentTime);
+        _musicGain.gain.setValueAtTime(0.5 *_musicVol, _ctx.currentTime);
     }
 
     function musicStop() {
@@ -212,14 +209,14 @@ const Snd = (() => {
         const now = _ctx.currentTime;
         _channelState.forEach(s => { s.nextNote = now + 0.05; });
         _musicGain.gain.cancelScheduledValues(now);
-        _musicGain.gain.setValueAtTime(0.32 * _musicVol, now);
+        _musicGain.gain.setValueAtTime(0.5 *_musicVol, now);
     }
 
     function musicSetVolume(vol) {
         _musicVol = vol;
         if (_musicGain && _currentTrack && !_musicIsPaused && _ctx && _ctx.state === 'running') {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-            _musicGain.gain.setValueAtTime(0.32 * vol, _ctx.currentTime);
+            _musicGain.gain.setValueAtTime(0.5 *vol, _ctx.currentTime);
         }
     }
 
@@ -278,7 +275,7 @@ const Snd = (() => {
 
     function sfxSetVolume(vol) {
         _sfxVol = vol;
-        if (_sfxGain) _sfxGain.gain.value = 0.58 * vol;
+        if (_sfxGain) _sfxGain.gain.value = 0.5 *vol;
     }
 
     // Build graph and prime pipeline at load. AC is suspended; prewarm oscillators
