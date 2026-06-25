@@ -1348,8 +1348,7 @@ function triggerSplashExit(fromTouch = false) {
     _splashExitAt = performance.now();
     _splashLeftAt = performance.now();
     _splashTouchPending = fromTouch;
-    Snd.sfxPlay('coin');
-    Snd.audioResume();
+    Snd.audioUnmute('coin');
 }
 
 const GAME_KEYS = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape','Backspace',' ','NameAdd']);
@@ -1420,7 +1419,7 @@ function handleKey(key, pde) {
         if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_COUNT)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
         if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
         if(key==='Enter'){
-            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute();else Snd.musicUnmute('select');updateMuteBtn();}
+            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute();else Snd.audioUnmute('select');updateMuteBtn();}
             else if(settingsSel===1){cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);}
             else if(settingsSel===4){cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);}
             else if(settingsSel===5){cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);}
@@ -1722,7 +1721,7 @@ function updateMuteBtn(){
         c.fillRect(rx*2+16,ry*2,2,2);
     }));
 }
-function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute(); else Snd.musicUnmute(); updateMuteBtn(); saveCfg(); }
+function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute(); else Snd.audioUnmute(); updateMuteBtn(); saveCfg(); }
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();
