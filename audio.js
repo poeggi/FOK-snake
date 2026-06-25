@@ -160,7 +160,7 @@ const Snd = (() => {
         // Call from every user gesture. iOS cold-start silently hangs the first resume();
         // retrying on each gesture is safe (spec-idempotent). Both .then() and onstatechange
         // call _onContextRunning; whichever fires first wins, second is a no-op.
-        if (_ctx ) { // && _ctx.state === 'suspended') {
+        if (_ctx) {
             return _ctx.resume().then(_onContextRunning).catch(() => {});
         }
         return Promise.resolve();
@@ -282,15 +282,6 @@ const Snd = (() => {
     // fire the moment the AC first resumes from a user gesture.
     audioInit();
     audioPreWarm();
-
-    // Document-level capture listener: fires on the absolute first touch anywhere on the
-    // page, before any game handler sees it. Gives iOS an early resume() attempt so that
-    // by the time the user reaches INSERT COIN the context is likely already running.
-    // const _unlockOnce = () => {
-    //     audioResume();
-    //     document.removeEventListener('touchstart', _unlockOnce, true);
-    // };
-    // document.addEventListener('touchstart', _unlockOnce, true);
 
     return {
         audioInit, audioResume, audioBgSuspend,
