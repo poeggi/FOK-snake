@@ -155,6 +155,7 @@ const Snd = (() => {
         _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
         _sfxGain.gain.setValueAtTime(0.58 * _sfxVol, _ctx.currentTime);
         _ctx.suspend().catch(() => {});
+        _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
     }
 
     function audioResume() {
