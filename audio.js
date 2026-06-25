@@ -154,16 +154,16 @@ const Snd = (() => {
         _ctx.resume().catch(() => {});
         _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
         _sfxGain.gain.setValueAtTime(0.58 * _sfxVol, _ctx.currentTime);
-        _ctx.suspend().catch(() => {});
+//        _ctx.suspend().catch(() => {});
     }
 
     function audioResume() {
         // Call from every user gesture. iOS cold-start silently hangs the first resume();
         // retrying on each gesture is safe (spec-idempotent). Both .then() and onstatechange
         // call _onContextRunning; whichever fires first wins, second is a no-op.
-        if (_ctx && _ctx.state === 'suspended') {
+//        if (_ctx && _ctx.state === 'suspended') {
             return _ctx.resume().then(_onContextRunning).catch(() => {});
-        }
+//        }
         return Promise.resolve();
     }
 
