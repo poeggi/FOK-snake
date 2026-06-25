@@ -1666,11 +1666,11 @@ document.addEventListener('keyup', e=>{
 });
 
 // Side buttons
-document.getElementById('btn-ok').addEventListener('touchstart',e=>{Snd.audioResume();if(phase==='nameEntry')nameInp.blur();handleKey(phase==='nameEntry'?'NameAdd':'Enter',null);e.preventDefault();},{passive:false});
+document.getElementById('btn-ok').addEventListener('touchstart',e=>{if(phase==='nameEntry')nameInp.blur();handleKey(phase==='nameEntry'?'NameAdd':'Enter',null);e.preventDefault();},{passive:false});
 document.getElementById('btn-ok').addEventListener('click',()=>handleKey(phase==='nameEntry'?'NameAdd':'Enter',null));
-document.getElementById('btn-pause').addEventListener('touchstart',e=>{Snd.audioResume();handleKey(' ',null);e.preventDefault();},{passive:false});
+document.getElementById('btn-pause').addEventListener('touchstart',e=>{handleKey(' ',null);e.preventDefault();},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
-document.getElementById('btn-start').addEventListener('touchstart',e=>{Snd.audioResume();handleKey('Enter',null);e.preventDefault();},{passive:false});
+document.getElementById('btn-start').addEventListener('touchstart',e=>{handleKey('Enter',null);e.preventDefault();},{passive:false});
 document.getElementById('btn-start').addEventListener('click',()=>handleKey('Enter',null));
 document.getElementById('gamepad').classList.add('splash');
 document.getElementById('btn-esc').addEventListener('touchstart',e=>{handleKey('Escape',null);e.preventDefault();},{passive:false});
