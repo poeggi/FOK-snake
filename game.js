@@ -593,9 +593,13 @@ function drawSnake(flash) {
 // SCREENS
 // ================================================================
 function drawSplash(now) {
-    const elapsed = _splashFast
-        ? _splashFastBase + (now - _splashFastStart) / 1000 * 2
-        : (now - phaseAt) / 1000;
+    // Cycle geometry constants
+    const DARK_LEAD = 1.0, DROP = 1.5, ENTER = 0.4, DARK_TAIL = 0.1;
+    const CYCLE = DARK_LEAD + DROP + ENTER + 1.0 + DARK_TAIL;
+    const T_DROP  = DARK_LEAD;
+    const T_ENTER = DARK_LEAD + DROP;
+    const T_DONE  = DARK_LEAD + DROP + ENTER;
+    const coinX = CW/2, slotY = 292, startY = 162;
 
     // Background matches menu: grid + scan line overlay
     drawGrid();
@@ -607,45 +611,52 @@ function drawSplash(now) {
     ctx.shadowBlur = 0;
     ctx.shadowColor='#4a7a4a'; ctx.shadowBlur=1; ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', 8); ctx.shadowBlur=0;
 
-    // Coin drop animation
-    // Cycle order: dark lead | DROP fall | ENTER slot entry | INSERT COIN blink | dark tail
-    const DARK_LEAD = 1.0, DROP = 1.5, ENTER = 0.4, DARK_TAIL = 0.1;
-    const CYCLE = DARK_LEAD + DROP + ENTER + 1.0 + DARK_TAIL;
-    const t = elapsed % CYCLE;
-    const coinX = CW/2, slotY = 292, startY = 162;
+    // Per-frame coin/spark state
+    let showCoin = false, coinY = startY, scaleX = 1, spinAngle = 0;
+    let slotFlashF = 0, coinClipped = false;
+    let t = 0; // only valid when !_splashExiting; used for INSERT COIN blink
 
-    const T_DROP  = DARK_LEAD;
-    const T_ENTER = DARK_LEAD + DROP;
-    const T_DONE  = DARK_LEAD + DROP + ENTER;
-    const T_TAIL  = CYCLE - DARK_TAIL;
-
-    // Spin angle tied to drop progress so entry is always face-on
-    const dropT = t - T_DROP;
-    const dropProgress = Math.min(Math.max(dropT, 0), DROP) / DROP;
-    const spinAngle = dropProgress * 1.5 * Math.PI * 2;
-    const scaleX = Math.max(0.08, Math.abs(Math.cos(spinAngle)));
-
-    // Fall: cubic ease-in (slow start, fast end = realistic gravity)
-    let coinY = startY, showCoin = false;
-    if (t >= T_DROP && t < T_DONE) {
-        showCoin = true;
-        if (dropT < DROP) {
-            const p = dropT / DROP;
-            coinY = startY + (slotY - startY - 14) * p * p * p * p * p;
-        } else {
-            const p = (dropT - DROP) / ENTER;
-            coinY = (slotY - 14) + 28 * p;
+    if (_splashExiting) {
+        const exitMs = now - _splashExitAt;
+        // Coin snaps into slot over 80ms then disappears below clip rect
+        if (exitMs < 80) {
+            showCoin = true;
+            coinY = (slotY - 14) + 28 * (exitMs / 80);
+            scaleX = 1; spinAngle = 0; coinClipped = true;
         }
+        // Sparks: fire at 40ms, fade over 420ms
+        if (exitMs >= 40) slotFlashF = Math.max(0, 1 - (exitMs - 40) / 420);
+    } else {
+        const elapsed = _splashFast
+            ? _splashFastBase + (now - _splashFastStart) / 1000 * 2
+            : (now - phaseAt) / 1000;
+        t = elapsed % CYCLE;
+        const dropT = t - T_DROP;
+        const dropProgress = Math.min(Math.max(dropT, 0), DROP) / DROP;
+        spinAngle = dropProgress * 1.5 * Math.PI * 2;
+        scaleX = Math.max(0.08, Math.abs(Math.cos(spinAngle)));
+        if (t >= T_DROP && t < T_DONE) {
+            showCoin = true;
+            if (dropT < DROP) {
+                const p = dropT / DROP;
+                coinY = startY + (slotY - startY - 14) * p * p * p * p * p;
+            } else {
+                const p = (dropT - DROP) / ENTER;
+                coinY = (slotY - 14) + 28 * p;
+            }
+        }
+        slotFlashF = (t >= T_ENTER && t < T_ENTER + 0.4) ? 1 - (t - T_ENTER) / 0.4 : 0;
+        coinClipped = t >= T_ENTER;
     }
 
-    // Slot housing always drawn; pixelated sparks fly out when coin enters
-    const slotFlashF = (t >= T_ENTER && t < T_ENTER + 0.4) ? 1 - (t - T_ENTER) / 0.4 : 0;
+    // Slot housing always drawn
     ctx.fillStyle = '#1a1a1a'; ctx.fillRect(coinX - 32, slotY - 9, 64, 18);
     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(coinX - 26, slotY - 6, 52, 12);
     ctx.fillStyle = '#111'; ctx.fillRect(coinX - 16, slotY - 2, 32, 4);
+
+    // Pixelated sparks burst from slot when coin enters
+    // speed >= 90 renders bright white; slower sparks render gold
     if (slotFlashF > 0) {
-        // Sparks: [dx, dy, speed, fadeScale] - burst from slot edge, gravity pulls down
-        // speed >= 90 renders bright white; slower sparks render gold
         const sparkDefs = [
             [-0.55,-1,72,1],    [0,-1,80,1],       [0.55,-1,72,1],
             [-1.1,-0.85,58,1],  [1.1,-0.85,58,1],
@@ -658,14 +669,12 @@ function drawSplash(now) {
             [-0.15,-1,135,0.5], [0.15,-1,135,0.5],
             [-1.0,-1.0,50,0.9], [1.0,-1.0,50,0.9],
             [-0.7,-0.3,30,0.7], [0.7,-0.3,30,0.7],
-            // extra spread
             [-0.75,-0.75,62,1], [0.75,-0.75,62,1],
             [-1.2,-0.5,48,0.9], [1.2,-0.5,48,0.9],
             [-0.35,-0.95,85,1], [0.35,-0.95,85,1],
             [-1.8,0.1,33,0.8],  [1.8,0.1,33,0.8],
             [-1.3,-0.15,40,0.8],[1.3,-0.15,40,0.8],
             [-0.6,-0.5,55,0.9], [0.6,-0.5,55,0.9],
-            // extra fast bright
             [-0.1,-1,148,0.4],  [0.1,-1,148,0.4],
             [0,-1,125,0.6],
             [-0.5,-0.85,102,0.7],[0.5,-0.85,102,0.7],
@@ -688,46 +697,40 @@ function drawSplash(now) {
 
     if (showCoin) {
         ctx.save();
-        if (t >= T_ENTER) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
-        // shadow
+        if (coinClipped) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.beginPath(); ctx.ellipse(coinX+2, coinY+4, 14*scaleX, 4, 0, 0, Math.PI*2); ctx.fill();
         ctx.translate(coinX, coinY);
         ctx.scale(scaleX, 1);
-        // bright gold outer rim
         ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI*2);
         ctx.fillStyle = '#FFD000'; ctx.fill();
-        // dark shadow ring
         ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2);
         ctx.fillStyle = '#1C0600'; ctx.fill();
-        // gold face with radial gradient (bright centre, darker edge)
         const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 11);
         grad.addColorStop(0,   '#FFE870');
         grad.addColorStop(0.5, '#FFB800');
         grad.addColorStop(1,   '#A06000');
         ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2);
         ctx.fillStyle = grad; ctx.fill();
-        // pixelated symbol centred on face
         const sym = Math.cos(spinAngle) >= 0 ? SYM_ONE : SYM_YEN;
         ctx.fillStyle = '#1C0600';
         sym.px.forEach(([ix,iy]) => ctx.fillRect(ix*2 - sym.w, iy*2 - sym.h, 2, 2));
         ctx.restore();
     }
 
-
-    // INSERT COIN blinking at 0.5Hz (1s on / 1s off)
-    if (Math.floor(t) % 2 === 1) {
-        ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 12;
-        ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
-        ctx.shadowBlur = 0;
+    // INSERT COIN blink and bottom hint: suppressed during exit sequence
+    if (!_splashExiting) {
+        if (Math.floor(t) % 2 === 1) {
+            ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 12;
+            ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
+            ctx.shadowBlur = 0;
+        }
+        ctx.save();
+        ctx.font = '8px "Press Start 2P"'; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#555'; ctx.shadowColor='#555'; ctx.shadowBlur=1;
+        ctx.fillText('enter  |  tap  |  click', CW/2, CH - 8); ctx.shadowBlur=0;
+        ctx.restore();
     }
-
-    // Bottom hint: matches menu bottom bar style
-    ctx.save();
-    ctx.font = '8px "Press Start 2P"'; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
-    ctx.fillStyle = '#555'; ctx.shadowColor='#555'; ctx.shadowBlur=1;
-    ctx.fillText('enter  |  tap  |  click', CW/2, CH - 8); ctx.shadowBlur=0;
-    ctx.restore();
 }
 
 function drawMenu() {
@@ -1337,16 +1340,16 @@ const GDIRS={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRi
 
 let _splashLeftAt = 0, _splashTouchPending = false;
 let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
-function leaveSplash(fromTouch = false) {
+let _splashExiting = false, _splashExitAt = 0;
+function triggerSplashExit(fromTouch = false) {
+    if (phase !== 'splash' || _splashExiting) return;
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
-    Snd.audioResume();
-    Snd.sfxPlay('coin');
+    _splashExiting = true;
+    _splashExitAt = performance.now();
     _splashLeftAt = performance.now();
     _splashTouchPending = fromTouch;
-    phase = 'menu'; phaseAt = performance.now();
-    document.getElementById('btn-mute').style.visibility = '';
-    document.getElementById('fps-el').style.visibility = '';
-    document.getElementById('gamepad').classList.remove('splash');
+    Snd.audioResume();
+    Snd.sfxPlay('coin');
 }
 
 const GAME_KEYS = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape','Backspace',' ','NameAdd']);
@@ -1354,17 +1357,15 @@ function handleKey(key, pde) {
     // Let browser handle F-keys (F5 reload, F11 fullscreen, etc.)
     if (key.length > 1 && !GAME_KEYS.has(key)) return;
     if (phase === 'splash') {
-        if (key === 'ArrowDown' && !_splashFast) {
+        if (key === 'ArrowDown' && !_splashFast && !_splashExiting) {
             _splashFast = true;
             _splashFastStart = performance.now();
             _splashFastBase = (performance.now() - phaseAt) / 1000;
             return;
         }
-        // Only meaningful keys exit splash; F-keys/Escape/modifiers fall through so
-        // the browser still handles F5 (refresh), F11 (fullscreen), etc.
         const splashOk = key.length === 1 || key === 'Enter';
         if (!splashOk) return;
-        leaveSplash(); if (pde) pde(); return;
+        triggerSplashExit(false); if (pde) pde(); return;
     }
     if (performance.now() - _splashLeftAt < 200) return;
     Snd.audioResume();
@@ -1579,15 +1580,15 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 // so deliberate re-moves after a pause feel as responsive as the first direction.
 // Splash: any pointer or touch on canvas exits splash and unlocks audio
 // Mouse/stylus only: touch devices use the touchstart handler below so that
-// leaveSplash() calls Snd.audioResume() inside a touchstart, not a pointerdown
+// triggerSplashExit() calls Snd.audioResume() inside a touchstart, not a pointerdown
 // (iOS Safari only honours AudioContext unlock from touchstart, not pointerdown).
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
-    if (phase === 'splash') { leaveSplash(false); }
+    if (phase === 'splash') { triggerSplashExit(false); }
     else if (phase !== 'playing' && phase !== 'nameEntry') { handleKey('Enter', null); }
 });
-canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { leaveSplash(true); e.preventDefault(); } }, { passive: false });
+canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { triggerSplashExit(true); e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
 const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50;
@@ -1745,9 +1746,20 @@ function _updateBtnDim() {
     _btnStart.classList.toggle('dim', gameplay || noAction);
 }
 
+let _uiSplashShown = null;
+function _updateNonCanvasUI() {
+    const onSplash = phase === 'splash';
+    if (_uiSplashShown === onSplash) return;
+    _uiSplashShown = onSplash;
+    document.getElementById('btn-mute').style.visibility = onSplash ? 'hidden' : '';
+    document.getElementById('fps-el').style.visibility = onSplash ? 'hidden' : '';
+    document.getElementById('gamepad').classList.toggle('splash', onSplash);
+}
+
 function loop(now) {
     requestAnimationFrame(loop);
     _updateBtnDim();
+    _updateNonCanvasUI();
     fpsFrames++;
     if(now-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(now-fpsLast))} FPS`;fpsFrames=0;fpsLast=now;}
 
@@ -1777,6 +1789,10 @@ function loop(now) {
     }
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
+    }
+    if(phase==='splash'&&_splashExiting&&now-_splashExitAt>=500){
+        _splashExiting=false;
+        phase='menu'; phaseAt=now;
     }
 
     // Draw
