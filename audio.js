@@ -286,6 +286,19 @@ const Snd = (() => {
         sfxPlay(sfxType);
     }
 
+    // Eager init: build the audio graph immediately so the first gesture only needs resume().
+    // AC starts suspended on iOS; no audio plays until resume() is called from a gesture.
+    audioInit();
+
+    // Document-level capture listener: fires on the absolute first touch anywhere on the
+    // page, before any game handler sees it. Gives iOS an early resume() attempt so that
+    // by the time the user reaches INSERT COIN the context is likely already running.
+    const _unlockOnce = () => {
+        audioResume();
+        document.removeEventListener('touchstart', _unlockOnce, true);
+    };
+    document.addEventListener('touchstart', _unlockOnce, true);
+
     return {
         audioInit, audioResume, audioTryResume, audioBgSuspend,
         musicPlay, musicStop, musicGamePause, musicGameUnpause, musicSetVolume, musicTick,
