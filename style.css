@@ -55,8 +55,8 @@ body {
     #btn-esc   { grid-column: 1; grid-row: 1; }
     #btn-pause { grid-column: 2; grid-row: 1; }
     #dpad-c    { grid-column: 1 / span 2; grid-row: 2; width: min(150px, 45vw); height: min(150px, 45vw); }
-    #btn-ok    { grid-column: 1; grid-row: 3; }
-    #btn-start { grid-column: 2; grid-row: 3; }
+    #btn-start { grid-column: 1; grid-row: 3; }
+    #btn-ok    { grid-column: 2; grid-row: 3; }
     #gamepad.splash #dpad-c { opacity: 0.2; }
     .sbtn { height: 48px; }
 }
@@ -102,12 +102,16 @@ body {
         width: min(calc((100dvh - 32px) * 1.5), 100%);
         height: auto;
     }
-    /* Right controls panel — ESC, A:OK, dpad, PAUSE, START stacked top to bottom */
+    /* Right controls panel — ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
     #gamepad {
         display: flex; flex-direction: column; flex-shrink: 0;
         width: min(120px, 28vw); align-items: center; justify-content: center; gap: 12px;
     }
-    #dpad-c { width: min(120px, 28vw); height: min(120px, 28vw); }
+    #btn-esc   { order: 1; }
+    #btn-pause { order: 2; }
+    #dpad-c    { order: 3; width: min(120px, 28vw); height: min(120px, 28vw); }
+    #btn-ok    { order: 4; }
+    #btn-start { order: 5; }
     .sbtn { width: min(120px, 28vw); height: 40px; }
     /* Left-handed: controls move to left panel, info to right; canvas leans right */
     body.lefty #gamepad   { order: 1; }
