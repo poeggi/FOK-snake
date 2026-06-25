@@ -283,7 +283,7 @@ const Snd = (() => {
     // Build graph and prime pipeline at load. AC is suspended; prewarm oscillators
     // fire the moment the AC first resumes from a user gesture.
     audioInit();
-    audioPreWarm();
+    //audioPreWarm();
 
     return {
         audioInit, audioResume, audioBgSuspend,
