@@ -1474,7 +1474,7 @@ function handleKey(key, pde) {
             if(item&&!item.repeatable&&si[item.id]){
                 if(wi[item.id]) delete wi[item.id]; else wi[item.id]=true;
                 saveCfg(); Snd.sfxPlay('nav',cfg.music);
-            }
+            } else if(item&&!si[item.id]){ Snd.sfxPlay('fail',cfg.music); }
         }
         if(pde)pde();
     }
