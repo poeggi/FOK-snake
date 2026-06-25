@@ -152,8 +152,8 @@ const Snd = (() => {
         // 1-sample silent buffer: iOS hint that this context has audio work
         const buf = _ctx.createBuffer(1, 1, 22050), src = _ctx.createBufferSource();
         src.buffer = buf; src.connect(_ctx.destination); src.start(0);
-        _ctx.resume().catch(() => {});
-        _ctx.suspend().catch(() => {});
+        //_ctx.resume().catch(() => {});
+        //_ctx.suspend().catch(() => {});
     }
 
     function audioResume() {
