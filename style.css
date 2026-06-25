@@ -52,11 +52,11 @@ body {
 .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
 @media (pointer: coarse) {
     #gamepad { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    #btn-esc   { grid-column: 1; grid-row: 1; }
-    #btn-pause { grid-column: 2; grid-row: 1; }
+    #btn-pause { grid-column: 1; grid-row: 1; }
+    #btn-esc   { grid-column: 2; grid-row: 1; }
     #dpad-c    { grid-column: 1 / span 2; grid-row: 2; width: min(150px, 45vw); height: min(150px, 45vw); }
-    #btn-start { grid-column: 1; grid-row: 3; }
-    #btn-ok    { grid-column: 2; grid-row: 3; }
+    #btn-ok    { grid-column: 1; grid-row: 3; }
+    #btn-start { grid-column: 2; grid-row: 3; }
     #gamepad.splash #dpad-c { opacity: 0.2; }
     .sbtn { height: 48px; }
 }
