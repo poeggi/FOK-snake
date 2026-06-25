@@ -146,7 +146,7 @@ const Snd = (() => {
         // then restore sfx bus to configured level. Self-destructs after ~175ms.
         if (!_ctx) return;
         _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _sfxGain.gain.setValueAtTime(0.001, _ctx.currentTime);
+        _sfxGain.gain.volume = 0.001;
         // 1-sample silent buffer: additional iOS hint that this context has audio work
         const buf = _ctx.createBuffer(1, 1, 22050), src = _ctx.createBufferSource();
         src.buffer = buf; src.connect(_ctx.destination); src.start(0);
