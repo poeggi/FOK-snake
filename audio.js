@@ -119,9 +119,10 @@ const Snd = (() => {
     // Idempotent: safe to call from both paths on the same resume event.
     function _onContextRunning() {
         if (!_ctx || !_currentTrack || !SEQ[_currentTrack] || _musicIsPaused) return;
-        const flush = _bgSuspended ? 0.45 : 0.05;
-        _bgSuspended = false;
-        _channelState = SEQ[_currentTrack].channels.map(() => ({ pos: 0, nextNote: _ctx.currentTime + flush }));
+        if (_bgSuspended) {
+            _bgSuspended = false;
+            _channelState = SEQ[_currentTrack].channels.map(() => ({ pos: 0, nextNote: _ctx.currentTime + 0.45 }));
+        }
         _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
         _musicGain.gain.setValueAtTime(0.32 * _musicVol, _ctx.currentTime);
     }
