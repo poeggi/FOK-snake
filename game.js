@@ -1348,7 +1348,7 @@ function triggerSplashExit(fromTouch = false) {
     _splashExitAt = performance.now();
     _splashLeftAt = performance.now();
     _splashTouchPending = fromTouch;
-    Snd.audioUnmute('coin');
+    Snd.sfxPlay('coin'); Snd.audioResume();
 }
 
 const GAME_KEYS = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape','Backspace',' ','NameAdd']);
@@ -1419,7 +1419,7 @@ function handleKey(key, pde) {
         if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_COUNT)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
         if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
         if(key==='Enter'){
-            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute();else Snd.audioUnmute('select');updateMuteBtn();}
+            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.musicStop();else{Snd.audioResume();Snd.sfxPlay('select',cfg.music);}updateMuteBtn();}
             else if(settingsSel===1){cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);}
             else if(settingsSel===4){cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);}
             else if(settingsSel===5){cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);}
@@ -1643,10 +1643,10 @@ canvas.addEventListener('touchend',e=>{
 },{passive:false});
 
 // Restore audio on pointer gestures mid-game (background resume, desktop mouse, etc.).
-document.addEventListener('pointerdown', () => Snd.audioTryResume(), {capture:true, passive:true});
+document.addEventListener('pointerdown', () => Snd.audioResume(), {capture:true, passive:true});
 // touchend is a trusted iOS Safari gesture; gives AC a second unlock attempt if the
 // touchstart-based resume() promise silently hung (iOS WebKit quirk).
-document.addEventListener('touchend', () => Snd.audioTryResume(), {passive:true});
+document.addEventListener('touchend', () => Snd.audioResume(), {passive:true});
 // Pause audio when app goes to background, resume when it returns
 function onBgHide() {
     if (phase === 'playing') { phase = 'paused'; pauseAt = performance.now(); Snd.musicGamePause(); }
@@ -1721,7 +1721,7 @@ function updateMuteBtn(){
         c.fillRect(rx*2+16,ry*2,2,2);
     }));
 }
-function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute(); else Snd.audioUnmute(); updateMuteBtn(); saveCfg(); }
+function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicStop(); else{Snd.audioResume();Snd.sfxPlay('nav',cfg.music);} updateMuteBtn(); saveCfg(); }
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();

@@ -8,7 +8,6 @@ const Snd = (() => {
     let _musicVol = 1.0, _sfxVol = 0.5;
     let _currentTrack = null, _channelState = [];
     let _musicIsPaused = false, _bgSuspended = false;
-    let _preWarmed = false;
 
     // ── Music data ────────────────────────────────────────────────
     const SEQ = {
@@ -143,23 +142,13 @@ const Snd = (() => {
     }
 
     function audioResume() {
-        // Resume suspended AC (or create it). Call from every trusted user gesture.
-        // iOS cold-start silently hangs the first ac.resume(); retrying on each gesture
-        // is safe (spec-idempotent). Both .then() and onstatechange call _onContextRunning,
-        // so whichever fires first wins; the second call is a harmless no-op.
-        // Returns a Promise that resolves when AC is running (or immediately if already running).
-        if (!_ctx) audioInit();
+        // Call from every user gesture. iOS cold-start silently hangs the first resume();
+        // retrying on each gesture is safe (spec-idempotent). Both .then() and onstatechange
+        // call _onContextRunning; whichever fires first wins, second is a no-op.
         if (_ctx && _ctx.state === 'suspended') {
             return _ctx.resume().then(_onContextRunning).catch(() => {});
         }
         return Promise.resolve();
-    }
-
-    function audioTryResume() {
-        // Resume without creating AC. Safe for untrusted events (touchend, pointerdown, etc.)
-        if (_ctx && _ctx.state === 'suspended') {
-            _ctx.resume().then(_onContextRunning).catch(() => {});
-        }
     }
 
     function audioBgSuspend() {
@@ -236,7 +225,6 @@ const Snd = (() => {
 
     function sfxPlay(type, on = true) {
         // on: pass cfg.music to gate playback on the sound-enabled setting.
-        // Omit (or pass true) to play unconditionally (e.g. iOS audio pipeline priming).
         if (!_ctx || !on) return;
         const now = _ctx.currentTime;
         const t = (f, w, d, tp) => _tone(f, w, d, tp || 'square', 0.42, 0, _sfxGain);
@@ -275,17 +263,11 @@ const Snd = (() => {
         if (_sfxGain) _sfxGain.gain.value = 0.58 * vol;
     }
 
-    // ── App-level mute / unmute ───────────────────────────────────
-
-    function musicMute() {
-        musicStop();
-    }
+    // ── Pipeline priming ──────────────────────────────────────────
 
     function audioPreWarm() {
-        // Prime the pipeline at load: set sfx bus to near-zero (not exactly 0, to prevent
-        // browser optimizing the signal away) then fire a real sfx through it. The signal
-        // travels all the way to the OS driver but is inaudible (-60dB). Self-destructs
-        // naturally after ~175ms. No nodes added to the permanent graph.
+        // Prime the pipeline at load: fire a real sfx through it at near-zero gain,
+        // then restore sfx bus to configured level. Self-destructs after ~175ms.
         if (!_ctx) return;
         _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
         _sfxGain.gain.setValueAtTime(0.001, _ctx.currentTime);
@@ -294,18 +276,8 @@ const Snd = (() => {
         src.buffer = buf; src.connect(_ctx.destination); src.start(0);
         sfxPlay('coin');
         audioResume();
-        _preWarmed = true;
-    }
-
-    function audioUnmute(sfxType = 'nav') {
-        // Restore sfx bus from pre-warm level, then resume + play sfx.
-        if (_preWarmed) {
-            _preWarmed = false;
-            _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
-            _sfxGain.gain.setValueAtTime(0.58 * _sfxVol, _ctx.currentTime);
-        }
-        audioResume();
-        sfxPlay(sfxType);
+        _sfxGain.gain.cancelScheduledValues(_ctx.currentTime);
+        _sfxGain.gain.setValueAtTime(0.58 * _sfxVol, _ctx.currentTime);
     }
 
     // Build graph and prime pipeline at load. AC is suspended; prewarm oscillators
@@ -323,9 +295,9 @@ const Snd = (() => {
     document.addEventListener('touchstart', _unlockOnce, true);
 
     return {
-        audioInit, audioResume, audioTryResume, audioBgSuspend,
+        audioInit, audioResume, audioBgSuspend,
         musicPlay, musicStop, musicGamePause, musicGameUnpause, musicSetVolume, musicTick,
         sfxPlay, sfxSetVolume,
-        musicMute, audioPreWarm, audioUnmute,
+        audioPreWarm,
     };
 })();
