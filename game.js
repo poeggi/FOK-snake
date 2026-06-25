@@ -1335,14 +1335,14 @@ const GDIRS={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRi
 
 let _splashLeftAt = 0, _splashTouchPending = false;
 let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
-let _splashExiting = false, _splashExitAt = 0;
+let _splashExiting = false, _splashExitAt = 0, _splashExitWaiting = false;
 function triggerSplashExit(fromTouch = false) {
     if (phase !== 'splash' || _splashExiting) return;
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
     _splashExiting = true;
     _splashExitAt = performance.now();
-    _splashLeftAt = performance.now();
     _splashTouchPending = fromTouch;
+    _splashExitWaiting = true; // wait for pointer/finger release before transitioning
     Snd.sfxPlay('coin'); Snd.audioResume();
 }
 
@@ -1359,7 +1359,7 @@ function handleKey(key, pde) {
         }
         const splashOk = key.length === 1 || key === 'Enter';
         if (!splashOk) return;
-        triggerSplashExit(false); if (pde) pde(); return;
+        triggerSplashExit(false); _splashExitWaiting = false; if (pde) pde(); return;
     }
     if (performance.now() - _splashLeftAt < 200) return;
     Snd.audioResume();
@@ -1582,6 +1582,15 @@ canvas.addEventListener('pointerdown', e => {
     if (phase === 'splash') { triggerSplashExit(false); }
     else if (phase !== 'playing' && phase !== 'nameEntry') { handleKey('Enter', null); }
 });
+canvas.addEventListener('pointerup', e => {
+    if (e.pointerType === 'touch') return;
+    if (_splashExitWaiting) {
+        _splashExitWaiting = false;
+        Snd.audioResume();
+        const _n = performance.now();
+        if (_n - _splashExitAt >= 500) { _splashExiting = false; phase = 'menu'; phaseAt = _n; _splashLeftAt = _n; }
+    }
+});
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { triggerSplashExit(true); e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
@@ -1626,7 +1635,17 @@ canvas.addEventListener('touchmove',e=>{
 },{passive:false});
 canvas.addEventListener('touchend',e=>{
     e.preventDefault();
-    if(_splashTouchPending){ _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null; return; }
+    if(_splashTouchPending){
+        _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null;
+        if(_splashExitWaiting){
+            _splashExitWaiting=false;
+            Snd.audioResume();
+            const _n=performance.now();
+            if(_n-_splashExitAt>=500){ _splashExiting=false; phase='menu'; phaseAt=_n; _splashLeftAt=_n; }
+            // else: animation still running, loop timer will transition and set _splashLeftAt
+        }
+        return;
+    }
     if(_swipeBase){
         const t=e.changedTouches[0];
         const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
@@ -1782,9 +1801,9 @@ function loop(now) {
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
     }
-    if(phase==='splash'&&_splashExiting&&now-_splashExitAt>=500){
+    if(phase==='splash'&&_splashExiting&&!_splashExitWaiting&&now-_splashExitAt>=500){
         _splashExiting=false;
-        phase='menu'; phaseAt=now;
+        phase='menu'; phaseAt=now; _splashLeftAt=now;
     }
 
     // Draw
