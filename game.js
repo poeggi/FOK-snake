@@ -1585,12 +1585,7 @@ canvas.addEventListener('pointerdown', e => {
 });
 canvas.addEventListener('pointerup', e => {
     if (e.pointerType === 'touch') return;
-    if (_splashExitWaiting) {
-        _splashExitWaiting = false;
-        Snd.audioResume();
-        const _n = performance.now();
-        if (_n - _splashExitAt >= 500) { _splashExiting = false; phase = 'menu'; phaseAt = _n; _splashLeftAt = _n; }
-    }
+    if (_splashExitWaiting) { _splashExitWaiting = false; Snd.audioResume(); }
 });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { triggerSplashExit(true); e.preventDefault(); } }, { passive: false });
 
@@ -1638,13 +1633,7 @@ canvas.addEventListener('touchend',e=>{
     e.preventDefault();
     if(_splashTouchPending){
         _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null;
-        if(_splashExitWaiting){
-            _splashExitWaiting=false;
-            Snd.audioResume();
-            const _n=performance.now();
-            if(_n-_splashExitAt>=500){ _splashExiting=false; phase='menu'; phaseAt=_n; _splashLeftAt=_n; }
-            // else: animation still running, loop timer will transition and set _splashLeftAt
-        }
+        if(_splashExitWaiting){ _splashExitWaiting=false; Snd.audioResume(); }
         return;
     }
     if(_swipeBase){

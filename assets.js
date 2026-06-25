@@ -69,7 +69,7 @@ const ACHIEVEMENTS = [
       icon:{p:{A:'#cc44ff',B:'#ff88ff',C:'#ffffff'},d:['...A....','..ABA...','.ABCBA..','ABCCCBA.','.ABCBA..','..ABA...','...A....','........']}},
     { id:'perfect_level', name:'PERFECTIONIST', desc:'Complete a level perfectly',
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['A..A..A.','AAAAAAA.','AAAAAAA.','AAAAAAA.','BAAAAAAB','BAAAAAAB','........','........']}},
-    { id:'level10',       name:'CHAMPION',      desc:'Complete all 10 levels on normal+',
+    { id:'level10',       name:'CHAMPION',      desc:'All 10 levels on normal+',
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['.AAAAA..','AAAAAAA.','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','BBBBBBB.','........']}},
     { id:'fokoins_100k',  name:'DRAGON RICH',   desc:'Earn 500,000 FOKoins',
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
