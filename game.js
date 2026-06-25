@@ -903,8 +903,8 @@ function drawAchievements() {
             const _ws=a.desc.split(' '); let _l='';
             for(const _w of _ws){const _t=_l?_l+' '+_w:_w;if(ctx.measureText(_t).width<=_mw)_l=_t;else{_d2=a.desc.slice(_l.length+1);break;}}_d1=_l;
         }
-        ctx.fillText(_d1,x+26,y+24);
-        if(_d2) ctx.fillText(_d2,x+26,y+34);
+        ctx.fillText(_d1,x+26,y+28);
+        if(_d2) ctx.fillText(_d2,x+26,y+42);
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
