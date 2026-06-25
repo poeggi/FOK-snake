@@ -743,16 +743,14 @@ function drawMenu() {
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
     ctx.shadowColor='#555'; ctx.shadowBlur=1; ct(`DIFF: ${DIFF[cfg.diff].label}  |  AUDIO: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#555',10); ctx.shadowBlur=0;
-    // Bottom bar: version left, hint center, FOKoins right -- all same font as FOK EDITION
-    const coins=_cachedFOKoins;
+    ct(`BALANCE: ${_cachedFOKoins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
+    // Bottom bar: version left, hint center
     ctx.save();
     ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
     ctx.fillText(_swVersion, 10, CH-8);
-    ctx.textAlign='center';
+    ctx.fillStyle='#4a7a4a'; ctx.textAlign='center';
     ctx.fillText('UP/DOWN  |  A:OK/ENTER select', CW/2, CH-8);
-    ctx.fillStyle='#ffd700'; ctx.textAlign='right';
-    ctx.fillText(`FOKOINS: ${coins.toLocaleString()}`, CW-10, CH-8);
     ctx.restore();
 }
 
