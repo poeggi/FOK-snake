@@ -152,11 +152,8 @@ const Snd = (() => {
         // 1-sample silent buffer: iOS hint that this context has audio work
         const buf = _ctx.createBuffer(1, 1, 22050), src = _ctx.createBufferSource();
         src.buffer = buf; src.connect(_ctx.destination); src.start(0);
-        // Chain: suspend only after resume settles so AC is cleanly suspended
-        // before the first gesture. Un-chained calls race and can leave AC in
-        // a suspending state when the user touches, queuing the gesture resume
-        // behind a pending suspend -- iOS then expires the gesture window.
-        _ctx.resume().then(() => _ctx.suspend()).catch(() => {});
+        _ctx.resume().catch(() => {});
+        _ctx.suspend().catch(() => {});
     }
 
     function audioResume() {
