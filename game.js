@@ -1,4 +1,4 @@
-﻿// ================================================================
+// ================================================================
 // CONSTANTS (static data in assets.js)
 // ================================================================
 
@@ -25,260 +25,6 @@ function startLen(lvl) {
 const canvas = document.getElementById('c');
 canvas.width = CW; canvas.height = CH;
 const ctx = canvas.getContext('2d');
-
-// ================================================================
-// AUDIO
-// ================================================================
-const Snd = (() => {
-    let ac = null, mGain, sGain, _vol = 1, _sfxVol = 0.5;
-    let chState = [], curTrack = null, isPaused = false, _bgSuspended = false;
-
-    const SEQ = {
-        // NEW style (3-channel)
-        ambient: { bpm: 85, channels: [
-            { fn:'tri',  vol:0.26, notes:[
-                [659,1],[784,1],[659,1],[523,1],
-                [523,1.5],[0,0.5],[440,1],[0,1],
-                [440,1],[523,1],[659,1],[523,1],
-                [440,1],[0,1],[440,1],[0,1],
-            ]},
-            { fn:'bass', vol:0.16, notes:[ [131,4],[0,4],[220,4],[0,4] ]},
-            { fn:'pad',  vol:0.09, notes:[
-                [196,1],[262,1],[330,1],[0,1],
-                [196,1],[262,1],[330,1],[0,1],
-                [220,1],[262,1],[330,1],[0,1],
-                [220,1],[262,1],[330,1],[0,1],
-            ]},
-        ]},
-        game: { bpm: 188, channels: [
-            { fn:'fat',  vol:0.28, notes:[
-                [440,0.5],[0,0.25],[494,0.25],[523,0.5],[494,0.5],
-                [440,1],[0,0.5],[440,0.5],
-                [523,0.5],[0,0.25],[587,0.25],[659,0.5],[587,0.5],
-                [523,1],[0,1],
-                [587,0.5],[659,0.5],[587,0.5],[494,0.5],
-                [440,1],[0,0.5],[392,0.5],
-                [330,0.5],[392,0.5],[440,0.5],[494,0.5],
-                [440,2],
-            ]},
-            { fn:'bass', vol:0.20, notes:[
-                [110,1],[0,1],[110,1],[0,1],[131,1],[0,1],[131,1],[0,1],
-                [147,1],[0,1],[147,1],[0,1],[165,1],[0,1],[110,2],
-            ]},
-            { fn:'stab', vol:0.10, notes:[
-                [220,0.5],[0,1.5],[220,0.5],[0,1.5],
-                [262,0.5],[0,1.5],[262,0.5],[0,1.5],
-                [294,0.5],[0,1.5],[294,0.5],[0,1.5],
-                [330,0.5],[0,1.5],[330,0.5],[0,1.5],
-            ]},
-        ]},
-        // CLASSIC style (2-channel, original tracks)
-        classicMenu: { bpm: 60, channels: [
-            { fn:'square', vol:0.30, notes:[
-                [659,0.25],[784,0.25],[659,0.25],[523,0.25],
-                [440,0.25],[523,0.25],[659,0.25],[587,0.25],
-                [349,0.25],[440,0.25],[523,0.25],[440,0.25],
-                [392,0.25],[494,0.25],[587,0.25],[494,0.25],
-                [523,0.25],[659,0.25],[784,0.25],[659,0.25],
-                [440,0.25],[659,0.25],[523,0.25],[440,0.25],
-                [349,0.25],[392,0.25],[440,0.25],[494,0.25],
-                [523,0.75],[0,0.25],
-            ]},
-            { fn:'tri', vol:0.20, notes:[
-                [131,0.5],[0,0.5],[220,0.5],[0,0.5],[175,0.5],[0,0.5],
-                [196,0.5],[0,0.5],[131,0.5],[0,0.5],[220,0.5],[0,0.5],
-                [175,0.5],[0,0.5],[131,1.0],
-            ]},
-        ]},
-        classicGame: { bpm: 80, channels: [
-            { fn:'square', vol:0.30, notes:[
-                [440,0.25],[0,0.125],[494,0.125],[523,0.25],[494,0.25],
-                [440,0.5],[0,0.25],[440,0.25],
-                [523,0.25],[0,0.125],[587,0.125],[659,0.25],[587,0.25],
-                [523,0.5],[0,0.5],
-                [587,0.25],[659,0.25],[587,0.25],[494,0.25],
-                [440,0.5],[0,0.25],[392,0.25],
-                [330,0.25],[392,0.25],[440,0.25],[494,0.25],
-                [440,1.0],
-            ]},
-            { fn:'tri', vol:0.22, notes:[
-                [110,0.5],[0,0.5],[110,0.5],[0,0.5],
-                [131,0.5],[0,0.5],[131,0.5],[0,0.5],
-                [147,0.5],[0,0.5],[147,0.5],[0,0.5],
-                [165,0.5],[0,0.5],[110,1.0],
-            ]},
-        ]},
-    };
-
-    function init() {
-        if (ac) return;
-        try {
-            ac = new (window.AudioContext || window.webkitAudioContext)();
-            mGain = ac.createGain(); mGain.gain.value = 0; mGain.connect(ac.destination);
-            sGain = ac.createGain(); sGain.gain.value = 0.58 * _sfxVol; sGain.connect(ac.destination);
-            // onstatechange: backup path for browsers where resume().then() is unreliable
-            ac.onstatechange = () => { if (ac.state === 'running') _startMusic(); };
-            // 1-sample silent buffer: prompts iOS to treat this context as user-gesture-unlocked
-            const buf = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource();
-            src.buffer = buf; src.connect(ac.destination); src.start(0);
-        } catch(e) { ac = null; }
-    }
-
-    function tone(freq, when, dur, type, vol, detune, dest) {
-        if (!ac || freq <= 0 || when < ac.currentTime - 0.12) return;
-        const o = ac.createOscillator(), g = ac.createGain();
-        o.type = type || 'square'; o.frequency.value = freq;
-        if (detune) o.detune.value = detune;
-        g.gain.setValueAtTime(0, when);
-        g.gain.linearRampToValueAtTime(vol, when + Math.max(0.010, Math.min(0.020, dur * 0.15)));
-        g.gain.exponentialRampToValueAtTime(0.001, when + Math.max(dur * 0.88, 0.02));
-        o.connect(g); g.connect(dest || mGain);
-        o.start(when); o.stop(when + dur + 0.02);
-        o.onended = () => { o.disconnect(); g.disconnect(); };
-    }
-
-    function fatTone(freq, when, dur, vol) {
-        if (!ac || freq <= 0 || when < ac.currentTime - 0.12) return;
-        tone(freq, when, dur, 'square', vol * 0.50,  0,  mGain);
-        tone(freq, when, dur, 'square', vol * 0.28,  8,  mGain);
-        tone(freq, when, dur, 'square', vol * 0.22, -8,  mGain);
-    }
-
-    function schedNote(ch, freq, when, dur) {
-        if (freq <= 0) return;
-        if      (ch.fn === 'fat')    fatTone(freq, when, dur, ch.vol);
-        else if (ch.fn === 'tri')    tone(freq, when, dur, 'triangle', ch.vol, 0);
-        else if (ch.fn === 'square') tone(freq, when, dur, 'square',   ch.vol, 0);
-        else if (ch.fn === 'bass' || ch.fn === 'pad') tone(freq, when, dur, 'sine', ch.vol, 0);
-        else if (ch.fn === 'stab')   tone(freq, when, dur, 'sawtooth', ch.vol, 0);
-    }
-
-    function tick(musicOn) {
-        if (!ac || !curTrack || !musicOn || isPaused) return;
-        if (ac.state !== 'running') return;
-        const seq = SEQ[curTrack], spb = 60 / seq.bpm;
-        seq.channels.forEach((ch, ci) => {
-            const st = chState[ci];
-            if (st.nextNote < ac.currentTime) st.nextNote = ac.currentTime;
-            while (st.nextNote < ac.currentTime + 0.40) {
-                const [f, b] = ch.notes[st.pos];
-                schedNote(ch, f, st.nextNote, b * spb * 0.84);
-                st.nextNote += b * spb;
-                st.pos = (st.pos + 1) % ch.notes.length;
-            }
-        });
-    }
-
-    // Called whenever AC transitions to running (from onstatechange OR resume().then()).
-    // Resets chState so stale scheduled notes don't pile up, then unmutes mGain.
-    // Idempotent: safe to call from both paths on the same resume event.
-    function _startMusic() {
-        if (!ac || !curTrack || !SEQ[curTrack] || isPaused) return;
-        const flush = _bgSuspended ? 0.45 : 0.05; _bgSuspended = false;
-        chState = SEQ[curTrack].channels.map(() => ({ pos: 0, nextNote: ac.currentTime + flush }));
-        mGain.gain.cancelScheduledValues(ac.currentTime);
-        mGain.gain.setValueAtTime(0.32 * _vol, ac.currentTime);
-    }
-
-    function play(t) {
-        if (!ac || curTrack === t) return;
-        curTrack = t; isPaused = false;
-        chState = SEQ[t].channels.map(() => ({ pos: 0, nextNote: ac.currentTime }));
-        if (ac.state === 'running') {
-            mGain.gain.cancelScheduledValues(ac.currentTime);
-            mGain.gain.setValueAtTime(0.32 * _vol, ac.currentTime);
-        }
-        // if suspended: _startMusic() will be called by onstatechange or resume().then()
-    }
-
-    function stop() {
-        curTrack = null; isPaused = false;
-        if (ac && mGain) { mGain.gain.cancelScheduledValues(ac.currentTime); mGain.gain.setTargetAtTime(0, ac.currentTime, 0.04); }
-    }
-
-    function pauseMusic() {
-        if (!ac || !curTrack) return;
-        isPaused = true;
-        mGain.gain.cancelScheduledValues(ac.currentTime);
-        mGain.gain.setTargetAtTime(0, ac.currentTime, 0.04);
-    }
-
-    function resumeMusic() {
-        if (!ac || !curTrack) return;
-        isPaused = false;
-        const now = ac.currentTime;
-        chState.forEach(s => { s.nextNote = now + 0.05; });
-        mGain.gain.cancelScheduledValues(now);
-        mGain.gain.setValueAtTime(0.32 * _vol, now);
-    }
-
-    function resume() {
-        if (!ac) { init(); }
-        // iOS cold-start silently hangs the first ac.resume() call; retrying on every
-        // gesture is safe (spec-idempotent). Both .then() and onstatechange call _startMusic
-        // so whichever fires first wins; the second call is a harmless no-op.
-        if (ac && ac.state === 'suspended') { ac.resume().then(_startMusic).catch(() => {}); }
-    }
-
-    function sfx(type, on) {
-        if (!ac || !on) return;
-        const now = ac.currentTime;
-        const t = (f, w, d, tp) => tone(f, w, d, tp || 'square', 0.42, 0, sGain);
-        if (type === 'eat') {
-            t(880, now, 0.05); t(1108, now + 0.055, 0.06);
-        } else if (type === 'die') {
-            for (let i = 0; i < 7; i++) t(300 - i * 26, now + i * 0.07, 0.1, 'sawtooth');
-        } else if (type === 'levelUp') {
-            [523,659,784,988,1319].forEach((f,i) => t(f, now + i*0.09, 0.13));
-        } else if (type === 'nav') {
-            t(392, now, 0.03);
-        } else if (type === 'select') {
-            t(523, now, 0.04); t(659, now + 0.045, 0.08);
-        } else if (type === 'bonus') {
-            [880,1047,1319,1568].forEach((f,i)=>t(f,now+i*0.055,0.10));
-        } else if (type === 'perfect') {
-            [523,659,784,1047,1319,1568].forEach((f,i)=>t(f,now+i*0.07,0.22));
-            [784,988,1319].forEach(f=>t(f,now+0.50,0.30,'triangle'));
-        } else if (type === 'lucky_spawn') {
-            [880,1319,1568].forEach((f,i)=>t(f,now+i*0.055,0.13));
-        } else if (type === 'lucky_eat') {
-            [880,1047,1319,1568,2093].forEach((f,i)=>t(f,now+i*0.045,0.16));
-        } else if (type === 'epic_spawn') {
-            [440,554,659,880,1047,1319,1568].forEach((f,i)=>t(f,now+i*0.06,0.18));
-            t(1568,now+0.46,0.28,'triangle');
-        } else if (type === 'epic_eat') {
-            [523,659,784,1047,1319,1568,2093].forEach((f,i)=>t(f,now+i*0.055,0.24));
-            [784,988,1319,1568].forEach(f=>t(f,now+0.45,0.36,'triangle'));
-        } else if (type === 'coin') {
-            t(1568,now,0.03); t(1319,now+0.045,0.04); t(880,now+0.095,0.08);
-        }
-    }
-
-    function setVol(v) {
-        _vol = v;
-        if (mGain && curTrack && !isPaused && ac && ac.state === 'running') {
-            mGain.gain.cancelScheduledValues(ac.currentTime);
-            mGain.gain.setValueAtTime(0.32 * v, ac.currentTime);
-        }
-    }
-    function setSfxVol(v){ _sfxVol=v; if(sGain) sGain.gain.value=0.58*v; }
-    function suspend() {
-        if (!ac || ac.state !== 'running') return;
-        // Fade to silence first so the hard suspension doesn't clip oscillators mid-cycle.
-        mGain.gain.cancelScheduledValues(ac.currentTime);
-        mGain.gain.setTargetAtTime(0, ac.currentTime, 0.02);
-        _bgSuspended = true;
-        setTimeout(() => { try { if (ac && ac.state === 'running') ac.suspend(); } catch(e){} }, 120);
-    }
-    // Like resume() but never creates the AC -- safe to call from untrusted events.
-    function tryResume() {
-        if (ac && ac.state === 'suspended') { ac.resume().then(_startMusic).catch(() => {}); }
-    }
-    return { init, tick, play, stop, pauseMusic, resumeMusic, resume, tryResume, sfx, setVol, setSfxVol, suspend };
-})();
-
-// Audio is initialized from the splash screen interaction, which guarantees a clean
-// user gesture context across all browsers (Firefox, iOS Safari, Chrome, etc.).
 
 // ================================================================
 // PERSISTENCE
@@ -393,8 +139,8 @@ const SETTINGS_COUNT = 11;
 let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false, cfgVer: 2 };
 loadCfg();
 if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
-Snd.setVol(cfg.volume ?? 1);
-Snd.setSfxVol(cfg.sfxVol ?? 0.5);
+Snd.musicSetVolume(cfg.volume ?? 1);
+Snd.sfxSetVolume(cfg.sfxVol ?? 0.5);
 function applyHandedness() { document.body.classList.toggle('lefty', cfg.handed === 1); }
 applyHandedness();
 
@@ -466,7 +212,7 @@ function beginLevel() {
             }
         }
     }
-    spawnGem(); renderBarsOffscreen(); Snd.resumeMusic(); showHUD(true);
+    spawnGem(); renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
 }
 
 let gemOptimal=0, gemSteps=0;
@@ -474,8 +220,8 @@ function spawnGem() {
     gem=freeCell(new Set([...snake,...bars].map(ck))); gemAt=gem.spawnAt=performance.now();
     const rv=Math.random();
     gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
-    if(gem.tier===2) Snd.sfx('epic_spawn',cfg.music);
-    else if(gem.tier===1) Snd.sfx('lucky_spawn',cfg.music);
+    if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
+    else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
     const dx=Math.min(Math.abs(gem.x-snake[0].x),COLS-Math.abs(gem.x-snake[0].x));
     const dy=Math.min(Math.abs(gem.y-snake[0].y),ROWS-Math.abs(gem.y-snake[0].y));
     gemOptimal=dx+dy; gemSteps=0;
@@ -501,18 +247,18 @@ function step(now) {
         score+=bonus?base*2*mult*diffMult:base*mult*diffMult;
         if(tier===2){
             showBonus(now,bonus?'EPIC x200!':'EPIC x100!');
-            Snd.sfx('epic_eat',cfg.music);
+            Snd.sfxPlay('epic_eat',cfg.music);
             unlockAch('epic_gem');
             epicLevelCount++; if(epicLevelCount>=2) unlockAch('epic_double');
         } else if(tier===1){
             showBonus(now,bonus?'LUCKY x20!':'LUCKY x10!');
-            Snd.sfx('lucky_eat',cfg.music);
+            Snd.sfxPlay('lucky_eat',cfg.music);
             unlockAch('lucky_gem');
             luckyCount++; if(luckyCount>=3) unlockAch('lucky_streak');
         } else if(bonus){
             showBonus(now,'x2 BONUS!');
-            Snd.sfx('bonus',cfg.music);
-        } else Snd.sfx('eat',cfg.music);
+            Snd.sfxPlay('bonus',cfg.music);
+        } else Snd.sfxPlay('eat',cfg.music);
         unlockAch('first_gem');
         if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); }
         if(score>=64000)  unlockAch('score_25k');
@@ -520,10 +266,10 @@ function step(now) {
         if(gemsDone>=GEMS_PER_LEVEL){
             gem=null; score+=level*500;
             if(perfectLevel){
-                score+=level*1000; spawnFireworks(now); Snd.sfx('perfect',cfg.music);
+                score+=level*1000; spawnFireworks(now); Snd.sfxPlay('perfect',cfg.music);
                 unlockAch('perfect_level');
                 perfectCount++; if(perfectCount>=3) unlockAch('triple_perf');
-            } else Snd.sfx('levelUp',cfg.music);
+            } else Snd.sfxPlay('levelUp',cfg.music);
             unlockAch('level1');
             if(level>=5)  unlockAch('level5');
             if(level>=10){
@@ -568,17 +314,17 @@ function spawnFireworks(now) {
 function die(now) {
     lives--; phase='dying'; phaseAt=now;
     deathMsg=lives>0?`LIFE LOST  (${lives} left)`:'GAME OVER!';
-    Snd.sfx('die',cfg.music); Snd.pauseMusic();
+    Snd.sfxPlay('die',cfg.music); Snd.musicGamePause();
 }
 
 function togglePause() {
     if(phase==='playing'){
         if(performance.now() < pauseReadyAt) return;
-        phase='paused'; pauseAt=performance.now(); Snd.pauseMusic();
+        phase='paused'; pauseAt=performance.now(); Snd.musicGamePause();
     } else if(phase==='paused'){
         gemAt+=performance.now()-pauseAt; phase='playing'; stepAt=performance.now()+speed;
         pauseReadyAt=performance.now()+1000;
-        Snd.resumeMusic();
+        Snd.musicGameUnpause();
     }
 }
 
@@ -1562,7 +1308,7 @@ function _startDpadRepeat(dir){
 }
 
 dpadCanvas.addEventListener('touchstart',e=>{
-    Snd.resume(); e.preventDefault();
+    Snd.audioResume(); e.preventDefault();
     if(phase==='nameEntry') nameInp.blur();
     dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null);
     drawDpad(phase==='splash'?null:dpadActive);
@@ -1593,7 +1339,8 @@ let _splashLeftAt = 0, _splashTouchPending = false;
 let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
 function leaveSplash(fromTouch = false) {
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
-    Snd.resume(); Snd.sfx('coin', cfg.music);
+    Snd.audioResume();
+    Snd.sfxPlay('coin');
     _splashLeftAt = performance.now();
     _splashTouchPending = fromTouch;
     phase = 'menu'; phaseAt = performance.now();
@@ -1620,7 +1367,7 @@ function handleKey(key, pde) {
         leaveSplash(); if (pde) pde(); return;
     }
     if (performance.now() - _splashLeftAt < 200) return;
-    Snd.resume();
+    Snd.audioResume();
 
     // Global: mute (suppressed during name entry so M is typeable)
     if((key==='m'||key==='M')&&phase!=='nameEntry'){ toggleMute(); return; }
@@ -1635,30 +1382,30 @@ function handleKey(key, pde) {
     // Escape = quit confirm in-game, or back in menus
     if(key==='Escape'){
         if(phase==='nameEntry'){
-            if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfx('nav',cfg.music);}
+            if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
             if(pde)pde(); return;
         }
         if(phase==='playing'||phase==='paused'){
             if(performance.now() < escReadyAt) return;
             prevPhase=phase; quitConfirmSel=1;
-            if(phase==='playing') Snd.pauseMusic();
+            if(phase==='playing') Snd.musicGamePause();
             phase='quitConfirm'; if(pde)pde(); return;
         }
         if(phase==='quitConfirm'){
-            phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic();
+            phase=prevPhase; if(prevPhase==='playing')Snd.musicGameUnpause();
             escReadyAt=performance.now()+1000; if(pde)pde(); return;
         }
         if(phase==='resetConfirm'){ phase='settings'; if(pde)pde(); return; }
-        if(phase==='settings'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
-        if(phase==='scores'||phase==='credits'||phase==='shop'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
-        if(phase==='achievements'){ phase='menu'; Snd.sfx('nav',cfg.music); if(pde)pde(); return; }
+        if(phase==='settings'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
+        if(phase==='scores'||phase==='credits'||phase==='shop'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
+        if(phase==='achievements'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
     }
 
     if(phase==='menu'){
-        if(key==='ArrowUp')  {menuSel=(menuSel-1+MENU_ITEMS.length)%MENU_ITEMS.length;Snd.sfx('nav',cfg.music);}
-        if(key==='ArrowDown'){menuSel=(menuSel+1)%MENU_ITEMS.length;Snd.sfx('nav',cfg.music);}
+        if(key==='ArrowUp')  {menuSel=(menuSel-1+MENU_ITEMS.length)%MENU_ITEMS.length;Snd.sfxPlay('nav',cfg.music);}
+        if(key==='ArrowDown'){menuSel=(menuSel+1)%MENU_ITEMS.length;Snd.sfxPlay('nav',cfg.music);}
         if(key==='Enter'){
-            Snd.sfx('select',cfg.music);
+            Snd.sfxPlay('select',cfg.music);
             if(menuSel===0)startGame();
             else if(menuSel===1){phase='settings';settingsSel=0;}
             else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
@@ -1669,33 +1416,33 @@ function handleKey(key, pde) {
         }
     }
     else if(phase==='settings'){
-        if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_COUNT)%SETTINGS_COUNT;Snd.sfx('nav',cfg.music);}
-        if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_COUNT;Snd.sfx('nav',cfg.music);}
+        if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_COUNT)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
+        if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
         if(key==='Enter'){
-            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.stop();updateMuteBtn();Snd.sfx('select',cfg.music);}
-            else if(settingsSel===1){cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.stop();Snd.sfx('select',cfg.music);}
-            else if(settingsSel===4){cfg.turbo=cfg.turbo===false?true:false;Snd.sfx('select',cfg.music);}
-            else if(settingsSel===5){cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfx('select',cfg.music);}
-            else if(settingsSel===6){cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfx('select',cfg.music);}
-            else if(settingsSel===7){cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfx('select',cfg.music);}
-            else if(settingsSel===8){cfg.touchSelect=!cfg.touchSelect;Snd.sfx('select',cfg.music);}
+            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute();else Snd.musicUnmute('select');updateMuteBtn();}
+            else if(settingsSel===1){cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);}
+            else if(settingsSel===4){cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);}
+            else if(settingsSel===5){cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);}
+            else if(settingsSel===6){cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);}
+            else if(settingsSel===7){cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfxPlay('select',cfg.music);}
+            else if(settingsSel===8){cfg.touchSelect=!cfg.touchSelect;Snd.sfxPlay('select',cfg.music);}
             else if(settingsSel===9){quitConfirmSel=1;phase='resetConfirm';return;}
-            else{Snd.sfx('nav',cfg.music);phase='menu';}
+            else{Snd.sfxPlay('nav',cfg.music);phase='menu';}
             saveCfg();
         }
         if(key==='ArrowLeft'||key==='ArrowRight'){
             const r=key==='ArrowRight';
             if(settingsSel===2){
                 cfg.volume=Math.max(0,Math.min(1,Math.round(((cfg.volume??1)+(r?0.1:-0.1))*10)/10));
-                Snd.setVol(cfg.volume); saveCfg(); Snd.sfx('nav',cfg.music);
+                Snd.musicSetVolume(cfg.volume); saveCfg(); Snd.sfxPlay('nav',cfg.music);
             } else if(settingsSel===3){
                 cfg.sfxVol=Math.max(0,Math.min(1,Math.round(((cfg.sfxVol??0.5)+(r?0.1:-0.1))*10)/10));
-                Snd.setSfxVol(cfg.sfxVol); saveCfg(); Snd.sfx('nav',cfg.music);
+                Snd.sfxSetVolume(cfg.sfxVol); saveCfg(); Snd.sfxPlay('nav',cfg.music);
             } else if(settingsSel===6){
                 cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;
-                saveCfg(); Snd.sfx('nav',cfg.music);
+                saveCfg(); Snd.sfxPlay('nav',cfg.music);
             } else if(settingsSel===7){
-                cfg.handed=r?1:0; applyHandedness(); saveCfg(); Snd.sfx('nav',cfg.music);
+                cfg.handed=r?1:0; applyHandedness(); saveCfg(); Snd.sfxPlay('nav',cfg.music);
             }
         }
         if(pde)pde();
@@ -1703,17 +1450,17 @@ function handleKey(key, pde) {
     else if(phase==='credits'){
         if(key==='ArrowDown'){creditsSpeed=3.5;if(pde)pde();}
         else if(key==='ArrowUp'){creditsSpeed=0.15;if(pde)pde();}
-        else if(key==='Enter'){Snd.sfx('nav',cfg.music);phase='menu';creditsSpeed=0.8;_creditsNormal=0.8;if(pde)pde();}
+        else if(key==='Enter'){Snd.sfxPlay('nav',cfg.music);phase='menu';creditsSpeed=0.8;_creditsNormal=0.8;if(pde)pde();}
     }
-    else if(phase==='scores'){ Snd.sfx('nav',cfg.music); phase='menu'; if(pde)pde(); }
+    else if(phase==='scores'){ Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde(); }
     else if(phase==='achievements'){
         const _ea=ACHIEVEMENTS.every(a=>achUnlocked[a.id]);
-        if(_ea&&(key==='ArrowLeft'||key==='ArrowRight')){achPage=1-achPage;Snd.sfx('nav',cfg.music);if(pde)pde();}
-        else{Snd.sfx('nav',cfg.music);phase='menu';if(pde)pde();}
+        if(_ea&&(key==='ArrowLeft'||key==='ArrowRight')){achPage=1-achPage;Snd.sfxPlay('nav',cfg.music);if(pde)pde();}
+        else{Snd.sfxPlay('nav',cfg.music);phase='menu';if(pde)pde();}
     }
     else if(phase==='shop'){
-        if(key==='ArrowUp'){ shopSel=(shopSel-1+SHOP_ITEMS.length)%SHOP_ITEMS.length; Snd.sfx('nav',cfg.music); }
-        else if(key==='ArrowDown'){ shopSel=(shopSel+1)%SHOP_ITEMS.length; Snd.sfx('nav',cfg.music); }
+        if(key==='ArrowUp'){ shopSel=(shopSel-1+SHOP_ITEMS.length)%SHOP_ITEMS.length; Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowDown'){ shopSel=(shopSel+1)%SHOP_ITEMS.length; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='Enter'){
             const item=SHOP_ITEMS[shopSel];
             const si=cfg.shopItems||(cfg.shopItems={});
@@ -1723,7 +1470,7 @@ function handleKey(key, pde) {
                 if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
                 saveCfg();
                 if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full');
-                triggerPurchaseAnim(); Snd.sfx('perfect',cfg.music);
+                triggerPurchaseAnim(); Snd.sfxPlay('perfect',cfg.music);
             }
         }
         else if(key===' '){
@@ -1731,26 +1478,26 @@ function handleKey(key, pde) {
             const si=cfg.shopItems||{}, wi=cfg.wornItems||(cfg.wornItems={});
             if(item&&!item.repeatable&&si[item.id]){
                 if(wi[item.id]) delete wi[item.id]; else wi[item.id]=true;
-                saveCfg(); Snd.sfx('nav',cfg.music);
+                saveCfg(); Snd.sfxPlay('nav',cfg.music);
             }
         }
         if(pde)pde();
     }
     else if(phase==='quitConfirm'){
-        if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfx('nav',cfg.music); }
-        if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfx('nav',cfg.music); }
+        if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfxPlay('nav',cfg.music); }
+        if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfxPlay('nav',cfg.music); }
         if(key==='Enter'||key==='y'||key==='Y'){
-            Snd.sfx('select',cfg.music);
-            if(quitConfirmSel===0){ phase='menu'; showHUD(false); Snd.stop(); }
-            else { phase=prevPhase; if(prevPhase==='playing')Snd.resumeMusic(); escReadyAt=performance.now()+1000; }
+            Snd.sfxPlay('select',cfg.music);
+            if(quitConfirmSel===0){ phase='menu'; showHUD(false); Snd.musicStop(); }
+            else { phase=prevPhase; if(prevPhase==='playing')Snd.musicGameUnpause(); escReadyAt=performance.now()+1000; }
         }
         if(pde)pde();
     }
     else if(phase==='resetConfirm'){
-        if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfx('nav',cfg.music); }
-        if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfx('nav',cfg.music); }
+        if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfxPlay('nav',cfg.music); }
+        if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfxPlay('nav',cfg.music); }
         if(key==='Enter'){
-            Snd.sfx('select',cfg.music);
+            Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){ resetStats(); }
             phase='settings'; quitConfirmSel=1;
         }
@@ -1760,7 +1507,7 @@ function handleKey(key, pde) {
         if(levelDoneWaiting){
             levelDoneWaiting=false;
             if(level<MAX_LEVELS){_levelStartLen=cfg.diff===2?snake.length:0;level++;beginLevel();}
-            else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='win';showHUD(false);Snd.stop();}
+            else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='win';showHUD(false);Snd.musicStop();}
             if(pde)pde();
         }
     }
@@ -1774,47 +1521,47 @@ function handleKey(key, pde) {
     }
     else if(phase==='nameEntry'){
         if(GDIRS[key]&&pde)pde();
-        if(key==='ArrowUp')  {nameCharIdx=(nameCharIdx-1+NAME_CHARS.length)%NAME_CHARS.length;Snd.sfx('nav',cfg.music);}
-        else if(key==='ArrowDown'){nameCharIdx=(nameCharIdx+1)%NAME_CHARS.length;Snd.sfx('nav',cfg.music);}
+        if(key==='ArrowUp')  {nameCharIdx=(nameCharIdx-1+NAME_CHARS.length)%NAME_CHARS.length;Snd.sfxPlay('nav',cfg.music);}
+        else if(key==='ArrowDown'){nameCharIdx=(nameCharIdx+1)%NAME_CHARS.length;Snd.sfxPlay('nav',cfg.music);}
         else if(key==='ArrowLeft'){
-            if(nameCursorPos>0){nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfx('nav',cfg.music);}
+            if(nameCursorPos>0){nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
         }
         else if(key==='ArrowRight'){
-            if(nameCursorPos<nameStr.length){nameCursorPos++;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfx('nav',cfg.music);}
+            if(nameCursorPos<nameStr.length){nameCursorPos++;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
         }
         else if(key==='NameAdd'){
             const ch=NAME_CHARS[nameCharIdx];
             if(ch==='\r'){
                 if(!nameStr.trim()) return;
                 try{localStorage.setItem('lastSName',nameStr);}catch{}
-                addScore(nameStr,score,level);Snd.sfx('select',cfg.music);
+                addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
                 _scoreboardCache=getScores();phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
             } else if(nameCursorPos<nameStr.length){
                 nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);
                 nameCursorPos=Math.min(nameCursorPos+1,nameStr.length);
                 _nameFlashPos=nameCursorPos-1; _nameFlashAt=performance.now();
-                Snd.sfx('nav',cfg.music);
+                Snd.sfxPlay('nav',cfg.music);
             } else if(nameStr.length<MAX_NAME){
                 nameStr+=ch; nameCursorPos++;
                 _nameFlashPos=nameCursorPos-1; _nameFlashAt=performance.now();
-                Snd.sfx('nav',cfg.music);
+                Snd.sfxPlay('nav',cfg.music);
             } else {
                 // name full and cursor at end: wrap to start so user can replace
                 nameCursorPos=0;
                 const ci=NAME_CHARS.indexOf(nameStr[0]); if(ci>=0)nameCharIdx=ci;
-                Snd.sfx('nav',cfg.music);
+                Snd.sfxPlay('nav',cfg.music);
             }
         }
         else if(key.length===1&&/^[A-Z0-9_ ]$/i.test(key)){
             const ch=key.toUpperCase();
             if(nameCursorPos<nameStr.length){nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);nameCursorPos=Math.min(nameCursorPos+1,nameStr.length);}
             else if(nameStr.length<MAX_NAME){nameStr+=ch;nameCursorPos++;}
-            Snd.sfx('nav',cfg.music);
+            Snd.sfxPlay('nav',cfg.music);
         }
         else if(key==='Enter'){
             if(!nameStr.trim()) return;
             try { localStorage.setItem('lastSName', nameStr); } catch {}
-            addScore(nameStr,score,level); Snd.sfx('select',cfg.music);
+            addScore(nameStr,score,level); Snd.sfxPlay('select',cfg.music);
             _scoreboardCache=getScores(); phase='scores'; showHUD(false); setTimeout(()=>nameInp.blur(),10);
         }
     }
@@ -1832,8 +1579,8 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 // so deliberate re-moves after a pause feel as responsive as the first direction.
 // Splash: any pointer or touch on canvas exits splash and unlocks audio
 // Mouse/stylus only: touch devices use the touchstart handler below so that
-// leaveSplash() \\u2192 Snd.resume() \\u2192 init() plays a silent buffer + ac.resume() inside a trusted element touchstart,
-// not inside a pointerdown (which iOS Safari won't honour for AudioContext unlock).
+// leaveSplash() calls Snd.audioResume() inside a touchstart, not a pointerdown
+// (iOS Safari only honours AudioContext unlock from touchstart, not pointerdown).
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
@@ -1847,7 +1594,7 @@ const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false;
 canvas.addEventListener('touchstart',e=>{
-    Snd.resume(); e.preventDefault();
+    Snd.audioResume(); e.preventDefault();
     if(phase==='nameEntry'){ nameInp.focus(); }
     const t=e.touches[0];
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false;
@@ -1896,17 +1643,16 @@ canvas.addEventListener('touchend',e=>{
 },{passive:false});
 
 // Restore audio on pointer gestures mid-game (background resume, desktop mouse, etc.).
-document.addEventListener('pointerdown', () => Snd.tryResume(), {capture:true, passive:true});
-// touchend is a trusted iOS Safari gesture and fires even when touchstart called
-// e.preventDefault(). Gives the audio context a second unlock attempt if the
-// touchstart-based ac.resume() promise silently hung (iOS WebKit quirk).
-document.addEventListener('touchend', () => Snd.tryResume(), {passive:true});
+document.addEventListener('pointerdown', () => Snd.audioTryResume(), {capture:true, passive:true});
+// touchend is a trusted iOS Safari gesture; gives AC a second unlock attempt if the
+// touchstart-based resume() promise silently hung (iOS WebKit quirk).
+document.addEventListener('touchend', () => Snd.audioTryResume(), {passive:true});
 // Pause audio when app goes to background, resume when it returns
 function onBgHide() {
-    if (phase === 'playing') { phase = 'paused'; pauseAt = performance.now(); Snd.pauseMusic(); }
-    Snd.suspend();
+    if (phase === 'playing') { phase = 'paused'; pauseAt = performance.now(); Snd.musicGamePause(); }
+    Snd.audioBgSuspend();
 }
-function onBgShow() { if (cfg.music) Snd.resume(); }
+function onBgShow() { if (cfg.music) Snd.audioResume(); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) onBgHide(); else onBgShow(); });
 window.addEventListener('blur', onBgHide);
 window.addEventListener('focus', onBgShow);
@@ -1922,11 +1668,11 @@ document.addEventListener('keyup', e=>{
 });
 
 // Side buttons
-document.getElementById('btn-ok').addEventListener('touchstart',e=>{if(phase==='nameEntry')nameInp.blur();handleKey(phase==='nameEntry'?'NameAdd':'Enter',null);e.preventDefault();},{passive:false});
+document.getElementById('btn-ok').addEventListener('touchstart',e=>{Snd.audioResume();if(phase==='nameEntry')nameInp.blur();handleKey(phase==='nameEntry'?'NameAdd':'Enter',null);e.preventDefault();},{passive:false});
 document.getElementById('btn-ok').addEventListener('click',()=>handleKey(phase==='nameEntry'?'NameAdd':'Enter',null));
-document.getElementById('btn-pause').addEventListener('touchstart',e=>{handleKey(' ',null);e.preventDefault();},{passive:false});
+document.getElementById('btn-pause').addEventListener('touchstart',e=>{Snd.audioResume();handleKey(' ',null);e.preventDefault();},{passive:false});
 document.getElementById('btn-pause').addEventListener('click',()=>handleKey(' ',null));
-document.getElementById('btn-start').addEventListener('touchstart',e=>{handleKey('Enter',null);e.preventDefault();},{passive:false});
+document.getElementById('btn-start').addEventListener('touchstart',e=>{Snd.audioResume();handleKey('Enter',null);e.preventDefault();},{passive:false});
 document.getElementById('btn-start').addEventListener('click',()=>handleKey('Enter',null));
 document.getElementById('gamepad').classList.add('splash');
 document.getElementById('btn-esc').addEventListener('touchstart',e=>{handleKey('Escape',null);e.preventDefault();},{passive:false});
@@ -1975,7 +1721,7 @@ function updateMuteBtn(){
         c.fillRect(rx*2+16,ry*2,2,2);
     }));
 }
-function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.stop(); else{Snd.resume();Snd.sfx('nav',cfg.music);} updateMuteBtn(); saveCfg(); }
+function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute(); else Snd.musicUnmute(); updateMuteBtn(); saveCfg(); }
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();
@@ -2010,10 +1756,10 @@ function loop(now) {
         const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm'].includes(phase);
         const gamePhase=['playing','levelReady','dying','levelDone'].includes(phase);
         const wt=menuPhase?menuTrack():gamePhase?gameTrack():null;
-        if(cfg.music&&wt) Snd.play(wt);
-        else if(!wt&&!menuPhase&&!gamePhase) Snd.stop();
+        if(cfg.music&&wt) Snd.musicPlay(wt);
+        else if(!wt&&!menuPhase&&!gamePhase) Snd.musicStop();
     }
-    Snd.tick(cfg.music);
+    Snd.musicTick(cfg.music);
 
     // Transitions
     if(phase==='playing'){
@@ -2027,7 +1773,7 @@ function loop(now) {
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(lives>0)beginLevel();
-        else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';showHUD(false);Snd.stop();}
+        else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';showHUD(false);Snd.musicStop();}
     }
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
