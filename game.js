@@ -1333,16 +1333,14 @@ drawDpad(null);
 // ================================================================
 const GDIRS={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
 
-let _splashLeftAt = 0, _splashTouchPending = false, _splashKeyHeld = false;
+let _splashLeftAt = 0, _splashKeyHeld = false;
 let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
-let _splashExiting = false, _splashExitAt = 0, _splashExitWaiting = false;
-function triggerSplashExit(fromTouch = false) {
+let _splashExiting = false, _splashExitAt = 0;
+function triggerSplashExit() {
     if (phase !== 'splash' || _splashExiting) return;
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
     _splashExiting = true;
     _splashExitAt = performance.now();
-    _splashTouchPending = fromTouch;
-    _splashExitWaiting = true; // wait for pointer/finger release before transitioning
     Snd.sfxPlay('coin'); Snd.audioResume();
 }
 
@@ -1359,7 +1357,7 @@ function handleKey(key, pde) {
         }
         const splashOk = key.length === 1 || key === 'Enter';
         if (!splashOk) return;
-        triggerSplashExit(false); _splashExitWaiting = false; if (pde) pde(); return;
+        triggerSplashExit(); if (pde) pde(); return;
     }
     if (_splashKeyHeld) return;
     if (performance.now() - _splashLeftAt < 200) return;
@@ -1580,14 +1578,14 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
-    if (phase === 'splash') { triggerSplashExit(false); }
+    if (phase === 'splash') { _splashFast = true; _splashFastStart = performance.now(); _splashFastBase = (performance.now() - phaseAt) / 1000; }
     else if (phase !== 'playing' && phase !== 'nameEntry') { handleKey('Enter', null); }
 });
 canvas.addEventListener('pointerup', e => {
     if (e.pointerType === 'touch') return;
-    if (_splashExitWaiting) { _splashExitWaiting = false; Snd.audioResume(); }
+    if (phase === 'splash') { triggerSplashExit(); }
 });
-canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { triggerSplashExit(true); e.preventDefault(); } }, { passive: false });
+canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = performance.now(); _splashFastBase = (performance.now() - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
 const SWIPE_1=20, SWIPE_N=30, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50;
@@ -1601,7 +1599,7 @@ canvas.addEventListener('touchstart',e=>{
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
-    if(!_swipeBase||_splashTouchPending) return;
+    if(!_swipeBase||phase==='splash') return;
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     const t=e.touches[0];
@@ -1631,9 +1629,9 @@ canvas.addEventListener('touchmove',e=>{
 },{passive:false});
 canvas.addEventListener('touchend',e=>{
     e.preventDefault();
-    if(_splashTouchPending){
-        _splashTouchPending=false; _swipeBase=null; _swipeLastDir=null;
-        if(_splashExitWaiting){ _splashExitWaiting=false; Snd.audioResume(); }
+    if(phase==='splash'){
+        _swipeBase=null; _swipeLastDir=null;
+        triggerSplashExit();
         return;
     }
     if(_swipeBase){
@@ -1793,7 +1791,7 @@ function loop(now) {
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
     }
-    if(phase==='splash'&&_splashExiting&&!_splashExitWaiting&&now-_splashExitAt>=500){
+    if(phase==='splash'&&_splashExiting&&now-_splashExitAt>=500){
         _splashExiting=false;
         phase='menu'; phaseAt=now; _splashLeftAt=now;
     }
