@@ -994,10 +994,6 @@ function drawShop() {
                 ctx.fillText(canAfford?'ENTER to buy':'Not enough FK',CW-18,y+23);}
         }
     });
-    // Empty slot placeholder (future item)
-    const emptyY=startY+SHOP_ITEMS.length*rowH;
-    ctx.fillStyle='rgba(10,10,10,0.15)'; rr(8,emptyY,CW-16,rowH-4,5); ctx.fill();
-    ctx.strokeStyle='#1c1c1c'; ctx.lineWidth=1; rr(8,emptyY,CW-16,rowH-4,5); ctx.stroke();
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
