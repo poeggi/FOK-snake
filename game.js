@@ -121,7 +121,7 @@ const CRED = [
     ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',50],
     ['coins'],['sml','(spend them in the SHOP)'],['gap',50],
     ['sml','(C) 2026 FOK STUDIOS'],['sml','All wrongs reserved.'],
-    ['gap',30],['txt','PRESS OK OR ENTER TO EXIT'],['gap',280],
+    ['gap',30],['txt','PRESS A TO EXIT'],['gap',280],
     ['secret','No Eastereggs here ;)'],['gap',240],
 ];
 const CRED_H = { title:54, sub:22, hdr:28, txt:26, sml:24, coins:28, secret:28 };
@@ -742,15 +742,14 @@ function drawMenu() {
     ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',10);
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
-    ctx.shadowColor='#555'; ctx.shadowBlur=1; ct(`DIFF: ${DIFF[cfg.diff].label}  |  AUDIO: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,342,'#555',10); ctx.shadowBlur=0;
-    ct(`BALANCE: ${_cachedFOKoins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
+    ctx.shadowColor='#555'; ctx.shadowBlur=1; ct(`DIFF: ${DIFF[cfg.diff].label}  |  AUDIO: ${cfg.music?'ON':'OFF'}  |  STYLE: ${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,362,'#555',10); ctx.shadowBlur=0;
     // Bottom bar: version left, hint center
     ctx.save();
     ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
     ctx.fillText(_swVersion, 10, CH-8);
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='center';
-    ctx.fillText('UP/DOWN  |  A:OK/ENTER select', CW/2, CH-8);
+    ctx.fillText('UP/DOWN  |  A: select  |  START: quickstart', CW/2, CH-8);
     ctx.restore();
 }
 
@@ -801,7 +800,7 @@ function drawSettings() {
         }
         ctx.restore();
     }
-    ct('LEFT/RIGHT to change   OK/ENTER toggle   ESC back',CW/2,CH-10,'#555',10);
+    ct('LEFT/RIGHT to change   A: toggle   ESC back',CW/2,CH-10,'#555',10);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -909,7 +908,7 @@ function drawAchievements() {
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
     ctx.shadowColor='#6aaa6a'; ctx.shadowBlur=6; ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',10); ctx.shadowBlur=0;
-    const hint=expert?'LEFT/RIGHT: page   A:OK/ENTER: return':'Any key or OK to return';
+    const hint=expert?'LEFT/RIGHT: page   A: return':'Any key or A to return';
     ct(hint,CW/2,CH-10,'#999',10);
 }
 
@@ -999,7 +998,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct('A:OK/ENTER buy  |  ||/SPC wear  |  ESC back',CW/2,CH-12,'#888',10);
+    ct('A: buy  |  ||/SPC wear  |  ESC back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=performance.now();
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1058,7 +1057,7 @@ function drawCredits() {
     ctx.restore();
     creditsScroll -= creditsSpeed;
     if (creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
-    ct('UP slow  DN fast  || pause  |  A:OK/ENTER exit', CW/2, CH-12, '#6a9a6a', 8);
+    ct('UP slow  DN fast  || pause  |  A: exit', CW/2, CH-12, '#6a9a6a', 8);
 }
 
 function drawNameEntry(now) {
@@ -1218,7 +1217,7 @@ function drawConfirmYesNo(title, sel) {
     ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',14);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
     ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center';
-    ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT choose   A:OK/ENTER confirm   ESC cancel',CW/2,CH-8); ctx.restore();
+    ctx.fillStyle='#4a7a4a'; ctx.fillText('LEFT/RIGHT choose   A: confirm   ESC cancel',CW/2,CH-8); ctx.restore();
 }
 function drawQuitConfirm() {
     drawGrid();

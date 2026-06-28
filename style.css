@@ -61,7 +61,8 @@ body {
     body.lefty #btn-esc   { grid-column: 2; }
     body.lefty #btn-ok    { grid-column: 1; }
     body.lefty #btn-start { grid-column: 2; }
-    #gamepad.splash #dpad-c { opacity: 0.2; }
+    #gamepad.splash #dpad-c,
+    #gamepad.splash #btn-esc { opacity: 0.2; pointer-events: none; }
     .sbtn { height: 48px; }
 }
 .sbtn.dim { opacity: 0.3; pointer-events: none; }
