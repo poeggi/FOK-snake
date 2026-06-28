@@ -222,9 +222,11 @@ function spawnGem() {
     gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
     if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
     else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
-    const dx=Math.min(Math.abs(gem.x-snake[0].x),COLS-Math.abs(gem.x-snake[0].x));
-    const dy=Math.min(Math.abs(gem.y-snake[0].y),ROWS-Math.abs(gem.y-snake[0].y));
-    gemOptimal=dx+dy; gemSteps=0;
+    let dgx=gem.x-snake[0].x, dgy=gem.y-snake[0].y;
+    if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
+    if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
+    const turnPenalty=(dgx*dir.x+dgy*dir.y<0&&Math.abs(dgx*dir.y-dgy*dir.x)===0)?2:0;
+    gemOptimal=Math.abs(dgx)+Math.abs(dgy)+turnPenalty+2; gemSteps=0;
 }
 
 function step(now) {
@@ -240,23 +242,25 @@ function step(now) {
     if(ate){
         gemsDone++;
         const base=level*100;
+        const tier=gem.tier||0;
         const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
-        if(!bonus) perfectLevel=false;
-        const tier=gem.tier||0, mult=tier===2?100:tier===1?10:1;
+        if(!bonus && tier===0) perfectLevel=false;
+        const bonusMult=(levelBonusCount+1)*2;
+        const mult=tier===2?100:tier===1?10:1;
         const diffMult=(cfg.diff===2&&level>=2)?2:1;
-        score+=bonus?base*2*mult*diffMult:base*mult*diffMult;
+        score+=bonus?base*bonusMult*mult*diffMult:base*mult*diffMult;
         if(tier===2){
-            showBonus(now,bonus?'EPIC x200!':'EPIC x100!');
+            showBonus(now,bonus?`EPIC x${100*bonusMult}!`:'EPIC x100!');
             Snd.sfxPlay('epic_eat',cfg.music);
             unlockAch('epic_gem');
             epicLevelCount++; if(epicLevelCount>=2) unlockAch('epic_double');
         } else if(tier===1){
-            showBonus(now,bonus?'LUCKY x20!':'LUCKY x10!');
+            showBonus(now,bonus?`LUCKY x${10*bonusMult}!`:'LUCKY x10!');
             Snd.sfxPlay('lucky_eat',cfg.music);
             unlockAch('lucky_gem');
             luckyCount++; if(luckyCount>=3) unlockAch('lucky_streak');
         } else if(bonus){
-            showBonus(now,'x2 BONUS!');
+            showBonus(now,`x${bonusMult} BONUS!`);
             Snd.sfxPlay('bonus',cfg.music);
         } else Snd.sfxPlay('eat',cfg.music);
         unlockAch('first_gem');
