@@ -749,7 +749,7 @@ function drawMenu() {
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
     ctx.fillText(_swVersion, 10, CH-8);
     ctx.fillStyle='#888'; ctx.textAlign='center';
-    ctx.fillText('UP/DOWN  |  A: select  |  START: quickstart', CW/2, CH-8);
+    ctx.fillText('UP/DN  |  A: select  |  START: quick', CW/2, CH-8);
     ctx.restore();
 }
 
