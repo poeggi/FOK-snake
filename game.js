@@ -728,7 +728,7 @@ function drawSplash(now) {
         ctx.save();
         ctx.font = '10px "Press Start 2P"'; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
         ctx.fillStyle = '#888';
-        ctx.fillText('enter  |  tap  |  click', CW/2, CH - 8);
+        ctx.fillText('ENTER:go  TAP:go  CLICK:go', CW/2, CH - 8);
         ctx.restore();
     }
 }
@@ -749,7 +749,7 @@ function drawMenu() {
     ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
     ctx.fillText(_swVersion, 10, CH-8);
     ctx.fillStyle='#888'; ctx.textAlign='center';
-    ctx.fillText('UP/DN  |  A: select  |  START: quick', CW/2, CH-8);
+    ctx.fillText('UP/DN:nav  A:ok  START:quick', CW/2, CH-8);
     ctx.restore();
 }
 
@@ -800,7 +800,7 @@ function drawSettings() {
         }
         ctx.restore();
     }
-    ct('LEFT/RIGHT to change   A: toggle   ESC back',CW/2,CH-10,'#888',10);
+    ct('L/R:change  A:toggle  ESC:back',CW/2,CH-10,'#888',10);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -859,7 +859,7 @@ function drawScores() {
         });
         ctx.textAlign='center';
     }
-    ct('Any key or A to return',CW/2,CH-14,'#888',10);
+    ct('A:back',CW/2,CH-14,'#888',10);
 }
 
 function drawAchievements() {
@@ -908,7 +908,7 @@ function drawAchievements() {
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
     ctx.shadowColor='#6aaa6a'; ctx.shadowBlur=6; ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',10); ctx.shadowBlur=0;
-    const hint=expert?'LEFT/RIGHT: page   A: return':'Any key or A to return';
+    const hint=expert?'L/R:page  A:back':'A:back';
     ct(hint,CW/2,CH-10,'#888',10);
 }
 
@@ -998,7 +998,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct('A: buy  |  ||/SPC wear  |  ESC back',CW/2,CH-12,'#888',10);
+    ct('A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=performance.now();
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1057,7 +1057,7 @@ function drawCredits() {
     ctx.restore();
     creditsScroll -= creditsSpeed;
     if (creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
-    ct('UP slow  DN fast  || pause  |  A: exit', CW/2, CH-12, '#888', 10);
+    ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, CH-12, '#888', 10);
 }
 
 function drawNameEntry(now) {
@@ -1116,7 +1116,7 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
-    ct('UP/DN scroll  LR move  ||: space  A confirm  ESC del',CW/2,CH-10,'#888',10);
+    ct('UP/DN:scroll  L/R:move  ||:space  A:ok  ESC:del',CW/2,CH-10,'#888',10);
 }
 
 function drawGameBoard(now) {
@@ -1158,7 +1158,7 @@ function drawGameBoard(now) {
         }
         if(levelDoneWaiting&&Math.floor(now/520)%2===0){
             ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-            ctx.fillStyle='#888'; ctx.fillText('TAP OR PRESS ANY KEY',CW/2,CH-8); ctx.restore();
+            ctx.fillStyle='#888'; ctx.fillText('A:next  TAP:next',CW/2,CH-8); ctx.restore();
         }
     }
     if(phase==='levelReady'){
@@ -1187,7 +1187,7 @@ function drawGameBoard(now) {
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=24;
         ct('PAUSED',CW/2,CH/2+10,'#7fff7f',26); ctx.shadowBlur=0;
         ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-        ctx.fillStyle='#888'; ctx.fillText('|| / SPACE resume   ESC quit',CW/2,CH-8); ctx.restore();
+        ctx.fillStyle='#888'; ctx.fillText('||:resume  ESC:quit',CW/2,CH-8); ctx.restore();
     }
     // Bonus flash (duration and colour vary by tier)
     const bonusAge=now-bonusAt;
@@ -1217,7 +1217,7 @@ function drawConfirmYesNo(title, sel) {
     ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',14);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
     ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center';
-    ctx.fillStyle='#888'; ctx.fillText('LEFT/RIGHT choose   A: confirm   ESC cancel',CW/2,CH-8); ctx.restore();
+    ctx.fillStyle='#888'; ctx.fillText('L/R:choose  A:ok  ESC:cancel',CW/2,CH-8); ctx.restore();
 }
 function drawQuitConfirm() {
     drawGrid();
