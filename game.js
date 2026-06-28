@@ -193,6 +193,8 @@ function beginLevel() {
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     clearBoost();
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
+    for(let x=0;x<COLS;x++){ blocked.add(ck({x,y:0})); blocked.add(ck({x,y:ROWS-1})); }
+    for(let y=1;y<ROWS-1;y++){ blocked.add(ck({x:0,y})); blocked.add(ck({x:COLS-1,y})); }
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
     // ~10% of bars extend into a 2-cell unit; no wrapping so rendering stays simple
