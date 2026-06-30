@@ -310,7 +310,7 @@ function step(now) {
         powerPellet=null; _powerMode=true; _powerModeAt=now;
         score+=level*200; showBonus(now,'POWER UP!');
     }
-    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES);heart=null;showBonus(now,'+1 UP!');}
+    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;showBonus(now,'+1 UP!');}
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
     const anyAte=ate||ateGourangaIdx>=0;
@@ -448,9 +448,9 @@ function updateHUD() {
     if(score!==_hudCache.score){       _hudScoreEl.textContent=score;    _hudCache.score=score; }
     if(lives!==_hudCache.lives){
         _hudCache.lives=lives;
-        _hudLivesCtx.clearRect(0,0,48,12);
-        for(let i=0;i<START_LIVES;i++){
-            _hudLivesCtx.fillStyle=i<lives?'#7fff7f':'#1e3a1e';
+        _hudLivesCv.width=lives*16;
+        _hudLivesCtx.fillStyle='#7fff7f';
+        for(let i=0;i<lives;i++){
             const ox=i*16;
             HEART_PX.forEach((row,ry)=>row.forEach((px,rx)=>{if(px)_hudLivesCtx.fillRect(ox+rx*2,ry*2,2,2);}));
         }
@@ -1257,6 +1257,7 @@ function _drawGourangaPending(now) {
     }
 }
 function _drawHeart(now) {
+    if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0) return;
     const pulse=0.85+0.15*Math.sin((now-heartAt)/220);
     const cx=heart.x*CS+CS/2, cy=heart.y*CS+CS/2;
     const s=pulse*(CS/2-2)/3.5;
