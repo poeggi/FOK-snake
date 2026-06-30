@@ -271,12 +271,16 @@ function step(now) {
         gemsDone++;
         if(ateGourangaIdx>=0){
             _gourangaEaten.add(ateGourangaIdx);
-            score+=level*100;
+            const bonusMult=(levelBonusCount+1)*2;
+            score+=level*100*bonusMult;
+            levelBonusCount++;
+            if(levelBonusCount>=5) unlockAch('bonus_3');
             if(_gourangaEaten.size>=7){
                 _gourangaActive=false;
-                unlockAch('gouranga'); addFOKoins(50000);
+                unlockAch('gouranga');
                 showBonus(now,'GOURANGA!'); Snd.sfxPlay('perfect',cfg.music);
             } else {
+                showBonus(now,`x${bonusMult} BONUS!`);
                 Snd.sfxPlay('eat',cfg.music);
             }
             unlockAch('first_gem');
