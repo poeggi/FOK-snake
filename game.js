@@ -1795,6 +1795,7 @@ updateMuteBtn();
 // ================================================================
 const _btnPause = document.getElementById('btn-pause');
 const _btnStart = document.getElementById('btn-start');
+const _btnEsc   = document.getElementById('btn-esc');
 let _dimPhase = null;
 function _updateBtnDim() {
     if(phase===_dimPhase) return;
@@ -1803,6 +1804,7 @@ function _updateBtnDim() {
     const noAction=['settings','scores','achievements','shop','credits'].includes(phase);
     _btnPause.classList.toggle('dim', !['playing','paused','credits','shop','nameEntry'].includes(phase));
     _btnStart.classList.toggle('dim', gameplay || noAction);
+    _btnEsc.classList.toggle('dim', phase==='menu');
 }
 
 let _uiSplashShown = null;
