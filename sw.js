@@ -1,7 +1,7 @@
 // AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually
-// version snake-v1.0.47, released 2026-06-30 22:49 +0300
-const CACHE = 'snake-v1.0.47';
-const ASSETS = ['./', './assets.js', './audio.js', './fonts/PressStart2P-Regular.woff2', './game.js', './icon.svg', './manifest.json', './style.css'];
+// version snake-v1.0.48, released 2026-06-30 23:19 +0300
+const CACHE = 'snake-v1.0.48';
+const ASSETS = ['./', './assets.js', './audio.js', './docs/barricade-fragile.svg', './docs/barricade.svg', './docs/gem-epic.svg', './docs/gem-gouranga.svg', './docs/gem-lucky.svg', './docs/gem.svg', './docs/heart.svg', './docs/power-pellet.svg', './fonts/PressStart2P-Regular.woff2', './game.js', './icon.svg', './manifest.json', './style.css'];
 
 self.addEventListener('install', e => {
     e.waitUntil(

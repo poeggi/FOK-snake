@@ -1,0 +1,15 @@
+<svg width="48" height="48" xmlns="http://www.w3.org/2000/svg">
+  <rect width="48" height="48" rx="5" fill="#07070e"/>
+  <!-- Body -->
+  <rect x="4" y="13" width="40" height="22" fill="#cc4400"/>
+  <!-- Mortar lines -->
+  <rect x="4"  y="23" width="40" height="2"  fill="#5a1a00"/>
+  <rect x="23" y="13" width="2"  height="10" fill="#5a1a00"/>
+  <rect x="23" y="25" width="2"  height="10" fill="#5a1a00"/>
+  <!-- Bevel highlight top/left -->
+  <rect x="4"  y="13" width="40" height="2"  fill="#ff7700"/>
+  <rect x="4"  y="13" width="2"  height="22" fill="#ff7700"/>
+  <!-- Bevel shadow bottom/right -->
+  <rect x="42" y="13" width="2"  height="22" fill="#661800"/>
+  <rect x="4"  y="33" width="40" height="2"  fill="#661800"/>
+</svg>
