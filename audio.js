@@ -272,6 +272,23 @@ const Snd = (() => {
             t(1568, now, 0.03); t(1319, now + 0.045, 0.04); t(880, now + 0.095, 0.08);
         } else if (type === 'fail') {
             t(330, now, 0.05, 'sawtooth'); t(196, now + 0.06, 0.12, 'sawtooth');
+        } else if (type === 'crash') {
+            const dur = 0.22;
+            const buf = _ctx.createBuffer(1, Math.ceil(_ctx.sampleRate * dur), _ctx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+            const src = _ctx.createBufferSource();
+            src.buffer = buf;
+            const flt = _ctx.createBiquadFilter();
+            flt.type = 'bandpass'; flt.frequency.value = 380; flt.Q.value = 0.6;
+            const g = _ctx.createGain();
+            g.gain.setValueAtTime(0.9, now);
+            g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+            src.connect(flt); flt.connect(g); g.connect(_sfxGain);
+            src.start(now); src.stop(now + dur);
+            src.onended = () => { src.disconnect(); flt.disconnect(); g.disconnect(); };
+            t(140, now, 0.14, 'sawtooth');
+            t(95,  now + 0.055, 0.11, 'sawtooth');
         }
     }
 

@@ -154,6 +154,8 @@ let perfectLevel = true, levelWasPerfect = false, fireworks = [];
 let levelBonusCount = 0, epicLevelCount = 0;
 let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
 let heart=null, heartAt=0, _crushEffects=[];
+let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
+const _POWER_DUR=5500;
 let boostDir=null, boostSince=0, boosting=false;
 const BOOST_GRACE=180;
 function clearBoost(){boostDir=null;boosting=false;}
@@ -195,6 +197,7 @@ function beginLevel(isRespawn=false) {
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set();
     heart=null; heartAt=0; _crushEffects=[];
+    powerPellet=null; _powerMode=false;
     clearBoost();
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
@@ -224,6 +227,11 @@ function beginLevel(isRespawn=false) {
     if(isRespawn && ((level===8&&lives===2)||(level===9&&lives===1)) && Math.random()<0.05){
         const hBlocked=new Set([...snake,...bars].map(ck));
         heart=freeCell(hBlocked); heartAt=performance.now();
+    }
+    if(level>=3 && Math.random()<0.03){
+        const ppB=new Set([...snake,...bars].map(ck));
+        if(gem) ppB.add(ck(gem)); if(heart) ppB.add(ck(heart));
+        powerPellet=freeCell(ppB); powerPelletAt=performance.now();
     }
     renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
 }
@@ -268,20 +276,31 @@ function step(now) {
     const head={x:(snake[0].x+dir.x+COLS)%COLS,y:(snake[0].y+dir.y+ROWS)%ROWS};
     const hk=ck(head);
     const protect = now - spawnAt < 1000;
+    if(_powerMode && now-_powerModeAt>=_POWER_DUR){ _powerMode=false; renderBarsOffscreen(); }
     if(!protect){
         const hitBar=bars.find(b=>ck(b)===hk);
         if(hitBar){
-            if(hitBar.fragile){
+            if(hitBar.fragile||_powerMode){
                 let primCk=ck(hitBar);
                 if(hitBar.paired){const p=bars.find(b=>b.pairEnd&&ck(b.pairEnd)===primCk);if(p)primCk=ck(p);}
                 const primBar=bars.find(b=>ck(b)===primCk);
                 const secCk=primBar&&primBar.pairEnd?ck(primBar.pairEnd):null;
-                _crushEffects.push({x:hitBar.x,y:hitBar.y,at:now});
+                _crushEffects.push({x:hitBar.x,y:hitBar.y,at:now,
+                    pts:Array.from({length:20},()=>({
+                        ang:Math.random()*Math.PI*2, spd:3+Math.random()*9,
+                        sz:2+Math.random()*4,
+                        col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
+                    }))});
                 bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk));
                 addFOKoins(1000); showBonus(now,'+1000 FK!');
-                renderBarsOffscreen();
+                Snd.sfxPlay('crash',cfg.music);
+                if(!_powerMode) renderBarsOffscreen();
             } else { die(now); return; }
         }
+    }
+    if(powerPellet&&ck(powerPellet)===hk){
+        powerPellet=null; _powerMode=true; _powerModeAt=now;
+        score+=level*200; showBonus(now,'POWER UP!');
     }
     if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES);heart=null;showBonus(now,'+1 UP!');}
     const ate=gem&&ck(gem)===hk;
@@ -475,14 +494,14 @@ function menuItem(text,y,sel) {
 }
 
 // High-contrast barricades (>4.5:1 on dark bg) - bright amber brick
-function drawBar(b, c=ctx) {
+function drawBar(b, c=ctx, asFragile=b.fragile) {
     if(b.paired && !b.pairEnd) return; // second cell of a pair -- drawn by its partner
     const isPair=!!b.pairEnd;
     const x=isPair?Math.min(b.x,b.pairEnd.x)*CS+1:b.x*CS+1;
     const y=isPair?Math.min(b.y,b.pairEnd.y)*CS+1:b.y*CS+1;
     const bw=(isPair?Math.abs(b.pairEnd.x-b.x)+1:1)*CS-2;
     const bh=(isPair?Math.abs(b.pairEnd.y-b.y)+1:1)*CS-2;
-    if(b.fragile){
+    if(asFragile){
         // Crumbling border block: grey-brown, visibly damaged
         c.fillStyle='#7a6050'; c.fillRect(x,y,bw,bh);
         c.fillStyle='#4a3a2a';
@@ -1244,22 +1263,48 @@ function _drawHeart(now) {
 }
 function _drawCrushEffects(now) {
     _crushEffects=_crushEffects.filter(e=>{
-        const age=now-e.at, dur=500;
+        const age=now-e.at, dur=600;
         if(age>=dur) return false;
-        const a=1-age/dur;
-        for(let i=0;i<8;i++){
-            const ang=(i/8)*Math.PI*2, spd=(age/dur)*14;
-            const px=e.x*CS+CS/2+Math.cos(ang)*spd, py=e.y*CS+CS/2+Math.sin(ang)*spd;
-            ctx.globalAlpha=a; ctx.fillStyle=i%2?'#cc8844':'#ffcc44';
-            ctx.fillRect(px-2,py-2,4,4);
+        const t=age/dur, cx=e.x*CS+CS/2, cy=e.y*CS+CS/2;
+        if(age<110){
+            ctx.save(); ctx.globalAlpha=(1-age/110)*0.85;
+            ctx.fillStyle='#ffaa44'; ctx.fillRect(e.x*CS,e.y*CS,CS,CS);
+            ctx.restore();
         }
+        e.pts.forEach(p=>{
+            const px=cx+Math.cos(p.ang)*p.spd*t*22;
+            const py=cy+Math.sin(p.ang)*p.spd*t*22+220*t*t;
+            ctx.globalAlpha=(1-t)*0.92; ctx.fillStyle=p.col;
+            const s=p.sz*(1-t*0.45);
+            ctx.fillRect(px-s/2,py-s/2,s,s);
+        });
         ctx.globalAlpha=1; return true;
     });
 }
+function _drawPowerPellet(now) {
+    const pulse=0.8+0.2*Math.sin((now-powerPelletAt)/220);
+    const cx=powerPellet.x*CS+CS/2, cy=powerPellet.y*CS+CS/2, r=(CS/2-2)*pulse;
+    const hue=(now/7)%360;
+    ctx.save();
+    ctx.shadowColor=`hsl(${hue},100%,70%)`; ctx.shadowBlur=14;
+    ctx.fillStyle=`hsl(${hue},100%,82%)`;
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+}
 function drawGameBoard(now) {
-    drawGrid(); ctx.drawImage(_barsCanvas, 0, 0);
+    drawGrid();
+    if(_powerMode){
+        const nearEnd=now-_powerModeAt>_POWER_DUR-1500;
+        const blink=nearEnd&&Math.floor(now/180)%2===0;
+        bars.forEach(b=>drawBar(b,ctx,blink?b.fragile:true));
+        ctx.save(); ctx.globalAlpha=0.06+0.04*Math.sin(now/200);
+        ctx.fillStyle='#2244ff'; ctx.fillRect(0,0,CW,CH); ctx.restore();
+    } else {
+        ctx.drawImage(_barsCanvas,0,0);
+    }
     if(_gourangaActive) _drawGourangaPending(now);
     if(gem) drawGem(gem,now);
+    if(powerPellet) _drawPowerPellet(now);
     if(heart) _drawHeart(now);
     _drawCrushEffects(now);
     const dying=phase==='dying',flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
