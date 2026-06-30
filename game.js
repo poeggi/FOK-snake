@@ -221,7 +221,7 @@ function beginLevel(isRespawn=false) {
         }
     }
     spawnGem();
-    if(isRespawn && ((level===8&&lives===2)||(level===9&&lives===1)) && Math.random()<0.01){
+    if(isRespawn && ((level===8&&lives===2)||(level===9&&lives===1)) && Math.random()<0.05){
         const hBlocked=new Set([...snake,...bars].map(ck));
         heart=freeCell(hBlocked); heartAt=performance.now();
     }
