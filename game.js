@@ -152,7 +152,7 @@ let spawnAt = 0, levelDoneWaiting = false;
 let pauseReadyAt = 0, escReadyAt = 0;
 let perfectLevel = true, levelWasPerfect = false, fireworks = [];
 let levelBonusCount = 0, epicLevelCount = 0;
-let _gourangaLine=[], _gourangaActive=false, _gourangaCollected=0;
+let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
 let boostDir=null, boostSince=0, boosting=false;
 const BOOST_GRACE=180;
 function clearBoost(){boostDir=null;boosting=false;}
@@ -192,7 +192,7 @@ function beginLevel() {
     phase='levelReady'; stepAt=0; phaseAt=performance.now();
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
-    _gourangaLine=[]; _gourangaActive=false; _gourangaCollected=0;
+    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set();
     clearBoost();
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
     for(let x=0;x<COLS;x++){ blocked.add(ck({x,y:0})); blocked.add(ck({x,y:ROWS-1})); }
@@ -217,12 +217,13 @@ function beginLevel() {
         }
     }
     _tryGouranga(blocked);
-    spawnGem(); renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
+    if(!_gourangaActive) spawnGem();
+    renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
 }
 
 let gemOptimal=0, gemSteps=0;
 function _tryGouranga(blocked) {
-    if(Math.random()>=0.015) return;
+    if(Math.random()>=0.10) return;
     const horiz=Math.random()<0.5;
     for(let tries=0;tries<30;tries++){
         const sx=horiz?ri(COLS-6):ri(COLS), sy=horiz?ri(ROWS):ri(ROWS-6);
@@ -232,19 +233,15 @@ function _tryGouranga(blocked) {
             if(blocked.has(ck(p))){ok=false;break;}
             line.push(p);
         }
-        if(ok){_gourangaLine=line;_gourangaActive=true;_gourangaCollected=0;return;}
+        if(ok){_gourangaLine=line;_gourangaActive=true;return;}
     }
 }
 function spawnGem() {
-    if(_gourangaActive){
-        gem={..._gourangaLine[_gourangaCollected], gouranga:true, tier:0};
-    } else {
-        gem=freeCell(new Set([...snake,...bars].map(ck)));
-        const rv=Math.random();
-        gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
-        if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
-        else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
-    }
+    gem=freeCell(new Set([...snake,...bars].map(ck)));
+    const rv=Math.random();
+    gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
+    if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
+    else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
     gemAt=gem.spawnAt=performance.now();
     let dgx=gem.x-snake[0].x, dgy=gem.y-snake[0].y;
     if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
@@ -260,44 +257,50 @@ function step(now) {
     const protect = now - spawnAt < 1000;
     if(!protect && bars.some(b=>ck(b)===hk)){die(now);return;}
     const ate=gem&&ck(gem)===hk;
-    if(!protect && (ate?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now);return;}
-    if(!ate) gemSteps++;
+    const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
+    const anyAte=ate||ateGourangaIdx>=0;
+    if(!protect && (anyAte?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now);return;}
+    if(!anyAte) gemSteps++;
     snake.unshift(head);
-    if(ate){
+    if(anyAte){
         gemsDone++;
-        const base=level*100;
-        const tier=gem.tier||0;
-        const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
-        if(!bonus && tier===0) perfectLevel=false;
-        const bonusMult=(levelBonusCount+1)*2;
-        const mult=tier===2?100:tier===1?10:1;
-        const diffMult=(cfg.diff===2&&level>=2)?2:1;
-        score+=bonus?base*bonusMult*mult*diffMult:base*mult*diffMult;
-        if(tier===2){
-            showBonus(now,bonus?`EPIC x${100*bonusMult}!`:'EPIC x100!');
-            Snd.sfxPlay('epic_eat',cfg.music);
-            unlockAch('epic_gem');
-            epicLevelCount++; if(epicLevelCount>=2) unlockAch('epic_double');
-        } else if(tier===1){
-            showBonus(now,bonus?`LUCKY x${10*bonusMult}!`:'LUCKY x10!');
-            Snd.sfxPlay('lucky_eat',cfg.music);
-            unlockAch('lucky_gem');
-            luckyCount++; if(luckyCount>=3) unlockAch('lucky_streak');
-        } else if(bonus){
-            showBonus(now,`x${bonusMult} BONUS!`);
-            Snd.sfxPlay('bonus',cfg.music);
-        } else Snd.sfxPlay('eat',cfg.music);
-        unlockAch('first_gem');
-        if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); } else levelBonusCount=0;
-        if(_gourangaActive){
-            _gourangaCollected++;
-            if(_gourangaCollected>=7){
+        if(ateGourangaIdx>=0){
+            _gourangaEaten.add(ateGourangaIdx);
+            score+=level*100;
+            if(_gourangaEaten.size>=7){
                 _gourangaActive=false;
-                unlockAch('gouranga');
-                addFOKoins(50000);
-                showBonus(now,'GOURANGA!');
-                Snd.sfxPlay('perfect',cfg.music);
+                unlockAch('gouranga'); addFOKoins(50000);
+                showBonus(now,'GOURANGA!'); Snd.sfxPlay('perfect',cfg.music);
+            } else {
+                Snd.sfxPlay('eat',cfg.music);
             }
+            unlockAch('first_gem');
+        }
+        if(ate){
+            const base=level*100;
+            const tier=gem.tier||0;
+            const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
+            if(!bonus && tier===0) perfectLevel=false;
+            const bonusMult=(levelBonusCount+1)*2;
+            const mult=tier===2?100:tier===1?10:1;
+            const diffMult=(cfg.diff===2&&level>=2)?2:1;
+            score+=bonus?base*bonusMult*mult*diffMult:base*mult*diffMult;
+            if(tier===2){
+                showBonus(now,bonus?`EPIC x${100*bonusMult}!`:'EPIC x100!');
+                Snd.sfxPlay('epic_eat',cfg.music);
+                unlockAch('epic_gem');
+                epicLevelCount++; if(epicLevelCount>=2) unlockAch('epic_double');
+            } else if(tier===1){
+                showBonus(now,bonus?`LUCKY x${10*bonusMult}!`:'LUCKY x10!');
+                Snd.sfxPlay('lucky_eat',cfg.music);
+                unlockAch('lucky_gem');
+                luckyCount++; if(luckyCount>=3) unlockAch('lucky_streak');
+            } else if(bonus){
+                showBonus(now,`x${bonusMult} BONUS!`);
+                Snd.sfxPlay('bonus',cfg.music);
+            } else Snd.sfxPlay('eat',cfg.music);
+            unlockAch('first_gem');
+            if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); } else levelBonusCount=0;
         }
         if(score>=64000)  unlockAch('score_25k');
         if(score>=100000) unlockAch('score_100k');
@@ -316,9 +319,11 @@ function step(now) {
                 if(lives>=START_LIVES)         unlockAch('no_deaths');
             }
             phase='levelDone'; phaseAt=now;
-        } else spawnGem();
+        } else {
+            if(!_gourangaActive) spawnGem();
+        }
     } else snake.pop();
-    if (ate && cfg.diff > 0) snake.push({...snake[snake.length - 1]});
+    if(anyAte && cfg.diff > 0) snake.push({...snake[snake.length - 1]});
     updateHUD();
 }
 
@@ -1167,10 +1172,11 @@ function drawNameEntry(now) {
 }
 
 function _drawGourangaPending(now) {
-    for(let i=_gourangaCollected+1;i<_gourangaLine.length;i++){
+    for(let i=0;i<_gourangaLine.length;i++){
+        if(_gourangaEaten.has(i)) continue;
         const g=_gourangaLine[i], gx=g.x*CS+CS/2, gy=g.y*CS+CS/2, r=CS/2-3;
-        ctx.save(); ctx.globalAlpha=0.45; ctx.translate(gx,gy);
-        ctx.shadowColor='#ff8800'; ctx.shadowBlur=6; ctx.fillStyle='#ff8800';
+        ctx.save(); ctx.translate(gx,gy);
+        ctx.shadowColor='#ff8800'; ctx.shadowBlur=8; ctx.fillStyle='#ff8800';
         ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath(); ctx.fill();
         ctx.restore();
     }

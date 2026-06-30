@@ -1,6 +1,6 @@
 // AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually
-// version snake-v1.0.35, released 2026-06-30 20:19 +0300
-const CACHE = 'snake-v1.0.35';
+// version snake-v1.0.36, released 2026-06-30 20:49 +0300
+const CACHE = 'snake-v1.0.36';
 const ASSETS = ['./', './assets.js', './audio.js', './fonts/PressStart2P-Regular.woff2', './game.js', './icon.svg', './manifest.json', './style.css'];
 
 self.addEventListener('install', e => {
