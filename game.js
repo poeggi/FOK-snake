@@ -153,6 +153,7 @@ let pauseReadyAt = 0, escReadyAt = 0;
 let perfectLevel = true, levelWasPerfect = false, fireworks = [];
 let levelBonusCount = 0, epicLevelCount = 0;
 let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
+let heart=null, heartAt=0, _crushEffects=[];
 let boostDir=null, boostSince=0, boosting=false;
 const BOOST_GRACE=180;
 function clearBoost(){boostDir=null;boosting=false;}
@@ -181,7 +182,7 @@ function freeCell(blocked) {
 
 function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; beginLevel(); }
 
-function beginLevel() {
+function beginLevel(isRespawn=false) {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
     speed = lcfg[['easy','normal','hard'][cfg.diff]];
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
@@ -193,12 +194,14 @@ function beginLevel() {
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set();
+    heart=null; heartAt=0; _crushEffects=[];
     clearBoost();
     const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
-    for(let x=0;x<COLS;x++){ blocked.add(ck({x,y:0})); blocked.add(ck({x,y:ROWS-1})); }
-    for(let y=1;y<ROWS-1;y++){ blocked.add(ck({x:0,y})); blocked.add(ck({x:COLS-1,y})); }
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
-    for(let i=0;i<numBars;i++){ const b=freeCell(blocked); blocked.add(ck(b)); bars.push(b); }
+    for(let i=0;i<numBars;i++){
+        const b=freeCell(blocked); blocked.add(ck(b));
+        bars.push({...b, fragile:(b.x===0||b.x===COLS-1||b.y===0||b.y===ROWS-1)});
+    }
     // ~10% of bars extend into a 2-cell unit; no wrapping so rendering stays simple
     const _bl=bars.length;
     for(let i=0;i<_bl;i++){
@@ -211,12 +214,17 @@ function beginLevel() {
             if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
             const nk=ck({x:nx,y:ny});
             if(!blocked.has(nk)){
-                blocked.add(nk); bars.push({x:nx,y:ny,paired:true});
+                blocked.add(nk);
+                bars.push({x:nx,y:ny,paired:true,fragile:(nx===0||nx===COLS-1||ny===0||ny===ROWS-1)});
                 b.pairEnd={x:nx,y:ny}; break;
             }
         }
     }
     spawnGem();
+    if(isRespawn && ((level===8&&lives===2)||(level===9&&lives===1)) && Math.random()<0.01){
+        const hBlocked=new Set([...snake,...bars].map(ck));
+        heart=freeCell(hBlocked); heartAt=performance.now();
+    }
     renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
 }
 
@@ -260,7 +268,22 @@ function step(now) {
     const head={x:(snake[0].x+dir.x+COLS)%COLS,y:(snake[0].y+dir.y+ROWS)%ROWS};
     const hk=ck(head);
     const protect = now - spawnAt < 1000;
-    if(!protect && bars.some(b=>ck(b)===hk)){die(now);return;}
+    if(!protect){
+        const hitBar=bars.find(b=>ck(b)===hk);
+        if(hitBar){
+            if(hitBar.fragile){
+                let primCk=ck(hitBar);
+                if(hitBar.paired){const p=bars.find(b=>b.pairEnd&&ck(b.pairEnd)===primCk);if(p)primCk=ck(p);}
+                const primBar=bars.find(b=>ck(b)===primCk);
+                const secCk=primBar&&primBar.pairEnd?ck(primBar.pairEnd):null;
+                _crushEffects.push({x:hitBar.x,y:hitBar.y,at:now});
+                bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk));
+                addFOKoins(1000); showBonus(now,'+1000 FK!');
+                renderBarsOffscreen();
+            } else { die(now); return; }
+        }
+    }
+    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES);heart=null;showBonus(now,'+1 UP!');}
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
     const anyAte=ate||ateGourangaIdx>=0;
@@ -459,6 +482,21 @@ function drawBar(b, c=ctx) {
     const y=isPair?Math.min(b.y,b.pairEnd.y)*CS+1:b.y*CS+1;
     const bw=(isPair?Math.abs(b.pairEnd.x-b.x)+1:1)*CS-2;
     const bh=(isPair?Math.abs(b.pairEnd.y-b.y)+1:1)*CS-2;
+    if(b.fragile){
+        // Crumbling border block: grey-brown, visibly damaged
+        c.fillStyle='#7a6050'; c.fillRect(x,y,bw,bh);
+        c.fillStyle='#4a3a2a';
+        c.fillRect(x,y+Math.floor(bh/2),bw,1);
+        c.fillRect(x+Math.floor(bw/2),y,1,isPair?bh:Math.floor(bh/2));
+        // Faded bevel
+        c.fillStyle='#aa9080'; c.fillRect(x,y,bw,2); c.fillRect(x,y,2,bh);
+        c.fillStyle='#332820'; c.fillRect(x+bw-2,y,2,bh); c.fillRect(x,y+bh-2,bw,2);
+        // Diagonal cracks
+        c.strokeStyle='#2a1a0a'; c.lineWidth=1;
+        c.beginPath(); c.moveTo(x+3,y+2); c.lineTo(x+bw-4,y+bh-3); c.stroke();
+        c.beginPath(); c.moveTo(x+bw-5,y+2); c.lineTo(x+4,y+Math.floor(bh*0.6)); c.stroke();
+        return;
+    }
     c.fillStyle='#cc4400'; c.fillRect(x,y,bw,bh);
     // mortar lines: cross for 2-cell (marks the join), T-shape for single
     c.fillStyle='#5a1a00';
@@ -865,7 +903,7 @@ function drawSettings() {
         }
         ctx.restore();
     }
-    ct('L/R:change  A:toggle  ESC:back',CW/2,CH-10,'#888',10);
+    ct('UP/DN:nav  L/R:change  A:toggle  ESC:back',CW/2,CH-10,'#888',10);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -1059,7 +1097,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct('A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
+    ct('UP/DN:nav  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=performance.now();
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1191,10 +1229,39 @@ function _drawGourangaPending(now) {
         ctx.restore();
     }
 }
+function _drawHeart(now) {
+    const pulse=0.85+0.15*Math.sin((now-heartAt)/220);
+    const cx=heart.x*CS+CS/2, cy=heart.y*CS+CS/2;
+    const s=pulse*(CS/2-2)/3.5;
+    ctx.save(); ctx.translate(cx,cy); ctx.scale(s,s);
+    ctx.shadowColor='#ff4499'; ctx.shadowBlur=10; ctx.fillStyle='#ff2266';
+    ctx.beginPath();
+    ctx.moveTo(0,1); ctx.bezierCurveTo(0,-1,-3.5,-4,-3.5,-2);
+    ctx.bezierCurveTo(-3.5,0.5,0,3.5,0,3.5);
+    ctx.bezierCurveTo(0,3.5,3.5,0.5,3.5,-2);
+    ctx.bezierCurveTo(3.5,-4,0,-1,0,1);
+    ctx.fill(); ctx.restore();
+}
+function _drawCrushEffects(now) {
+    _crushEffects=_crushEffects.filter(e=>{
+        const age=now-e.at, dur=500;
+        if(age>=dur) return false;
+        const a=1-age/dur;
+        for(let i=0;i<8;i++){
+            const ang=(i/8)*Math.PI*2, spd=(age/dur)*14;
+            const px=e.x*CS+CS/2+Math.cos(ang)*spd, py=e.y*CS+CS/2+Math.sin(ang)*spd;
+            ctx.globalAlpha=a; ctx.fillStyle=i%2?'#cc8844':'#ffcc44';
+            ctx.fillRect(px-2,py-2,4,4);
+        }
+        ctx.globalAlpha=1; return true;
+    });
+}
 function drawGameBoard(now) {
     drawGrid(); ctx.drawImage(_barsCanvas, 0, 0);
     if(_gourangaActive) _drawGourangaPending(now);
     if(gem) drawGem(gem,now);
+    if(heart) _drawHeart(now);
+    _drawCrushEffects(now);
     const dying=phase==='dying',flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
     const protect=phase==='playing'&&(now-spawnAt<1000);
     if(protect&&Math.floor(now/130)%2===1) ctx.globalAlpha=0.22;
@@ -1519,8 +1586,12 @@ function handleKey(key, pde) {
         else if(key==='ArrowUp'){creditsSpeed=0.15;if(pde)pde();}
         else if(key==='Enter'){Snd.sfxPlay('nav',cfg.music);phase='menu';creditsSpeed=0.8;_creditsNormal=0.8;if(pde)pde();}
     }
-    else if(phase==='scores'){ Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde(); }
+    else if(phase==='scores'){
+        if(key==='ArrowUp'||key==='ArrowDown'||key==='ArrowLeft'||key==='ArrowRight') return;
+        Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
+    }
     else if(phase==='achievements'){
+        if(key==='ArrowUp'||key==='ArrowDown') return;
         const _ea=ACHIEVEMENTS.every(a=>achUnlocked[a.id]);
         if(_ea&&(key==='ArrowLeft'||key==='ArrowRight')){achPage=1-achPage;Snd.sfxPlay('nav',cfg.music);if(pde)pde();}
         else{Snd.sfxPlay('nav',cfg.music);phase='menu';if(pde)pde();}
@@ -1861,7 +1932,7 @@ function loop(now) {
         phase='playing'; stepAt=now+speed; spawnAt=now; phaseAt=0;
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
-        if(lives>0)beginLevel();
+        if(lives>0)beginLevel(true);
         else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';showHUD(false);Snd.musicStop();}
     }
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
