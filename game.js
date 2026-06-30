@@ -222,7 +222,7 @@ function beginLevel() {
 
 let gemOptimal=0, gemSteps=0;
 function _tryGouranga(blocked) {
-    if(Math.random()>=0.10) return;
+    if(Math.random()>=0.01) return;
     const dirs=[{dx:1,dy:0},{dx:0,dy:1},{dx:1,dy:1},{dx:1,dy:-1}];
     const {dx,dy}=dirs[ri(4)];
     for(let tries=0;tries<30;tries++){
@@ -313,6 +313,7 @@ function step(now) {
             gem=null; score+=level*500;
             if(perfectLevel){
                 score+=level*1000; spawnFireworks(now); Snd.sfxPlay('perfect',cfg.music);
+                addFOKoins(10000);
                 unlockAch('perfect_level');
                 perfectCount++; if(perfectCount>=3) unlockAch('triple_perf');
             } else Snd.sfxPlay('levelUp',cfg.music);
