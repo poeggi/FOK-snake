@@ -224,14 +224,9 @@ function beginLevel(isRespawn=false) {
         }
     }
     spawnGem();
-    if(isRespawn && ((level===8&&lives===2)||(level===9&&lives===1)) && Math.random()<0.05){
+    if(isRespawn && (((level===7||level===8)&&lives===2)||((level===9||level===10)&&lives===1)) && Math.random()<0.10){
         const hBlocked=new Set([...snake,...bars].map(ck));
         heart=freeCell(hBlocked); heartAt=performance.now();
-    }
-    if(level>=3 && Math.random()<0.03){
-        const ppB=new Set([...snake,...bars].map(ck));
-        if(gem) ppB.add(ck(gem)); if(heart) ppB.add(ck(heart));
-        powerPellet=freeCell(ppB); powerPelletAt=performance.now();
     }
     renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
 }
@@ -269,6 +264,11 @@ function spawnGem() {
     if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
     const turnPenalty=(dgx*dir.x+dgy*dir.y<0&&Math.abs(dgx*dir.y-dgy*dir.x)===0)?2:0;
     gemOptimal=Math.abs(dgx)+Math.abs(dgy)+turnPenalty+2; gemSteps=0;
+    if(!powerPellet&&!_powerMode&&Math.random()<0.002){
+        const ppB=new Set([...snake,...bars].map(ck)); ppB.add(ck(gem));
+        if(heart) ppB.add(ck(heart));
+        powerPellet=freeCell(ppB); powerPelletAt=performance.now();
+    }
 }
 
 function step(now) {
