@@ -183,6 +183,12 @@ function freeCell(blocked) {
 
 function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(Math.random()*30); _earlyHeartCount=0; beginLevel(); }
 
+// Edge ring is always fragile; the ring one cell inward is fragile 25% of the time.
+function _barFragile(x,y) {
+    if(x===0||x===COLS-1||y===0||y===ROWS-1) return true;
+    if(x===1||x===COLS-2||y===1||y===ROWS-2) return Math.random()<0.25;
+    return false;
+}
 function beginLevel(isRespawn=false) {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
     speed = lcfg[['easy','normal','hard'][cfg.diff]];
@@ -202,7 +208,7 @@ function beginLevel(isRespawn=false) {
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){
         const b=freeCell(blocked); blocked.add(ck(b));
-        bars.push({...b, fragile:(b.x===0||b.x===COLS-1||b.y===0||b.y===ROWS-1)});
+        bars.push({...b, fragile:_barFragile(b.x,b.y)});
     }
     // ~10% of bars extend into a 2-cell unit; no wrapping so rendering stays simple
     const _bl=bars.length;
@@ -217,7 +223,7 @@ function beginLevel(isRespawn=false) {
             const nk=ck({x:nx,y:ny});
             if(!blocked.has(nk)){
                 blocked.add(nk);
-                bars.push({x:nx,y:ny,paired:true,fragile:(nx===0||nx===COLS-1||ny===0||ny===ROWS-1)});
+                bars.push({x:nx,y:ny,paired:true,fragile:b.fragile});
                 b.pairEnd={x:nx,y:ny}; break;
             }
         }
