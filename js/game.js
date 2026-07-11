@@ -971,9 +971,12 @@ function drawNewspaper(now, sel) {
         ctx.save(); ctx.fillStyle='#ff3355'; ctx.shadowColor='#ff3355'; ctx.shadowBlur=8;
         ctx.beginPath(); ctx.arc(x+w-2,y+1,3.5+Math.sin(now/220),0,Math.PI*2); ctx.fill(); ctx.restore();
     }
+    // NEWS label on the bottom line, baseline-aligned with the version string
+    ctx.save();
     ctx.globalAlpha=sel?1:0.78; ctx.shadowColor=sel?'#7fff7f':'#cccccc'; ctx.shadowBlur=sel?12:1;
-    ct('NEWS', x+w/2, y+h+9, sel?'#7fff7f':'#cccccc', 14);
-    ctx.shadowBlur=0; ctx.globalAlpha=1;
+    ctx.font='14px "Press Start 2P"'; ctx.textAlign='right'; ctx.textBaseline='bottom';
+    ctx.fillStyle=sel?'#7fff7f':'#cccccc'; ctx.fillText('NEWS', CW-10, CH-8);
+    ctx.restore();
 }
 function _drawNewspaperPage(now) {
     const pw=CW-64, ph=CH-64, px=(CW-pw)/2, py=(CH-ph)/2, cx=CW/2;

@@ -22,11 +22,15 @@ const DEATH_DUR = 900, LEVELDONE_DUR = 1400, READY_DUR = 1000, GO_DUR = 300;
 // Main-menu announcement. Set to null when there is nothing to announce.
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge), a headline, and body lines ('' makes a blank gap line).
-const ANNOUNCEMENT = { id:'multiplayer-soon', headline:'WE ARE BEEFING THINGS UP!', lines:[
-    'A new MULTIPLAYER feature',
-    'is coming soon.',
+const ANNOUNCEMENT = { id:'v1.2.0', headline:'WE ARE BEEFING THINGS UP!', lines:[
+    'NEW IN v1.2:',
+    'Time Crystal in levels 6+',
+    'Shop page 2 - 5 new items',
+    'Smileys in your name',
+    'Snappier touch controls',
     '',
-    'Stay tuned.' ] };
+    'MULTIPLAYER coming soon.',
+    'Stay tuned!' ] };
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_-!?.,\'"#$@&()[]:+ \r';
 
