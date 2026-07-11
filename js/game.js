@@ -134,7 +134,8 @@ const CRED_TOTAL_H = credTotalH();
 // ================================================================
 // phases: splash|menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|nameEntry|quitConfirm|resetConfirm
 let phase = 'splash';
-let menuSel = 0, settingsSel = 0, shopSel = 0, quitConfirmSel = 1, prevPhase = 'playing';
+let menuSel = 0, settingsSel = 0, shopSel = 0, shopPage = 0, quitConfirmSel = 1, prevPhase = 'playing';
+let _shimmerThreshold = 25000;
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
 const SETTINGS_COUNT = 11;
 let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false, cfgVer: 2 };
@@ -186,7 +187,10 @@ function freeCell(blocked) {
     return p;
 }
 
-function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(Math.random()*30); _earlyHeartCount=0; beginLevel(); }
+function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(Math.random()*30); _earlyHeartCount=0;
+    let best=0; try{ for(const s of getScores()) if((s.score||0)>best) best=s.score; }catch{}
+    _shimmerThreshold=Math.max(best,25000);
+    beginLevel(); }
 
 // Edge ring is always fragile; the ring one cell inward is fragile 25% of the time.
 function _barFragile(x,y) {
@@ -727,8 +731,34 @@ function drawAccessoryNecktie(hx, hy, facing={x:1,y:0}) {
     ctx.restore();
 }
 
+function drawAccessoryHalo(hx, hy) {
+    ctx.save();
+    ctx.strokeStyle='#ffe23a'; ctx.lineWidth=2; ctx.shadowColor='#ffe23a'; ctx.shadowBlur=8;
+    ctx.beginPath(); ctx.ellipse(hx+9,hy-7,9,3.2,0,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+}
+
+function drawAccessoryMoustache(hx, hy) {
+    const eyes=eyeOffsets(dir);
+    const ex=(eyes[0][0]+(eyes[1]?eyes[1][0]:eyes[0][0]))/2+1.5;
+    const ey=(eyes[0][1]+(eyes[1]?eyes[1][1]:eyes[0][1]))/2+1.5+4;
+    ctx.save(); ctx.fillStyle='#2a1a0a';
+    ctx.beginPath(); ctx.ellipse(hx+ex-3,hy+ey,3,1.8,0.35,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(hx+ex+3,hy+ey,3,1.8,-0.35,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+}
+
+function drawAccessoryWizard(hx, hy) {
+    ctx.fillStyle='#5a2a9a';                             // cone
+    ctx.beginPath(); ctx.moveTo(hx+9,hy-16); ctx.lineTo(hx+2,hy-1); ctx.lineTo(hx+16,hy-1); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#3a1a6a'; ctx.fillRect(hx,hy-2,18,2); // brim
+    ctx.fillStyle='#ffe860';                             // star tip + specks
+    ctx.fillRect(hx+8,hy-18,2,2); ctx.fillRect(hx+6,hy-8,1,1); ctx.fillRect(hx+11,hy-11,1,1);
+}
+
 function drawSnake(flash) {
     const sc=SNAKE_COLORS[cfg.snakeColor||0];
+    const si=cfg.wornItems||{};
     snake.forEach((seg,i)=>{
         const x=seg.x*CS+1,y=seg.y*CS+1,sw=CS-2,sh=CS-2,frac=1-i/Math.max(snake.length,1);
         if(i===0){
@@ -749,15 +779,36 @@ function drawSnake(flash) {
                 ctx.shadowColor='#7fff7f'; ctx.shadowBlur=5;
                 ctx.fillRect(mx-1,my-1,3,3); ctx.restore();
             }
-            const si=cfg.wornItems||{};
             if(si.shades)    drawAccessoryShades(x,y);
             if(si.monocle)   drawAccessoryMonocle(x,y);
+            if(si.moustache) drawAccessoryMoustache(x,y);
             if(si.bow)       drawAccessoryBow(x,y,eyeDir);
             if(si.necktie)   drawAccessoryNecktie(x,y,eyeDir);
             if(si.cylinder)  drawAccessoryCylinder(x,y);
+            if(si.wizard)    drawAccessoryWizard(x,y);
             if(si.crown)     drawAccessoryCrown(x,y);
+            if(si.halo)      drawAccessoryHalo(x,y);
         }
     });
+    // Shoes ride the tail segment
+    if(si.shoes && !flash && snake.length>0){
+        const t=snake[snake.length-1], x=t.x*CS+1, y=t.y*CS+1;
+        ctx.fillStyle='#eeeeee'; ctx.fillRect(x+2,y+CS-7,5,3); ctx.fillRect(x+CS-8,y+CS-7,5,3);
+        ctx.fillStyle='#cc2222'; ctx.fillRect(x+2,y+CS-5,5,1); ctx.fillRect(x+CS-8,y+CS-5,5,1);
+        ctx.fillStyle='#333333'; ctx.fillRect(x+1,y+CS-4,6,2); ctx.fillRect(x+CS-9,y+CS-4,6,2);
+    }
+    // Invisible gown: only reveals a traveling shimmer while you are outscoring the record
+    if(si.gown && !flash && phase==='playing' && score>=_shimmerThreshold){
+        const L=snake.length, now=performance.now();
+        for(let i=0;i<L;i++){
+            const wv=Math.sin(i*0.6-now/160);
+            if(wv>0.75){
+                const s=snake[i], x=s.x*CS+1, y=s.y*CS+1;
+                ctx.save(); ctx.globalAlpha=(wv-0.75)/0.25*0.6; ctx.fillStyle='#ffffff';
+                rr(x,y,CS-2,CS-2,i===0?5:3); ctx.fill(); ctx.restore();
+            }
+        }
+    }
 }
 
 // ================================================================
@@ -1050,8 +1101,10 @@ function drawScoreHead(cx, cy, colorIdx, si) {
         if(si.necktie) drawAccessoryNecktie(0, 0);
         if(si.shades)  { ctx.fillStyle='#111'; [3.5,17.5].forEach(ey=>{ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();}); }
         if(si.monocle) { ctx.strokeStyle='#ccc'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(14.5,3.5,3.5,0,Math.PI*2); ctx.stroke(); }
+        if(si.wizard)   drawAccessoryWizard(0, 0);
         if(si.cylinder) drawAccessoryCylinder(0, 0);
         if(si.crown)    drawAccessoryCrown(0, 0);
+        if(si.halo)     drawAccessoryHalo(0, 0);
     }
     ctx.restore();
 }
@@ -1167,9 +1220,11 @@ function drawAchPopups(now) {
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,28,'#ffd700',18); ctx.shadowBlur=0;
+    ct('< PAGE '+(shopPage+1)+'/2 >',CW/2,44,'#aa8844',9);
     const coins=_cachedFOKoins, si=cfg.shopItems||{}, wi=cfg.wornItems||{};
-    const startY=50, rowH=44;
-    SHOP_ITEMS.forEach((item,i)=>{
+    const items=SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
+    const startY=56, rowH=44;
+    items.forEach((item,i)=>{
         const y=startY+i*rowH, sel=i===shopSel;
         const isRep=!!item.repeatable;
         const owned=!!si[item.id], worn=!isRep&&owned&&!!wi[item.id], canAfford=coins>=item.price;
@@ -1211,7 +1266,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct('UP/DN:nav  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
+    ct('UP/DN:nav  L/R:page  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=performance.now();
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1711,7 +1766,7 @@ function handleKey(key, pde) {
             else if(menuSel===1){phase='settings';settingsSel=0;}
             else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
             else if(menuSel===3){phase='achievements';achPage=0;}
-            else if(menuSel===4){phase='shop';shopSel=0;purchaseAnimAt=0;}
+            else if(menuSel===4){phase='shop';shopSel=0;shopPage=0;purchaseAnimAt=0;}
             else if(menuSel===5){phase='credits';creditsScroll=CH+40;creditsSpeed=0.8;_creditsNormal=0.8;}
             else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=performance.now();}
             if(pde)pde();
@@ -1767,10 +1822,12 @@ function handleKey(key, pde) {
         Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
     }
     else if(phase==='shop'){
-        if(key==='ArrowUp'){ shopSel=(shopSel-1+SHOP_ITEMS.length)%SHOP_ITEMS.length; Snd.sfxPlay('nav',cfg.music); }
-        else if(key==='ArrowDown'){ shopSel=(shopSel+1)%SHOP_ITEMS.length; Snd.sfxPlay('nav',cfg.music); }
+        const items=SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
+        if(key==='ArrowUp'){ shopSel=(shopSel-1+items.length)%items.length; Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowDown'){ shopSel=(shopSel+1)%items.length; Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowLeft'||key==='ArrowRight'){ shopPage=(shopPage+1)%2; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='Enter'){
-            const item=SHOP_ITEMS[shopSel];
+            const item=items[shopSel];
             const si=cfg.shopItems||(cfg.shopItems={});
             if(item&&_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
                 _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch {}
@@ -1782,7 +1839,7 @@ function handleKey(key, pde) {
             } else if(item&&(_cachedFOKoins<item.price)){ Snd.sfxPlay('fail',cfg.music); }
         }
         else if(key===' '){
-            const item=SHOP_ITEMS[shopSel];
+            const item=items[shopSel];
             const si=cfg.shopItems||{}, wi=cfg.wornItems||(cfg.wornItems={});
             if(item&&!item.repeatable&&si[item.id]){
                 if(wi[item.id]) delete wi[item.id]; else wi[item.id]=true;
