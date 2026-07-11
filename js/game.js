@@ -905,7 +905,7 @@ function drawSplash(now) {
 }
 
 function drawNewspaper(now, sel) {
-    const w=30, h=26, x=CW-w-12, y=CH-h-20;
+    const w=30, h=26, x=CW-w-20, y=CH-h-20;
     ctx.save();
     if(sel){ ctx.shadowColor='#ffe08a'; ctx.shadowBlur=14; }
     ctx.fillStyle=sel?'#fff8e0':'#d8d2c0'; ctx.fillRect(x,y,w,h);       // paper
@@ -920,7 +920,9 @@ function drawNewspaper(now, sel) {
         ctx.save(); ctx.fillStyle='#ff3355'; ctx.shadowColor='#ff3355'; ctx.shadowBlur=8;
         ctx.beginPath(); ctx.arc(x+w-2,y+1,3.5+Math.sin(now/220),0,Math.PI*2); ctx.fill(); ctx.restore();
     }
-    ct('NEWS', x+w/2, y+h+8, sel?'#ffe08a':'#4a7a4a', 8);
+    ctx.globalAlpha=sel?1:0.78; ctx.shadowColor=sel?'#7fff7f':'#cccccc'; ctx.shadowBlur=sel?12:1;
+    ct('NEWS', x+w/2, y+h+9, sel?'#7fff7f':'#cccccc', 14);
+    ctx.shadowBlur=0; ctx.globalAlpha=1;
 }
 function _drawNewspaperPage(now) {
     const pw=CW-64, ph=CH-64, px=(CW-pw)/2, py=(CH-ph)/2, cx=CW/2;
