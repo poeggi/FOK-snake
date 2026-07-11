@@ -697,6 +697,22 @@ function drawAccessoryBow(hx, hy, facing={x:1,y:0}) {
     ctx.restore();
 }
 
+function drawAccessoryNecktie(hx, hy, facing={x:1,y:0}) {
+    ctx.save();
+    ctx.translate(hx+9,hy+9); ctx.rotate(Math.atan2(facing.y,facing.x));
+    // Blade trails behind the head (opposite the facing direction)
+    ctx.fillStyle='#2a52be';
+    ctx.beginPath();
+    ctx.moveTo(-1,-3); ctx.lineTo(-1,3); ctx.lineTo(-6,4);
+    ctx.lineTo(-9,0); ctx.lineTo(-6,-4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#5a82ee';            // highlight stripe
+    ctx.beginPath();
+    ctx.moveTo(-3,-1); ctx.lineTo(-3,1); ctx.lineTo(-7,0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#1a3a8e';            // knot
+    ctx.fillRect(-1,-3,4,5);
+    ctx.restore();
+}
+
 function drawSnake(flash) {
     const sc=SNAKE_COLORS[cfg.snakeColor||0];
     snake.forEach((seg,i)=>{
@@ -723,6 +739,7 @@ function drawSnake(flash) {
             if(si.shades)    drawAccessoryShades(x,y);
             if(si.monocle)   drawAccessoryMonocle(x,y);
             if(si.bow)       drawAccessoryBow(x,y,eyeDir);
+            if(si.necktie)   drawAccessoryNecktie(x,y,eyeDir);
             if(si.cylinder)  drawAccessoryCylinder(x,y);
             if(si.crown)     drawAccessoryCrown(x,y);
         }
@@ -971,6 +988,7 @@ function drawScoreHead(cx, cy, colorIdx, si) {
     // Accessories (back-to-front; shades/monocle inlined to avoid global dir dependency)
     if(si) {
         if(si.bow)     drawAccessoryBow(0, 0);
+        if(si.necktie) drawAccessoryNecktie(0, 0);
         if(si.shades)  { ctx.fillStyle='#111'; [3.5,17.5].forEach(ey=>{ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();}); }
         if(si.monocle) { ctx.strokeStyle='#ccc'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(14.5,3.5,3.5,0,Math.PI*2); ctx.stroke(); }
         if(si.cylinder) drawAccessoryCylinder(0, 0);

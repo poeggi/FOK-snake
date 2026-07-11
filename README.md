@@ -58,7 +58,7 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - Arcade SFX for eating, dying, level up
 - High score table (saved locally, top 10)
 - FOKoins: lifetime score accumulator across all sessions, spent in the shop
-- Shop: cosmetic accessories for the snake head (cylinder hat, monocle, sunglasses, royal crown, bow tie)
+- Shop: cosmetic accessories for the snake head (necktie, sunglasses, cylinder hat, monocle, bow tie, royal crown)
 - Achievements and expert achievements
 - FPS counter
 - Scrolling credits screen

@@ -108,16 +108,18 @@ const EXPERT_ACHIEVEMENTS = [
 ];
 
 const SHOP_ITEMS = [
-    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000,
-      icon:{p:{A:'#1a1a1a',B:'#333333'},d:['........','..AAAA..','..AAAA..','..AAAA..','.BBBBBB.','........','........','........']}},
-    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000,
-      icon:{p:{H:'#d8d8d8',A:'#999999',S:'#484848',G:'#eeeeee',C:'#aaaaaa',D:'#555555'},d:['..HHAA..','.H....A.','.H.G..A.','.A....S.','..AASS..','.....CD.','....CD..','...CD...']}},
+    { id:'necktie',  name:'NECKTIE',       desc:'Business on the grid',           price:25000,
+      icon:{p:{A:'#2a52be',B:'#1a3a8e',C:'#5a82ee'},d:['...BB...','...BB...','...AA...','..AAAA..','..ACCA..','..AAAA..','...AA...','........']}},
     { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:50000,
       icon:{p:{A:'#111111',B:'#1a3050'},d:['.AAA.AAA','ABBBABBB','ABBBABBB','.AAA.AAA','........','........','........','........']}},
-    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000,
-      icon:{p:{A:'#ffd700',C:'#ff4444'},d:['A..A..A.','AAAAAAA.','ACAAACA.','AAAAAAA.','........','........','........','........']}},
-    { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:250000,
-      icon:{p:{A:'#cc2222',B:'#ff4444',C:'#aa0000'},d:['........','AA...AA.','ABBACBBA','AABACBAA','AA...AA.','........','........','........']}},
+    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000,
+      icon:{p:{A:'#1a1a1a',B:'#333333'},d:['........','..AAAA..','..AAAA..','..AAAA..','.BBBBBB.','........','........','........']}},
     { id:'donate',   name:'DONATE',        desc:'Support the dev. Repeatable!',  price:100000, repeatable:true,
       icon:{p:{A:'#ff4499',B:'#ff88cc'},d:['.AA.AA..','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','...A....','........','........']}},
+    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000,
+      icon:{p:{H:'#d8d8d8',A:'#999999',S:'#484848',G:'#eeeeee',C:'#aaaaaa',D:'#555555'},d:['..HHAA..','.H....A.','.H.G..A.','.A....S.','..AASS..','.....CD.','....CD..','...CD...']}},
+    { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:250000,
+      icon:{p:{A:'#cc2222',B:'#ff4444',C:'#aa0000'},d:['........','AA...AA.','ABBACBBA','AABACBAA','AA...AA.','........','........','........']}},
+    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000,
+      icon:{p:{A:'#ffd700',C:'#ff4444'},d:['A..A..A.','AAAAAAA.','ACAAACA.','AAAAAAA.','........','........','........','........']}},
 ];
