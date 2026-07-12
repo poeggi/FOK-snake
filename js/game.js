@@ -105,6 +105,7 @@ const CRED = [
     ['hdr','--- CREDITS ---'],['gap',40],
     ['hdr','CONCEPTUAL SUPERVISION'],['txt','Jonas and Kai P.'],['gap',28],
     ['hdr','CREATIVE DIRECTION'],['txt','Jonas P.'],['gap',28],
+    ['hdr','CREATIVE ADVISOR'],['txt','Maartje P.'],['gap',28],
     ['hdr','EXECUTIVE PRODUCTION'],['txt','Kai P.'],['gap',28],
     ['hdr','LEAD DEVELOPER'],['txt','Claude P.'],['sml','(types at 10,000 tokens/min)'],['gap',28],
     ['hdr','MUSICAL COMPOSITION'],['txt','Claude M.'],['sml','(self-taught. mostly.)'],['gap',28],
@@ -1843,7 +1844,7 @@ function handleKey(key, pde) {
             else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){phase='shop';shopSel=0;shopPage=0;purchaseAnimAt=0;}
-            else if(menuSel===5){phase='credits';creditsScroll=CH+40;creditsSpeed=0.8;_creditsNormal=0.8;}
+            else if(menuSel===5){phase='credits';creditsScroll=CH-20;creditsSpeed=0.8;_creditsNormal=0.8;}
             else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=simNow;}
             if(pde)pde();
         }
