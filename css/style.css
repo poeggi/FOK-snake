@@ -25,13 +25,16 @@ body {
     display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
     order: 2;
 }
-#fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; border-radius: 3px; padding: 3px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; box-sizing: border-box; width: 64px; height: 24px; }
+/* Mute button and FPS box share one identical outline */
+#fps-el, #btn-mute {
+    box-sizing: border-box; width: 72px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 3px; padding: 0 4px;
+}
+#fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
-    cursor: pointer; border-radius: 3px; padding: 3px;
-    display: flex; align-items: center; justify-content: center;
-    -webkit-tap-highlight-color: transparent; line-height: 0;
-    box-sizing: border-box; width: 64px; height: 24px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; line-height: 0;
 }
 #btn-mute canvas { image-rendering: pixelated; display: block; }
 #btn-mute:hover { border-color: #7fff7f; }
@@ -80,7 +83,7 @@ body {
            Tiny horizontal padding keeps panels off the screen edge. */
         padding: 0 3px; gap: 6px; height: 100dvh; min-height: unset;
     }
-    /* Side info panel — 100px; floats left or right depending on handed setting */
+    /* Side info panel -- 100px; floats left or right depending on handed setting */
     #side-info {
         display: flex; flex-direction: column; justify-content: flex-start;
         align-items: center; gap: 14px;
@@ -103,7 +106,7 @@ body {
         width: min(calc((100dvh - 32px) * 1.5), 100%);
         height: auto;
     }
-    /* Right controls panel — ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
+    /* Right controls panel -- ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
     #gamepad {
         display: flex; flex-direction: column; flex-shrink: 0;
         width: min(120px, 28vw); align-items: center; justify-content: center; gap: 12px;
