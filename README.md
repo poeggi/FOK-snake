@@ -2,7 +2,7 @@
 
 Snake FOK Edition uses classic Snake as its starting point, but it is as much a love letter to retro arcade gaming as it is a Snake clone. Power pellets, bonus multiplier chains, border barricades that crumble on impact, extra lives hidden across levels -- it all adds up to something that feels like flipping through an arcade cabinet catalogue from the 1980s.
 
-**Play online:** https://poeggi.github.io/FOK/
+**Play online:** https://poeggi.github.io/FOK-snake/
 
 ## Items
 
@@ -13,6 +13,7 @@ Snake FOK Edition uses classic Snake as its starting point, but it is as much a 
 | ![Epic Gem](docs/gem-epic.svg) | **Epic Gem** | Extremely rare rainbow gem. Worth 100x or 200x the normal score bonus. |
 | ![Gouranga Gem](docs/gem-gouranga.svg) | **Gouranga Bonus** | Seven orange gems appear in a line -- horizontal, vertical, or diagonal. Collect all seven in sequence for escalating x2, x4, x6 ... score multipliers. Hare Krishna. |
 | ![Power Pellet](docs/power-pellet.svg) | **Power Pellet** | A Pac-Man nod. All barricades turn fragile for 5.5 seconds -- crash through everything. Barricades blink as the effect fades. |
+| | **Time Crystal** | Rare icy pickup from level 6 onward (chance rises with the level). Collect it to slow the whole board to level-3 speed for 30 seconds; a field-wide shimmer marks the warp and blinks as it runs out. |
 | ![1UP Heart](docs/heart.svg) | **1UP Heart** | Extra life. Appears once during levels 4-6 and occasionally on respawn in later levels. Blinks before disappearing. Can push you above the starting three lives. |
 | ![Barricade](docs/barricade.svg) | **Barricade** | Solid orange brick. Colliding costs a life. Grows in number each level. |
 | ![Fragile Barricade](docs/barricade-fragile.svg) | **Fragile Barricade** | Crumbling border block. The snake can smash straight through it for +1000 FOKoins and a debris effect. Activated by the Power Pellet. |
@@ -52,18 +53,32 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - 3 lives - barricades and self-collision cost one life each
 - 10 gems per level; collect in fewest steps for a x2 score bonus
 - Lucky gems (x10/x20) and Epic gems (x100/x200) spawn randomly
+- Time Crystal (level 6+): slows the board to level-3 speed for 30 seconds
 - Pause with Space; quit-to-menu confirm on Escape
 - Two music styles: NEW (3-channel chiptune) and CLASSIC (2-channel retro) - switchable in Settings
 - Music pauses on death, resumes on restart
 - Arcade SFX for eating, dying, level up
 - High score table (saved locally, top 10)
 - FOKoins: lifetime score accumulator across all sessions, spent in the shop
-- Shop: cosmetic accessories for the snake head (necktie, sunglasses, cylinder hat, monocle, bow tie, royal crown)
+- Shop with two pages of cosmetics: necktie, sunglasses, cylinder hat, monocle, bow tie (page 1); shoes, moustache, halo, wizard hat, royal crown, and the invisible gown that shimmers only while you outscore the record (page 2); plus a repeatable DONATE
+- NEW SNAKE TIMES: in-game news page for release announcements (newspaper icon on the main menu)
+- Smileys allowed in high-score names (characters like : - ( ) [ ] ')
 - Achievements and expert achievements
 - FPS counter
 - Scrolling credits screen
 - Mobile-friendly responsive layout with portrait and landscape support
 - Installable PWA (works offline)
+
+## In development
+
+This repo (FOK-snake) is where the online features are being built:
+
+- Global online high-score board, validated server-side by deterministic replay
+- 1v1 online snake duels
+
+To make these possible the engine was refactored onto a deterministic
+fixed-timestep 60 Hz tick clock. See docs/multiplayer-server-prompt.md for the
+server design brief.
 
 ## Setup (GitHub Pages)
 
