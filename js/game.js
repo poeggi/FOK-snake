@@ -1889,6 +1889,9 @@ function handleKey(key, pde) {
         if(phase==='credits'){ _creditsNormal=_creditsNormal>0?0:0.8; creditsSpeed=_creditsNormal; if(pde)pde(); return; }
     }
 
+    // In settings/shop, Backspace goes back like Escape (not advertised in the hint text).
+    if(key==='Backspace' && (phase==='settings'||phase==='shop')) key='Escape';
+
     // Escape = quit confirm in-game, or back in menus
     if(key==='Escape'){
         if(phase==='nameEntry'){
