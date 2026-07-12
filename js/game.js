@@ -136,6 +136,7 @@ const CRED_TOTAL_H = credTotalH();
 let phase = 'splash';
 let menuSel = 0, settingsSel = 0, shopSel = 0, shopPage = 0, quitConfirmSel = 1, prevPhase = 'playing';
 let _shimmerThreshold = 25000;
+const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
 const SETTINGS_COUNT = 11;
 let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false, cfgVer: 2 };
@@ -1058,6 +1059,16 @@ function drawNews(now) {
     ctx.restore();
     if(t>=1) ct('A:back  ESC:back', CW/2, CH-12, '#888', 10);
 }
+function drawSplashText(now) {
+    if(!_splashText) return;
+    ctx.save();
+    ctx.translate(CW*0.78, 120); ctx.rotate(-0.34);
+    ctx.scale(1+0.10*Math.abs(Math.sin(now/300)), 1+0.10*Math.abs(Math.sin(now/300)));
+    ctx.font='10px "Press Start 2P"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='#3a2a00'; ctx.fillText(_splashText, 1.5, 1.5);   // retro drop shadow
+    ctx.fillStyle='#ffff00'; ctx.fillText(_splashText, 0, 0);
+    ctx.restore();
+}
 function drawMenu(now) {
     drawGrid();
     ctx.drawImage(_scanCanvas, 0, 0);
@@ -1065,6 +1076,7 @@ function drawMenu(now) {
     ct('S N A K E',CW/2,78,'#7fff7f',40);
     ctx.shadowBlur=0;
     ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',10);
+    drawSplashText(now);
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
     if(ANNOUNCEMENT) drawNewspaper(now, menuSel===MENU_ITEMS.length);

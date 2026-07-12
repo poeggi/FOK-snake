@@ -38,6 +38,19 @@ const ANNOUNCEMENT = { id:'v1.2.0', headline:'WE ARE BEEFING THINGS UP!', lines:
     '',
     'MULTIPLAYER coming soon.',
     'Stay tuned!' ] };
+// Minecraft-style title splash lines; one is picked at random each load.
+// Keep them short and ASCII so they fit the tilted, pulsing draw.
+const SPLASHES = [
+    '100% pure!', 'Gouranga!', 'Also try Tetris!', 'Eat the gems!',
+    'Mind the walls!', 'Nokia would be proud!', 'Hare Krishna!', 'sssssss!',
+    'FOKoins to the moon!', 'Do a barrel roll!', 'Made in Hamburg!',
+    'Multiplayer soon!', 'Time is a crystal!', 'Wear the gown!', 'Turbo!',
+    'git gud!', 'Snek!', 'The tail remembers.', 'Collect them all!',
+    'Achievement get!', 'Press START!', 'Perfectly balanced!', 'One more run!',
+    'Beep boop!', 'Powered by FOKoins!', 'Try the wizard hat!',
+    'Watch the barricades!', 'You are the snake.', 'No walls were harmed.',
+    'Now with two shop pages!',
+];
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_-!?.,\'"#$@&()[]:+ \r';
 
