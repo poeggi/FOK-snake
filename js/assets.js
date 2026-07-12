@@ -4,6 +4,13 @@
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
+// Fixed-timestep simulation clock. The whole game advances in integer sim-ticks;
+// everything time-based is expressed in ticks, not wall-clock milliseconds, so the
+// simulation is deterministic and can later be driven by a server/peer clock.
+const SIM_HZ = 60, TICK_MS = 1000 / SIM_HZ;   // 60 Hz base tick (16.67 ms per tick)
+const T = t => t * TICK_MS;                    // ticks -> sim-clock ms
+const TICKS_PER_NET = 4;                       // network cadence: 1 packet / 4 ticks = 15 Hz
+const MAX_CATCHUP = 5;                          // max sim ticks simulated per rendered frame
 const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
 // Speaker split into two 8x8 icons drawn side by side (total 32x16px at CS=2)
 // BODY: cone only (cols 0-3). WAVES: 3 arcs inner(col1,rows3-4) mid(col3,rows2-5) outer(col5,rows1-6). X: diagonal cross for muted.
@@ -18,7 +25,7 @@ const SPEAKER_X     = [[0,0,0,0,0,0,0,0],[0,1,0,0,0,1,0,0],[0,0,1,0,1,0,0,0],[0,
 const SYM_ONE = { w:4, h:6, px:[[2,0],[1,1],[2,1],[2,2],[2,3],[2,4],[2,5]] };
 // "¥": 5x7 yen  (screen: 10x14px)
 const SYM_YEN = { w:5, h:7, px:[[0,0],[4,0],[1,1],[3,1],[2,2],[0,3],[1,3],[2,3],[3,3],[4,3],[2,4],[0,5],[1,5],[2,5],[3,5],[4,5],[2,6]] };
-const DEATH_DUR = 900, LEVELDONE_DUR = 1400, READY_DUR = 1000, GO_DUR = 300;
+const DEATH_DUR = T(54), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18);
 // Main-menu announcement. Set to null when there is nothing to announce.
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge), a headline, and body lines ('' makes a blank gap line).
@@ -34,17 +41,20 @@ const ANNOUNCEMENT = { id:'v1.2.0', headline:'WE ARE BEEFING THINGS UP!', lines:
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_-!?.,\'"#$@&()[]:+ \r';
 
+// easy/normal/hard = sim-ticks per snake move at 60 Hz (lower = faster).
+// bars = barricade count. Fastest (hard L10 = 4 ticks) is 15 moves/s; boost floors
+// the interval at 2 ticks = 30 moves/s, the sim's absolute ceiling.
 const LEVEL_CFG = [
-    { easy:260, normal:210, hard:150, bars:0  },
-    { easy:240, normal:190, hard:140, bars:2  },
-    { easy:220, normal:180, hard:130, bars:4  },
-    { easy:210, normal:160, hard:120, bars:6  },
-    { easy:190, normal:150, hard:110, bars:8  },
-    { easy:170, normal:140, hard:100, bars:10 },
-    { easy:150, normal:120, hard:90,  bars:12 },
-    { easy:140, normal:110, hard:80,  bars:14 },
-    { easy:120, normal:90,  hard:70,  bars:16 },
-    { easy:100, normal:80,  hard:60,  bars:18 },
+    { easy:15, normal:12, hard:10, bars:0  },
+    { easy:14, normal:12, hard:10, bars:2  },
+    { easy:13, normal:11, hard:9,  bars:4  },
+    { easy:12, normal:10, hard:8,  bars:6  },
+    { easy:11, normal:9,  hard:8,  bars:8  },
+    { easy:10, normal:8,  hard:7,  bars:10 },
+    { easy:9,  normal:7,  hard:6,  bars:12 },
+    { easy:8,  normal:6,  hard:5,  bars:14 },
+    { easy:7,  normal:5,  hard:4,  bars:16 },
+    { easy:6,  normal:5,  hard:4,  bars:18 },
 ];
 
 const DIFF = [

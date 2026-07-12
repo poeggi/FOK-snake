@@ -92,7 +92,7 @@ function unlockAch(id) {
     if(cfg.diff === 0 && !EASY_ACHS.has(id)) return;
     achUnlocked[id] = Date.now(); saveAch();
     addFOKoins(1000);
-    achPopups.push({ id, at: performance.now() });
+    achPopups.push({ id, at: simNow });
     spawnConfetti();
 }
 loadAch();
@@ -149,7 +149,10 @@ applyHandedness();
 let level, lives, score, _levelStartLen = 0;
 let snake, dir, dirQueue;
 let gem, gemsDone, bars;
-let speed, stepAt, phaseAt = performance.now(), gemAt, deathMsg, pauseAt;
+// Sim clock: simTick is the integer source of truth; simNow is its ms projection
+// (simTick * TICK_MS). All game state reads simNow/simTick, never performance.now().
+let simTick = 0, simNow = 0, _acc = 0, _lastRAF = 0;
+let speed, _moveDue = 0, phaseAt = 0, gemAt, deathMsg, pauseAt;   // speed = ticks per move
 let spawnAt = 0, levelDoneWaiting = false;
 let pauseReadyAt = 0, escReadyAt = 0;
 let perfectLevel = true, levelWasPerfect = false, fireworks = [];
@@ -157,12 +160,14 @@ let levelBonusCount = 0, epicLevelCount = 0;
 let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
 let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0, _crushEffects=[];
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
-const _POWER_DUR=5500;
+const _POWER_DUR=T(330);   // 5.5s power mode
+const EARLY_HEART_TTL=T(600);   // 10s early-heart lifespan
+const SPAWN_PROTECT=T(60);      // 1s post-spawn collision immunity
 let timeCrystal=null, timeCrystalAt=0, _slowMode=false, _slowModeAt=0;
-const _SLOW_DUR=30000;
+const _SLOW_DUR=T(1800);   // 30s time-warp slow
 function _lvlSpeed(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
-let boostDir=null, boostSince=0, boosting=false;
-const BOOST_GRACE=180;
+let boostDir=null, boostSince=0, boosting=false;   // boostSince is a simTick stamp
+const BOOST_GRACE_TICKS=10;
 function clearBoost(){boostDir=null;boosting=false;}
 let perfectCount = 0, luckyCount = 0;
 let achPage = 0;
@@ -206,7 +211,7 @@ function beginLevel(isRespawn=false) {
     _levelStartLen = sl;
     snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
-    phase='levelReady'; stepAt=0; phaseAt=performance.now();
+    phase='levelReady'; _moveDue=0; phaseAt=simNow;
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set();
@@ -241,7 +246,7 @@ function beginLevel(isRespawn=false) {
     spawnGem();
     if(isRespawn && (((level===7||level===8)&&lives===2)||((level===9||level===10)&&lives===1)) && Math.random()<0.10){
         const hBlocked=new Set([...snake,...bars].map(ck));
-        heart=freeCell(hBlocked); heartAt=performance.now();
+        heart=freeCell(hBlocked); heartAt=simNow;
     }
     renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
 }
@@ -275,7 +280,7 @@ function spawnGem() {
     gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
     if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
     else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
-    gemAt=gem.spawnAt=performance.now();
+    gemAt=gem.spawnAt=simNow;
     let dgx=gem.x-snake[0].x, dgy=gem.y-snake[0].y;
     if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
     if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
@@ -284,20 +289,20 @@ function spawnGem() {
     if(!powerPellet&&!_powerMode&&Math.random()<0.002){
         const ppB=new Set([...snake,...bars].map(ck)); ppB.add(ck(gem));
         if(heart) ppB.add(ck(heart));
-        powerPellet=freeCell(ppB); powerPelletAt=performance.now();
+        powerPellet=freeCell(ppB); powerPelletAt=simNow;
     }
     // Time crystal: level 6+, per-gem chance scales 0.1%/level (L6 0.1% .. L10 0.5%)
     if(!timeCrystal&&!_slowMode&&level>=6&&Math.random()<(level-5)*0.001){
         const tcB=new Set([...snake,...bars].map(ck)); tcB.add(ck(gem));
         if(powerPellet) tcB.add(ck(powerPellet));
         if(heart) tcB.add(ck(heart));
-        timeCrystal=freeCell(tcB); timeCrystalAt=performance.now();
+        timeCrystal=freeCell(tcB); timeCrystalAt=simNow;
     }
     if(!_earlyHeartUsed&&level>=4&&level<=6){
         if(_earlyHeartCount===_earlyHeartTrigger&&!heart){
             const hB=new Set([...snake,...bars].map(ck)); hB.add(ck(gem));
             if(powerPellet) hB.add(ck(powerPellet));
-            heart=freeCell(hB); heartAt=performance.now(); heartIsEarly=true; _earlyHeartUsed=true;
+            heart=freeCell(hB); heartAt=simNow; heartIsEarly=true; _earlyHeartUsed=true;
         }
         _earlyHeartCount++;
     }
@@ -307,7 +312,7 @@ function step(now) {
     while(dirQueue.length>0){ const nd=dirQueue.shift(); if(nd.x!==-dir.x||nd.y!==-dir.y){dir=nd;break;} }
     const head={x:(snake[0].x+dir.x+COLS)%COLS,y:(snake[0].y+dir.y+ROWS)%ROWS};
     const hk=ck(head);
-    const protect = now - spawnAt < 1000;
+    const protect = now - spawnAt < SPAWN_PROTECT;
     if(_powerMode && now-_powerModeAt>=_POWER_DUR){ _powerMode=false; renderBarsOffscreen(); }
     if(!protect){
         const hitBar=bars.find(b=>ck(b)===hk);
@@ -448,9 +453,9 @@ function die(now) {
 function togglePause() {
     if(phase==='playing'){
         if(performance.now() < pauseReadyAt) return;
-        phase='paused'; pauseAt=performance.now(); Snd.musicGamePause();
+        phase='paused'; pauseAt=simNow; Snd.musicGamePause();
     } else if(phase==='paused'){
-        gemAt+=performance.now()-pauseAt; phase='playing'; stepAt=performance.now()+speed;
+        gemAt+=simNow-pauseAt; phase='playing'; _moveDue=speed;
         pauseReadyAt=performance.now()+1000;
         Snd.musicGameUnpause();
     }
@@ -645,7 +650,7 @@ function drawGem(g,now) {
 }
 
 function triggerPurchaseAnim() {
-    purchaseAnimAt = performance.now();
+    purchaseAnimAt = simNow;
     for(let i=0;i<50;i++){
         const angle=(i/50)*Math.PI*2, spd=1.5+Math.random()*3.5;
         purchaseParticles.push({
@@ -1271,7 +1276,7 @@ function drawShop() {
     ctx.shadowBlur=0;
     ct('UP/DN:nav  L/R:page  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
-    const now=performance.now();
+    const now=simNow;
     purchaseParticles=purchaseParticles.filter(p=>{
         p.life++;p.x+=p.vx;p.y+=p.vy;p.vy+=0.09;p.rot+=p.vrot;
         if(p.life>=p.maxLife||p.y>CH+20) return false;
@@ -1487,7 +1492,7 @@ function drawGameBoard(now) {
     if(heart) _drawHeart(now);
     _drawCrushEffects(now);
     const dying=phase==='dying',flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
-    const protect=phase==='playing'&&(now-spawnAt<1000);
+    const protect=phase==='playing'&&(now-spawnAt<SPAWN_PROTECT);
     if(protect&&Math.floor(now/130)%2===1) ctx.globalAlpha=0.22;
     drawSnake(flash);
     ctx.globalAlpha=1;
@@ -1587,7 +1592,7 @@ function drawConfirmYesNo(title, sel) {
 function drawQuitConfirm() {
     drawGrid();
     if(bars)  ctx.drawImage(_barsCanvas, 0, 0);
-    if(gem)   drawGem(gem, performance.now());
+    if(gem)   drawGem(gem, simNow);
     if(snake) drawSnake(false);
     drawOvBg(0.72);
     drawConfirmYesNo('QUIT TO MENU?', quitConfirmSel);
@@ -1674,7 +1679,7 @@ dpadCanvas.addEventListener('touchstart',e=>{
     if(phase==='nameEntry') nameInp.blur();
     dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null);
     drawDpad(phase==='splash'?null:dpadActive);
-    if(phase==='playing'){const d=GDIRS[dpadActive];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+    if(phase==='playing'){const d=GDIRS[dpadActive];if(d){boostDir=d;boostSince=simTick;boosting=false;}}
     _startDpadRepeat(dpadActive);
 },{passive:false});
 dpadCanvas.addEventListener('touchmove',e=>{
@@ -1683,7 +1688,7 @@ dpadCanvas.addEventListener('touchmove',e=>{
     if(d!==dpadActive){
         dpadActive=d; handleKey(dpadActive,null);
         drawDpad(phase==='splash'?null:dpadActive);
-        if(phase==='playing'){const gd=GDIRS[dpadActive];if(gd){boostDir=gd;boostSince=performance.now();boosting=false;}else{boostDir=null;boosting=false;}}
+        if(phase==='playing'){const gd=GDIRS[dpadActive];if(gd){boostDir=gd;boostSince=simTick;boosting=false;}else{boostDir=null;boosting=false;}}
         _startDpadRepeat(dpadActive);
     }
 },{passive:false});
@@ -1704,7 +1709,7 @@ function triggerSplashExit() {
     if (phase !== 'splash' || _splashExiting) return;
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
     _splashExiting = true;
-    _splashExitAt = performance.now();
+    _splashExitAt = simNow;
     Snd.sfxPlay('coin'); Snd.audioResume();
 }
 
@@ -1715,8 +1720,8 @@ function handleKey(key, pde) {
     if (phase === 'splash') {
         if (key === 'ArrowDown' && !_splashFast && !_splashExiting) {
             _splashFast = true;
-            _splashFastStart = performance.now();
-            _splashFastBase = (performance.now() - phaseAt) / 1000;
+            _splashFastStart = simNow;
+            _splashFastBase = (simNow - phaseAt) / 1000;
             return;
         }
         const splashOk = key.length === 1 || key === 'Enter';
@@ -1724,7 +1729,7 @@ function handleKey(key, pde) {
         triggerSplashExit(); if (pde) pde(); return;
     }
     if (_splashKeyHeld) return;
-    if (performance.now() - _splashLeftAt < 200) return;
+    if (simNow - _splashLeftAt < 200) return;
     Snd.audioResume();
 
     // Global: mute (suppressed during name entry so M is typeable)
@@ -1771,7 +1776,7 @@ function handleKey(key, pde) {
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){phase='shop';shopSel=0;shopPage=0;purchaseAnimAt=0;}
             else if(menuSel===5){phase='credits';creditsScroll=CH+40;creditsSpeed=0.8;_creditsNormal=0.8;}
-            else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=performance.now();}
+            else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=simNow;}
             if(pde)pde();
         }
     }
@@ -1907,11 +1912,11 @@ function handleKey(key, pde) {
             } else if(nameCursorPos<nameStr.length){
                 nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);
                 nameCursorPos=Math.min(nameCursorPos+1,nameStr.length);
-                _nameFlashPos=nameCursorPos-1; _nameFlashAt=performance.now();
+                _nameFlashPos=nameCursorPos-1; _nameFlashAt=simNow;
                 Snd.sfxPlay('nav',cfg.music);
             } else if(nameStr.length<MAX_NAME){
                 nameStr+=ch; nameCursorPos++;
-                _nameFlashPos=nameCursorPos-1; _nameFlashAt=performance.now();
+                _nameFlashPos=nameCursorPos-1; _nameFlashAt=simNow;
                 Snd.sfxPlay('nav',cfg.music);
             } else {
                 // name full and cursor at end: wrap to start so user can replace
@@ -1952,14 +1957,14 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
-    if (phase === 'splash') { _splashFast = true; _splashFastStart = performance.now(); _splashFastBase = (performance.now() - phaseAt) / 1000; }
+    if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
     else if (phase !== 'playing' && phase !== 'nameEntry') { handleKey('Enter', null); }
 });
 canvas.addEventListener('pointerup', e => {
     if (e.pointerType === 'touch') return;
     if (phase === 'splash') { triggerSplashExit(); }
 });
-canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = performance.now(); _splashFastBase = (performance.now() - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
+canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
@@ -1996,7 +2001,7 @@ canvas.addEventListener('touchmove',e=>{
         const d=GDIRS[key];
         if(d){
             if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){clearBoost();}
-            else if(_swipeLastDir&&key===_swipeLastDir){boostDir=d;boosting=true;boostSince=performance.now();}
+            else if(_swipeLastDir&&key===_swipeLastDir){boostDir=d;boosting=true;boostSince=simTick;}
             else if(!(boosting&&boostDir&&d.x===boostDir.x&&d.y===boostDir.y)){clearBoost();} // first swipe or 90-deg turn: no boost
         }
     }
@@ -2024,7 +2029,7 @@ document.addEventListener('pointerdown', () => Snd.audioResume(), {capture:true,
 document.addEventListener('touchend', () => Snd.audioResume(), {passive:true});
 // Pause audio when app goes to background, resume when it returns
 function onBgHide() {
-    if (phase === 'playing') { phase = 'paused'; pauseAt = performance.now(); Snd.musicGamePause(); }
+    if (phase === 'playing') { phase = 'paused'; pauseAt = simNow; Snd.musicGamePause(); }
     Snd.audioBgSuspend();
 }
 function onBgShow() { if (cfg.music) Snd.audioResume(); }
@@ -2034,7 +2039,7 @@ window.addEventListener('focus', onBgShow);
 document.addEventListener('keydown', e=>{
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
-    if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=performance.now();boosting=false;}}
+    if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=simTick;boosting=false;}}
     if(phase==='playing') canvas.style.cursor='none';
 });
 document.addEventListener('keyup', e=>{
@@ -2105,10 +2110,12 @@ updateMuteBtn();
 
 // ================================================================
 // MAIN LOOP
-// TODO(multiplayer): game logic (tick check, phase transitions) is coupled to
-// RAF/rendering. For multiplayer, decouple into a fixed-timestep logic loop
-// (setInterval or manual accumulator) so game state advances independently of
-// display refresh rate and can be driven/validated by a server clock.
+// Fixed-timestep architecture: update() is the single tick provider -- it is the
+// only place simTick advances, and all game state is a pure function of simTick.
+// loop() accumulates real frame time and runs update() a whole number of times per
+// frame (with a catch-up cap), then renders once. This decouples the simulation
+// from display refresh (60/30 Hz screens, iOS throttling) and is the seam a server
+// or peer can later drive instead of the RAF accumulator.
 // ================================================================
 const _btnPause = document.getElementById('btn-pause');
 const _btnStart = document.getElementById('btn-start');
@@ -2134,12 +2141,42 @@ function _updateNonCanvasUI() {
     document.getElementById('gamepad').classList.toggle('splash', onSplash);
 }
 
-function loop(now) {
+// Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
+function update() {
+    simTick++;
+    simNow = simTick * TICK_MS;
+    const now = simNow;
+    if(phase==='playing'){
+        if(boostDir&&boostDir.x===dir.x&&boostDir.y===dir.y&&dirQueue.length===0){
+            if(!boosting&&simTick-boostSince>=BOOST_GRACE_TICKS&&cfg.turbo!==false)boosting=true;
+        }else boosting=false;
+        // speed = ticks per move; boost halves the interval, floored at 2 ticks (30 Hz).
+        if(--_moveDue<=0){ _moveDue=boosting?Math.max(2,Math.round(speed/2)):speed; step(now); }
+    }
+    if(heart&&heartIsEarly&&now-heartAt>=EARLY_HEART_TTL){heart=null;heartIsEarly=false;}
+    if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;speed=_lvlSpeed(level);}
+    if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
+        phase='playing'; _moveDue=speed; spawnAt=now; phaseAt=0;
+    }
+    if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
+        if(lives>0)beginLevel(true);
+        else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';showHUD(false);Snd.musicStop();}
+    }
+    if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
+        levelDoneWaiting=true;
+    }
+    if(phase==='splash'&&_splashExiting&&now-_splashExitAt>=T(30)){
+        _splashExiting=false;
+        phase='menu'; phaseAt=now; _splashLeftAt=now;
+    }
+}
+
+function loop(rafNow) {
     requestAnimationFrame(loop);
     _updateBtnDim();
     _updateNonCanvasUI();
     fpsFrames++;
-    if(now-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(now-fpsLast))} FPS`;fpsFrames=0;fpsLast=now;}
+    if(rafNow-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(rafNow-fpsLast))} FPS`;fpsFrames=0;fpsLast=rafNow;}
 
     // Music routing (skip splash/paused/quitConfirm states)
     if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'){
@@ -2151,31 +2188,18 @@ function loop(now) {
     }
     Snd.musicTick(cfg.music);
 
-    // Transitions
-    if(phase==='playing'){
-        if(boostDir&&boostDir.x===dir.x&&boostDir.y===dir.y&&dirQueue.length===0){
-            if(!boosting&&now-boostSince>=BOOST_GRACE&&cfg.turbo!==false)boosting=true;
-        }else boosting=false;
-        if(now>=stepAt){const es=boosting?Math.max(40,Math.round(speed/20)*10):speed;stepAt=now+es;step(now);}
-    }
-    if(heart&&heartIsEarly&&now-heartAt>=10000){heart=null;heartIsEarly=false;}
-    if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;speed=_lvlSpeed(level);}
-    if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
-        phase='playing'; stepAt=now+speed; spawnAt=now; phaseAt=0;
-    }
-    if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
-        if(lives>0)beginLevel(true);
-        else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';showHUD(false);Snd.musicStop();}
-    }
-    if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
-        levelDoneWaiting=true;
-    }
-    if(phase==='splash'&&_splashExiting&&now-_splashExitAt>=500){
-        _splashExiting=false;
-        phase='menu'; phaseAt=now; _splashLeftAt=now;
-    }
+    // Fixed-timestep sim: run update() once per elapsed tick, capped so a slow or
+    // backgrounded frame catches up a little then drops the backlog (no spiral).
+    if(_lastRAF===0) _lastRAF=rafNow;
+    let frameMs=rafNow-_lastRAF; _lastRAF=rafNow;
+    if(frameMs>250) frameMs=250;
+    _acc+=frameMs;
+    let ran=0;
+    while(_acc>=TICK_MS && ran<MAX_CATCHUP){ _acc-=TICK_MS; update(); ran++; }
+    if(ran>=MAX_CATCHUP) _acc=0;
 
-    // Draw
+    // Draw once per frame from the simulated state.
+    const now=simNow;
     if     (phase==='splash')       {drawSplash(now);      showHUD(false);}
     else if(phase==='menu')         {drawMenu(now);        showHUD(false);}
     else if(phase==='news')         {drawNews(now);        showHUD(false);}
