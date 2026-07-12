@@ -1142,10 +1142,10 @@ function _settingsList(){ return settingsCat>=0 ? SETTINGS_CATS[settingsCat].ite
 function drawSettings() {
     drawGrid(); drawOvBg(0.92);
     const inCat=settingsCat>=0;
-    const title=inCat?SETTINGS_CATS[settingsCat].label:'SETTINGS';
+    const title=inCat?'SETTINGS/'+SETTINGS_CATS[settingsCat].label:'SETTINGS';
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',18); ctx.shadowBlur=0;
     const list=_settingsList();
-    const rows=list.map(it=>inCat?it.lbl():it.label+'   >');
+    const rows=list.map(it=>inCat?it.lbl():it.label);
     rows.push('BACK');
     const startY=62, rowH=28;
     rows.forEach((item,i)=>menuItem(item,startY+i*rowH,i===settingsSel));
