@@ -136,11 +136,14 @@ const CRED_TOTAL_H = credTotalH();
 // phases: splash|menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|nameEntry|quitConfirm|resetConfirm
 let phase = 'splash';
 let menuSel = 0, settingsSel = 0, shopSel = 0, shopPage = 0, quitConfirmSel = 1, prevPhase = 'playing';
+let settingsCat = -1;              // -1 = category list; else index into SETTINGS_CATS
+let _dataMsg = '', _dataMsgAt = 0; // transient DATA MANAGEMENT feedback line
 let _shimmerThreshold = 25000;
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
-const SETTINGS_COUNT = 11;
-let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false, cfgVer: 2 };
+// cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
+// must stay disabled -- gate all networking on !cfg.offline.
+let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false, offline: false, cfgVer: 2 };
 loadCfg();
 if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
 Snd.musicSetVolume(cfg.volume ?? 1);
@@ -1097,54 +1100,83 @@ function drawMenu(now) {
     ctx.restore();
 }
 
+// Settings are grouped into sub-menus. Each leaf carries a live label plus
+// optional act() (Enter), adj(right) (Left/Right), and a render hint (bar/preview).
+// Audio leaves keep their exact original Snd.* call sequences -- relocated, not changed.
+const SETTINGS_CATS = [
+    { label:'AUDIO', items:[
+        { lbl:()=>'AUDIO: '+(cfg.music?'ON':'OFF'),
+          act:()=>{cfg.music=!cfg.music;if(!cfg.music)Snd.musicStop();else{Snd.audioResume();Snd.sfxPlay('select',cfg.music);}updateMuteBtn();} },
+        { lbl:()=>'AUDIO STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
+          act:()=>{cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'VOLUME: '+Math.round((cfg.volume??1)*100)+'%', bar:'#7fff7f', frac:()=>cfg.volume??1,
+          adj:(r)=>{cfg.volume=Math.max(0,Math.min(1,Math.round(((cfg.volume??1)+(r?0.1:-0.1))*10)/10));Snd.musicSetVolume(cfg.volume);} },
+        { lbl:()=>'SFX VOL: '+Math.round((cfg.sfxVol??0.5)*100)+'%', bar:'#aaddff', frac:()=>cfg.sfxVol??0.5,
+          adj:(r)=>{cfg.sfxVol=Math.max(0,Math.min(1,Math.round(((cfg.sfxVol??0.5)+(r?0.1:-0.1))*10)/10));Snd.sfxSetVolume(cfg.sfxVol);} },
+    ]},
+    { label:'CONTROLS', items:[
+        { lbl:()=>'TURBO BOOST: '+(cfg.turbo!==false?'ON':'OFF'),
+          act:()=>{cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
+          act:()=>{cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.handed=r?1:0;applyHandedness();} },
+        { lbl:()=>'TOUCH AUTOSELECT: '+(cfg.touchSelect?'ON':'OFF'),
+          act:()=>{cfg.touchSelect=!cfg.touchSelect;Snd.sfxPlay('select',cfg.music);} },
+    ]},
+    { label:'GAME', items:[
+        { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
+          act:()=>{cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'SNAKE COLOR: '+SNAKE_COLORS[cfg.snakeColor||0].name, preview:'color',
+          act:()=>{cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
+    ]},
+    { label:'DATA MANAGEMENT', items:[
+        { lbl:()=>'STRICTLY OFFLINE: '+(cfg.offline?'ON':'OFF'),
+          act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'BACKUP STATS', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
+        { lbl:()=>'RESTORE STATS', act:()=>{Snd.sfxPlay('select',cfg.music);restoreStats();} },
+        { lbl:()=>'RESET STATS', act:()=>{quitConfirmSel=1;phase='resetConfirm';} },
+    ]},
+];
+function _settingsList(){ return settingsCat>=0 ? SETTINGS_CATS[settingsCat].items : SETTINGS_CATS; }
 function drawSettings() {
     drawGrid(); drawOvBg(0.92);
-    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct('SETTINGS',CW/2,24,'#7fff7f',18); ctx.shadowBlur=0;
-    const sc=SNAKE_COLORS[cfg.snakeColor||0];
-    const vol=Math.round((cfg.volume??1)*10);
-    const sfxv=Math.round((cfg.sfxVol??0.5)*10);
-    const items = [
-        'AUDIO: '+(cfg.music?'ON':'OFF'),
-        'AUDIO STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
-        'VOLUME: '+Math.round((cfg.volume??1)*100)+'%',
-        'SFX VOL: '+Math.round((cfg.sfxVol??0.5)*100)+'%',
-        'TURBO BOOST: '+(cfg.turbo!==false?'ON':'OFF'),
-        'DIFFICULTY: '+DIFF[cfg.diff].label,
-        'SNAKE COLOR: '+sc.name,
-        'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
-        'TOUCH AUTOSELECT: '+(cfg.touchSelect?'ON':'OFF'),
-        'RESET STATS',
-        'BACK',
-    ];
+    const inCat=settingsCat>=0;
+    const title=inCat?SETTINGS_CATS[settingsCat].label:'SETTINGS';
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',18); ctx.shadowBlur=0;
+    const list=_settingsList();
+    const rows=list.map(it=>inCat?it.lbl():it.label+'   >');
+    rows.push('BACK');
     const startY=62, rowH=28;
-    items.forEach((item,i)=>menuItem(item,startY+i*rowH,i===settingsSel));
-    // Volume bars when selected
-    if(settingsSel===2){
-        const py=startY+2*rowH, bx=CW/2-55, bw=110;
-        ctx.fillStyle='#1a2a1a'; ctx.fillRect(bx,py+10,bw,5);
-        ctx.fillStyle='#7fff7f'; ctx.fillRect(bx,py+10,Math.round(bw*vol/10),5);
-    }
-    if(settingsSel===3){
-        const py=startY+3*rowH, bx=CW/2-55, bw=110;
-        ctx.fillStyle='#1a2a1a'; ctx.fillRect(bx,py+10,bw,5);
-        ctx.fillStyle='#aaddff'; ctx.fillRect(bx,py+10,Math.round(bw*sfxv/10),5);
-    }
-    // Snake color mini-preview when selected
-    if(settingsSel===6){
-        const py=startY+6*rowH;
-        ctx.save();
-        ctx.font='14px "Press Start 2P"';
-        const tw=ctx.measureText('> SNAKE COLOR: '+sc.name+' <').width;
-        const px=Math.round(CW/2+tw/2+12);
-        for(let k=0;k<5;k++){
-            const frac=1-k/5, l=Math.round(10+frac*40);
-            ctx.fillStyle=k===0?sc.head:`hsl(${sc.h},65%,${l}%)`;
-            ctx.shadowColor=k===0?sc.head:'transparent'; ctx.shadowBlur=k===0?6:0;
-            ctx.fillRect(px+k*7,py-5,6,10);
+    rows.forEach((item,i)=>menuItem(item,startY+i*rowH,i===settingsSel));
+    if(inCat){
+        const it=list[settingsSel];
+        // Volume bar under the selected slider row
+        if(it&&it.bar){
+            const py=startY+settingsSel*rowH, bx=CW/2-55, bw=110;
+            ctx.fillStyle='#1a2a1a'; ctx.fillRect(bx,py+10,bw,5);
+            ctx.fillStyle=it.bar; ctx.fillRect(bx,py+10,Math.round(bw*it.frac()),5);
         }
-        ctx.restore();
+        // Snake-color mini-preview beside the selected row
+        if(it&&it.preview==='color'){
+            const sc=SNAKE_COLORS[cfg.snakeColor||0], py=startY+settingsSel*rowH;
+            ctx.save(); ctx.font='14px "Press Start 2P"';
+            const tw=ctx.measureText('> '+it.lbl()+' <').width;
+            const px=Math.round(CW/2+tw/2+12);
+            for(let k=0;k<5;k++){
+                const frac=1-k/5, l=Math.round(10+frac*40);
+                ctx.fillStyle=k===0?sc.head:`hsl(${sc.h},65%,${l}%)`;
+                ctx.shadowColor=k===0?sc.head:'transparent'; ctx.shadowBlur=k===0?6:0;
+                ctx.fillRect(px+k*7,py-5,6,10);
+            }
+            ctx.restore();
+        }
+        // Transient backup/restore feedback in DATA MANAGEMENT
+        if(SETTINGS_CATS[settingsCat].label==='DATA MANAGEMENT'&&_dataMsg&&simNow-_dataMsgAt<2500)
+            ct(_dataMsg,CW/2,CH-32,'#7fff7f',10);
     }
-    ct('UP/DN:nav  L/R:change  A:toggle  ESC:back',CW/2,CH-10,'#888',10);
+    const hint=inCat?'UP/DN:nav  L/R:change  A:select  ESC:back':'UP/DN:nav  A:open  ESC:back';
+    ct(hint,CW/2,CH-10,'#888',10);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -1685,6 +1717,52 @@ function resetStats() {
     cfg.shopItems = {}; cfg.wornItems = null; saveCfg();
 }
 
+// Backup/restore all game data (scores, coins, achievements, shop items, settings)
+// as a downloadable JSON file. A backup is a full clone -- restore overwrites.
+function _saveSnapshot() {
+    return { v:1,
+        hs:    localStorage.getItem(HS_KEY),
+        coins: localStorage.getItem(FK_KEY),
+        ach:   localStorage.getItem(ACH_KEY),
+        cfg:   localStorage.getItem(CFG_KEY),
+        name:  localStorage.getItem('lastSName') };
+}
+function backupStats() {
+    try {
+        const blob=new Blob([JSON.stringify(_saveSnapshot())],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url; a.download='snake-fok-backup.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        _dataMsg='BACKUP SAVED'; _dataMsgAt=simNow;
+    } catch { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
+}
+const _restoreInp=document.createElement('input');
+_restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.style.display='none';
+document.body.appendChild(_restoreInp);
+_restoreInp.addEventListener('change',()=>{
+    const f=_restoreInp.files&&_restoreInp.files[0]; _restoreInp.value='';
+    if(!f) return;
+    const rd=new FileReader();
+    rd.onload=()=>{
+        try {
+            const d=JSON.parse(rd.result);
+            if(!d||typeof d!=='object') throw 0;
+            const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
+            set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name');
+            _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
+            if(cfg.wornItems===null){ cfg.wornItems={...(cfg.shopItems||{})}; }
+            applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
+            Snd.musicSetVolume(cfg.volume??1); Snd.sfxSetVolume(cfg.sfxVol??0.5);
+            _dataMsg='STATS RESTORED'; _dataMsgAt=simNow;
+        } catch { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
+    };
+    rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=simNow; };
+    rd.readAsText(f);
+});
+function restoreStats(){ try{ _restoreInp.click(); }catch{} }
+
 const fpsEl = document.getElementById('fps-el');
 
 // ================================================================
@@ -1828,7 +1906,10 @@ function handleKey(key, pde) {
             escReadyAt=performance.now()+1000; if(pde)pde(); return;
         }
         if(phase==='resetConfirm'){ phase='settings'; if(pde)pde(); return; }
-        if(phase==='settings'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
+        if(phase==='settings'){
+            if(settingsCat>=0){ settingsCat=-1; settingsSel=0; } else phase='menu';
+            Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return;
+        }
         if(phase==='scores'||phase==='credits'||phase==='shop'||phase==='news'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
         if(phase==='achievements'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
     }
@@ -1840,7 +1921,7 @@ function handleKey(key, pde) {
         if(key==='Enter'){
             Snd.sfxPlay('select',cfg.music);
             if(menuSel===0)startGame();
-            else if(menuSel===1){phase='settings';settingsSel=0;}
+            else if(menuSel===1){phase='settings';settingsCat=-1;settingsSel=0;}
             else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){phase='shop';shopSel=0;shopPage=0;purchaseAnimAt=0;}
@@ -1850,34 +1931,25 @@ function handleKey(key, pde) {
         }
     }
     else if(phase==='settings'){
-        if(key==='ArrowUp')  {settingsSel=(settingsSel-1+SETTINGS_COUNT)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
-        if(key==='ArrowDown'){settingsSel=(settingsSel+1)%SETTINGS_COUNT;Snd.sfxPlay('nav',cfg.music);}
+        const inCat=settingsCat>=0, list=_settingsList(), count=list.length+1;   // +1 for BACK
+        const onBack=settingsSel===list.length;
+        if(key==='ArrowUp')  {settingsSel=(settingsSel-1+count)%count;Snd.sfxPlay('nav',cfg.music);}
+        if(key==='ArrowDown'){settingsSel=(settingsSel+1)%count;Snd.sfxPlay('nav',cfg.music);}
         if(key==='Enter'){
-            if(settingsSel===0){cfg.music=!cfg.music;if(!cfg.music)Snd.musicStop();else{Snd.audioResume();Snd.sfxPlay('select',cfg.music);}updateMuteBtn();}
-            else if(settingsSel===1){cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);}
-            else if(settingsSel===4){cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);}
-            else if(settingsSel===5){cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);}
-            else if(settingsSel===6){cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);}
-            else if(settingsSel===7){cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfxPlay('select',cfg.music);}
-            else if(settingsSel===8){cfg.touchSelect=!cfg.touchSelect;Snd.sfxPlay('select',cfg.music);}
-            else if(settingsSel===9){quitConfirmSel=1;phase='resetConfirm';return;}
-            else{Snd.sfxPlay('nav',cfg.music);phase='menu';}
-            saveCfg();
-        }
-        if(key==='ArrowLeft'||key==='ArrowRight'){
-            const r=key==='ArrowRight';
-            if(settingsSel===2){
-                cfg.volume=Math.max(0,Math.min(1,Math.round(((cfg.volume??1)+(r?0.1:-0.1))*10)/10));
-                Snd.musicSetVolume(cfg.volume); saveCfg(); Snd.sfxPlay('nav',cfg.music);
-            } else if(settingsSel===3){
-                cfg.sfxVol=Math.max(0,Math.min(1,Math.round(((cfg.sfxVol??0.5)+(r?0.1:-0.1))*10)/10));
-                Snd.sfxSetVolume(cfg.sfxVol); saveCfg(); Snd.sfxPlay('nav',cfg.music);
-            } else if(settingsSel===6){
-                cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;
-                saveCfg(); Snd.sfxPlay('nav',cfg.music);
-            } else if(settingsSel===7){
-                cfg.handed=r?1:0; applyHandedness(); saveCfg(); Snd.sfxPlay('nav',cfg.music);
+            if(onBack){
+                Snd.sfxPlay('nav',cfg.music);
+                if(inCat){settingsCat=-1;settingsSel=0;} else phase='menu';
+            } else if(!inCat){
+                Snd.sfxPlay('select',cfg.music); settingsCat=settingsSel; settingsSel=0;
+            } else {
+                const it=list[settingsSel];
+                if(it.act) it.act();
+                saveCfg();
             }
+        }
+        if((key==='ArrowLeft'||key==='ArrowRight') && inCat && !onBack){
+            const it=list[settingsSel];
+            if(it.adj){ it.adj(key==='ArrowRight'); Snd.sfxPlay('nav',cfg.music); saveCfg(); }
         }
         if(pde)pde();
     }

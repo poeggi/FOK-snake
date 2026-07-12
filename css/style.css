@@ -25,12 +25,13 @@ body {
     display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
     order: 2;
 }
-#fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; border-radius: 3px; padding: 3px; display: inline-flex; align-items: center; }
+#fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; border-radius: 3px; padding: 3px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 56px; height: 24px; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
     cursor: pointer; border-radius: 3px; padding: 3px;
     display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent; line-height: 0;
+    box-sizing: border-box; width: 56px; height: 24px;
 }
 #btn-mute canvas { image-rendering: pixelated; display: block; }
 #btn-mute:hover { border-color: #7fff7f; }
