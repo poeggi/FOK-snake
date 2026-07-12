@@ -83,3 +83,14 @@ server design brief.
 ## Setup (GitHub Pages)
 
 In repo Settings -> Pages -> Source: Deploy from branch -> main -> / (root)
+
+## Development
+
+`sw.js` (service-worker cache version + asset list) is auto-managed by a
+pre-commit hook. Enable it once after cloning:
+
+    git config core.hooksPath .githooks
+
+The hook derives MAJOR.MINOR from the latest git tag and bumps the PATCH on every
+commit, so installed PWA clients always pick up fresh assets. Do not edit the
+version/CACHE/ASSETS lines in sw.js by hand.

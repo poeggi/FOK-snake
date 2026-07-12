@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Auto-update sw.js on every commit: bump patch version, refresh asset list.
+# MAJOR.MINOR is derived from the latest git tag (e.g. v1 -> 1.0, v1.1 -> 1.1).
+# PATCH auto-increments each commit; resets to 0 when the tag's MAJOR.MINOR changes.
+# Version is duplicated in comment + CACHE for bogus-update detection.
+SW="sw.js"
+[ -f "$SW" ] || exit 0
+
+# Derive MAJOR.MINOR from latest git tag
+TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0")
+TAG_CLEAN=${TAG#v}
+DOT_COUNT=$(echo "$TAG_CLEAN" | tr -cd '.' | wc -c)
+if [ "$DOT_COUNT" -eq 0 ]; then
+    MAJ_MIN="${TAG_CLEAN}.0"
+elif [ "$DOT_COUNT" -eq 1 ]; then
+    MAJ_MIN="$TAG_CLEAN"
+else
+    MAJ_MIN=$(echo "$TAG_CLEAN" | cut -d. -f1,2)
+fi
+
+# Bump PATCH, reset to 0 if MAJOR.MINOR changed from what is in sw.js
+CURRENT_VER=$(grep -oE "snake-v[0-9]+\.[0-9]+\.[0-9]+" "$SW" | head -1)
+if [ -z "$CURRENT_VER" ]; then
+    NEW_VER="snake-v${MAJ_MIN}.0"
+else
+    CURRENT_MAJ_MIN=$(echo "${CURRENT_VER#snake-v}" | cut -d. -f1,2)
+    CURRENT_PATCH=$(echo "${CURRENT_VER#snake-v}" | cut -d. -f3)
+    if [ "$CURRENT_MAJ_MIN" = "$MAJ_MIN" ]; then
+        NEW_VER="snake-v${MAJ_MIN}.$((CURRENT_PATCH + 1))"
+    else
+        NEW_VER="snake-v${MAJ_MIN}.0"
+    fi
+fi
+
+TS=$(date "+%Y-%m-%d %H:%M %z")
+
+# Build ASSETS from all tracked/staged files, excluding sw.js itself
+ASSETS="'./'$(git ls-files | grep -E '\.(js|css|json|svg|woff2|woff|ttf)$' | grep -v '^sw\.js$' | sort | while IFS= read -r f; do printf ", './%s'" "$f"; done)"
+
+# Enforce auto-managed header on line 1
+sed -i "1s|.*|// AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually|" "$SW"
+
+# Update version comment (duplicated in comment + CACHE for bogus-update detection)
+sed -i "s|^// version snake-.*|// version ${NEW_VER}, released ${TS}|" "$SW"
+
+# Update CACHE key
+sed -i "s|const CACHE = 'snake-[^']*';|const CACHE = '${NEW_VER}';|" "$SW"
+
+# Update ASSETS line
+awk -v assets="const ASSETS = [${ASSETS}];" \
+    '/^const ASSETS = \[/{print assets; next} {print}' "$SW" > "${SW}.tmp" && mv "${SW}.tmp" "$SW"
+
+git add "$SW"
+printf "[pre-commit] SW cache -> %s\n" "$NEW_VER"
