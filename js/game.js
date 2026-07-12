@@ -572,22 +572,33 @@ function menuItem(text,y,sel) {
 }
 
 // High-contrast barricades (>4.5:1 on dark bg) - bright amber brick
+// Neighbour lookup so touching barricades of the same kind render as one
+// continuous wall: shared edges drop the 1px inset and the bevel, so the fills
+// meet seamlessly. _prepBars must run before a drawBar pass. allFragile mirrors
+// the caller's asFragile override (power mode paints every bar as fragile).
+let _barLookup=new Map(), _barAllFragile=false;
+function _prepBars(allFragile){ _barAllFragile=allFragile; _barLookup=new Map(); for(const b of bars) _barLookup.set(ck(b),b); }
+function _barConn(nx,ny,eff){
+    if(nx<0||nx>=COLS||ny<0||ny>=ROWS) return false;   // no wrap -- edges aren't visually adjacent
+    const n=_barLookup.get(nx+','+ny);
+    if(!n) return false;
+    return (_barAllFragile?true:n.fragile)===eff;
+}
 function drawBar(b, c=ctx, asFragile=b.fragile) {
-    if(b.paired && !b.pairEnd) return; // second cell of a pair -- drawn by its partner
-    const isPair=!!b.pairEnd;
-    const x=isPair?Math.min(b.x,b.pairEnd.x)*CS+1:b.x*CS+1;
-    const y=isPair?Math.min(b.y,b.pairEnd.y)*CS+1:b.y*CS+1;
-    const bw=(isPair?Math.abs(b.pairEnd.x-b.x)+1:1)*CS-2;
-    const bh=(isPair?Math.abs(b.pairEnd.y-b.y)+1:1)*CS-2;
-    if(asFragile){
+    const eff=asFragile;
+    const cL=_barConn(b.x-1,b.y,eff), cR=_barConn(b.x+1,b.y,eff);
+    const cU=_barConn(b.x,b.y-1,eff), cD=_barConn(b.x,b.y+1,eff);
+    const x=b.x*CS+(cL?0:1), y=b.y*CS+(cU?0:1);
+    const bw=CS-(cL?0:1)-(cR?0:1), bh=CS-(cU?0:1)-(cD?0:1);
+    if(eff){
         // Crumbling border block: grey-brown, visibly damaged
         c.fillStyle='#7a6050'; c.fillRect(x,y,bw,bh);
         c.fillStyle='#4a3a2a';
         c.fillRect(x,y+Math.floor(bh/2),bw,1);
-        c.fillRect(x+Math.floor(bw/2),y,1,isPair?bh:Math.floor(bh/2));
-        // Faded bevel
-        c.fillStyle='#aa9080'; c.fillRect(x,y,bw,2); c.fillRect(x,y,2,bh);
-        c.fillStyle='#332820'; c.fillRect(x+bw-2,y,2,bh); c.fillRect(x,y+bh-2,bw,2);
+        c.fillRect(x+Math.floor(bw/2),y,1,Math.floor(bh/2));
+        // Faded bevel -- only on outer (unconnected) edges
+        c.fillStyle='#aa9080'; if(!cU)c.fillRect(x,y,bw,2); if(!cL)c.fillRect(x,y,2,bh);
+        c.fillStyle='#332820'; if(!cR)c.fillRect(x+bw-2,y,2,bh); if(!cD)c.fillRect(x,y+bh-2,bw,2);
         // Diagonal cracks
         c.strokeStyle='#2a1a0a'; c.lineWidth=1;
         c.beginPath(); c.moveTo(x+3,y+2); c.lineTo(x+bw-4,y+bh-3); c.stroke();
@@ -595,16 +606,16 @@ function drawBar(b, c=ctx, asFragile=b.fragile) {
         return;
     }
     c.fillStyle='#cc4400'; c.fillRect(x,y,bw,bh);
-    // mortar lines: cross for 2-cell (marks the join), T-shape for single
+    // mortar lines: T-shape per cell -- tiles into brickwork across a connected wall
     c.fillStyle='#5a1a00';
     c.fillRect(x,y+Math.floor(bh/2),bw,1);
-    c.fillRect(x+Math.floor(bw/2),y,1,isPair?bh:Math.floor(bh/2));
-    // 3D bevel
-    c.fillStyle='#ff7700'; c.fillRect(x,y,bw,2); c.fillRect(x,y,2,bh);
-    c.fillStyle='#661800'; c.fillRect(x+bw-2,y,2,bh); c.fillRect(x,y+bh-2,bw,2);
+    c.fillRect(x+Math.floor(bw/2),y,1,Math.floor(bh/2));
+    // 3D bevel -- only on outer (unconnected) edges
+    c.fillStyle='#ff7700'; if(!cU)c.fillRect(x,y,bw,2); if(!cL)c.fillRect(x,y,2,bh);
+    c.fillStyle='#661800'; if(!cR)c.fillRect(x+bw-2,y,2,bh); if(!cD)c.fillRect(x,y+bh-2,bw,2);
 }
 function renderBarsOffscreen() {
-    _barsCtx.clearRect(0,0,CW,CH); bars.forEach(b=>drawBar(b,_barsCtx));
+    _barsCtx.clearRect(0,0,CW,CH); _prepBars(false); bars.forEach(b=>drawBar(b,_barsCtx));
 }
 
 function drawGem(g,now) {
@@ -1378,7 +1389,7 @@ function drawCredits() {
 
 function drawNameEntry(now) {
     drawGrid();
-    if(bars)  bars.forEach(b=>drawBar(b));
+    if(bars)  { _prepBars(false); bars.forEach(b=>drawBar(b)); }
     if(_gourangaActive) _drawGourangaPending(now);
     if(gem)   drawGem(gem,now);
     if(snake) drawSnake(false);
@@ -1514,7 +1525,7 @@ function drawGameBoard(now) {
     if(_powerMode){
         const nearEnd=now-_powerModeAt>_POWER_DUR-1500;
         const blink=nearEnd&&Math.floor(now/180)%2===0;
-        bars.forEach(b=>drawBar(b,ctx,blink?b.fragile:true));
+        _prepBars(!blink); bars.forEach(b=>drawBar(b,ctx,blink?b.fragile:true));
         ctx.save(); ctx.globalAlpha=0.06+0.04*Math.sin(now/200);
         ctx.fillStyle='#2244ff'; ctx.fillRect(0,0,CW,CH); ctx.restore();
     } else {
