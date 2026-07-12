@@ -36,7 +36,8 @@ function getScores() {
     try {
         const raw = localStorage.getItem(HS_KEY);
         if(raw === null) return [{name:'SNAKE PLISSKEN',score:42,level:1,diff:1,color:0,shopItems:{},date:'26.11.97'}];
-        return JSON.parse(raw) || [];
+        const a = JSON.parse(raw);
+        return Array.isArray(a) ? a : [];
     } catch { return []; }
 }
 function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10) || 0; }
@@ -60,7 +61,43 @@ function addScore(name, sc, lvl) {
     addFOKoins(sc);
 }
 function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} }
-function loadCfg() { try { const s=JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); if(!s.cfgVer||s.cfgVer<2){delete s.touchSelect;} Object.assign(cfg,s); } catch {} }
+// Fresh default config each call (new objects, so nothing is shared/aliased).
+// cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
+// must stay disabled -- gate all networking on !cfg.offline.
+function defaultCfg() {
+    return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, cfgVer:2 };
+}
+// Clamp/coerce every field so a corrupt, partial, or foreign save can never put
+// the game in a bad state (e.g. an out-of-range diff or colour index).
+function _sanitizeCfg() {
+    const idx = (v,n,d) => (Number.isInteger(v) && v>=0 && v<n) ? v : d;
+    const unit = (v,d) => (typeof v==='number' && isFinite(v)) ? Math.max(0,Math.min(1,v)) : d;
+    cfg.diff        = idx(cfg.diff, DIFF.length, 1);
+    cfg.snakeColor  = idx(cfg.snakeColor, SNAKE_COLORS.length, 0);
+    cfg.musicStyle  = idx(cfg.musicStyle, 2, 0);
+    cfg.handed      = idx(cfg.handed, 2, 0);
+    cfg.volume      = unit(cfg.volume, 1);
+    cfg.sfxVol      = unit(cfg.sfxVol, 0.5);
+    cfg.music       = cfg.music !== false;
+    cfg.turbo       = cfg.turbo !== false;
+    cfg.touchSelect = !!cfg.touchSelect;
+    cfg.offline     = !!cfg.offline;
+    if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
+    if(cfg.wornItems!==null && (typeof cfg.wornItems!=='object' || Array.isArray(cfg.wornItems))) cfg.wornItems = null;
+}
+// Error-tolerant load: parse failures fall back to defaults; keys absent from an
+// older or partial save (including a restored old backup) keep their defaults;
+// every value is sanitized. Reset-to-defaults-then-overlay so restoring an old
+// backup clears settings that backup never carried.
+function loadCfg() {
+    let s = {};
+    try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch {}
+    if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
+    if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
+    Object.assign(cfg, defaultCfg(), s);
+    _sanitizeCfg();
+}
 
 const ACH_KEY = 'fok-snake-ach';
 let achUnlocked = {};
@@ -141,9 +178,7 @@ let _dataMsg = '', _dataMsgAt = 0; // transient DATA MANAGEMENT feedback line
 let _shimmerThreshold = 25000;
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
-// cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
-// must stay disabled -- gate all networking on !cfg.offline.
-let cfg = { music: true, diff: 1, musicStyle: 0, snakeColor: 0, shopItems: {}, wornItems: null, handed: 0, volume: 1, sfxVol: 0.5, turbo: true, touchSelect: false, offline: false, cfgVer: 2 };
+let cfg = defaultCfg();
 loadCfg();
 if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
 Snd.musicSetVolume(cfg.volume ?? 1);

@@ -114,6 +114,19 @@ const driver = `
     settingsCat=-1; settingsSel=SETTINGS_CATS.length; press('Enter');
     if(phase!=='menu') throw 'BACK from category list should return to menu';
 
+    // Config load tolerance: an old/partial save (missing new keys, out-of-range
+    // values) and outright garbage must not throw and must fall back to defaults.
+    localStorage.setItem(CFG_KEY, JSON.stringify({ music:false, diff:99, snakeColor:-1 }));
+    loadCfg();
+    if(cfg.diff!==1) throw 'out-of-range diff not clamped to default';
+    if(cfg.snakeColor!==0) throw 'out-of-range color not clamped to default';
+    if(cfg.offline!==false) throw 'missing offline key should default to false';
+    if(cfg.music!==false) throw 'valid saved value (music) was not applied';
+    localStorage.setItem(CFG_KEY, 'this is not json {{{');
+    loadCfg();
+    if(cfg.diff!==1 || cfg.music!==true) throw 'garbage save did not fall back to defaults';
+    log('config load tolerance ok');
+
     // Gameplay smoke: reset the sim clock (the settings phase advanced it past the
     // input guard), start a game, run the fixed-timestep sim through levelReady into
     // playing so step() actually executes, then render the board.
