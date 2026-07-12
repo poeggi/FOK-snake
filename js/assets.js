@@ -41,20 +41,23 @@ const ANNOUNCEMENT = { id:'v1.2.0', headline:'WE ARE BEEFING THINGS UP!', lines:
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_-!?.,\'"#$@&()[]:+ \r';
 
-// easy/normal/hard = sim-ticks per snake move at 60 Hz (lower = faster).
-// bars = barricade count. Fastest (hard L10 = 4 ticks) is 15 moves/s; boost floors
-// the interval at 2 ticks = 30 moves/s, the sim's absolute ceiling.
+// Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
+// boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2
+// game ticks (period 2G); boost advances every game tick (period G, exactly 2x).
+// Boost is a parity toggle, never a re-divisor, so the game tick is fixed per
+// level -- the invariant the network cadence (max(4,G) engine ticks) syncs to.
+// bars = barricade count.
 const LEVEL_CFG = [
-    { easy:15, normal:12, hard:10, bars:0  },
-    { easy:14, normal:12, hard:10, bars:2  },
-    { easy:13, normal:11, hard:9,  bars:4  },
-    { easy:12, normal:10, hard:8,  bars:6  },
-    { easy:11, normal:9,  hard:8,  bars:8  },
-    { easy:10, normal:8,  hard:7,  bars:10 },
-    { easy:9,  normal:7,  hard:6,  bars:12 },
-    { easy:8,  normal:6,  hard:5,  bars:14 },
-    { easy:7,  normal:5,  hard:4,  bars:16 },
-    { easy:6,  normal:5,  hard:4,  bars:18 },
+    { easy:7, normal:6, hard:5, bars:0  },
+    { easy:7, normal:6, hard:5, bars:2  },
+    { easy:7, normal:6, hard:4, bars:4  },
+    { easy:6, normal:5, hard:4, bars:6  },
+    { easy:6, normal:5, hard:3, bars:8  },
+    { easy:6, normal:5, hard:3, bars:10 },
+    { easy:5, normal:4, hard:3, bars:12 },
+    { easy:5, normal:4, hard:2, bars:14 },
+    { easy:4, normal:3, hard:2, bars:16 },
+    { easy:4, normal:3, hard:2, bars:18 },
 ];
 
 const DIFF = [

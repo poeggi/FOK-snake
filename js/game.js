@@ -152,7 +152,11 @@ let gem, gemsDone, bars;
 // Sim clock: simTick is the integer source of truth; simNow is its ms projection
 // (simTick * TICK_MS). All game state reads simNow/simTick, never performance.now().
 let simTick = 0, simNow = 0, _acc = 0, _lastRAF = 0;
-let speed, _moveDue = 0, phaseAt = 0, gemAt, deathMsg, pauseAt;   // speed = ticks per move
+// gPer = engine ticks per game tick (the level's fixed boost period). _gDue counts
+// down to the next game tick; _stepAccum accrues movement (normal +1, boost +2 per
+// game tick) and spends 2 per snake step -> normal moves every 2nd game tick, boost
+// every game tick, without ever changing gPer.
+let gPer, _gDue = 0, _stepAccum = 0, phaseAt = 0, gemAt, deathMsg, pauseAt;
 let spawnAt = 0, levelDoneWaiting = false;
 let pauseReadyAt = 0, escReadyAt = 0;
 let perfectLevel = true, levelWasPerfect = false, fireworks = [];
@@ -165,7 +169,7 @@ const EARLY_HEART_TTL=T(600);   // 10s early-heart lifespan
 const SPAWN_PROTECT=T(60);      // 1s post-spawn collision immunity
 let timeCrystal=null, timeCrystalAt=0, _slowMode=false, _slowModeAt=0;
 const _SLOW_DUR=T(1800);   // 30s time-warp slow
-function _lvlSpeed(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
+function _lvlGper(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
 let boostDir=null, boostSince=0, boosting=false;   // boostSince is a simTick stamp
 const BOOST_GRACE_TICKS=10;
 function clearBoost(){boostDir=null;boosting=false;}
@@ -205,13 +209,13 @@ function _barFragile(x,y) {
 }
 function beginLevel(isRespawn=false) {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
-    speed = lcfg[['easy','normal','hard'][cfg.diff]];
+    gPer = lcfg[['easy','normal','hard'][cfg.diff]];
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
     const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
     _levelStartLen = sl;
     snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
     dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
-    phase='levelReady'; _moveDue=0; phaseAt=simNow;
+    phase='levelReady'; _gDue=0; _stepAccum=0; phaseAt=simNow;
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; fireworks=[]; levelBonusCount=0; epicLevelCount=0;
     _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set();
@@ -340,7 +344,7 @@ function step(now) {
         score+=level*200; showBonus(now,'POWER UP!');
     }
     if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;showBonus(now,'+1 UP!');}
-    if(timeCrystal&&ck(timeCrystal)===hk){timeCrystal=null;_slowMode=true;_slowModeAt=now;speed=_lvlSpeed(3);showBonus(now,'TIME WARP!');}
+    if(timeCrystal&&ck(timeCrystal)===hk){timeCrystal=null;_slowMode=true;_slowModeAt=now;gPer=_lvlGper(3);showBonus(now,'TIME WARP!');}
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
     const anyAte=ate||ateGourangaIdx>=0;
@@ -455,7 +459,7 @@ function togglePause() {
         if(performance.now() < pauseReadyAt) return;
         phase='paused'; pauseAt=simNow; Snd.musicGamePause();
     } else if(phase==='paused'){
-        gemAt+=simNow-pauseAt; phase='playing'; _moveDue=speed;
+        gemAt+=simNow-pauseAt; phase='playing'; _gDue=gPer; _stepAccum=0;
         pauseReadyAt=performance.now()+1000;
         Snd.musicGameUnpause();
     }
@@ -2150,13 +2154,18 @@ function update() {
         if(boostDir&&boostDir.x===dir.x&&boostDir.y===dir.y&&dirQueue.length===0){
             if(!boosting&&simTick-boostSince>=BOOST_GRACE_TICKS&&cfg.turbo!==false)boosting=true;
         }else boosting=false;
-        // speed = ticks per move; boost halves the interval, floored at 2 ticks (30 Hz).
-        if(--_moveDue<=0){ _moveDue=boosting?Math.max(2,Math.round(speed/2)):speed; step(now); }
+        // Fixed per-level game tick (gPer). Normal steps every 2nd game tick, boost
+        // every game tick -- boost changes the accrual, never gPer.
+        if(--_gDue<=0){
+            _gDue=gPer;
+            _stepAccum += boosting?2:1;
+            if(_stepAccum>=2){ _stepAccum-=2; step(now); }
+        }
     }
     if(heart&&heartIsEarly&&now-heartAt>=EARLY_HEART_TTL){heart=null;heartIsEarly=false;}
-    if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;speed=_lvlSpeed(level);}
+    if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;gPer=_lvlGper(level);}
     if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
-        phase='playing'; _moveDue=speed; spawnAt=now; phaseAt=0;
+        phase='playing'; _gDue=gPer; _stepAccum=0; spawnAt=now; phaseAt=0;
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(lives>0)beginLevel(true);
