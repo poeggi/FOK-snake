@@ -886,7 +886,7 @@ function drawSplash(now) {
     ctx.fillStyle = '#111'; ctx.fillRect(coinX - 16, slotY - 2, 32, 4);
 
     // Pixelated sparks burst from slot when coin enters
-    // speed >= 90 renders bright white; slower sparks render gold
+    // spark speed (spd) >= 90 renders bright white; slower sparks render gold
     if (slotFlashF > 0) {
         const sparkDefs = [
             [-0.55,-1,72,1],    [0,-1,80,1],       [0.55,-1,72,1],
@@ -1947,13 +1947,16 @@ function handleKey(key, pde) {
 canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 
 // Swipe/gesture control on game canvas.
-// Thresholds: first move = 30px; same dir or 90-deg turn = 40px; opposite dir = 30px.
+// Thresholds (px of finger travel): first move or reverse = SWIPE_1 (16), or SWIPE_N
+// (24) while boosting; 90-deg turn = SWIPE_N (24); continue same direction = SWIPE_SAME
+// (50), which suppresses accidental boosts.
 // Dead zone: 40-50 degrees from horizontal -- diagonal motion commits nothing until
 // the finger clearly enters a direction corridor (0-40 deg = horizontal, 50-90 = vertical).
 // In the dead zone the baseline is NOT reset, so displacement keeps accumulating until
 // the angle exits into a real corridor.
-// Pause cooldown: if finger stops moving for 200ms the higher threshold resets to 30px,
-// so deliberate re-moves after a pause feel as responsive as the first direction.
+// Move cooldown: if the finger pauses longer than SWIPE_COOLDOWN (40ms) the last
+// direction is cleared, so the next move uses the first-move threshold and re-moves
+// after a pause feel as responsive as the first direction.
 // Splash: any pointer or touch on canvas exits splash and unlocks audio
 // Mouse/stylus only: touch devices use the touchstart handler below so that
 // triggerSplashExit() calls Snd.audioResume() inside a touchstart, not a pointerdown
@@ -1997,7 +2000,7 @@ canvas.addEventListener('touchmove',e=>{
     const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
     if(ang>=dzLo&&ang<=dzHi) return;
     const key=ang<dzLo?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
-    // opposite or first: 20px (30px while boosting); 90-deg turn: 30px; same dir: 50px (boost prevention)
+    // first or reverse: SWIPE_1 (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention)
     const thresh=(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(boosting?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
     if(dist<thresh) return;
     _swipedThisTouch=true; handleKey(key,null);

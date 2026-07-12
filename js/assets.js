@@ -20,10 +20,10 @@ const SPEAKER_X     = [[0,0,0,0,0,0,0,0],[0,1,0,0,0,1,0,0],[0,0,1,0,1,0,0,0],[0,
 // Pixel art standard: CS=2 (1 artwork pixel = 2x2 screen pixels)
 // Icons (achievements, shop, speaker): 8x8 artwork -> 16x16px on screen
 // Coin: 16x16 artwork -> 32x32px on screen
-// Coin symbol pixel grids — [col, row] pairs, drawn at cs=2, centered in coin face
+// Coin symbol pixel grids -- [col, row] pairs, drawn at cs=2, centered in coin face
 // "1": 4x6 simple (angled top, no base)  (screen: 8x12px)
 const SYM_ONE = { w:4, h:6, px:[[2,0],[1,1],[2,1],[2,2],[2,3],[2,4],[2,5]] };
-// "¥": 5x7 yen  (screen: 10x14px)
+// yen sign: 5x7  (screen: 10x14px)
 const SYM_YEN = { w:5, h:7, px:[[0,0],[4,0],[1,1],[3,1],[2,2],[0,3],[1,3],[2,3],[3,3],[4,3],[2,4],[0,5],[1,5],[2,5],[3,5],[4,5],[2,6]] };
 const DEATH_DUR = T(54), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18);
 // Main-menu announcement. Set to null when there is nothing to announce.
