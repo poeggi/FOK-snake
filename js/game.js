@@ -274,6 +274,32 @@ function _tryGouranga(blocked) {
         if(ok){_gourangaLine=line;_gourangaActive=true;return;}
     }
 }
+// Fewest walkable moves from head to goal on the wrap-around board. Blocked = the
+// snake's own body (minus the tail tip, which vacates as it moves, and thus matches
+// the in-game collision rule) plus solid barricades; fragile barricades are passable
+// since the snake can smash through them. Returns Infinity if the goal is walled off.
+function _pathDist(start, goal) {
+    const gk = ck(goal);
+    if (ck(start) === gk) return 0;
+    const blocked = new Set([...snake.slice(1, -1), ...bars.filter(b => !b.fragile)].map(ck));
+    const STEP = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+    let frontier = [start], seen = new Set([ck(start)]), dist = 0;
+    while (frontier.length) {
+        dist++;
+        const next = [];
+        for (const c of frontier) {
+            for (const d of STEP) {
+                const nx = (c.x + d.x + COLS) % COLS, ny = (c.y + d.y + ROWS) % ROWS;
+                const nk = nx + ',' + ny;
+                if (nk === gk) return dist;
+                if (seen.has(nk) || blocked.has(nk)) continue;
+                seen.add(nk); next.push({x:nx, y:ny});
+            }
+        }
+        frontier = next;
+    }
+    return Infinity;
+}
 function spawnGem() {
     if(!_gourangaActive && level>=2 && (gemsDone===1||gemsDone===2)){
         _tryGouranga(new Set([...snake,...bars].map(ck)));
@@ -285,11 +311,21 @@ function spawnGem() {
     if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
     else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
     gemAt=gem.spawnAt=simNow;
-    let dgx=gem.x-snake[0].x, dgy=gem.y-snake[0].y;
-    if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
-    if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
-    const turnPenalty=(dgx*dir.x+dgy*dir.y<0&&Math.abs(dgx*dir.y-dgy*dir.x)===0)?2:0;
-    gemOptimal=Math.abs(dgx)+Math.abs(dgy)+turnPenalty+2; gemSteps=0;
+    // Fewest actual moves to the gem, routing around the snake's own body and solid
+    // barricades. Manhattan distance ignored those, making the "fewest steps" x2 bonus
+    // unfairly hard whenever the body blocked the direct line. +2 preserves the original
+    // slack; if the gem is walled off, fall back to the wrapped Manhattan estimate.
+    const pd=_pathDist(snake[0], gem);
+    if(pd===Infinity){
+        let dgx=gem.x-snake[0].x, dgy=gem.y-snake[0].y;
+        if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
+        if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
+        const turnPenalty=(dgx*dir.x+dgy*dir.y<0&&Math.abs(dgx*dir.y-dgy*dir.x)===0)?2:0;
+        gemOptimal=Math.abs(dgx)+Math.abs(dgy)+turnPenalty+2;
+    } else {
+        gemOptimal=pd+2;
+    }
+    gemSteps=0;
     if(!powerPellet&&!_powerMode&&Math.random()<0.002){
         const ppB=new Set([...snake,...bars].map(ck)); ppB.add(ck(gem));
         if(heart) ppB.add(ck(heart));
@@ -333,7 +369,7 @@ function step(now) {
                         col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
                     }))});
                 bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk));
-                addFOKoins(1000); showBonus(now,'+1000 FK!');
+                const barReward=level*100; addFOKoins(barReward); showBonus(now,'+'+barReward+' FK!');
                 Snd.sfxPlay('crash',cfg.music);
                 if(!_powerMode) renderBarsOffscreen();
             } else { die(now); return; }
