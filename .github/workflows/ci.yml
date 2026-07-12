@@ -1,0 +1,35 @@
+# Lightweight CI: JS syntax, ASCII-only sources, headless smoke test, and the
+# sw.js integrity check. Pure Node -- no package.json, no installs, no build.
+# Runs on every push and PR so a broken commit is caught even though main
+# auto-deploys to GitHub Pages.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Code checks (syntax + ASCII + smoke)
+        run: bash test/checks.sh
+
+      - name: sw.js integrity
+        run: node test/check-sw.js
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### FOK-snake CI"
+            echo "- JS syntax check (node --check)"
+            echo "- ASCII-only sources"
+            echo "- headless smoke test (menus + gameplay)"
+            echo "- sw.js CACHE / ASSETS integrity"
+          } >> "$GITHUB_STEP_SUMMARY"

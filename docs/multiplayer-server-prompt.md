@@ -1,4 +1,4 @@
-# FOK Snake — Server Implementation Prompt
+# FOK Snake -- Server Implementation Prompt
 
 > Paste this as the task brief for the agent/session that builds the server.
 > It is a spec, not a to-do; confirm the OPEN DECISIONS before writing code.
@@ -78,7 +78,7 @@ verifies the resulting score/level. Reject on mismatch.
 
 ## Recommended stack (confirm in OPEN DECISIONS)
 
-- **Node.js + TypeScript** — lets the deterministic sim be shared verbatim
+- **Node.js + TypeScript** -- lets the deterministic sim be shared verbatim
   between the plain-JS client and the server for replay validation. Biggest
   architectural lever here.
 - HTTP API: Fastify (or Express). Realtime signaling: WebSocket.
@@ -107,7 +107,7 @@ verifies the resulting score/level. Reject on mismatch.
 2. Server with the endpoints above, SQLite schema, and replay validator.
 3. Admin interface (login, stats, news editor, leaderboard moderation).
 4. Client integration points (news fetch, online scores page, duel client,
-   FOK send UI) — may be a follow-up milestone.
+   FOK send UI) -- may be a follow-up milestone.
 5. Deploy story: single command, env-configured, plus how the client points at it.
 
 ## OPEN DECISIONS (answer before building)
@@ -116,7 +116,7 @@ verifies the resulting score/level. Reject on mismatch.
 - Duel transport: P2P WebRTC DataChannel (server = signaling) vs fully
   server-relayed authoritative exchange?
 - Player identity: anonymous device-generated ID, or accounts/login for players?
-- Hosting target (VPS, container, serverless) and domain — informs auth/session
+- Hosting target (VPS, container, serverless) and domain -- informs auth/session
   and deploy shape.
 - Repo: new standalone repo, or a `server/` dir in the FOK monorepo (sharing the
   sim module is easier in a monorepo)?

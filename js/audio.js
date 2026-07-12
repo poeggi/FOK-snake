@@ -2,14 +2,14 @@
 // AUDIO ENGINE
 // ================================================================
 const Snd = (() => {
-    // ── Private state ─────────────────────────────────────────────
+    // -- Private state ---------------------------------------------
     let _ctx = null;
     let _musicGain = null, _sfxGain = null;
     let _musicVol = 1.0, _sfxVol = 0.5;
     let _currentTrack = null, _channelState = [];
     let _musicIsPaused = false, _bgSuspended = false;
 
-    // ── Music data ────────────────────────────────────────────────
+    // -- Music data ------------------------------------------------
     const SEQ = {
         ambient: { bpm: 85, channels: [
             { fn:'tri',  vol:0.26, notes:[
@@ -85,7 +85,7 @@ const Snd = (() => {
         ]},
     };
 
-    // ── Oscillator helpers ────────────────────────────────────────
+    // -- Oscillator helpers ----------------------------------------
     function _tone(freq, when, dur, type, vol, detune, dest) {
         if (!_ctx || freq <= 0 || when < _ctx.currentTime - 0.12) return;
         const o = _ctx.createOscillator(), g = _ctx.createGain();
@@ -130,7 +130,7 @@ const Snd = (() => {
         _musicGain.gain.setValueAtTime(0.5 * _musicVol, _ctx.currentTime);
     }
 
-    // ── Audio context lifecycle ───────────────────────────────────
+    // -- Audio context lifecycle -----------------------------------
 
     function audioInit() {
         // Build the permanent audio graph. Called at load; AC starts suspended.
@@ -175,7 +175,7 @@ const Snd = (() => {
         setTimeout(() => { try { if (_ctx && _ctx.state === 'running') _ctx.suspend(); } catch(e) {} }, 120);
     }
 
-    // ── Music ─────────────────────────────────────────────────────
+    // -- Music -----------------------------------------------------
 
     function musicPlay(trackId) {
         // Start a music track. No-op if already playing this track.
@@ -236,7 +236,7 @@ const Snd = (() => {
         });
     }
 
-    // ── SFX ───────────────────────────────────────────────────────
+    // -- SFX -------------------------------------------------------
 
     function sfxPlay(type, on = true) {
         // on: pass cfg.music to gate playback on the sound-enabled setting.

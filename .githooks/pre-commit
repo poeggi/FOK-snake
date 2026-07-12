@@ -3,6 +3,21 @@
 # MAJOR.MINOR is derived from the latest git tag (e.g. v1 -> 1.0, v1.1 -> 1.1).
 # PATCH auto-increments each commit; resets to 0 when the tag's MAJOR.MINOR changes.
 # Version is duplicated in comment + CACHE for bogus-update detection.
+
+# Run the same code checks CI runs (parity), before bumping the version, so a
+# broken commit never reaches the auto-deploying main branch. Skipped only if
+# node is unavailable locally -- CI still enforces them.
+if [ -f test/checks.sh ]; then
+    if command -v node >/dev/null 2>&1; then
+        if ! bash test/checks.sh; then
+            echo "[pre-commit] checks failed -- commit aborted" >&2
+            exit 1
+        fi
+    else
+        echo "[pre-commit] node not found -- skipping code checks (CI will run them)" >&2
+    fi
+fi
+
 SW="sw.js"
 [ -f "$SW" ] || exit 0
 
@@ -34,8 +49,8 @@ fi
 
 TS=$(date "+%Y-%m-%d %H:%M %z")
 
-# Build ASSETS from all tracked/staged files, excluding sw.js itself
-ASSETS="'./'$(git ls-files | grep -E '\.(js|css|json|svg|woff2|woff|ttf)$' | grep -v '^sw\.js$' | sort | while IFS= read -r f; do printf ", './%s'" "$f"; done)"
+# Build ASSETS from tracked runtime files (exclude sw.js and the test/CI dirs)
+ASSETS="'./'$(git ls-files | grep -E '\.(js|css|json|svg|woff2|woff|ttf)$' | grep -v '^sw\.js$' | grep -vE '^(test/|\.github/)' | sort | while IFS= read -r f; do printf ", './%s'" "$f"; done)"
 
 # Enforce auto-managed header on line 1
 sed -i "1s|.*|// AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually|" "$SW"

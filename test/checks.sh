@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Code checks shared by the pre-commit hook and CI (kept in one place so local
+# and CI run exactly the same thing). Fast, no dependencies beyond node + git.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+echo "[checks] JS syntax"
+for f in js/*.js; do node --check "$f"; done
+
+echo "[checks] ASCII-only sources"
+node test/check-ascii.js
+
+echo "[checks] headless smoke test"
+node test/smoke.js
