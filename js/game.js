@@ -1042,6 +1042,11 @@ function _drawNewspaperPage(now) {
     ctx.fillStyle='#1a1a14';                                        // masthead rules
     ctx.fillRect(px+16,py+22,pw-32,2); ctx.fillRect(px+16,py+58,pw-32,2);
     ct('NEW SNAKE TIMES', cx, py+41, '#141410', 18);
+    // Masthead crest: the player's own snake flanks the title, facing inward
+    const _logoCol=cfg.snakeColor||0, _logoSi=cfg.wornItems||{}, _logoY=py+40, _logoRx=px+pw-52;
+    drawScoreHead(px+52, _logoY, _logoCol, _logoSi);
+    ctx.save(); ctx.translate(_logoRx,0); ctx.scale(-1,1); ctx.translate(-_logoRx,0);
+    drawScoreHead(_logoRx, _logoY, _logoCol, _logoSi); ctx.restore();
     ct('EXTRA * EXTRA * READ ALL ABOUT IT', cx, py+72, '#6a5f4a', 8);
     const a=ANNOUNCEMENT||{lines:[]};
     ct(a.headline||'', cx, py+112, '#8a1810', 14);                  // headline
