@@ -1646,15 +1646,19 @@ function handleKey(key, pde) {
     // Let browser handle F-keys (F5 reload, F11 fullscreen, etc.)
     if (key.length > 1 && !GAME_KEYS.has(key)) return;
     if (phase === 'splash') {
-        if (key === 'ArrowDown' && !_splashFast && !_splashExiting) {
-            _splashFast = true;
-            _splashFastStart = simNow;
-            _splashFastBase = (simNow - phaseAt) / 1000;
+        // Capture only the meaningful keys: arrows fast-forward the coin drop,
+        // Space/Enter start the game. Everything else is ignored (no preventDefault)
+        // so browser/OS shortcuts keep working on the splash screen.
+        if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+            if (!_splashFast && !_splashExiting) {
+                _splashFast = true;
+                _splashFastStart = simNow;
+                _splashFastBase = (simNow - phaseAt) / 1000;
+            }
             return;
         }
-        const splashOk = key.length === 1 || key === 'Enter';
-        if (!splashOk) return;
-        triggerSplashExit(); if (pde) pde(); return;
+        if (key === 'Enter' || key === ' ') { triggerSplashExit(); if (pde) pde(); return; }
+        return;
     }
     if (_splashKeyHeld) return;
     if (simNow - _splashLeftAt < 200) return;
@@ -1965,6 +1969,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) onBgH
 window.addEventListener('blur', onBgHide);
 window.addEventListener('focus', onBgShow);
 document.addEventListener('keydown', e=>{
+    if(e.ctrlKey||e.metaKey||e.altKey) return;   // let browser/OS shortcuts (Ctrl+Shift+R etc.) through
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=simTick;boosting=false;}}

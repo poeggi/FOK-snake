@@ -9,8 +9,17 @@ const driver = `
   const log = (m) => R.steps.push(m);
   function press(k){ handleKey(k, ()=>{}); }
   try {
+    // Splash captures only arrows (fast-forward) + Space/Enter (start); ignores the rest
+    // so browser shortcuts (Ctrl+Shift+R) survive.
+    phase='splash'; _splashExiting=false; _splashFast=false; _splashKeyHeld=false;
+    press('r'); if(phase!=='splash'||_splashExiting) throw 'splash must ignore letter keys (Ctrl+Shift+R safe)';
+    press('ArrowLeft'); if(phase!=='splash'||_splashExiting) throw 'arrow must not exit splash';
+    if(!_splashFast) throw 'arrow should fast-forward the splash';
+    press('Enter'); if(!_splashExiting) throw 'Enter should start the splash exit';
+    log('splash key capture ok');
+
     // From splash, force menu. Advance sim clock past the 200ms post-splash input guard.
-    simNow=100000; _splashLeftAt=0; _splashKeyHeld=false;
+    simNow=100000; _splashExiting=false; _splashLeftAt=0; _splashKeyHeld=false;
     phase='menu'; menuSel=1; settingsCat=-1; settingsSel=0;
 
     press('Enter');                                    // open SETTINGS (category list)
