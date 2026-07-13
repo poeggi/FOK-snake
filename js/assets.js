@@ -172,3 +172,35 @@ const SHOP_ITEMS = [
     { id:'gown',     name:'INVISIBLE GOWN',desc:'Unseen - shimmers when you soar',price:3000000, page:1,
       icon:{p:{A:'#8fbfe0',S:'#ffffff'},d:['...S....','..AAA...','..A.A...','.A...A..','.A...A..','.AAAAA..','.AAAAA..','S......S']}},
 ];
+
+// ---------------- Mystery boxes ----------------
+// Every existing cosmetic (except the repeatable 'donate') gets a loot rarity. A few
+// box-exclusive cosmetics (art added in a later stage) round out the pool; the ADMIN
+// item is exclusive to the ADMIN box. All loot is cosmetic -- no gameplay advantage.
+const ITEM_RARITY = {
+    necktie:'common', shades:'common', cylinder:'common',
+    monocle:'rare',   bow:'rare',      shoes:'rare',
+    moustache:'epic', halo:'epic',     wizard:'epic',
+    crown:'legendary', gown:'legendary',
+};
+const BOX_ITEMS = [
+    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000 },
+    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000 },
+    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000 },
+    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true },
+];
+// Box tiers. odds = probability of each outcome (coins filler + a loot rarity); they
+// bias toward rarer loot as the tier rises. Prices sit ABOVE expected loot value
+// (house edge) -- enforced by test/box-odds.js. ADMIN box is a rare free-claim.
+const BOXES = [
+    { id:'common',    name:'COMMON',    color:'#9aa0a6', price:60000,
+      odds:{ coins:0.72, common:0.22, rare:0.05,  epic:0.009, legendary:0.001 } },
+    { id:'rare',      name:'RARE',      color:'#4a90d9', price:200000,
+      odds:{ coins:0.55, common:0.18, rare:0.20,  epic:0.06,  legendary:0.01 } },
+    { id:'epic',      name:'EPIC',      color:'#9b59b6', price:500000,
+      odds:{ coins:0.34, common:0.10, rare:0.28,  epic:0.22,  legendary:0.06 } },
+    { id:'legendary', name:'LEGENDARY', color:'#f1c40f', price:1000000,
+      odds:{ coins:0.20, common:0.05, rare:0.20,  epic:0.35,  legendary:0.20 } },
+];
+const BOX_PITY = 8;          // consecutive junk pulls (coins/common) then a guaranteed upgrade
+const ADMIN_BOX_EVERY = 750; // ADMIN box appears once every N shop opens

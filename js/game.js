@@ -62,7 +62,8 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 // must stay disabled -- gate all networking on !cfg.offline.
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, cfgVer:2 };
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false,
+             boxPity:0, shopOpens:0, cfgVer:2 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
 // the game in a bad state (e.g. an out-of-range diff or colour index).
@@ -80,6 +81,8 @@ function _sanitizeCfg() {
     cfg.touchSelect = !!cfg.touchSelect;
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
+    cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
+    cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
     if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
     if(cfg.wornItems!==null && (typeof cfg.wornItems!=='object' || Array.isArray(cfg.wornItems))) cfg.wornItems = null;
 }
@@ -1555,6 +1558,47 @@ function resetStats() {
     _cachedFOKoins = 0;
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
     cfg.shopItems = {}; cfg.wornItems = null; saveCfg();
+}
+
+// ---- Mystery box loot (META: uses Math.random, NOT the seeded sim RNG -- never
+// affects gameplay determinism or leaderboard replay). All loot is cosmetic. ----
+function _boxItemValue(id){
+    const s=SHOP_ITEMS.find(i=>i.id===id); if(s) return s.price;
+    const b=BOX_ITEMS.find(i=>i.id===id); if(b) return b.value;
+    return 0;
+}
+function _boxLootPool(rarity, admin){
+    const pool=[];
+    for(const it of SHOP_ITEMS) if(!it.repeatable && ITEM_RARITY[it.id]===rarity) pool.push(it.id);
+    for(const it of BOX_ITEMS) if(it.rarity===rarity && (admin || !it.admin)) pool.push(it.id);
+    return pool;
+}
+function _boxCoinsAvg(box){ return box.price*0.35; }   // mean of the coins-filler reward
+// Expected loot value for a fresh player (no dupes). test/box-odds.js asserts price > EV.
+function boxEV(box){
+    let ev = box.odds.coins * _boxCoinsAvg(box);
+    for(const r of ['common','rare','epic','legendary']){
+        const pool=_boxLootPool(r,false);
+        if(!pool.length || !box.odds[r]) continue;
+        ev += box.odds[r] * (pool.reduce((s,id)=>s+_boxItemValue(id),0)/pool.length);
+    }
+    return ev;
+}
+// Roll one outcome. Pity: after BOX_PITY consecutive junk pulls (coins/common) the next
+// pull is forced to epic/legendary. Returns {type:'coins',amount} or {type:'item',id,rarity}.
+function rollBox(box){
+    let outcome;
+    if((cfg.boxPity||0) >= BOX_PITY){
+        cfg.boxPity = 0;
+        outcome = Math.random()<0.25 ? 'legendary' : 'epic';
+    } else {
+        const r=Math.random(); let acc=0; outcome='coins';
+        for(const o of ['coins','common','rare','epic','legendary']){ acc+=box.odds[o]||0; if(r<acc){ outcome=o; break; } }
+        cfg.boxPity = (outcome==='coins'||outcome==='common') ? (cfg.boxPity||0)+1 : 0;
+    }
+    if(outcome==='coins') return { type:'coins', amount: Math.round(box.price*(0.2+Math.random()*0.3)) };
+    const pool=_boxLootPool(outcome, box.id==='admin');
+    return { type:'item', id: pool[Math.floor(Math.random()*pool.length)], rarity:outcome };
 }
 
 // Backup/restore all game data (scores, coins, achievements, shop items, settings)

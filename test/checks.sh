@@ -24,3 +24,6 @@ node test/sim-events.js
 
 echo "[checks] sim headless purity"
 node test/sim-purity.js
+
+echo "[checks] mystery-box economy"
+node test/box-odds.js
