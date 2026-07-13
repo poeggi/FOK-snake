@@ -333,6 +333,10 @@ const _gridCanvas=document.createElement('canvas'); _gridCanvas.width=CW; _gridC
 const _scanCanvas=document.createElement('canvas'); _scanCanvas.width=CW; _scanCanvas.height=CH;
 const _barsCanvas=document.createElement('canvas'); _barsCanvas.width=CW; _barsCanvas.height=CH;
 const _barsCtx=_barsCanvas.getContext('2d');
+// Static background = grid + bars, pre-composited so the board is one blit per frame
+// (instead of grid + bars separately). Rebuilt only when bars change (see _composeBg).
+const _bgCanvas=document.createElement('canvas'); _bgCanvas.width=CW; _bgCanvas.height=CH;
+const _bgCtx=_bgCanvas.getContext('2d');
 (()=>{
     const g=_gridCanvas.getContext('2d');
     g.fillStyle='#07070e'; g.fillRect(0,0,CW,CH);
@@ -345,6 +349,10 @@ const _barsCtx=_barsCanvas.getContext('2d');
     for(let y=0;y<CH;y+=3) s.fillRect(0,y,CW,1);
 })();
 function drawGrid() { ctx.drawImage(_gridCanvas, 0, 0); }
+// Recompose the static background (grid is opaque, bars drawn on top). Called whenever
+// the bar layout changes, so drawGameBoard can blit it in a single drawImage.
+function _composeBg() { _bgCtx.drawImage(_gridCanvas, 0, 0); _bgCtx.drawImage(_barsCanvas, 0, 0); }
+_composeBg();
 function drawOvBg(a) { ctx.fillStyle=`rgba(7,7,14,${a||0.88})`; ctx.fillRect(0,0,CW,CH); }
 function ct(text,x,y,color,size) {
     ctx.fillStyle=color||'#7fff7f';
@@ -403,6 +411,7 @@ function drawBar(b, c=ctx, asFragile=b.fragile) {
 }
 function renderBarsOffscreen() {
     _barsCtx.clearRect(0,0,CW,CH); _prepBars(false); bars.forEach(b=>drawBar(b,_barsCtx));
+    _composeBg();
 }
 
 function drawGem(g,now) {
@@ -1385,15 +1394,15 @@ function _drawTimeCrystal(now) {
     ctx.restore();
 }
 function drawGameBoard(now) {
-    drawGrid();
     if(_powerMode){
+        drawGrid();
         const nearEnd=now-_powerModeAt>_POWER_DUR-1500;
         const blink=nearEnd&&Math.floor(now/180)%2===0;
         _prepBars(!blink); bars.forEach(b=>drawBar(b,ctx,blink?b.fragile:true));
         ctx.save(); ctx.globalAlpha=0.06+0.04*Math.sin(now/200);
         ctx.fillStyle='#2244ff'; ctx.fillRect(0,0,CW,CH); ctx.restore();
     } else {
-        ctx.drawImage(_barsCanvas,0,0);
+        ctx.drawImage(_bgCanvas,0,0);   // grid + bars pre-composited: one blit
     }
     if(_slowMode){
         const rem=_SLOW_DUR-(now-_slowModeAt);
@@ -2105,7 +2114,7 @@ function _updateNonCanvasUI() {
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
 
-let _lastDraw = 0;
+let _lastDraw = 0, _pauseDrawn = false;
 function loop(rafNow) {
     requestAnimationFrame(loop);
     // Optional 30 FPS cap: skip whole frames (the fixed-timestep sim catches up via
@@ -2140,6 +2149,8 @@ function loop(rafNow) {
 
     // Draw once per frame from the simulated state.
     const now=simNow;
+    if(phase!=='paused') _pauseDrawn=false;
+    let skip=false;
     if     (phase==='splash')       {drawSplash(now);      showHUD(false);}
     else if(phase==='menu')         {drawMenu(now);        showHUD(false);}
     else if(phase==='news')         {drawNews(now);        showHUD(false);}
@@ -2151,8 +2162,14 @@ function loop(rafNow) {
     else if(phase==='nameEntry')    {drawNameEntry(now);}
     else if(phase==='quitConfirm')  {drawQuitConfirm();}
     else if(phase==='resetConfirm') {drawResetConfirm();}
+    else if(phase==='paused'){
+        // Nothing animates while paused: draw the board + overlay once, then skip
+        // whole frames so the paused screen holds a steady rate instead of dipping.
+        if(_pauseDrawn) skip=true;
+        else { drawGameBoard(now); showHUD(true); _pauseDrawn=true; }
+    }
     else                            {drawGameBoard(now);   showHUD(true);}
-    drawAchPopups(now);
+    if(!skip) drawAchPopups(now);
 }
 
 document.fonts.ready.then(() => requestAnimationFrame(loop));
