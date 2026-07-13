@@ -1318,8 +1318,9 @@ function _drawBoxIcon(x,y,box,s){
     ctx.restore();
 }
 function _drawBoxesPage(){
-    const coins=_cachedFOKoins, startY=72, rowH=52;
-    _boxList().forEach((box,i)=>{
+    const coins=_cachedFOKoins, startY=72, rowH=52, boxes=_boxList();
+    if(shopSel>=boxes.length) shopSel=boxes.length-1;   // keep a row selected after the ADMIN box is claimed
+    boxes.forEach((box,i)=>{
         const y=startY+i*rowH, sel=i===shopSel, isAdmin=box.id==='admin';
         const canAfford=isAdmin||coins>=box.price, bc=isAdmin?'#ffd700':box.color;
         ctx.fillStyle=sel?(isAdmin?'rgba(60,42,10,0.75)':'rgba(45,45,45,0.7)'):(isAdmin?'rgba(40,26,6,0.5)':'rgba(10,10,10,0.35)');
