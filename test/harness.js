@@ -63,7 +63,7 @@ function runInGame(driver) {
     sandbox.window.matchMedia = sandbox.matchMedia;
     const ctx = vm.createContext(sandbox);
 
-    const src = ['assets.js', 'audio.js', 'game.js']
+    const src = ['assets.js', 'audio.js', 'sim.js', 'game.js']
         .map(f => fs.readFileSync(path.join(JS_DIR, f), 'utf8')).join('\n');
     vm.runInContext(src + '\n' + driver, ctx, { filename: 'fok-bundle.js' });
     return sandbox;
