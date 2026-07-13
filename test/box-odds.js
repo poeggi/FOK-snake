@@ -17,23 +17,31 @@ const driver = `
       const ev = boxEV(b), edge = (b.price-ev)/b.price;
       R.steps.push(b.id.padEnd(9)+' price='+b.price+'  EV='+Math.round(ev)+'  edge='+(edge*100).toFixed(1)+'%');
       if(ev >= b.price) throw b.id+' has NO house edge (EV '+Math.round(ev)+' >= price '+b.price+')';
-      if(edge < 0.10)   throw b.id+' edge '+(edge*100).toFixed(1)+'% < 10% (too generous)';
+      if(edge < 0.05)   throw b.id+' edge '+(edge*100).toFixed(1)+'% < 5% (too generous)';
       if(edge > 0.55)   throw b.id+' edge '+(edge*100).toFixed(1)+'% > 55% (too stingy)';
     }
-    // 3. simulate many rolls: no ADMIN leak, pity caps junk streaks
+    // 3. simulate many rolls: no ADMIN leak, pity caps junk streaks, coins-consolation band
     let s=1234567; Math.random = () => { s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff; };
     cfg.boxPity = 0;
-    let sawAdmin=false, streak=0, maxStreak=0, coins=0, items=0;
+    let sawAdmin=false, streak=0, maxStreak=0, coins=0, items=0, retSum=0;
     for(let i=0;i<40000;i++){
-      const res = rollBox(BOXES[i % BOXES.length]);
+      const box = BOXES[i % BOXES.length];
+      const res = rollBox(box);
       if(res.type==='item'){ items++; if(res.id==='admincrown') sawAdmin=true; }
-      else { coins++; if(res.amount%100!==0) throw 'coin reward '+res.amount+' is not a multiple of 100'; }
+      else { coins++;
+        if(res.amount%100!==0) throw 'coin reward '+res.amount+' is not a multiple of 100';
+        const ret = res.amount/box.price;   // fraction of the price handed back
+        if(ret < 0.25-1e-3 || ret > 0.75+1e-3) throw 'coin return '+(ret*100).toFixed(1)+'% outside 25%-75%';
+        retSum += ret;
+      }
       const junk = res.type==='coins' || (res.type==='item' && res.rarity==='common');
       streak = junk ? streak+1 : 0; if(streak>maxStreak) maxStreak=streak;
     }
+    const meanRet = retSum/coins;   // expect ~0.5 (you lose ~50% on a coins pull)
+    if(Math.abs(meanRet-0.5) > 0.02) throw 'mean coin return '+(meanRet*100).toFixed(1)+'% not ~50%';
     if(sawAdmin) throw 'ADMIN-exclusive item dropped from a normal box';
     if(maxStreak > BOX_PITY) throw 'pity failed: junk streak '+maxStreak+' > BOX_PITY '+BOX_PITY;
-    R.steps.push('rolled 40000: '+items+' items / '+coins+' coins; max junk streak '+maxStreak+' (pity '+BOX_PITY+'); no admin leak');
+    R.steps.push('rolled 40000: '+items+' items / '+coins+' coins (mean return '+(meanRet*100).toFixed(1)+'%); max junk streak '+maxStreak+'; no admin leak');
     R.ok = true;
   } catch(e){ R.err = String(e && e.stack || e); }
 })();

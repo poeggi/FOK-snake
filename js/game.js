@@ -1793,7 +1793,7 @@ function _boxLootPool(rarity, admin){
     for(const it of BOX_ITEMS) if(it.rarity===rarity && (admin || !it.admin)) pool.push(it.id);
     return pool;
 }
-function _boxCoinsAvg(box){ return box.price*0.35; }   // mean of the coins-filler reward
+function _boxCoinsAvg(box){ return box.price*0.5; }   // mean of the coins-filler reward (25%-75%)
 // Expected loot value for a fresh player (no dupes). test/box-odds.js asserts price > EV.
 function boxEV(box){
     let ev = box.odds.coins * _boxCoinsAvg(box);
@@ -1816,7 +1816,9 @@ function rollBox(box){
         for(const o of ['coins','common','rare','epic','legendary']){ acc+=box.odds[o]||0; if(r<acc){ outcome=o; break; } }
         cfg.boxPity = (outcome==='coins'||outcome==='common') ? (cfg.boxPity||0)+1 : 0;
     }
-    if(outcome==='coins') return { type:'coins', amount: Math.round(box.price*(0.2+Math.random()*0.3)/100)*100 };
+    // Coins consolation: you get back 25%-75% of the price (lose 75% at worst, ~50% on
+    // average), rounded to a whole 100. A softer loss than a total bust -- still a lottery.
+    if(outcome==='coins') return { type:'coins', amount: Math.round(box.price*(0.25+Math.random()*0.5)/100)*100 };
     const pool=_boxLootPool(outcome, box.id==='admin');
     return { type:'item', id: pool[Math.floor(Math.random()*pool.length)], rarity:outcome };
 }
