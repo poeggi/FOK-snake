@@ -62,7 +62,7 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 // must stay disabled -- gate all networking on !cfg.offline.
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false,
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false,
              boxPity:0, shopOpens:0, cfgVer:2 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
@@ -81,6 +81,7 @@ function _sanitizeCfg() {
     cfg.touchSelect = !!cfg.touchSelect;
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
+    cfg.disableGlow = !!cfg.disableGlow;
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
     if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
@@ -157,10 +158,12 @@ const CRED = [
     ['txt','Everyone who played.'],['txt','Everyone who crashed into themselves.'],
     ['txt','The one person who reached Level 10.'],['txt','You know who you are.'],['gap',40],
     ['hdr','IN MEMORIAM'],
-    ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',50],
+    ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',28],
+    ['txt','No animals were harmed...'],['sml','(the snakes beg to differ)'],['gap',50],
     ['coins'],['sml','(spend them in the SHOP)'],['gap',50],
     ['sml','(C) 2026 FOK STUDIOS'],['sml','All wrongs reserved.'],
     ['gap',30],['txt','PRESS A TO EXIT'],['gap',280],
+    ['gap',420],
     ['secret','No Eastereggs here ;)'],['gap',240],
 ];
 const CRED_H = { title:54, sub:22, hdr:28, txt:26, sml:24, coins:28, secret:28 };
@@ -344,7 +347,17 @@ const _bgCtx=_bgCanvas.getContext('2d');
 // Rebuilt only when the visible static content changes (selection, version, diff line).
 const _menuCanvas=document.createElement('canvas'); _menuCanvas.width=CW; _menuCanvas.height=CH;
 const _menuCtx=_menuCanvas.getContext('2d');
-let _mc={sel:-1,ver:'',diff:''};
+let _mc={sel:-1,ver:'',diff:'',glow:null};
+// Central glow control: intercept the shadowBlur setter once per context so that
+// cfg.disableGlow forces it to 0 EVERYWHERE, with zero changes at the 80+ call sites.
+function _glowGuard(c){
+    const d=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(c),'shadowBlur');
+    if(!d||!d.set) return;   // stub context (headless tests) -- nothing to guard
+    Object.defineProperty(c,'shadowBlur',{ configurable:true,
+        get(){ return d.get.call(this); },
+        set(v){ d.set.call(this, cfg.disableGlow ? 0 : v); } });
+}
+_glowGuard(ctx); _glowGuard(_menuCtx);
 (()=>{
     const g=_gridCanvas.getContext('2d');
     g.fillStyle='#07070e'; g.fillRect(0,0,CW,CH);
@@ -975,8 +988,8 @@ function _composeMenu(diffLine){
 }
 function drawMenu(now) {
     const diffLine=`DIFF:${DIFF[cfg.diff].label}  AUDIO:${cfg.music?'ON':'OFF'}  STYLE:${cfg.musicStyle===0?'NEW':'CLASSIC'}`;
-    if(menuSel!==_mc.sel || _swVersion!==_mc.ver || diffLine!==_mc.diff){
-        _composeMenu(diffLine); _mc.sel=menuSel; _mc.ver=_swVersion; _mc.diff=diffLine;
+    if(menuSel!==_mc.sel || _swVersion!==_mc.ver || diffLine!==_mc.diff || cfg.disableGlow!==_mc.glow){
+        _composeMenu(diffLine); _mc.sel=menuSel; _mc.ver=_swVersion; _mc.diff=diffLine; _mc.glow=cfg.disableGlow;
     }
     ctx.drawImage(_menuCanvas,0,0);           // static layer (one blit)
     drawSplashText(now);                       // animated overlay
@@ -1012,8 +1025,12 @@ const SETTINGS_CATS = [
         { lbl:()=>'SNAKE COLOR: '+SNAKE_COLORS[cfg.snakeColor||0].name, preview:'color',
           act:()=>{cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
+    ]},
+    { label:'GRAPHICS', items:[
         { lbl:()=>'LIMIT 30 FPS: '+(cfg.fps30?'ON':'OFF'),
           act:()=>{cfg.fps30=!cfg.fps30;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'DISABLE GLOW: '+(cfg.disableGlow?'ON':'OFF'),
+          act:()=>{cfg.disableGlow=!cfg.disableGlow;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'DATA MANAGEMENT', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(cfg.offline?'ON':'OFF'),
@@ -1030,10 +1047,9 @@ function drawSettings() {
     const title=inCat?'SETTINGS/'+SETTINGS_CATS[settingsCat].label:'SETTINGS';
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',18); ctx.shadowBlur=0;
     const list=_settingsList();
-    const rows=list.map(it=>inCat?it.lbl():it.label);
-    rows.push('BACK');
     const startY=62, rowH=28;
-    rows.forEach((item,i)=>menuItem(item,startY+i*rowH,i===settingsSel));
+    list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel));
+    menuItem('BACK', CH-52, settingsSel===list.length);   // BACK aligned toward the bottom
     if(inCat){
         const it=list[settingsSel];
         // Volume bar under the selected slider row
