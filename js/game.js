@@ -2000,9 +2000,10 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) onBgH
 window.addEventListener('blur', onBgHide);
 window.addEventListener('focus', onBgShow);
 document.addEventListener('keydown', e=>{
-    // TV remotes (LG webOS etc.) send a "Back" key -- map it to the in-game Escape
-    // (quit-to-menu / back) instead of navigating the browser away.
-    if(e.keyCode===461||e.key==='BrowserBack'||e.key==='GoBack'||e.key==='XF86Back'){ e.preventDefault(); handleKey('Escape',null); return; }
+    // TV remotes: the "Back" key (webOS 461) AND the RED colour button (403) both act
+    // as the in-game Escape (exit shop / back / quit-to-menu), instead of navigating
+    // the browser away. RED is the reliable exit when a remote has no usable Back.
+    if(e.keyCode===461||e.keyCode===403||e.key==='BrowserBack'||e.key==='GoBack'||e.key==='XF86Back'||e.key==='ColorF0Red'||e.key==='Red'){ e.preventDefault(); handleKey('Escape',null); return; }
     if(e.ctrlKey||e.metaKey||e.altKey) return;   // let browser/OS shortcuts (Ctrl+Shift+R etc.) through
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
