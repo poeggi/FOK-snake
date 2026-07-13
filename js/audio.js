@@ -258,6 +258,10 @@ const Snd = (() => {
         } else if (type === 'perfect') {
             [523,659,784,1047,1319,1568].forEach((f,i) => t(f, now + i*0.07, 0.22));
             [784,988,1319].forEach(f => t(f, now + 0.50, 0.30, 'triangle'));
+        } else if (type === 'unbox') {
+            // Golden unbox: a quick rising sparkle then a bright shimmering chord.
+            [659,988,1319,1760].forEach((f,i) => t(f, now + i*0.05, 0.10));
+            [1319,1760,2637].forEach(f => t(f, now + 0.24, 0.30, 'triangle'));
         } else if (type === 'lucky_spawn') {
             [880,1319,1568].forEach((f,i) => t(f, now + i*0.055, 0.13));
         } else if (type === 'lucky_eat') {

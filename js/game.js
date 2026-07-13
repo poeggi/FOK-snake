@@ -1370,7 +1370,7 @@ function _openBox(box){
         _adminConsumed=true;
         if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',rarity:'legendary',refund}; }
         else { si.admincrown=true; _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
-        saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('perfect',cfg.music); return;
+        saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('unbox',cfg.music); return;
     }
     if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
     _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch{}
@@ -1383,7 +1383,7 @@ function _openBox(box){
     }
     saveCfg();
     _boxOpenAt=simNow;
-    Snd.sfxPlay(_boxReward.kind==='item'?'perfect':'bonus',cfg.music);
+    Snd.sfxPlay('unbox',cfg.music);
 }
 function _drawBoxReveal(){
     const age=simNow-_boxOpenAt;
