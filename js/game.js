@@ -62,7 +62,7 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 // must stay disabled -- gate all networking on !cfg.offline.
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, cfgVer:2 };
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, cfgVer:2 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
 // the game in a bad state (e.g. an out-of-range diff or colour index).
@@ -79,6 +79,7 @@ function _sanitizeCfg() {
     cfg.turbo       = cfg.turbo !== false;
     cfg.touchSelect = !!cfg.touchSelect;
     cfg.offline     = !!cfg.offline;
+    cfg.fps30       = !!cfg.fps30;
     if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
     if(cfg.wornItems!==null && (typeof cfg.wornItems!=='object' || Array.isArray(cfg.wornItems))) cfg.wornItems = null;
 }
@@ -938,6 +939,8 @@ const SETTINGS_CATS = [
         { lbl:()=>'SNAKE COLOR: '+SNAKE_COLORS[cfg.snakeColor||0].name, preview:'color',
           act:()=>{cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
+        { lbl:()=>'LIMIT 30 FPS: '+(cfg.fps30?'ON':'OFF'),
+          act:()=>{cfg.fps30=!cfg.fps30;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'DATA MANAGEMENT', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(cfg.offline?'ON':'OFF'),
@@ -2110,8 +2113,13 @@ function _updateNonCanvasUI() {
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
 
+let _lastDraw = 0;
 function loop(rafNow) {
     requestAnimationFrame(loop);
+    // Optional 30 FPS cap: skip whole frames (the fixed-timestep sim catches up via
+    // the _acc accumulator, so gameplay speed is unchanged -- only the draw rate drops).
+    if(cfg.fps30 && rafNow-_lastDraw < 32) return;
+    _lastDraw = rafNow;
     _updateBtnDim();
     _updateNonCanvasUI();
     fpsFrames++;
