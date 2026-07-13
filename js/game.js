@@ -1997,6 +1997,8 @@ document.addEventListener('keydown', e=>{
     // as the in-game Escape (exit shop / back / quit-to-menu), instead of navigating
     // the browser away. RED is the reliable exit when a remote has no usable Back.
     if(e.keyCode===461||e.keyCode===403||e.key==='BrowserBack'||e.key==='GoBack'||e.key==='XF86Back'||e.key==='ColorF0Red'||e.key==='Red'){ e.preventDefault(); handleKey('Escape',null); return; }
+    // The BLUE colour button (webOS 406) acts as Space (pause / credits speed / name space).
+    if(e.keyCode===406||e.key==='ColorF3Blue'||e.key==='Blue'){ e.preventDefault(); handleKey(' ',null); return; }
     if(e.ctrlKey||e.metaKey||e.altKey) return;   // let browser/OS shortcuts (Ctrl+Shift+R etc.) through
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
