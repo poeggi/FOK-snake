@@ -52,7 +52,7 @@ const SPLASHES = [
     'Now with two shop pages!',
 ];
 const MAX_NAME = 15;
-const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_-!?.,\'"#$@&()[]:+ \r';
+const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-!?.,\'"#$@&()[]:+ \r';
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
 // boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2

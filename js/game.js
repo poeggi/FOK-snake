@@ -1055,7 +1055,7 @@ function drawSettings() {
     const title=inCat?'SETTINGS/'+SETTINGS_CATS[settingsCat].label:'SETTINGS';
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',18); ctx.shadowBlur=0;
     const list=_settingsList();
-    const startY=62, rowH=28;
+    const startY=90, rowH=28;   // one empty line below the headline before the first entry
     list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel));
     menuItem('BACK', CH-52, settingsSel===list.length);   // BACK aligned toward the bottom
     if(inCat){
