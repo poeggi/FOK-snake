@@ -656,12 +656,15 @@ function drawAccessoryAdmincrown(hx, hy) {
     ctx.fillStyle='#00e5ff'; ctx.fillRect(hx+2,hy-15,2,2); ctx.fillRect(hx+8,hy-4,3,2); ctx.fillRect(hx+15,hy-15,2,2);
     ctx.restore();
 }
-function drawAccessoryBlackbelt(hx, hy) {
-    ctx.fillStyle='#111111'; ctx.fillRect(hx-1,hy+2,20,3);          // headband across the brow
-    ctx.fillStyle='#3a3a3a'; ctx.fillRect(hx-1,hy+3,20,1);          // stitch line
+// Karate black belt wrapped around a body segment: a band across the cell with a
+// centred knot and two short hanging tails.
+function drawAccessoryBlackbelt(x, y) {
+    const w=CS-2;
+    ctx.fillStyle='#111111'; ctx.fillRect(x-1,y+6,w+2,5);          // belt band
+    ctx.fillStyle='#333333'; ctx.fillRect(x-1,y+7,w+2,1);          // sheen
     ctx.fillStyle='#111111';
-    ctx.fillRect(hx-2,hy+1,3,3);                                    // side knot
-    ctx.fillRect(hx-3,hy+4,2,6); ctx.fillRect(hx,hy+4,2,5);         // two hanging tails
+    ctx.fillRect(x+7,y+5,5,4);                                     // knot
+    ctx.fillRect(x+7,y+9,2,5); ctx.fillRect(x+10,y+9,2,4);         // two hanging tails
 }
 function drawAccessoryLasereyes(hx, hy) {
     const eyes=eyeOffsets(dir);
@@ -766,12 +769,16 @@ function drawSnake(flash) {
             if(si.cylinder)  drawAccessoryCylinder(x,y);
             if(si.propeller) drawAccessoryPropeller(x,y);
             if(si.wizard)    drawAccessoryWizard(x,y);
-            if(si.blackbelt) drawAccessoryBlackbelt(x,y);
             if(si.crown)     drawAccessoryCrown(x,y);
             if(si.admincrown)drawAccessoryAdmincrown(x,y);
             if(si.halo)      drawAccessoryHalo(x,y);
         }
     });
+    // Black belt wraps a mid-body segment (the snake's "waist")
+    if(si.blackbelt && !flash && snake.length>=3){
+        const b=snake[Math.floor(snake.length/2)];
+        drawAccessoryBlackbelt(b.x*CS+1, b.y*CS+1);
+    }
     // Shoes ride the tail segment
     if(si.shoes && !flash && snake.length>0){
         const t=snake[snake.length-1], x=t.x*CS+1, y=t.y*CS+1;
@@ -1162,7 +1169,6 @@ function drawScoreHead(cx, cy, colorIdx, si) {
         if(si.propeller)drawAccessoryPropeller(0, 0);
         if(si.wizard)   drawAccessoryWizard(0, 0);
         if(si.cylinder) drawAccessoryCylinder(0, 0);
-        if(si.blackbelt)drawAccessoryBlackbelt(0, 0);
         if(si.crown)    drawAccessoryCrown(0, 0);
         if(si.admincrown)drawAccessoryAdmincrown(0, 0);
         if(si.halo)     drawAccessoryHalo(0, 0);
