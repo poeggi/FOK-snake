@@ -626,21 +626,23 @@ function drawSnake(flash) {
     const sc=SNAKE_COLORS[cfg.snakeColor||0];
     const si=cfg.wornItems||{};
     const cols = flash ? null : _bodyCols(snake.length, sc.h);
+    const sw=CS-2,sh=CS-2,len=snake.length;
     snake.forEach((seg,i)=>{
-        const x=seg.x*CS+1,y=seg.y*CS+1,sw=CS-2,sh=CS-2;
-        if(i===0){
-            ctx.fillStyle=flash?'#bb2222':sc.head;
-            if(!flash){ctx.shadowColor=sc.head;ctx.shadowBlur=10;}
-        } else if(flash){
-            const l=Math.round(41*(0.5+0.5*(1-i/Math.max(snake.length,1))));
-            ctx.fillStyle=`hsl(0,55%,${l+8}%)`;
-        } else {
-            ctx.fillStyle=cols[i];
+        const x=seg.x*CS+1,y=seg.y*CS+1;
+        if(i>0){
+            // Body: no shadow to set/reset -- just colour + fill.
+            ctx.fillStyle=flash?`hsl(0,55%,${Math.round(41*(0.5+0.5*(1-i/Math.max(len,1))))+8}%)`:cols[i];
+            if(_segPathBody){ ctx.translate(x,y); ctx.fill(_segPathBody); ctx.translate(-x,-y); }
+            else { rr(x,y,sw,sh,3); ctx.fill(); }
+            return;
         }
-        if(_segPathBody){ ctx.translate(x,y); ctx.fill(i===0?_segPathHead:_segPathBody); ctx.translate(-x,-y); }
-        else { rr(x,y,sw,sh,i===0?5:3); ctx.fill(); }
-        ctx.shadowBlur=0;
-        if(i===0&&!flash){
+        // Head (glow set + reset only here, once per frame).
+        ctx.fillStyle=flash?'#bb2222':sc.head;
+        if(!flash){ctx.shadowColor=sc.head;ctx.shadowBlur=10;}
+        if(_segPathHead){ ctx.translate(x,y); ctx.fill(_segPathHead); ctx.translate(-x,-y); }
+        else { rr(x,y,sw,sh,5); ctx.fill(); }
+        if(!flash){
+            ctx.shadowBlur=0;
             const eyeDir=dirQueue.length>0?dirQueue[0]:dir;
             ctx.fillStyle='#001500'; eyeOffsets(eyeDir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy,3,3));
             if(dirQueue.length>0&&(dirQueue[0].x!==dir.x||dirQueue[0].y!==dir.y)){
