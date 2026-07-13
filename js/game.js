@@ -2131,7 +2131,7 @@ function _updateNonCanvasUI() {
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
 
-let _lastDraw = 0, _pauseDrawn = false, _qcSel = -1;
+let _lastDraw = 0, _pauseDrawn = false, _qcSel = -1, _newsDrawn = false;
 function loop(rafNow) {
     requestAnimationFrame(loop);
     // Optional 30 FPS cap: skip whole frames (the fixed-timestep sim catches up via
@@ -2168,10 +2168,16 @@ function loop(rafNow) {
     const now=simNow;
     if(phase!=='paused') _pauseDrawn=false;
     if(phase!=='quitConfirm') _qcSel=-1;
+    if(phase!=='news') _newsDrawn=false;
     let skip=false;
     if     (phase==='splash')       {drawSplash(now);      showHUD(false);}
     else if(phase==='menu')         {drawMenu(now);        showHUD(false);}
-    else if(phase==='news')         {drawNews(now);        showHUD(false);}
+    else if(phase==='news'){
+        // Animate the spin-open; once it settles the page is static -> draw once, then skip.
+        if(now-_newsAt < 700){ drawNews(now); showHUD(false); }
+        else if(!_newsDrawn){ drawNews(now); showHUD(false); _newsDrawn=true; }
+        else skip=true;
+    }
     else if(phase==='settings')     {drawSettings();       showHUD(false);}
     else if(phase==='scores')       {drawScores();         showHUD(false);}
     else if(phase==='achievements') {drawAchievements();   showHUD(false);}
