@@ -184,10 +184,14 @@ const ITEM_RARITY = {
     crown:'legendary', gown:'legendary',
 };
 const BOX_ITEMS = [
-    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000 },
-    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000 },
-    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000 },
-    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true },
+    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000,   desc:'Arr. Box-only.',
+      icon:{p:{A:'#0a0a0a',S:'#3a3a3a'},d:['........','S.....S.','.S...S..','..AAA...','..AAA...','..AAA...','........','........']}},
+    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000,  desc:'Everything pops. Box-only.',
+      icon:{p:{R:'#ff2a2a',C:'#22e0ff',F:'#111111'},d:['........','.FFFFFF.','.FRRCCF.','.FRRCCF.','.FFFFFF.','........','........','........']}},
+    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000,  desc:'Ready for takeoff. Box-only.',
+      icon:{p:{R:'#e03c3c',Y:'#f5d020',G:'#2aa84a',B:'#4a90d9',H:'#ffd700',S:'#888888'},d:['..B..R..','..BBRR..','...HH...','...S....','..RRRR..','.YRYRYR.','.GGGGGG.','........']}},
+    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, desc:'ADMIN box only. The trophy.',
+      icon:{p:{A:'#ffe860',C:'#00e5ff',B:'#cc9a00'},d:['C..C..C.','AAAAAAA.','ACAAACA.','AAAAAAA.','BBBBBBB.','........','........','........']}},
 ];
 // Box tiers. odds = probability of each outcome (coins filler + a loot rarity); they
 // bias toward rarer loot as the tier rises. Prices sit ABOVE expected loot value

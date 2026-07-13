@@ -597,6 +597,44 @@ function drawAccessoryHalo(hx, hy) {
     ctx.beginPath(); ctx.ellipse(hx+9,hy-7,9,3.2,0,0,Math.PI*2); ctx.stroke();
     ctx.restore();
 }
+// ---- Box-exclusive accessories ----
+function drawAccessoryEyepatch(hx, hy) {
+    const e=eyeOffsets(dir)[0], cx=hx+e[0]+1.5, cy=hy+e[1]+1.5;
+    ctx.strokeStyle='#0a0a0a'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(hx-1,cy-4.5); ctx.lineTo(hx+19,cy+2.5); ctx.stroke();   // strap
+    ctx.fillStyle='#0a0a0a';
+    ctx.beginPath(); ctx.ellipse(cx,cy,3.4,3,0,0,Math.PI*2); ctx.fill();                // patch
+    ctx.fillStyle='#2a2a2a'; ctx.fillRect(Math.round(cx-2),Math.round(cy-2),1,1);       // sheen
+}
+function drawAccessoryGlasses3d(hx, hy) {
+    const eyes=eyeOffsets(dir), cols=['#ff2a2a','#22e0ff'];
+    ctx.fillStyle='#111111';
+    eyes.forEach(([ox,oy])=>{ctx.beginPath();ctx.arc(hx+ox+1.5,hy+oy+1.5,4,0,Math.PI*2);ctx.fill();});
+    eyes.forEach(([ox,oy],i)=>{ctx.fillStyle=cols[i%2];ctx.beginPath();ctx.arc(hx+ox+1.5,hy+oy+1.5,2.6,0,Math.PI*2);ctx.fill();});
+    if(eyes.length>=2){
+        ctx.strokeStyle='#111111'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(hx+eyes[0][0]+1.5,hy+eyes[0][1]+1.5); ctx.lineTo(hx+eyes[1][0]+1.5,hy+eyes[1][1]+1.5); ctx.stroke();
+    }
+}
+function drawAccessoryPropeller(hx, hy) {
+    ctx.fillStyle='#e03c3c'; ctx.fillRect(hx+4,hy-6,11,6);      // beanie
+    ctx.fillStyle='#f5d020'; ctx.fillRect(hx+4,hy-4,11,2);
+    ctx.fillStyle='#2aa84a'; ctx.fillRect(hx+4,hy-1,11,1);
+    ctx.fillStyle='#888888'; ctx.fillRect(hx+9,hy-9,2,3);       // stalk
+    ctx.fillStyle='#4a90d9'; ctx.fillRect(hx+3,hy-10,6,2);      // blade L
+    ctx.fillStyle='#e03c3c'; ctx.fillRect(hx+10,hy-10,6,2);     // blade R
+    ctx.fillStyle='#ffd700'; ctx.fillRect(hx+8,hy-11,3,3);      // hub
+}
+function drawAccessoryAdmincrown(hx, hy) {
+    ctx.save(); ctx.shadowColor='#00e5ff'; ctx.shadowBlur=6;
+    ctx.fillStyle='#ffe860';
+    ctx.fillRect(hx+1,hy-13,4,11); ctx.fillRect(hx+7,hy-16,5,14); ctx.fillRect(hx+14,hy-13,4,11);
+    ctx.fillRect(hx,hy-5,19,5);
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#cc9a00'; ctx.fillRect(hx,hy-5,19,1);
+    ctx.fillStyle='#00e5ff'; ctx.fillRect(hx+2,hy-15,2,2); ctx.fillRect(hx+8,hy-4,3,2); ctx.fillRect(hx+15,hy-15,2,2);
+    ctx.restore();
+}
 
 function drawAccessoryMoustache(hx, hy) {
     const eyes=eyeOffsets(dir);
@@ -670,13 +708,17 @@ function drawSnake(flash) {
                 ctx.fillRect(mx-1,my-1,3,3); ctx.restore();
             }
             if(si.shades)    drawAccessoryShades(x,y);
+            if(si.glasses3d) drawAccessoryGlasses3d(x,y);
             if(si.monocle)   drawAccessoryMonocle(x,y);
+            if(si.eyepatch)  drawAccessoryEyepatch(x,y);
             if(si.moustache) drawAccessoryMoustache(x,y);
             if(si.bow)       drawAccessoryBow(x,y,eyeDir);
             if(si.necktie)   drawAccessoryNecktie(x,y,eyeDir);
             if(si.cylinder)  drawAccessoryCylinder(x,y);
+            if(si.propeller) drawAccessoryPropeller(x,y);
             if(si.wizard)    drawAccessoryWizard(x,y);
             if(si.crown)     drawAccessoryCrown(x,y);
+            if(si.admincrown)drawAccessoryAdmincrown(x,y);
             if(si.halo)      drawAccessoryHalo(x,y);
         }
     });
@@ -1052,10 +1094,14 @@ function drawScoreHead(cx, cy, colorIdx, si) {
         if(si.bow)     drawAccessoryBow(0, 0);
         if(si.necktie) drawAccessoryNecktie(0, 0);
         if(si.shades)  { ctx.fillStyle='#111'; [3.5,17.5].forEach(ey=>{ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();}); }
+        if(si.glasses3d){ [['#ff2a2a',3.5],['#22e0ff',17.5]].forEach(([c,ey])=>{ctx.fillStyle='#111';ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();ctx.fillStyle=c;ctx.beginPath();ctx.arc(14.5,ey,2.6,0,Math.PI*2);ctx.fill();}); }
         if(si.monocle) { ctx.strokeStyle='#ccc'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(14.5,3.5,3.5,0,Math.PI*2); ctx.stroke(); }
+        if(si.eyepatch){ ctx.fillStyle='#0a0a0a'; ctx.beginPath(); ctx.ellipse(14.5,3.5,3.4,3,0,0,Math.PI*2); ctx.fill(); }
+        if(si.propeller)drawAccessoryPropeller(0, 0);
         if(si.wizard)   drawAccessoryWizard(0, 0);
         if(si.cylinder) drawAccessoryCylinder(0, 0);
         if(si.crown)    drawAccessoryCrown(0, 0);
+        if(si.admincrown)drawAccessoryAdmincrown(0, 0);
         if(si.halo)     drawAccessoryHalo(0, 0);
     }
     ctx.restore();
