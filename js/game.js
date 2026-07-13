@@ -405,6 +405,50 @@ function renderBarsOffscreen() {
     _barsCtx.clearRect(0,0,CW,CH); _prepBars(false); bars.forEach(b=>drawBar(b,_barsCtx));
 }
 
+// Pre-rendered gem sprites, built once at load. Fixed-colour gems (normal/lucky/
+// gouranga) are painted to a small offscreen canvas here; drawGem() blits them each
+// frame with the pulse applied as ctx.scale and the spin as ctx.rotate. Scaling a
+// sprite is geometrically identical to regenerating the gradients at that radius, so
+// this avoids a per-frame gradient + shadowBlur pass with no visible change. The epic
+// gem hue-cycles every frame, so it stays live.
+const _GEM_SZ=96;
+function _paintGemN(c,r,b){   // normal: cyan
+    const grd=c.createRadialGradient(0,0,0,0,0,r*2.2);
+    grd.addColorStop(0,'rgba(0,255,255,0.25)'); grd.addColorStop(1,'rgba(0,255,255,0)');
+    c.fillStyle=grd; c.beginPath(); c.arc(0,0,r*2.2,0,Math.PI*2); c.fill();
+    c.shadowColor='#00ffff'; c.shadowBlur=b;
+    const fg=c.createLinearGradient(0,-r,0,r);
+    fg.addColorStop(0,'#ffffff'); fg.addColorStop(0.35,'#00ffff'); fg.addColorStop(1,'#006688');
+    c.beginPath(); c.moveTo(0,-r); c.lineTo(r*0.65,0); c.lineTo(0,r); c.lineTo(-r*0.65,0); c.closePath();
+    c.fillStyle=fg; c.fill();
+}
+function _paintGemL(c,r,b){   // lucky: gold + white highlight
+    const grd=c.createRadialGradient(0,0,0,0,0,r*2.5);
+    grd.addColorStop(0,'rgba(255,215,0,0.32)'); grd.addColorStop(1,'rgba(255,215,0,0)');
+    c.fillStyle=grd; c.beginPath(); c.arc(0,0,r*2.5,0,Math.PI*2); c.fill();
+    c.shadowColor='#ffd700'; c.shadowBlur=b;
+    c.fillStyle='#ffd700';
+    c.beginPath(); c.moveTo(0,-r); c.lineTo(r*0.65,0); c.lineTo(0,r); c.lineTo(-r*0.65,0); c.closePath(); c.fill();
+    c.fillStyle='rgba(255,255,255,0.52)';
+    c.beginPath(); c.moveTo(0,-r); c.lineTo(r*0.65,0); c.lineTo(0,0); c.closePath(); c.fill();
+}
+function _paintGemG(c,r,b){   // gouranga: orange
+    const grd=c.createRadialGradient(0,0,0,0,0,r*2.2);
+    grd.addColorStop(0,'rgba(255,140,0,0.25)'); grd.addColorStop(1,'rgba(255,140,0,0)');
+    c.fillStyle=grd; c.beginPath(); c.arc(0,0,r*2.2,0,Math.PI*2); c.fill();
+    c.shadowColor='#ff8800'; c.shadowBlur=b;
+    const fg=c.createLinearGradient(0,-r,0,r);
+    fg.addColorStop(0,'#ffee88'); fg.addColorStop(0.35,'#ff8800'); fg.addColorStop(1,'#cc4400');
+    c.beginPath(); c.moveTo(0,-r); c.lineTo(r*0.65,0); c.lineTo(0,r); c.lineTo(-r*0.65,0); c.closePath();
+    c.fillStyle=fg; c.fill();
+}
+function _mkGemSprite(paint,r0,blur){
+    const cv=document.createElement('canvas'); cv.width=_GEM_SZ; cv.height=_GEM_SZ;
+    const c=cv.getContext('2d'); c.translate(_GEM_SZ/2,_GEM_SZ/2); paint(c,r0,blur); return cv;
+}
+const _gemSpriteN=_mkGemSprite(_paintGemN, CS/2-2, 14);
+const _gemSpriteL=_mkGemSprite(_paintGemL, CS/2-1, 18);
+const _gemSpriteG=_mkGemSprite(_paintGemG, CS/2-2, 14);
 function drawGem(g,now) {
     const cx=g.x*CS+CS/2, cy=g.y*CS+CS/2, t=(now-gemAt)/1000;
     const tier=g.tier||0;
@@ -448,42 +492,17 @@ function drawGem(g,now) {
             ctx.restore();
         }
     } else if(tier===1){
-        // Lucky gem: gold, faster spin
-        const r=(CS/2-1)*(1+0.15*Math.sin(t*7));
-        ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*3.5);
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.5);
-        grd.addColorStop(0,'rgba(255,215,0,0.32)'); grd.addColorStop(1,'rgba(255,215,0,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.5,0,Math.PI*2); ctx.fill();
-        ctx.shadowColor='#ffd700'; ctx.shadowBlur=18;
-        ctx.fillStyle='#ffd700';
-        ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath(); ctx.fill();
-        ctx.fillStyle='rgba(255,255,255,0.52)';
-        ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,0); ctx.closePath(); ctx.fill();
-        ctx.restore();
+        const sc=1+0.15*Math.sin(t*7);   // lucky
+        ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*3.5); ctx.scale(sc,sc);
+        ctx.drawImage(_gemSpriteL,-_GEM_SZ/2,-_GEM_SZ/2); ctx.restore();
     } else if(g.gouranga) {
-        // Gouranga gem: orange diamond
-        const r=(CS/2-2)*(1+0.12*Math.sin(t*5));
-        ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2);
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
-        grd.addColorStop(0,'rgba(255,140,0,0.25)'); grd.addColorStop(1,'rgba(255,140,0,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
-        ctx.shadowColor='#ff8800'; ctx.shadowBlur=14;
-        const fg=ctx.createLinearGradient(0,-r,0,r);
-        fg.addColorStop(0,'#ffee88'); fg.addColorStop(0.35,'#ff8800'); fg.addColorStop(1,'#cc4400');
-        ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath();
-        ctx.fillStyle=fg; ctx.fill(); ctx.restore();
+        const sc=1+0.12*Math.sin(t*5);   // gouranga
+        ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2); ctx.scale(sc,sc);
+        ctx.drawImage(_gemSpriteG,-_GEM_SZ/2,-_GEM_SZ/2); ctx.restore();
     } else {
-        // Normal gem: cyan diamond
-        const r=(CS/2-2)*(1+0.12*Math.sin(t*5));
-        ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2);
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
-        grd.addColorStop(0,'rgba(0,255,255,0.25)'); grd.addColorStop(1,'rgba(0,255,255,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
-        ctx.shadowColor='#00ffff'; ctx.shadowBlur=14;
-        const fg=ctx.createLinearGradient(0,-r,0,r);
-        fg.addColorStop(0,'#ffffff'); fg.addColorStop(0.35,'#00ffff'); fg.addColorStop(1,'#006688');
-        ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath();
-        ctx.fillStyle=fg; ctx.fill(); ctx.restore();
+        const sc=1+0.12*Math.sin(t*5);   // normal
+        ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2); ctx.scale(sc,sc);
+        ctx.drawImage(_gemSpriteN,-_GEM_SZ/2,-_GEM_SZ/2); ctx.restore();
     }
 }
 
