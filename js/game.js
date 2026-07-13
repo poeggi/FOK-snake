@@ -1889,8 +1889,11 @@ canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
+    // A pointer click (mouse / TV remote) acts as OK: start on splash, add-a-letter
+    // in name entry, confirm/select in every other menu. Not during gameplay.
     if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
-    else if (phase !== 'playing' && phase !== 'nameEntry') { handleKey('Enter', null); }
+    else if (phase === 'nameEntry') { handleKey('NameAdd', null); }
+    else if (phase !== 'playing') { handleKey('Enter', null); }
 });
 canvas.addEventListener('pointerup', e => {
     if (e.pointerType === 'touch') return;
@@ -1969,6 +1972,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) onBgH
 window.addEventListener('blur', onBgHide);
 window.addEventListener('focus', onBgShow);
 document.addEventListener('keydown', e=>{
+    // TV remotes (LG webOS etc.) send a "Back" key -- map it to the in-game Escape
+    // (quit-to-menu / back) instead of navigating the browser away.
+    if(e.keyCode===461||e.key==='BrowserBack'||e.key==='GoBack'||e.key==='XF86Back'){ e.preventDefault(); handleKey('Escape',null); return; }
     if(e.ctrlKey||e.metaKey||e.altKey) return;   // let browser/OS shortcuts (Ctrl+Shift+R etc.) through
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
