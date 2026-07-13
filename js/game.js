@@ -598,19 +598,47 @@ function drawAccessoryWizard(hx, hy) {
     ctx.fillRect(hx+8,hy-18,2,2); ctx.fillRect(hx+6,hy-8,1,1); ctx.fillRect(hx+11,hy-11,1,1);
 }
 
+// Perf: pre-build the segment rounded-rects once (filled translated each frame)
+// instead of rebuilding an 8-curve path per segment, and cache body colours so the
+// per-segment hsl() strings aren't reallocated every frame. Zero visual change;
+// falls back to rr() if Path2D is unavailable.
+const _mkSegPath = r => {
+    if (typeof Path2D === 'undefined') return null;
+    const p = new Path2D(), w = CS-2, h = CS-2;
+    p.moveTo(r,0); p.lineTo(w-r,0); p.quadraticCurveTo(w,0,w,r);
+    p.lineTo(w,h-r); p.quadraticCurveTo(w,h,w-r,h);
+    p.lineTo(r,h); p.quadraticCurveTo(0,h,0,h-r);
+    p.lineTo(0,r); p.quadraticCurveTo(0,0,r,0); p.closePath();
+    return p;
+};
+const _segPathBody = _mkSegPath(3), _segPathHead = _mkSegPath(5);
+let _bodyColCache = { h:-1, len:-1, cols:null };
+function _bodyCols(len, h) {
+    if (_bodyColCache.h !== h || _bodyColCache.len !== len) {
+        const cols = new Array(len);
+        for (let j=0; j<len; j++) { const l = Math.round(41*(0.5+0.5*(1-j/Math.max(len,1)))); cols[j] = `hsl(${h},65%,${l}%)`; }
+        _bodyColCache = { h, len, cols };
+    }
+    return _bodyColCache.cols;
+}
 function drawSnake(flash) {
     const sc=SNAKE_COLORS[cfg.snakeColor||0];
     const si=cfg.wornItems||{};
+    const cols = flash ? null : _bodyCols(snake.length, sc.h);
     snake.forEach((seg,i)=>{
-        const x=seg.x*CS+1,y=seg.y*CS+1,sw=CS-2,sh=CS-2,frac=1-i/Math.max(snake.length,1);
+        const x=seg.x*CS+1,y=seg.y*CS+1,sw=CS-2,sh=CS-2;
         if(i===0){
             ctx.fillStyle=flash?'#bb2222':sc.head;
             if(!flash){ctx.shadowColor=sc.head;ctx.shadowBlur=10;}
+        } else if(flash){
+            const l=Math.round(41*(0.5+0.5*(1-i/Math.max(snake.length,1))));
+            ctx.fillStyle=`hsl(0,55%,${l+8}%)`;
         } else {
-            const l=Math.round(41*(0.5+0.5*frac));
-            ctx.fillStyle=flash?`hsl(0,55%,${l+8}%)`:`hsl(${sc.h},65%,${l}%)`;
+            ctx.fillStyle=cols[i];
         }
-        rr(x,y,sw,sh,i===0?5:3); ctx.fill(); ctx.shadowBlur=0;
+        if(_segPathBody){ ctx.translate(x,y); ctx.fill(i===0?_segPathHead:_segPathBody); ctx.translate(-x,-y); }
+        else { rr(x,y,sw,sh,i===0?5:3); ctx.fill(); }
+        ctx.shadowBlur=0;
         if(i===0&&!flash){
             const eyeDir=dirQueue.length>0?dirQueue[0]:dir;
             ctx.fillStyle='#001500'; eyeOffsets(eyeDir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy,3,3));

@@ -57,6 +57,7 @@ function runInGame(driver) {
         Blob: class { constructor() {} }, URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
         FileReader: class { readAsText() {} },
         Image: class { constructor() { this.onload = null; } },
+        Path2D: class { moveTo() {} lineTo() {} quadraticCurveTo() {} arc() {} closePath() {} },
         addEventListener() {}, removeEventListener() {},
     };
     sandbox.window = sandbox;
