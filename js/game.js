@@ -1122,8 +1122,9 @@ function drawSettings() {
             ctx.restore();
         }
         // Transient backup/restore feedback in DATA MANAGEMENT
-        if(SETTINGS_CATS[settingsCat].label==='DATA MANAGEMENT'&&_dataMsg&&simNow-_dataMsgAt<2500)
-            ct(_dataMsg,CW/2,CH-32,'#7fff7f',10);
+        if(SETTINGS_CATS[settingsCat].label==='DATA MANAGEMENT'&&_dataMsg&&simNow-_dataMsgAt<2500){
+            ctx.shadowColor='#7fff7f'; ctx.shadowBlur=12; ct(_dataMsg,CW/2,CH-34,'#7fff7f',14); ctx.shadowBlur=0;
+        }
     }
     const hint=inCat?'UP/DN:nav  L/R:change  A:select  ESC:back':'UP/DN:nav  A:open  ESC:back';
     ct(hint,CW/2,CH-10,'#888',10);
