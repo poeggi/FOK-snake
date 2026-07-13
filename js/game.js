@@ -457,9 +457,11 @@ function drawGem(g,now) {
             });
         }
         // Outer glow
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.8);
-        grd.addColorStop(0,`hsla(${hue},100%,65%,0.22)`); grd.addColorStop(1,`hsla(${hue},100%,65%,0)`);
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.8,0,Math.PI*2); ctx.fill();
+        if(!cfg.disableGlow){
+            const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.8);
+            grd.addColorStop(0,`hsla(${hue},100%,65%,0.22)`); grd.addColorStop(1,`hsla(${hue},100%,65%,0)`);
+            ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.8,0,Math.PI*2); ctx.fill();
+        }
         // Diamond
         ctx.shadowColor=`hsl(${hue},100%,70%)`; ctx.shadowBlur=12;
         ctx.fillStyle=`hsl(${hue},100%,65%)`;
@@ -481,9 +483,11 @@ function drawGem(g,now) {
         // Lucky gem: gold, faster spin
         const r=(CS/2-1)*(1+0.15*Math.sin(t*7));
         ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*3.5);
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.5);
-        grd.addColorStop(0,'rgba(255,215,0,0.32)'); grd.addColorStop(1,'rgba(255,215,0,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.5,0,Math.PI*2); ctx.fill();
+        if(!cfg.disableGlow){
+            const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.5);
+            grd.addColorStop(0,'rgba(255,215,0,0.32)'); grd.addColorStop(1,'rgba(255,215,0,0)');
+            ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.5,0,Math.PI*2); ctx.fill();
+        }
         ctx.shadowColor='#ffd700'; ctx.shadowBlur=18;
         ctx.fillStyle='#ffd700';
         ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.65,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.65,0); ctx.closePath(); ctx.fill();
@@ -494,9 +498,11 @@ function drawGem(g,now) {
         // Gouranga gem: orange diamond
         const r=(CS/2-2)*(1+0.12*Math.sin(t*5));
         ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2);
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
-        grd.addColorStop(0,'rgba(255,140,0,0.25)'); grd.addColorStop(1,'rgba(255,140,0,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
+        if(!cfg.disableGlow){
+            const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
+            grd.addColorStop(0,'rgba(255,140,0,0.25)'); grd.addColorStop(1,'rgba(255,140,0,0)');
+            ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
+        }
         ctx.shadowColor='#ff8800'; ctx.shadowBlur=14;
         const fg=ctx.createLinearGradient(0,-r,0,r);
         fg.addColorStop(0,'#ffee88'); fg.addColorStop(0.35,'#ff8800'); fg.addColorStop(1,'#cc4400');
@@ -506,9 +512,11 @@ function drawGem(g,now) {
         // Normal gem: cyan diamond
         const r=(CS/2-2)*(1+0.12*Math.sin(t*5));
         ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*2);
-        const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
-        grd.addColorStop(0,'rgba(0,255,255,0.25)'); grd.addColorStop(1,'rgba(0,255,255,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
+        if(!cfg.disableGlow){
+            const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.2);
+            grd.addColorStop(0,'rgba(0,255,255,0.25)'); grd.addColorStop(1,'rgba(0,255,255,0)');
+            ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.fill();
+        }
         ctx.shadowColor='#00ffff'; ctx.shadowBlur=14;
         const fg=ctx.createLinearGradient(0,-r,0,r);
         fg.addColorStop(0,'#ffffff'); fg.addColorStop(0.35,'#00ffff'); fg.addColorStop(1,'#006688');
@@ -1248,7 +1256,7 @@ function _drawBoxIcon(x,y,box,s){
     ctx.restore();
 }
 function _drawBoxesPage(){
-    const coins=_cachedFOKoins, startY=62, rowH=52;
+    const coins=_cachedFOKoins, startY=72, rowH=52;
     BOXES.forEach((box,i)=>{
         const y=startY+i*rowH, sel=i===shopSel, canAfford=coins>=box.price;
         ctx.fillStyle=sel?'rgba(45,45,45,0.7)':'rgba(10,10,10,0.35)';
@@ -1296,16 +1304,30 @@ function _drawBoxReveal(){
         ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',12); }
     ctx.shadowBlur=0; ctx.restore();
 }
+// Retro tab strip: all three shop pages visible at once, active one lit.
+function _drawShopTabs(){
+    const labels=['COSMETICS 1','COSMETICS 2','MYSTERY BOXES'];
+    const m=6, tabH=20, tabY=42, tabW=(CW-2*m)/3;
+    for(let i=0;i<labels.length;i++){
+        const tx=m+i*tabW, active=(i===shopPage), isBox=(i===BOX_PAGE), hi=isBox?'#c48af0':'#7fff7f';
+        ctx.fillStyle=active?(isBox?'rgba(68,40,96,0.85)':'rgba(28,60,20,0.85)'):'rgba(16,16,16,0.6)';
+        rr(tx+2,tabY,tabW-4,tabH,4); ctx.fill();
+        ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi:'#3a3a3a';
+        if(active){ ctx.shadowColor=hi; ctx.shadowBlur=8; }
+        rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
+        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?(isBox?'#e6c0ff':'#bfffbf'):'#666666', 8);
+    }
+}
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
-    ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,28,'#ffd700',18); ctx.shadowBlur=0;
-    ct(shopPage<BOX_PAGE ? '< COSMETICS '+(shopPage+1)+'/2 >' : '< MYSTERY BOXES >', CW/2,44, shopPage<BOX_PAGE?'#aa8844':'#c48af0', 9);
+    ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,26,'#ffd700',18); ctx.shadowBlur=0;
+    _drawShopTabs();
     const coins=_cachedFOKoins;
     if(shopPage>=BOX_PAGE){ _drawBoxesPage(); }
     else {
     const si=cfg.shopItems||{}, wi=cfg.wornItems||{};
     const items=SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
-    const startY=56, rowH=44;
+    const startY=72, rowH=44;
     items.forEach((item,i)=>{
         const y=startY+i*rowH, sel=i===shopSel;
         const isRep=!!item.repeatable;
@@ -1349,7 +1371,7 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct(shopPage>=BOX_PAGE ? 'UP/DN:nav  L/R:page  A:open  ESC:back' : 'UP/DN:nav  L/R:page  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
+    ct(shopPage>=BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back' : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=simNow;
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1936,7 +1958,7 @@ function handleKey(key, pde) {
         }
         if(phase==='resetConfirm'){ phase='settings'; if(pde)pde(); return; }
         if(phase==='settings'){
-            if(settingsCat>=0){ settingsCat=-1; settingsSel=0; } else phase='menu';
+            if(settingsCat>=0){ settingsSel=settingsCat; settingsCat=-1; } else phase='menu';
             Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return;
         }
         if(phase==='scores'||phase==='credits'||phase==='shop'||phase==='news'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
@@ -1967,7 +1989,7 @@ function handleKey(key, pde) {
         if(key==='Enter'){
             if(onBack){
                 Snd.sfxPlay('nav',cfg.music);
-                if(inCat){settingsCat=-1;settingsSel=0;} else phase='menu';
+                if(inCat){settingsSel=settingsCat;settingsCat=-1;} else phase='menu';
             } else if(!inCat){
                 Snd.sfxPlay('select',cfg.music); settingsCat=settingsSel; settingsSel=0;
             } else {
@@ -2004,7 +2026,8 @@ function handleKey(key, pde) {
         const items = onBoxes ? BOXES : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
         if(key==='ArrowUp'){ shopSel=(shopSel-1+items.length)%items.length; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='ArrowDown'){ shopSel=(shopSel+1)%items.length; Snd.sfxPlay('nav',cfg.music); }
-        else if(key==='ArrowLeft'||key==='ArrowRight'){ shopPage=(shopPage+1)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowLeft'){ shopPage=(shopPage-1+SHOP_PAGES)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowRight'){ shopPage=(shopPage+1)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='Enter'){
             if(onBoxes){ _openBox(BOXES[shopSel]); }
             else {
