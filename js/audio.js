@@ -204,7 +204,7 @@ const Snd = (() => {
     }
 
     function musicGameUnpause() {
-        if (!_ctx || !_currentTrack) return;
+        if (!_ctx || !_currentTrack || !_musicIsPaused) return;   // only resume if actually paused
         _musicIsPaused = false;
         const now = _ctx.currentTime;
         _channelState.forEach(s => { s.nextNote = now + 0.05; });
