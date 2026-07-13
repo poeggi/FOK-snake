@@ -2554,11 +2554,11 @@ requestAnimationFrame(syncLandscapePanels);
 // Scale SND/FPS font to match canvas display size when the canvas is CSS-upscaled beyond its 600px native width
 function syncFontScale() {
     const scale = canvas.getBoundingClientRect().width / CW;
-    // One knob drives every DOM chrome font-size (calc(var(--fs-*) * var(--ui-scale)))
-    // so the chrome scales with the CSS-upscaled canvas exactly like canvas text does.
+    // One knob drives every DOM chrome font-size AND the SND/FPS box dims (all
+    // calc(... * var(--ui-scale))), so the chrome scales with the canvas. The box
+    // heights come from CSS now; only the speaker icon canvas is sized here.
     document.documentElement.style.setProperty('--ui-scale', scale);
     const iconH=Math.round(16*scale); _muteCv.style.height=iconH+'px'; _muteCv.style.width=(iconH*2)+'px';
-    fpsEl.style.height=(iconH+8)+'px'; // match speaker: canvas + 2*padding + 2*border
 }
 window.addEventListener('resize', syncFontScale);
 window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120));
