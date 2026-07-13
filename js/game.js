@@ -1239,9 +1239,25 @@ function drawAchPopups(now) {
     ctx.textAlign='center'; ctx.textBaseline='middle';
 }
 
-// Mystery-box shop page. SHOP_PAGES: 0,1 = cosmetics; 2 = mystery boxes.
-const SHOP_PAGES = 3, BOX_PAGE = 2;
+// Shop tabs: 0,1 = cosmetics; 2 = BOX GEAR (box-won cosmetics, wearable); 3 = mystery boxes.
+const SHOP_PAGES = 4, GEAR_PAGE = 2, BOX_PAGE = 3;
+function _gearList(){ const si=cfg.shopItems||{}; return BOX_ITEMS.filter(b=>si[b.id]); }
 let _boxOpenAt = 0, _boxReward = null;
+// ADMIN box: surfaces on the boxes tab once every ADMIN_BOX_EVERY shop opens, then is
+// consumed for the run once claimed. _boxList() appends it only while available.
+let _adminAvail = false, _adminConsumed = false;
+function _boxList(){ return (_adminAvail && !_adminConsumed) ? BOXES.concat([ADMIN_BOX]) : BOXES; }
+// Enter the shop: count the open, decide whether the ADMIN box is up this visit, and
+// jump straight to it (boxes tab, selected) when it is so the grand prize is unmissable.
+function _enterShop(){
+    cfg.shopOpens = (cfg.shopOpens||0) + 1;
+    _adminAvail = (cfg.shopOpens % ADMIN_BOX_EVERY === 0);
+    _adminConsumed = false;
+    phase='shop'; purchaseAnimAt=0;
+    shopPage = _adminAvail ? BOX_PAGE : 0;
+    shopSel  = _adminAvail ? BOXES.length : 0;
+    saveCfg();
+}
 function _findItem(id){ return SHOP_ITEMS.find(i=>i.id===id) || BOX_ITEMS.find(i=>i.id===id); }
 const _RARITY_COL = { common:'#9aa0a6', rare:'#4a90d9', epic:'#9b59b6', legendary:'#f1c40f' };
 function _drawBoxIcon(x,y,box,s){
@@ -1257,31 +1273,66 @@ function _drawBoxIcon(x,y,box,s){
 }
 function _drawBoxesPage(){
     const coins=_cachedFOKoins, startY=72, rowH=52;
-    BOXES.forEach((box,i)=>{
-        const y=startY+i*rowH, sel=i===shopSel, canAfford=coins>=box.price;
-        ctx.fillStyle=sel?'rgba(45,45,45,0.7)':'rgba(10,10,10,0.35)';
+    _boxList().forEach((box,i)=>{
+        const y=startY+i*rowH, sel=i===shopSel, isAdmin=box.id==='admin';
+        const canAfford=isAdmin||coins>=box.price, bc=isAdmin?'#ffd700':box.color;
+        ctx.fillStyle=sel?(isAdmin?'rgba(60,42,10,0.75)':'rgba(45,45,45,0.7)'):(isAdmin?'rgba(40,26,6,0.5)':'rgba(10,10,10,0.35)');
         rr(8,y,CW-16,rowH-6,5); ctx.fill();
-        ctx.strokeStyle=sel?box.color:'#3a3a3a'; ctx.lineWidth=sel?2:1.2; rr(8,y,CW-16,rowH-6,5); ctx.stroke();
+        if(isAdmin){ ctx.shadowColor='#ffd700'; ctx.shadowBlur=sel?14:8; }
+        ctx.strokeStyle=sel?bc:(isAdmin?'#caa100':'#3a3a3a'); ctx.lineWidth=sel?2:(isAdmin?1.8:1.2); rr(8,y,CW-16,rowH-6,5); ctx.stroke();
+        ctx.shadowBlur=0;
         _drawBoxIcon(18,y+8,box,28);
         ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.font='12px "Press Start 2P"'; ctx.fillStyle=box.color; ctx.fillText(box.name+' BOX',60,y+10);
-        ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#999999'; ctx.fillText('Rarer loot at higher tiers',60,y+28);
+        ctx.font='12px "Press Start 2P"'; ctx.fillStyle=bc; ctx.fillText(box.name+' BOX',60,y+10);
+        ctx.font='9px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#ffcf55':'#999999';
+        ctx.fillText(isAdmin?'GRAND PRIZE - guaranteed ADMIN CROWN':'Rarer loot at higher tiers',60,y+28);
         ctx.textAlign='right';
-        ctx.font='11px "Press Start 2P"'; ctx.fillStyle=canAfford?'#ffd700':'#553322';
-        ctx.fillText(box.price.toLocaleString()+' FK',CW-18,y+11);
+        ctx.font='11px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#5aff8a':(canAfford?'#ffd700':'#553322');
+        ctx.fillText(isAdmin?'FREE':box.price.toLocaleString()+' FK',CW-18,y+11);
         if(sel){ ctx.font='9px "Press Start 2P"'; ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
-            ctx.fillText(canAfford?'ENTER to open':'Not enough FK',CW-18,y+29); }
+            ctx.fillText(canAfford?(isAdmin?'ENTER to claim':'ENTER to open'):'Not enough FK',CW-18,y+29); }
     });
 }
-// Buy + open a box: deduct, roll, grant (item / dupe-refund / coins), trigger reveal.
+// Owned box-exclusive cosmetics, wearable here (they don't fit the buyable cosmetics tabs).
+function _drawGearPage(){
+    const wi=cfg.wornItems||{}, gear=_gearList();
+    if(!gear.length){
+        ct('NO BOX GEAR YET',CW/2,CH/2-16,'#888888',12);
+        ct('Win exclusive cosmetics from Mystery Boxes',CW/2,CH/2+10,'#9b6ad0',8);
+        return;
+    }
+    const startY=72, rowH=44;
+    gear.forEach((item,i)=>{
+        const y=startY+i*rowH, sel=i===shopSel, worn=!!wi[item.id], rc=_RARITY_COL[item.rarity]||'#7fff7f';
+        ctx.fillStyle=worn?(sel?'rgba(40,64,40,0.7)':'rgba(20,48,20,0.5)'):(sel?'rgba(20,40,55,0.7)':'rgba(10,25,40,0.5)');
+        rr(8,y,CW-16,rowH-4,5); ctx.fill();
+        ctx.strokeStyle=worn?'#7fff7f':rc; ctx.lineWidth=1.5; rr(8,y,CW-16,rowH-4,5); ctx.stroke();
+        drawPixelIcon(16,y+(rowH-4)/2-8,item.icon,2);
+        ctx.textAlign='left'; ctx.textBaseline='top';
+        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=worn?'#7fff7f':'#dddddd'; ctx.fillText(item.name,46,y+7);
+        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=rc; ctx.fillText((item.rarity||'').toUpperCase()+' - BOX EXCLUSIVE',46,y+21);
+        ctx.textAlign='right';
+        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=worn?'#7fff7f':'#4a7a9a'; ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
+        if(sel){ ctx.font='10px "Press Start 2P"'; ctx.fillStyle=worn?'#cc5555':'#5aaa5a'; ctx.fillText(worn?'SPACE to remove':'SPACE to wear',CW-18,y+23); }
+    });
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+}
+// Buy + open a box: deduct, roll, grant (item / dupe-sell / coins), trigger reveal.
 function _openBox(box){
+    if(box.id==='admin'){
+        const si=cfg.shopItems||(cfg.shopItems={});
+        _adminConsumed=true;
+        if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',refund}; }
+        else { si.admincrown=true; _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
+        saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('perfect',cfg.music); return;
+    }
     if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
     _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch{}
     const res=rollBox(box);
     if(res.type==='coins'){ addFOKoins(res.amount); _boxReward={kind:'coins',amount:res.amount}; }
     else {
         const si=cfg.shopItems||(cfg.shopItems={});
-        if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.4); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,refund}; }
+        if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,refund}; }
         else { si[res.id]=true; if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
     }
     saveCfg();
@@ -1297,25 +1348,28 @@ function _drawBoxReveal(){
     const r=_boxReward;
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=18;
     if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',10); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',18); }
-    else if(r.kind==='dupe'){ ct('DUPLICATE',CW/2,CH/2-16,'#aaaaaa',12); ct('REFUND +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+12,'#ffd700',12); }
+    else if(r.kind==='dupe'){ ct('DUPLICATE - SOLD',CW/2,CH/2-16,'#aaaaaa',11); ct('+'+r.refund.toLocaleString()+' FK',CW/2,CH/2+12,'#ffd700',14); }
     else { const it=_findItem(r.id), rc=_RARITY_COL[r.rarity]||'#fff';
         if(it&&it.icon) drawPixelIcon(CW/2-16,CH/2-46,it.icon,4);
         ct((r.rarity||'').toUpperCase(),CW/2,CH/2+10,rc,10);
         ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',12); }
     ctx.shadowBlur=0; ctx.restore();
 }
-// Retro tab strip: all three shop pages visible at once, active one lit.
+// Retro tab strip: all four shop pages visible at once, active one lit.
 function _drawShopTabs(){
-    const labels=['COSMETICS 1','COSMETICS 2','MYSTERY BOXES'];
-    const m=6, tabH=20, tabY=42, tabW=(CW-2*m)/3;
+    const labels=['COSMETICS 1','COSMETICS 2','BOX GEAR','MYSTERY BOXES'];
+    const hi   =['#7fff7f','#7fff7f','#4ad0ff','#c48af0'];
+    const fill =['rgba(28,60,20,0.85)','rgba(28,60,20,0.85)','rgba(16,44,60,0.85)','rgba(68,40,96,0.85)'];
+    const txt  =['#bfffbf','#bfffbf','#bfe8ff','#e6c0ff'];
+    const m=6, tabH=20, tabY=42, tabW=(CW-2*m)/labels.length;
     for(let i=0;i<labels.length;i++){
-        const tx=m+i*tabW, active=(i===shopPage), isBox=(i===BOX_PAGE), hi=isBox?'#c48af0':'#7fff7f';
-        ctx.fillStyle=active?(isBox?'rgba(68,40,96,0.85)':'rgba(28,60,20,0.85)'):'rgba(16,16,16,0.6)';
+        const tx=m+i*tabW, active=(i===shopPage);
+        ctx.fillStyle=active?fill[i]:'rgba(16,16,16,0.6)';
         rr(tx+2,tabY,tabW-4,tabH,4); ctx.fill();
-        ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi:'#3a3a3a';
-        if(active){ ctx.shadowColor=hi; ctx.shadowBlur=8; }
+        ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi[i]:'#3a3a3a';
+        if(active){ ctx.shadowColor=hi[i]; ctx.shadowBlur=8; }
         rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
-        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?(isBox?'#e6c0ff':'#bfffbf'):'#666666', 8);
+        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', 8);
     }
 }
 function drawShop() {
@@ -1323,7 +1377,8 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,26,'#ffd700',18); ctx.shadowBlur=0;
     _drawShopTabs();
     const coins=_cachedFOKoins;
-    if(shopPage>=BOX_PAGE){ _drawBoxesPage(); }
+    if(shopPage===BOX_PAGE){ _drawBoxesPage(); }
+    else if(shopPage===GEAR_PAGE){ _drawGearPage(); }
     else {
     const si=cfg.shopItems||{}, wi=cfg.wornItems||{};
     const items=SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
@@ -1371,7 +1426,9 @@ function drawShop() {
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct(shopPage>=BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back' : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
+    ct(shopPage===BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back'
+       : shopPage===GEAR_PAGE ? 'UP/DN:nav  L/R:tab  A/||:wear  ESC:back'
+       : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=simNow;
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1975,7 +2032,7 @@ function handleKey(key, pde) {
             else if(menuSel===1){phase='settings';settingsCat=-1;settingsSel=0;}
             else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
             else if(menuSel===3){phase='achievements';achPage=0;}
-            else if(menuSel===4){phase='shop';shopSel=0;shopPage=0;purchaseAnimAt=0;}
+            else if(menuSel===4){_enterShop();}
             else if(menuSel===5){phase='credits';creditsScroll=CH-20;creditsSpeed=0.8;_creditsNormal=0.8;}
             else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=simNow;}
             if(pde)pde();
@@ -2022,14 +2079,16 @@ function handleKey(key, pde) {
         Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
     }
     else if(phase==='shop'){
-        const onBoxes = shopPage>=BOX_PAGE;
-        const items = onBoxes ? BOXES : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
-        if(key==='ArrowUp'){ shopSel=(shopSel-1+items.length)%items.length; Snd.sfxPlay('nav',cfg.music); }
-        else if(key==='ArrowDown'){ shopSel=(shopSel+1)%items.length; Snd.sfxPlay('nav',cfg.music); }
+        const onBoxes = shopPage===BOX_PAGE, onGear = shopPage===GEAR_PAGE;
+        const items = onBoxes ? _boxList() : onGear ? _gearList() : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
+        if(key==='ArrowUp'){ if(items.length){ shopSel=(shopSel-1+items.length)%items.length; Snd.sfxPlay('nav',cfg.music); } }
+        else if(key==='ArrowDown'){ if(items.length){ shopSel=(shopSel+1)%items.length; Snd.sfxPlay('nav',cfg.music); } }
         else if(key==='ArrowLeft'){ shopPage=(shopPage-1+SHOP_PAGES)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='ArrowRight'){ shopPage=(shopPage+1)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='Enter'){
-            if(onBoxes){ _openBox(BOXES[shopSel]); }
+            if(onBoxes){ const b=_boxList()[shopSel]; if(b) _openBox(b); }
+            else if(onGear){ const item=items[shopSel], wi=cfg.wornItems||(cfg.wornItems={});
+                if(item){ if(wi[item.id]) delete wi[item.id]; else wi[item.id]=true; saveCfg(); Snd.sfxPlay('nav',cfg.music); } }
             else {
                 const item=items[shopSel];
                 const si=cfg.shopItems||(cfg.shopItems={});

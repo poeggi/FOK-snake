@@ -99,6 +99,22 @@ const driver = `
     if(!_boxReward) throw 'opening a box produced no reward';
     log('mystery box shop ok: reward='+_boxReward.kind);
 
+    // Box gear tab: a won box-exclusive cosmetic appears there and is wearable.
+    cfg.shopItems=Object.assign(cfg.shopItems||{},{eyepatch:true}); cfg.wornItems={};
+    if(!_gearList().some(g=>g.id==='eyepatch')) throw 'won box item missing from BOX GEAR list';
+    shopPage=GEAR_PAGE; shopSel=0; drawShop();
+    press(' '); if(!cfg.wornItems.eyepatch) throw 'BOX GEAR: SPACE did not wear the item';
+    press(' '); if(cfg.wornItems.eyepatch)  throw 'BOX GEAR: SPACE did not remove the item';
+    log('box gear tab ok');
+
+    // ADMIN box: offered only when available, grants the guaranteed crown, then is consumed.
+    _adminAvail=true; _adminConsumed=false; delete cfg.shopItems.admincrown;
+    if(_boxList().length!==BOXES.length+1) throw 'ADMIN box not offered when available';
+    _openBox(ADMIN_BOX);
+    if(!(cfg.shopItems.admincrown && _adminConsumed)) throw 'ADMIN box did not grant + consume';
+    if(_boxList().length!==BOXES.length) throw 'ADMIN box still offered after being claimed';
+    log('admin box ok');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

@@ -208,3 +208,6 @@ const BOXES = [
 ];
 const BOX_PITY = 8;          // consecutive junk pulls (coins/common) then a guaranteed upgrade
 const ADMIN_BOX_EVERY = 750; // ADMIN box appears once every N shop opens
+// The GRAND FINALE: a free box that surfaces once every ADMIN_BOX_EVERY shop opens and
+// hands out the ADMIN CROWN -- the one cosmetic you cannot buy or win any other way.
+const ADMIN_BOX = { id:'admin', name:'ADMIN', color:'#ff4455', price:0 };
