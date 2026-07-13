@@ -820,7 +820,7 @@ function drawSplash(now) {
     ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 38;
     ct('S N A K E', CW/2, 78, '#7fff7f', 40);
     ctx.shadowBlur = 0;
-    ctx.shadowColor='#4a7a4a'; ctx.shadowBlur=1; ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', 8); ctx.shadowBlur=0;
+    ctx.shadowColor='#4a7a4a'; ctx.shadowBlur=1; ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', 10); ctx.shadowBlur=0;
 
     // Per-frame coin/spark state
     let showCoin = false, coinY = startY, scaleX = 1, spinAngle = 0;
@@ -982,14 +982,14 @@ function _drawNewspaperPage(now) {
     drawScoreHead(px+52, _logoY, _logoCol, _logoSi);
     ctx.save(); ctx.translate(_logoRx,0); ctx.scale(-1,1); ctx.translate(-_logoRx,0);
     drawScoreHead(_logoRx, _logoY, _logoCol, _logoSi); ctx.restore();
-    ct('EXTRA * EXTRA * READ ALL ABOUT IT', cx, py+72, '#6a5f4a', 8);
+    ct('EXTRA * EXTRA * READ ALL ABOUT IT', cx, py+72, '#6a5f4a', 10);
     const pages=(ANNOUNCEMENT&&ANNOUNCEMENT.pages)||[ANNOUNCEMENT||{lines:[]}];
     const a=pages[Math.min(newsPage,pages.length-1)]||{lines:[]};
     ct(a.headline||'', cx, py+108, '#8a1810', 14);                  // headline
     let y=py+146;
     (a.lines||[]).forEach(line=>{ if(line===''){ y+=10; return; } ct(line, cx, y, '#2a281e', 10); y+=22; });
     if(pages.length>1){                                             // page flipper
-        ct('< '+(newsPage+1)+' / '+pages.length+' >', cx, py+ph-20, '#6a5f4a', 8);
+        ct('< '+(newsPage+1)+' / '+pages.length+' >', cx, py+ph-20, '#6a5f4a', 10);
     }
 }
 let _newsAt = 0, newsPage = 0;
@@ -1330,13 +1330,13 @@ function _drawBoxesPage(){
         ctx.shadowBlur=0;
         _drawBoxIcon(18,y+8,box,28);
         ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.font='12px "Press Start 2P"'; ctx.fillStyle=bc; ctx.fillText(box.name+' BOX',60,y+10);
-        ctx.font='9px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#ffcf55':'#999999';
+        ctx.font='14px "Press Start 2P"'; ctx.fillStyle=bc; ctx.fillText(box.name+' BOX',60,y+10);
+        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#ffcf55':'#999999';
         ctx.fillText(isAdmin?'GRAND PRIZE - guaranteed ADMIN CROWN':'Rarer loot at higher tiers',60,y+28);
         ctx.textAlign='right';
-        ctx.font='11px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#5aff8a':(canAfford?'#ffd700':'#553322');
+        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#5aff8a':(canAfford?'#ffd700':'#553322');
         ctx.fillText(isAdmin?'FREE':box.price.toLocaleString()+' FK',CW-18,y+11);
-        if(sel){ ctx.font='9px "Press Start 2P"'; ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
+        if(sel){ ctx.font='10px "Press Start 2P"'; ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
             ctx.fillText(canAfford?(isAdmin?'ENTER to claim':'ENTER to open'):'Not enough FK',CW-18,y+29); }
     });
 }
@@ -1344,8 +1344,8 @@ function _drawBoxesPage(){
 function _drawGearPage(){
     const wi=cfg.wornItems||{}, gear=_gearList();
     if(!gear.length){
-        ct('NO BOX GEAR YET',CW/2,CH/2-16,'#888888',12);
-        ct('Win exclusive cosmetics from Mystery Boxes',CW/2,CH/2+10,'#9b6ad0',8);
+        ct('NO BOX GEAR YET',CW/2,CH/2-16,'#888888',14);
+        ct('Win exclusive cosmetics from Mystery Boxes',CW/2,CH/2+10,'#9b6ad0',10);
         return;
     }
     const startY=72, rowH=44;
@@ -1397,13 +1397,13 @@ function _drawBoxReveal(){
     if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',10); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',18); }
     else if(r.kind==='dupe'){ const dit=_findItem(r.id), drc=_RARITY_COL[r.rarity]||'#aaaaaa';
         if(dit&&dit.icon) drawPixelIcon(CW/2-16,CH/2-52,dit.icon,4);
-        ct(dit?dit.name:r.id,CW/2,CH/2+2,'#ffffff',12);
-        ct('DUPLICATE',CW/2,CH/2+22,drc,9);
-        ct('SOLD +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+40,'#ffd700',11); }
+        ct(dit?dit.name:r.id,CW/2,CH/2+2,'#ffffff',14);
+        ct('DUPLICATE',CW/2,CH/2+22,drc,10);
+        ct('SOLD +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+40,'#ffd700',10); }
     else { const it=_findItem(r.id), rc=_RARITY_COL[r.rarity]||'#fff';
         if(it&&it.icon) drawPixelIcon(CW/2-16,CH/2-46,it.icon,4);
         ct((r.rarity||'').toUpperCase(),CW/2,CH/2+10,rc,10);
-        ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',12); }
+        ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',14); }
     ctx.shadowBlur=0; ctx.restore();
 }
 // Retro tab strip: all four shop pages visible at once, active one lit.
@@ -1516,7 +1516,7 @@ function drawCredits() {
                     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=38;
                     ct(val, CW/2, yc, '#7fff7f', 40); ctx.shadowBlur=0; break;
                 case 'sub':
-                    ct(val, CW/2, yc, '#4a7a4a', 8); break;
+                    ct(val, CW/2, yc, '#4a7a4a', 10); break;
                 case 'hdr':
                     ctx.shadowColor='#00cccc'; ctx.shadowBlur=6;
                     ct(val, CW/2, yc, '#00cccc', 14); ctx.shadowBlur=0; break;
@@ -1572,7 +1572,7 @@ function drawNameEntry(now) {
         ctx.strokeStyle='#2a5a2a'; ctx.lineWidth=1; rr(CW/2-20,selY-12,40,22,3); ctx.stroke();
         for(let d=-2;d<=2;d++){
             const raw=NAME_CHARS[(ci+d+NAME_CHARS.length)%NAME_CHARS.length];
-            const y=selY+d*22, sz=d===0?14:8;
+            const y=selY+d*22, sz=d===0?14:10;
             const col=d===0?'#7fff7f':Math.abs(d)===1?'#888':'#555';
             const al=d===0?1:Math.abs(d)===2?0.35:0.75;
             if(d===0){ctx.shadowColor='#7fff7f';ctx.shadowBlur=12;}
