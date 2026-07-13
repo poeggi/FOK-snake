@@ -11,7 +11,7 @@ body {
 #hud {
     display: flex; flex-direction: column; gap: 3px;
     width: min(600px, calc(100vw - 16px));
-    font-size: 12px; letter-spacing: 0;
+    font-size: calc(var(--fs-menu) * var(--ui-scale)); letter-spacing: 0;
     opacity: 1; transition: opacity 0.15s;
     order: 1;
 }
@@ -35,7 +35,7 @@ body {
     border-radius: 3px; padding: 0 4px;
     -webkit-appearance: none; appearance: none;
 }
-#fps-el { font: 8px 'Press Start 2P',monospace; color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
+#fps-el { font-family: 'Press Start 2P',monospace; font-size: calc(var(--fs-hint) * var(--ui-scale)); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -49,7 +49,7 @@ body {
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {
     background: #0d180d; border: 1px solid #3a5a3a; color: #7fff7f;
-    font: 8px 'Press Start 2P',monospace; cursor: pointer; border-radius: 6px;
+    font-family: 'Press Start 2P',monospace; font-size: calc(var(--fs-hint) * var(--ui-scale)); cursor: pointer; border-radius: 6px;
     -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center;
 }
 .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }

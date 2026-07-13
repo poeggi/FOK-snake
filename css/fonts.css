@@ -3,3 +3,15 @@
     font-display: swap;
     src: url('../fonts/PressStart2P-Regular.woff2') format('woff2');
 }
+
+/* Font-size scale -- SINGLE SOURCE OF TRUTH for both the canvas (read into the JS
+   FONT object) and the DOM chrome (via var() below). Change a size here, once.
+   DOM chrome multiplies by --ui-scale so it grows with the CSS-upscaled canvas. */
+:root {
+    --fs-display: 40px;   /* SNAKE logo, final score number      */
+    --fs-jumbo:   26px;   /* big overlays: WIN/OVER/GO/PAUSED     */
+    --fs-title:   18px;   /* screen headings (SHOP, SCORES, ...)  */
+    --fs-menu:    14px;   /* menu items, HUD readout, prompts     */
+    --fs-hint:    10px;   /* hints, body copy, FPS, gamepad btns  */
+    --ui-scale: 1;        /* JS keeps this = canvasDisplayWidth / 600 */
+}

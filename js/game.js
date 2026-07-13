@@ -21,6 +21,14 @@ function drawPixelIcon(x, y, icon, cs) {
 const canvas = document.getElementById('c');
 canvas.width = CW; canvas.height = CH;
 const ctx = canvas.getContext('2d');
+// Canvas font sizes: declared in css/fonts.css (:root --fs-*), read once here so the
+// canvas and the DOM chrome share one source. Hardcoded fallbacks keep the headless
+// tests (no getComputedStyle) working. Use FONT.* at every call site -- never a raw px.
+const FONT = (() => {
+    let rt = null; try { rt = getComputedStyle(document.documentElement); } catch(_) {}
+    const px = (n, def) => { try { return parseInt(rt.getPropertyValue('--fs-' + n)) || def; } catch(_) { return def; } };
+    return { DISPLAY: px('display',40), JUMBO: px('jumbo',26), TITLE: px('title',18), MENU: px('menu',14), HINT: px('hint',10) };
+})();
 
 // ================================================================
 // PERSISTENCE
@@ -377,13 +385,13 @@ _composeBg();
 function drawOvBg(a) { ctx.fillStyle=`rgba(7,7,14,${a||0.88})`; ctx.fillRect(0,0,CW,CH); }
 function ct(text,x,y,color,size,c=ctx) {
     c.fillStyle=color||'#7fff7f';
-    c.font=`${size||10}px "Press Start 2P"`;
+    c.font=`${size||FONT.HINT}px "Press Start 2P"`;
     c.textAlign='center'; c.textBaseline='middle'; c.fillText(text,x,y);
 }
 function menuItem(text,y,sel,c=ctx) {
     c.globalAlpha=sel?1:0.78;
     c.shadowColor=sel?'#7fff7f':'#cccccc'; c.shadowBlur=sel?12:1;
-    ct(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',14,c);
+    ct(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',FONT.MENU,c);
     c.shadowBlur=0; c.globalAlpha=1;
 }
 
@@ -818,9 +826,9 @@ function drawSplash(now) {
 
     // Title block: identical to drawMenu
     ctx.shadowColor = '#7fff7f'; ctx.shadowBlur = 38;
-    ct('S N A K E', CW/2, 78, '#7fff7f', 40);
+    ct('S N A K E', CW/2, 78, '#7fff7f', FONT.DISPLAY);
     ctx.shadowBlur = 0;
-    ctx.shadowColor='#4a7a4a'; ctx.shadowBlur=1; ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', 10); ctx.shadowBlur=0;
+    ctx.shadowColor='#4a7a4a'; ctx.shadowBlur=1; ct('F O K   E D I T I O N', CW/2, 122, '#4a7a4a', FONT.HINT); ctx.shadowBlur=0;
 
     // Per-frame coin/spark state
     let showCoin = false, coinY = startY, scaleX = 1, spinAngle = 0;
@@ -933,11 +941,11 @@ function drawSplash(now) {
     if (!_splashExiting) {
         if (Math.floor(t) % 2 === 1) {
             ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 12;
-            ct('INSERT COIN', CW/2, 344, '#ffff00', 14);
+            ct('INSERT COIN', CW/2, 344, '#ffff00', FONT.MENU);
             ctx.shadowBlur = 0;
         }
         ctx.save();
-        ctx.font = '10px "Press Start 2P"'; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
+        ctx.font = `${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center';
         ctx.fillStyle = '#888';
         ctx.fillText('ENTER:go  TAP:go  CLICK:go', CW/2, CH - 8);
         ctx.restore();
@@ -960,7 +968,7 @@ function _drawNewspaper(c, sel) {
     c.restore();
     c.save();
     c.globalAlpha=sel?1:0.78; c.shadowColor=sel?'#7fff7f':'#cccccc'; c.shadowBlur=sel?12:1;
-    c.font='14px "Press Start 2P"'; c.textAlign='right'; c.textBaseline='bottom';
+    c.font=`${FONT.MENU}px "Press Start 2P"`; c.textAlign='right'; c.textBaseline='bottom';
     c.fillStyle=sel?'#7fff7f':'#cccccc'; c.fillText('NEWS', CW-10, CH-8);
     c.restore();
 }
@@ -976,20 +984,20 @@ function _drawNewspaperPage(now) {
     ctx.strokeStyle='#2a2a1e'; ctx.lineWidth=2; ctx.strokeRect(px+3,py+3,pw-6,ph-6);
     ctx.fillStyle='#1a1a14';                                        // masthead rules
     ctx.fillRect(px+16,py+22,pw-32,2); ctx.fillRect(px+16,py+58,pw-32,2);
-    ct('NEW SNAKE TIMES', cx, py+41, '#141410', 18);
+    ct('NEW SNAKE TIMES', cx, py+41, '#141410', FONT.TITLE);
     // Masthead crest: the player's own snake flanks the title, facing inward
     const _logoCol=cfg.snakeColor||0, _logoSi=cfg.wornItems||{}, _logoY=py+40, _logoRx=px+pw-52;
     drawScoreHead(px+52, _logoY, _logoCol, _logoSi);
     ctx.save(); ctx.translate(_logoRx,0); ctx.scale(-1,1); ctx.translate(-_logoRx,0);
     drawScoreHead(_logoRx, _logoY, _logoCol, _logoSi); ctx.restore();
-    ct('EXTRA * EXTRA * READ ALL ABOUT IT', cx, py+72, '#6a5f4a', 10);
+    ct('EXTRA * EXTRA * READ ALL ABOUT IT', cx, py+72, '#6a5f4a', FONT.HINT);
     const pages=(ANNOUNCEMENT&&ANNOUNCEMENT.pages)||[ANNOUNCEMENT||{lines:[]}];
     const a=pages[Math.min(newsPage,pages.length-1)]||{lines:[]};
-    ct(a.headline||'', cx, py+108, '#8a1810', 14);                  // headline
+    ct(a.headline||'', cx, py+108, '#8a1810', FONT.MENU);                  // headline
     let y=py+146;
-    (a.lines||[]).forEach(line=>{ if(line===''){ y+=10; return; } ct(line, cx, y, '#2a281e', 10); y+=22; });
+    (a.lines||[]).forEach(line=>{ if(line===''){ y+=10; return; } ct(line, cx, y, '#2a281e', FONT.HINT); y+=22; });
     if(pages.length>1){                                             // page flipper
-        ct('< '+(newsPage+1)+' / '+pages.length+' >', cx, py+ph-20, '#6a5f4a', 10);
+        ct('< '+(newsPage+1)+' / '+pages.length+' >', cx, py+ph-20, '#6a5f4a', FONT.HINT);
     }
 }
 let _newsAt = 0, newsPage = 0;
@@ -1002,14 +1010,14 @@ function drawNews(now) {
     _drawNewspaperPage(now);
     ctx.restore();
     if(t>=1){ const multi=ANNOUNCEMENT&&ANNOUNCEMENT.pages&&ANNOUNCEMENT.pages.length>1;
-        ct(multi?'L/R:page   A/ESC:back':'A:back  ESC:back', CW/2, CH-12, '#888', 10); }
+        ct(multi?'L/R:page   A/ESC:back':'A:back  ESC:back', CW/2, CH-12, '#888', FONT.HINT); }
 }
 function drawSplashText(now) {
     if(!_splashText) return;
     ctx.save();
     ctx.translate(CW*0.78, 120); ctx.rotate(-0.34);
     ctx.scale(1+0.10*Math.abs(Math.sin(now/300)), 1+0.10*Math.abs(Math.sin(now/300)));
-    ctx.font='10px "Press Start 2P"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='#3a2a00'; ctx.fillText(_splashText, 1.5, 1.5);   // retro drop shadow
     ctx.fillStyle='#ffff00'; ctx.fillText(_splashText, 0, 0);
     ctx.restore();
@@ -1020,15 +1028,15 @@ function _composeMenu(diffLine){
     c.drawImage(_gridCanvas,0,0);
     c.drawImage(_scanCanvas,0,0);
     c.shadowColor='#7fff7f'; c.shadowBlur=38;
-    ct('S N A K E',CW/2,78,'#7fff7f',40,c);
+    ct('S N A K E',CW/2,78,'#7fff7f',FONT.DISPLAY,c);
     c.shadowBlur=0;
-    ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',10,c);
+    ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',FONT.HINT,c);
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel,c));
     if(ANNOUNCEMENT) _drawNewspaper(c, menuSel===MENU_ITEMS.length);
-    ct(diffLine,CW/2,362,'#4a7a4a',10,c);
+    ct(diffLine,CW/2,362,'#4a7a4a',FONT.HINT,c);
     c.save();
-    c.font='10px "Press Start 2P"'; c.textBaseline='bottom'; c.shadowBlur=0;
+    c.font=`${FONT.HINT}px "Press Start 2P"`; c.textBaseline='bottom'; c.shadowBlur=0;
     c.fillStyle='#4a7a4a'; c.textAlign='left';
     c.fillText(_swVersion, 10, CH-8);
     c.fillStyle='#888'; c.textAlign='center';
@@ -1094,7 +1102,7 @@ function drawSettings() {
     drawGrid(); drawOvBg(0.92);
     const inCat=settingsCat>=0;
     const title=inCat?'SETTINGS/'+SETTINGS_CATS[settingsCat].label:'SETTINGS';
-    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',18); ctx.shadowBlur=0;
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',FONT.TITLE); ctx.shadowBlur=0;
     const list=_settingsList();
     const startY=90, rowH=28;   // one empty line below the headline before the first entry
     list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel));
@@ -1110,7 +1118,7 @@ function drawSettings() {
         // Snake-color mini-preview beside the selected row
         if(it&&it.preview==='color'){
             const sc=SNAKE_COLORS[cfg.snakeColor||0], py=startY+settingsSel*rowH;
-            ctx.save(); ctx.font='14px "Press Start 2P"';
+            ctx.save(); ctx.font=`${FONT.MENU}px "Press Start 2P"`;
             const tw=ctx.measureText('> '+it.lbl()+' <').width;
             const px=Math.round(CW/2+tw/2+12);
             for(let k=0;k<5;k++){
@@ -1123,11 +1131,11 @@ function drawSettings() {
         }
         // Transient backup/restore feedback in DATA MANAGEMENT
         if(SETTINGS_CATS[settingsCat].label==='DATA MANAGEMENT'&&_dataMsg&&simNow-_dataMsgAt<2500){
-            ctx.shadowColor='#7fff7f'; ctx.shadowBlur=12; ct(_dataMsg,CW/2,CH-34,'#7fff7f',14); ctx.shadowBlur=0;
+            ctx.shadowColor='#7fff7f'; ctx.shadowBlur=12; ct(_dataMsg,CW/2,CH-34,'#7fff7f',FONT.MENU); ctx.shadowBlur=0;
         }
     }
     const hint=inCat?'UP/DN:nav  L/R:change  A:select  ESC:back':'UP/DN:nav  A:open  ESC:back';
-    ct(hint,CW/2,CH-10,'#888',10);
+    ct(hint,CW/2,CH-10,'#888',FONT.HINT);
 }
 
 function drawMiniSnake(x, y, colorIdx) {
@@ -1180,11 +1188,11 @@ function drawScoreHead(cx, cy, colorIdx, si) {
 let _scoreboardCache = null;
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
-    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct('HIGH SCORES',CW/2,28,'#7fff7f',18); ctx.shadowBlur=0;
+    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct('HIGH SCORES',CW/2,28,'#7fff7f',FONT.TITLE); ctx.shadowBlur=0;
     const scores=_scoreboardCache||[];
-    if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',10); }
+    if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',FONT.HINT); }
     else {
-        ctx.font='14px "Press Start 2P"'; ctx.textBaseline='middle';
+        ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
         scores.slice(0,8).forEach((s,i)=>{
             const y=90+i*28;
             ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
@@ -1197,7 +1205,7 @@ function drawScores() {
         });
         ctx.textAlign='center';
     }
-    ct('A:back',CW/2,CH-14,'#888',10);
+    ct('A:back',CW/2,CH-14,'#888',FONT.HINT);
 }
 
 function drawAchievements() {
@@ -1208,11 +1216,11 @@ function drawAchievements() {
     const onExpert=expert&&achPage===0;
     const list=onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
     const titleColor=onExpert?'#ff8800':'#7fff7f';
-    ctx.shadowColor=titleColor; ctx.shadowBlur=16; ct('ACHIEVEMENTS',CW/2,28,titleColor,18); ctx.shadowBlur=0;
+    ctx.shadowColor=titleColor; ctx.shadowBlur=16; ct('ACHIEVEMENTS',CW/2,28,titleColor,FONT.TITLE); ctx.shadowBlur=0;
     if(expert){
-        ct(onExpert?'< EXPERT  1/2 >':'< BASE  2/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',10);
+        ct(onExpert?'< EXPERT  1/2 >':'< BASE  2/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',FONT.HINT);
     } else if(allBase&&!donated){
-        ct('DONATE in SHOP to unlock EXPERT page',CW/2,42,'#ff4488',10);
+        ct('DONATE in SHOP to unlock EXPERT page',CW/2,42,'#ff4488',FONT.HINT);
     }
     const cols=3, aw=188, ah=68, gx=4, gy=4;
     const ox=(CW-(cols*aw+(cols-1)*gx))/2;
@@ -1230,10 +1238,10 @@ function drawAchievements() {
         drawPixelIcon(x+5,y+ah/2-9,a.icon,2);
         ctx.restore();
         ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.font='10px "Press Start 2P"';
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=got?'#7fff7f':'#888888';
         ctx.fillText(a.name,x+26,y+10);
-        ctx.font='10px "Press Start 2P"';
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=got?'#6aaa6a':'#777777';
         const _mw=aw-32; let _d1=a.desc,_d2='';
         if(ctx.measureText(_d1).width>_mw){
@@ -1245,9 +1253,9 @@ function drawAchievements() {
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
-    ctx.shadowColor='#6aaa6a'; ctx.shadowBlur=6; ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',10); ctx.shadowBlur=0;
+    ctx.shadowColor='#6aaa6a'; ctx.shadowBlur=6; ct(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',FONT.HINT); ctx.shadowBlur=0;
     const hint='A:back';
-    ct(hint,CW/2,CH-10,'#888',10);
+    ct(hint,CW/2,CH-10,'#888',FONT.HINT);
 }
 
 function drawAchPopups(now) {
@@ -1271,13 +1279,13 @@ function drawAchPopups(now) {
         ctx.fillStyle='#071407'; rr(px,py,pw,ph,5); ctx.fill();
         ctx.strokeStyle='#4aaa4a'; ctx.lineWidth=1.5; rr(px,py,pw,ph,5); ctx.stroke();
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=6;
-        ctx.fillStyle='#7fff7f'; ctx.font='10px "Press Start 2P"';
+        ctx.fillStyle='#7fff7f'; ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.textAlign='left'; ctx.textBaseline='top';
         ctx.fillText('ACHIEVEMENT!',px+28,py+7);
         ctx.shadowBlur=0;
-        ctx.fillStyle='#aaffaa'; ctx.font='10px "Press Start 2P"';
+        ctx.fillStyle='#aaffaa'; ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillText(a.name,px+28,py+20);
-        ctx.fillStyle='#ffd700'; ctx.font='10px "Press Start 2P"';
+        ctx.fillStyle='#ffd700'; ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillText('+1,000 FK',px+28,py+31);
         drawPixelIcon(px+5,py+ph/2-8,a.icon,2);
         ctx.restore();
@@ -1330,13 +1338,13 @@ function _drawBoxesPage(){
         ctx.shadowBlur=0;
         _drawBoxIcon(18,y+8,box,28);
         ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.font='14px "Press Start 2P"'; ctx.fillStyle=bc; ctx.fillText(box.name+' BOX',60,y+10);
-        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#ffcf55':'#999999';
+        ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.fillStyle=bc; ctx.fillText(box.name+' BOX',60,y+10);
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=isAdmin?'#ffcf55':'#999999';
         ctx.fillText(isAdmin?'GRAND PRIZE - guaranteed ADMIN CROWN':'Rarer loot at higher tiers',60,y+28);
         ctx.textAlign='right';
-        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=isAdmin?'#5aff8a':(canAfford?'#ffd700':'#553322');
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=isAdmin?'#5aff8a':(canAfford?'#ffd700':'#553322');
         ctx.fillText(isAdmin?'FREE':box.price.toLocaleString()+' FK',CW-18,y+11);
-        if(sel){ ctx.font='10px "Press Start 2P"'; ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
+        if(sel){ ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
             ctx.fillText(canAfford?(isAdmin?'ENTER to claim':'ENTER to open'):'Not enough FK',CW-18,y+29); }
     });
 }
@@ -1344,8 +1352,8 @@ function _drawBoxesPage(){
 function _drawGearPage(){
     const wi=cfg.wornItems||{}, gear=_gearList();
     if(!gear.length){
-        ct('NO BOX GEAR YET',CW/2,CH/2-16,'#888888',14);
-        ct('Win exclusive cosmetics from Mystery Boxes',CW/2,CH/2+10,'#9b6ad0',10);
+        ct('NO BOX GEAR YET',CW/2,CH/2-16,'#888888',FONT.MENU);
+        ct('Win exclusive cosmetics from Mystery Boxes',CW/2,CH/2+10,'#9b6ad0',FONT.HINT);
         return;
     }
     const startY=72, rowH=44;
@@ -1356,11 +1364,11 @@ function _drawGearPage(){
         ctx.strokeStyle=worn?'#7fff7f':rc; ctx.lineWidth=1.5; rr(8,y,CW-16,rowH-4,5); ctx.stroke();
         drawPixelIcon(16,y+(rowH-4)/2-8,item.icon,2);
         ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=worn?'#7fff7f':'#dddddd'; ctx.fillText(item.name,46,y+7);
-        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=rc; ctx.fillText((item.rarity||'').toUpperCase()+' - BOX EXCLUSIVE',46,y+21);
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#dddddd'; ctx.fillText(item.name,46,y+7);
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=rc; ctx.fillText((item.rarity||'').toUpperCase()+' - BOX EXCLUSIVE',46,y+21);
         ctx.textAlign='right';
-        ctx.font='10px "Press Start 2P"'; ctx.fillStyle=worn?'#7fff7f':'#4a7a9a'; ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
-        if(sel){ ctx.font='10px "Press Start 2P"'; ctx.fillStyle=worn?'#cc5555':'#5aaa5a'; ctx.fillText(worn?'SPACE to remove':'SPACE to wear',CW-18,y+23); }
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#4a7a9a'; ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
+        if(sel){ ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#cc5555':'#5aaa5a'; ctx.fillText(worn?'SPACE to remove':'SPACE to wear',CW-18,y+23); }
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
 }
@@ -1394,16 +1402,16 @@ function _drawBoxReveal(){
     ctx.save(); ctx.globalAlpha=fade; drawOvBg(0.55);
     const r=_boxReward;
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=18;
-    if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',10); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',18); }
+    if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',FONT.HINT); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',FONT.TITLE); }
     else if(r.kind==='dupe'){ const dit=_findItem(r.id), drc=_RARITY_COL[r.rarity]||'#aaaaaa';
         if(dit&&dit.icon) drawPixelIcon(CW/2-16,CH/2-52,dit.icon,4);
-        ct(dit?dit.name:r.id,CW/2,CH/2+2,'#ffffff',14);
-        ct('DUPLICATE',CW/2,CH/2+22,drc,10);
-        ct('SOLD +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+40,'#ffd700',10); }
+        ct(dit?dit.name:r.id,CW/2,CH/2+2,'#ffffff',FONT.MENU);
+        ct('DUPLICATE',CW/2,CH/2+22,drc,FONT.HINT);
+        ct('SOLD +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+40,'#ffd700',FONT.HINT); }
     else { const it=_findItem(r.id), rc=_RARITY_COL[r.rarity]||'#fff';
         if(it&&it.icon) drawPixelIcon(CW/2-16,CH/2-46,it.icon,4);
-        ct((r.rarity||'').toUpperCase(),CW/2,CH/2+10,rc,10);
-        ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',14); }
+        ct((r.rarity||'').toUpperCase(),CW/2,CH/2+10,rc,FONT.HINT);
+        ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',FONT.MENU); }
     ctx.shadowBlur=0; ctx.restore();
 }
 // Retro tab strip: all four shop pages visible at once, active one lit.
@@ -1420,12 +1428,12 @@ function _drawShopTabs(){
         ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi[i]:'#3a3a3a';
         if(active){ ctx.shadowColor=hi[i]; ctx.shadowBlur=8; }
         rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
-        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', 10);
+        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', FONT.HINT);
     }
 }
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
-    ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,26,'#ffd700',18); ctx.shadowBlur=0;
+    ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,26,'#ffd700',FONT.TITLE); ctx.shadowBlur=0;
     _drawShopTabs();
     const coins=_cachedFOKoins;
     if(shopPage===BOX_PAGE){ _drawBoxesPage(); }
@@ -1446,40 +1454,40 @@ function drawShop() {
         if(worn||owned||sel){ctx.strokeStyle=worn?'#7fff7f':(owned&&isRep)?'#cc4488':owned?'#4a7a9a':'#6aaa6a';ctx.lineWidth=1.5;rr(8,y,CW-16,rowH-4,5);ctx.stroke();}
         drawPixelIcon(16,y+(rowH-4)/2-8,item.icon,2);
         ctx.textAlign='left'; ctx.textBaseline='top';
-        ctx.font='10px "Press Start 2P"';
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=worn?'#7fff7f':(owned&&isRep)?'#ff66aa':owned?'#5a8aaa':sel?'#dddddd':'#aaaaaa';
         ctx.fillText(item.name,46,y+7);
-        ctx.font='10px "Press Start 2P"'; ctx.fillStyle='#999999';
+        ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle='#999999';
         ctx.fillText(item.desc,46,y+21);
         ctx.textAlign='right';
         if(isRep){
-            if(owned){ctx.font='10px "Press Start 2P"';ctx.fillStyle='#ff44aa';ctx.fillText('DONATED',CW-18,y+9);}
-            else{ctx.font='10px "Press Start 2P"';ctx.fillStyle=canAfford?'#ffd700':'#553322';ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+9);}
-            ctx.font='10px "Press Start 2P"';
+            if(owned){ctx.font=`${FONT.HINT}px "Press Start 2P"`;ctx.fillStyle='#ff44aa';ctx.fillText('DONATED',CW-18,y+9);}
+            else{ctx.font=`${FONT.HINT}px "Press Start 2P"`;ctx.fillStyle=canAfford?'#ffd700':'#553322';ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+9);}
+            ctx.font=`${FONT.HINT}px "Press Start 2P"`;
             if(sel){ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';ctx.fillText(canAfford?'ENTER to donate':'Not enough FK',CW-18,y+23);}
             else if(owned){ctx.fillStyle='#555';ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+23);}
         } else if(owned){
-            ctx.font='10px "Press Start 2P"';
+            ctx.font=`${FONT.HINT}px "Press Start 2P"`;
             ctx.fillStyle=worn?'#7fff7f':'#4a7a9a';
             ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
-            ctx.font='10px "Press Start 2P"';
+            ctx.font=`${FONT.HINT}px "Press Start 2P"`;
             if(sel){ctx.fillStyle=worn?'#cc5555':'#5aaa5a';ctx.fillText(worn?'SPACE to remove':'SPACE to wear',CW-18,y+23);}
             else{ctx.fillStyle='#555';ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+23);}
         } else {
-            ctx.font='10px "Press Start 2P"'; ctx.fillStyle=canAfford?'#ffd700':'#553322';
+            ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=canAfford?'#ffd700':'#553322';
             ctx.fillText(`${item.price.toLocaleString()} FK`,CW-18,y+9);
-            if(sel){ctx.font='10px "Press Start 2P"';ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
+            if(sel){ctx.font=`${FONT.HINT}px "Press Start 2P"`;ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
                 ctx.fillText(canAfford?'ENTER to buy':'Not enough FK',CW-18,y+23);}
         }
     });
     }
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
-    ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
+    ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',FONT.HINT);
     ctx.shadowBlur=0;
     ct(shopPage===BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back'
        : shopPage===GEAR_PAGE ? 'UP/DN:nav  L/R:tab  A/||:wear  ESC:back'
-       : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
+       : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',FONT.HINT);
     // Purchase particles
     const now=simNow;
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1496,7 +1504,7 @@ function drawShop() {
         const a=buyAge<180?buyAge/180:buyAge>1200?1-(buyAge-1200)/400:1;
         ctx.save();ctx.globalAlpha=a;
         ctx.shadowColor='#7fff7f';ctx.shadowBlur=16;
-        ct('PURCHASED!',CW/2,CH/2+20,'#7fff7f',18);
+        ct('PURCHASED!',CW/2,CH/2+20,'#7fff7f',FONT.TITLE);
         ctx.restore();
     }
     _drawBoxReveal();
@@ -1514,23 +1522,23 @@ function drawCredits() {
             switch (type) {
                 case 'title':
                     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=38;
-                    ct(val, CW/2, yc, '#7fff7f', 40); ctx.shadowBlur=0; break;
+                    ct(val, CW/2, yc, '#7fff7f', FONT.DISPLAY); ctx.shadowBlur=0; break;
                 case 'sub':
-                    ct(val, CW/2, yc, '#4a7a4a', 10); break;
+                    ct(val, CW/2, yc, '#4a7a4a', FONT.HINT); break;
                 case 'hdr':
                     ctx.shadowColor='#00cccc'; ctx.shadowBlur=6;
-                    ct(val, CW/2, yc, '#00cccc', 14); ctx.shadowBlur=0; break;
+                    ct(val, CW/2, yc, '#00cccc', FONT.MENU); ctx.shadowBlur=0; break;
                 case 'txt':
-                    ct(val, CW/2, yc, '#aaa', 14); break;
+                    ct(val, CW/2, yc, '#aaa', FONT.MENU); break;
                 case 'sml':
-                    ct(val, CW/2, yc, '#999', 14); break;
+                    ct(val, CW/2, yc, '#999', FONT.MENU); break;
                 case 'coins':
                     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
-                    ct(`YOUR FOKOINS: ${_cachedFOKoins.toLocaleString()}`, CW/2, yc, '#ffd700', 14);
+                    ct(`YOUR FOKOINS: ${_cachedFOKoins.toLocaleString()}`, CW/2, yc, '#ffd700', FONT.MENU);
                     ctx.shadowBlur=0; break;
                 case 'secret':
                     ctx.shadowColor='#ff4444'; ctx.shadowBlur=14;
-                    ct(val, CW/2, yc, '#ff5555', 14);
+                    ct(val, CW/2, yc, '#ff5555', FONT.MENU);
                     ctx.shadowBlur=0; break;
             }
         }
@@ -1539,7 +1547,7 @@ function drawCredits() {
     ctx.restore();
     creditsScroll -= creditsSpeed;
     if (creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
-    ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, CH-12, '#888', 10);
+    ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, CH-12, '#888', FONT.HINT);
 }
 
 function drawNameEntry(now) {
@@ -1551,18 +1559,18 @@ function drawNameEntry(now) {
     drawOvBg(0.84);
     const isWin=nameReason==='win';
     ctx.shadowColor=isWin?'#ffd700':'#ff5555'; ctx.shadowBlur=24;
-    ct(isWin?'YOU WIN!':'GAME OVER',CW/2,36,isWin?'#ffd700':'#ff5555',26); ctx.shadowBlur=0;
-    ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,76,'#aaa',10);
-    ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',10);
+    ct(isWin?'YOU WIN!':'GAME OVER',CW/2,36,isWin?'#ffd700':'#ff5555',FONT.JUMBO); ctx.shadowBlur=0;
+    ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,76,'#aaa',FONT.HINT);
+    ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     const sw=30,sh=40,gap=5,totalW=MAX_NAME*(sw+gap)-gap,sx0=Math.floor(CW/2-totalW/2),sy=122;
     for(let i=0;i<MAX_NAME;i++){
         const sx=sx0+i*(sw+gap),act=i===nameCursorPos,has=i<nameStr.length&&!act;
         ctx.fillStyle=act?'#142014':'#0d0d18'; ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
         rr(sx,sy,sw,sh,3); ctx.fill(); ctx.stroke();
         const flashing=has&&i===_nameFlashPos&&now-_nameFlashAt<350;
-        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=flashing?14:1; if(nameStr[i]===' '){ctx.shadowBlur=0;ctx.fillStyle=flashing?'#ffffff':'#4a7a4a';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(nameStr[i],sx+sw/2,sy+sh/2,flashing?'#ffffff':'#7fff7f',14);} ctx.shadowBlur=0; }
+        if(has){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=flashing?14:1; if(nameStr[i]===' '){ctx.shadowBlur=0;ctx.fillStyle=flashing?'#ffffff':'#4a7a4a';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(nameStr[i],sx+sw/2,sy+sh/2,flashing?'#ffffff':'#7fff7f',FONT.MENU);} ctx.shadowBlur=0; }
         else if(act){
-            const gc=NAME_CHARS[nameCharIdx]; ctx.globalAlpha=0.42; if(gc===' '){ctx.fillStyle='#7fff7f';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(gc==='\r'?'\u21B5':gc,sx+sw/2,sy+sh/2,'#7fff7f',14);} ctx.globalAlpha=1;
+            const gc=NAME_CHARS[nameCharIdx]; ctx.globalAlpha=0.42; if(gc===' '){ctx.fillStyle='#7fff7f';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(gc==='\r'?'\u21B5':gc,sx+sw/2,sy+sh/2,'#7fff7f',FONT.MENU);} ctx.globalAlpha=1;
             if(Math.floor(now/400)%2===0){ctx.fillStyle='#7fff7f55';ctx.fillRect(sx+5,sy+sh-6,sw-10,2);}
         }
     }
@@ -1572,7 +1580,7 @@ function drawNameEntry(now) {
         ctx.strokeStyle='#2a5a2a'; ctx.lineWidth=1; rr(CW/2-20,selY-12,40,22,3); ctx.stroke();
         for(let d=-2;d<=2;d++){
             const raw=NAME_CHARS[(ci+d+NAME_CHARS.length)%NAME_CHARS.length];
-            const y=selY+d*22, sz=d===0?14:10;
+            const y=selY+d*22, sz=d===0?FONT.MENU:FONT.HINT;
             const col=d===0?'#7fff7f':Math.abs(d)===1?'#888':'#555';
             const al=d===0?1:Math.abs(d)===2?0.35:0.75;
             if(d===0){ctx.shadowColor='#7fff7f';ctx.shadowBlur=12;}
@@ -1599,7 +1607,7 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
-    ct('UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,CH-10,'#888',10);
+    ct('UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,CH-10,'#888',FONT.HINT);
 }
 
 function _drawGourangaPending(now) {
@@ -1719,20 +1727,20 @@ function drawGameBoard(now) {
     if(phase==='levelDone'){
         const a=Math.min(1,(now-phaseAt)/150);
         ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16;
-        ct('LEVEL COMPLETE!',CW/2,levelWasPerfect?CH/2-36:CH/2-18,'#7fff7f',18); ctx.restore();
+        ct('LEVEL COMPLETE!',CW/2,levelWasPerfect?CH/2-36:CH/2-18,'#7fff7f',FONT.TITLE); ctx.restore();
         if(levelWasPerfect){
             const pa=Math.min(1,(now-phaseAt-180)/200);
             if(pa>0){
                 ctx.save(); ctx.globalAlpha=pa;
                 ctx.shadowColor='#ffd700'; ctx.shadowBlur=12;
-                ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',14);
+                ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',FONT.MENU);
                 ctx.shadowBlur=0;
-                ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',10);
+                ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',FONT.HINT);
                 ctx.restore();
             }
         }
         if(levelDoneWaiting&&Math.floor(now/520)%2===0){
-            ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
+            ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
             ctx.fillStyle='#888'; ctx.fillText('A:next  TAP:next',CW/2,CH-8); ctx.restore();
         }
     }
@@ -1741,27 +1749,27 @@ function drawGameBoard(now) {
         drawOvBg(0.72);
         if(!goPhase){
             ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16;
-            ct(`LEVEL ${level}`,CW/2,CH/2-18,'#7fff7f',18); ctx.shadowBlur=0;
+            ct(`LEVEL ${level}`,CW/2,CH/2-18,'#7fff7f',FONT.TITLE); ctx.shadowBlur=0;
             ctx.shadowColor='#aaa'; ctx.shadowBlur=12;
-            ct('GET READY',CW/2,CH/2+38,'#aaa',14);
+            ct('GET READY',CW/2,CH/2+38,'#aaa',FONT.MENU);
         } else {
             const a=Math.min(1,(t-READY_DUR)/80);
             ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#ffff44'; ctx.shadowBlur=24;
-            ct('GO!',CW/2,CH/2+10,'#ffff44',26); ctx.shadowBlur=0; ctx.restore();
+            ct('GO!',CW/2,CH/2+10,'#ffff44',FONT.JUMBO); ctx.shadowBlur=0; ctx.restore();
         }
     }
     if(dying){
         const t=(now-phaseAt)/DEATH_DUR;
         ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5); ctx.shadowColor='#ff4444';
-        if(lives===0){ctx.shadowBlur=24;ct(deathMsg,CW/2,CH/2,'#ff5555',26);}
-        else{ctx.shadowBlur=16;ct(deathMsg,CW/2,CH/2,'#ff5555',18);}
+        if(lives===0){ctx.shadowBlur=24;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.JUMBO);}
+        else{ctx.shadowBlur=16;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.TITLE);}
         ctx.restore();
     }
     if(phase==='paused'){
         drawOvBg(0.55);
         ctx.shadowColor='#7fff7f'; ctx.shadowBlur=24;
-        ct('PAUSED',CW/2,CH/2+10,'#7fff7f',26); ctx.shadowBlur=0;
-        ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
+        ct('PAUSED',CW/2,CH/2+10,'#7fff7f',FONT.JUMBO); ctx.shadowBlur=0;
+        ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
         ctx.fillStyle='#888'; ctx.fillText('||:resume  ESC:quit',CW/2,CH-8); ctx.restore();
     }
     // Bonus flash (duration and colour vary by tier)
@@ -1772,7 +1780,7 @@ function drawGameBoard(now) {
         const a=1-bonusAge/flashDur;
         const isEpic=bonusLabel.startsWith('EPIC'),isLucky=bonusLabel.startsWith('LUCKY');
         const col=isGouranga?`hsl(${(now/5)%360},100%,65%)`:isEpic?`hsl(${(now/6)%360},100%,70%)`:'#ffd700';
-        const sz=isGouranga?32:isEpic?26:14;
+        const sz=isGouranga?FONT.JUMBO:isEpic?FONT.JUMBO:FONT.MENU;
         ctx.save(); ctx.globalAlpha=a;
         ctx.shadowColor=col; ctx.shadowBlur=isGouranga?36:isEpic?24:12;
         ct(bonusLabel,CW/2,CH/2-60,col,sz);
@@ -1784,15 +1792,15 @@ function drawGameBoard(now) {
 function drawConfirmYesNo(title, sel) {
     const YES_X=CW/2-80, NO_X=CW/2+80;
     ctx.shadowColor='#ff9900'; ctx.shadowBlur=16;
-    ct(title,CW/2,CH/2-18,'#ff9900',18); ctx.shadowBlur=0;
+    ct(title,CW/2,CH/2-18,'#ff9900',FONT.TITLE); ctx.shadowBlur=0;
     ctx.globalAlpha=sel===0?1:0.35;
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=sel===0?12:1;
-    ct(sel===0?'> YES <':'  YES  ',YES_X,CH/2+38,'#7fff7f',14);
+    ct(sel===0?'> YES <':'  YES  ',YES_X,CH/2+38,'#7fff7f',FONT.MENU);
     ctx.globalAlpha=sel===1?1:0.35;
     ctx.shadowColor='#ff5555'; ctx.shadowBlur=sel===1?12:1;
-    ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',14);
+    ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',FONT.MENU);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
-    ctx.save(); ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.textAlign='center';
+    ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center';
     ctx.fillStyle='#888'; ctx.fillText('L/R:choose  A:ok  ESC:cancel',CW/2,CH-8); ctx.restore();
 }
 function drawQuitConfirm() {
@@ -1808,8 +1816,8 @@ function drawResetConfirm() {
     drawSettings();
     drawOvBg(0.80);
     ctx.shadowColor='#ff5555'; ctx.shadowBlur=12;
-    ct('RESET ALL STATS?',CW/2,CH/2-54,'#ff5555',14); ctx.shadowBlur=0;
-    ctx.font='10px "Press Start 2P"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ct('RESET ALL STATS?',CW/2,CH/2-54,'#ff5555',FONT.MENU); ctx.shadowBlur=0;
+    ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='#888';
     ctx.fillText('scores  fokoins  achievements  shop',CW/2,CH/2-24);
     drawConfirmYesNo('', quitConfirmSel);
@@ -2546,8 +2554,9 @@ requestAnimationFrame(syncLandscapePanels);
 // Scale SND/FPS font to match canvas display size when the canvas is CSS-upscaled beyond its 600px native width
 function syncFontScale() {
     const scale = canvas.getBoundingClientRect().width / CW;
-    const sz = Math.round(8 * scale) + 'px';
-    fpsEl.style.fontSize = sz;
+    // One knob drives every DOM chrome font-size (calc(var(--fs-*) * var(--ui-scale)))
+    // so the chrome scales with the CSS-upscaled canvas exactly like canvas text does.
+    document.documentElement.style.setProperty('--ui-scale', scale);
     const iconH=Math.round(16*scale); _muteCv.style.height=iconH+'px'; _muteCv.style.width=(iconH*2)+'px';
     fpsEl.style.height=(iconH+8)+'px'; // match speaker: canvas + 2*padding + 2*border
 }
