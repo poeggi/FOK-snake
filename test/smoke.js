@@ -93,6 +93,12 @@ const driver = `
     drawGameBoard(simNow); drawScoreHead(100,100,0,cfg.wornItems);
     log('box accessories render ok');
 
+    // Mystery box shop: render the boxes page and open a box without error.
+    phase='shop'; shopPage=BOX_PAGE; shopSel=0; drawShop();
+    _cachedFOKoins=5000000; cfg.shopItems={}; _openBox(BOXES[0]); drawShop();
+    if(!_boxReward) throw 'opening a box produced no reward';
+    log('mystery box shop ok: reward='+_boxReward.kind);
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

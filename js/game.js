@@ -1215,11 +1215,79 @@ function drawAchPopups(now) {
     ctx.textAlign='center'; ctx.textBaseline='middle';
 }
 
+// Mystery-box shop page. SHOP_PAGES: 0,1 = cosmetics; 2 = mystery boxes.
+const SHOP_PAGES = 3, BOX_PAGE = 2;
+let _boxOpenAt = 0, _boxReward = null;
+function _findItem(id){ return SHOP_ITEMS.find(i=>i.id===id) || BOX_ITEMS.find(i=>i.id===id); }
+const _RARITY_COL = { common:'#9aa0a6', rare:'#4a90d9', epic:'#9b59b6', legendary:'#f1c40f' };
+function _drawBoxIcon(x,y,box,s){
+    ctx.save();
+    ctx.fillStyle=box.color; ctx.fillRect(x-1,y+s*0.26,s+2,s*0.2);       // lid
+    ctx.fillStyle=box.color; ctx.fillRect(x,y+s*0.42,s,s*0.55);          // body
+    ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.fillRect(x,y+s*0.26,s+1,s*0.06);
+    ctx.strokeStyle='rgba(0,0,0,0.45)'; ctx.lineWidth=1; ctx.strokeRect(x,y+s*0.42,s,s*0.55);
+    ctx.fillStyle='#ffd700'; ctx.fillRect(x+s/2-2,y+s*0.5,4,4);          // lock
+    ctx.fillStyle='#ffffff'; ctx.font=Math.round(s*0.42)+'px "Press Start 2P"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('?',x+s/2,y+s*0.72);
+    ctx.restore();
+}
+function _drawBoxesPage(){
+    const coins=_cachedFOKoins, startY=62, rowH=52;
+    BOXES.forEach((box,i)=>{
+        const y=startY+i*rowH, sel=i===shopSel, canAfford=coins>=box.price;
+        ctx.fillStyle=sel?'rgba(45,45,45,0.7)':'rgba(10,10,10,0.35)';
+        rr(8,y,CW-16,rowH-6,5); ctx.fill();
+        ctx.strokeStyle=sel?box.color:'#3a3a3a'; ctx.lineWidth=sel?2:1.2; rr(8,y,CW-16,rowH-6,5); ctx.stroke();
+        _drawBoxIcon(18,y+8,box,28);
+        ctx.textAlign='left'; ctx.textBaseline='top';
+        ctx.font='12px "Press Start 2P"'; ctx.fillStyle=box.color; ctx.fillText(box.name+' BOX',60,y+10);
+        ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#999999'; ctx.fillText('Rarer loot at higher tiers',60,y+28);
+        ctx.textAlign='right';
+        ctx.font='11px "Press Start 2P"'; ctx.fillStyle=canAfford?'#ffd700':'#553322';
+        ctx.fillText(box.price.toLocaleString()+' FK',CW-18,y+11);
+        if(sel){ ctx.font='9px "Press Start 2P"'; ctx.fillStyle=canAfford?'#5aaa5a':'#cc6644';
+            ctx.fillText(canAfford?'ENTER to open':'Not enough FK',CW-18,y+29); }
+    });
+}
+// Buy + open a box: deduct, roll, grant (item / dupe-refund / coins), trigger reveal.
+function _openBox(box){
+    if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
+    _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch{}
+    const res=rollBox(box);
+    if(res.type==='coins'){ addFOKoins(res.amount); _boxReward={kind:'coins',amount:res.amount}; }
+    else {
+        const si=cfg.shopItems||(cfg.shopItems={});
+        if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.4); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,refund}; }
+        else { si[res.id]=true; if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
+    }
+    saveCfg();
+    _boxOpenAt=simNow;
+    Snd.sfxPlay(_boxReward.kind==='item'?'perfect':'bonus',cfg.music);
+}
+function _drawBoxReveal(){
+    const age=simNow-_boxOpenAt;
+    if(!(_boxOpenAt>0 && age<2400 && _boxReward)) return;
+    if(age<220){ ctx.save(); ctx.globalAlpha=(1-age/220)*0.55; ctx.fillStyle='#ffe860'; ctx.fillRect(0,0,CW,CH); ctx.restore(); }
+    const fade=age<150?age/150:age>2000?Math.max(0,1-(age-2000)/400):1;
+    ctx.save(); ctx.globalAlpha=fade; drawOvBg(0.55);
+    const r=_boxReward;
+    ctx.shadowColor='#ffd700'; ctx.shadowBlur=18;
+    if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',10); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',18); }
+    else if(r.kind==='dupe'){ ct('DUPLICATE',CW/2,CH/2-16,'#aaaaaa',12); ct('REFUND +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+12,'#ffd700',12); }
+    else { const it=_findItem(r.id), rc=_RARITY_COL[r.rarity]||'#fff';
+        if(it&&it.icon) drawPixelIcon(CW/2-16,CH/2-46,it.icon,4);
+        ct((r.rarity||'').toUpperCase(),CW/2,CH/2+10,rc,10);
+        ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',12); }
+    ctx.shadowBlur=0; ctx.restore();
+}
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=16; ct('SHOP',CW/2,28,'#ffd700',18); ctx.shadowBlur=0;
-    ct('< PAGE '+(shopPage+1)+'/2 >',CW/2,44,'#aa8844',9);
-    const coins=_cachedFOKoins, si=cfg.shopItems||{}, wi=cfg.wornItems||{};
+    ct(shopPage<BOX_PAGE ? '< COSMETICS '+(shopPage+1)+'/2 >' : '< MYSTERY BOXES >', CW/2,44, shopPage<BOX_PAGE?'#aa8844':'#c48af0', 9);
+    const coins=_cachedFOKoins;
+    if(shopPage>=BOX_PAGE){ _drawBoxesPage(); }
+    else {
+    const si=cfg.shopItems||{}, wi=cfg.wornItems||{};
     const items=SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
     const startY=56, rowH=44;
     items.forEach((item,i)=>{
@@ -1260,11 +1328,12 @@ function drawShop() {
                 ctx.fillText(canAfford?'ENTER to buy':'Not enough FK',CW-18,y+23);}
         }
     });
+    }
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
     ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',10);
     ctx.shadowBlur=0;
-    ct('UP/DN:nav  L/R:page  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
+    ct(shopPage>=BOX_PAGE ? 'UP/DN:nav  L/R:page  A:open  ESC:back' : 'UP/DN:nav  L/R:page  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',10);
     // Purchase particles
     const now=simNow;
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -1284,6 +1353,7 @@ function drawShop() {
         ct('PURCHASED!',CW/2,CH/2+20,'#7fff7f',18);
         ctx.restore();
     }
+    _drawBoxReveal();
 }
 
 function drawCredits() {
@@ -1914,23 +1984,27 @@ function handleKey(key, pde) {
         Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
     }
     else if(phase==='shop'){
-        const items=SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
+        const onBoxes = shopPage>=BOX_PAGE;
+        const items = onBoxes ? BOXES : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
         if(key==='ArrowUp'){ shopSel=(shopSel-1+items.length)%items.length; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='ArrowDown'){ shopSel=(shopSel+1)%items.length; Snd.sfxPlay('nav',cfg.music); }
-        else if(key==='ArrowLeft'||key==='ArrowRight'){ shopPage=(shopPage+1)%2; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowLeft'||key==='ArrowRight'){ shopPage=(shopPage+1)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         else if(key==='Enter'){
-            const item=items[shopSel];
-            const si=cfg.shopItems||(cfg.shopItems={});
-            if(item&&_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
-                _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch {}
-                si[item.id]=true;
-                if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
-                saveCfg();
-                if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full');
-                triggerPurchaseAnim(); Snd.sfxPlay('perfect',cfg.music);
-            } else if(item&&(_cachedFOKoins<item.price)){ Snd.sfxPlay('fail',cfg.music); }
+            if(onBoxes){ _openBox(BOXES[shopSel]); }
+            else {
+                const item=items[shopSel];
+                const si=cfg.shopItems||(cfg.shopItems={});
+                if(item&&_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
+                    _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch {}
+                    si[item.id]=true;
+                    if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
+                    saveCfg();
+                    if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full');
+                    triggerPurchaseAnim(); Snd.sfxPlay('perfect',cfg.music);
+                } else if(item&&(_cachedFOKoins<item.price)){ Snd.sfxPlay('fail',cfg.music); }
+            }
         }
-        else if(key===' '){
+        else if(key===' ' && !onBoxes){
             const item=items[shopSel];
             const si=cfg.shopItems||{}, wi=cfg.wornItems||(cfg.wornItems={});
             if(item&&!item.repeatable&&si[item.id]){
