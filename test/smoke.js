@@ -89,7 +89,7 @@ const driver = `
     log('gameplay smoke ok: phase='+phase+' simTick='+simTick+' snakeLen='+(snake?snake.length:0));
 
     // Box-exclusive accessories render (snake head + score head) without error.
-    cfg.wornItems={eyepatch:1,glasses3d:1,propeller:1,admincrown:1};
+    cfg.wornItems={eyepatch:1,glasses3d:1,propeller:1,admincrown:1,blackbelt:1,lasereyes:1,goldchain:1};
     drawGameBoard(simNow); drawScoreHead(100,100,0,cfg.wornItems);
     log('box accessories render ok');
 

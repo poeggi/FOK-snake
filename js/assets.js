@@ -203,6 +203,12 @@ const BOX_ITEMS = [
       icon:{p:{R:'#ff2a2a',C:'#22e0ff',F:'#111111'},d:['........','.FFFFFF.','.FRRCCF.','.FRRCCF.','.FFFFFF.','........','........','........']}},
     { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000,  desc:'Ready for takeoff. Box-only.',
       icon:{p:{R:'#e03c3c',Y:'#f5d020',G:'#2aa84a',B:'#4a90d9',H:'#ffd700',S:'#888888'},d:['..B..R..','..BBRR..','...HH...','...S....','..RRRR..','.YRYRYR.','.GGGGGG.','........']}},
+    { id:'blackbelt',  name:'BLACK BELT',    rarity:'rare',      value:250000,  desc:'Dojo master. Box-only.',
+      icon:{p:{B:'#111111',D:'#3a3a3a'},d:['........','........','BBBBBBBB','BDDDDDDB','...BB...','..B..B..','..B..B..','........']}},
+    { id:'lasereyes',  name:'LASER EYES',    rarity:'epic',      value:650000,  desc:'Pew pew. Box-only.',
+      icon:{p:{R:'#ff2a2a',H:'#ff9090'},d:['........','........','HH....HH','RRRRRRRR','HH....HH','........','........','........']}},
+    { id:'goldchain',  name:'GOLD CHAIN',    rarity:'legendary', value:1500000, desc:'Ice cold bling. Box-only.',
+      icon:{p:{G:'#ffd700',Y:'#b8860b',M:'#fff2a0'},d:['........','........','G......G','.G....G.','..G..G..','..GYYG..','...MM...','........']}},
     { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, desc:'ADMIN box only. The trophy.',
       icon:{p:{A:'#ffe860',C:'#00e5ff',B:'#cc9a00'},d:['C..C..C.','AAAAAAA.','ACAAACA.','AAAAAAA.','BBBBBBB.','........','........','........']}},
 ];

@@ -656,6 +656,32 @@ function drawAccessoryAdmincrown(hx, hy) {
     ctx.fillStyle='#00e5ff'; ctx.fillRect(hx+2,hy-15,2,2); ctx.fillRect(hx+8,hy-4,3,2); ctx.fillRect(hx+15,hy-15,2,2);
     ctx.restore();
 }
+function drawAccessoryBlackbelt(hx, hy) {
+    ctx.fillStyle='#111111'; ctx.fillRect(hx-1,hy+2,20,3);          // headband across the brow
+    ctx.fillStyle='#3a3a3a'; ctx.fillRect(hx-1,hy+3,20,1);          // stitch line
+    ctx.fillStyle='#111111';
+    ctx.fillRect(hx-2,hy+1,3,3);                                    // side knot
+    ctx.fillRect(hx-3,hy+4,2,6); ctx.fillRect(hx,hy+4,2,5);         // two hanging tails
+}
+function drawAccessoryLasereyes(hx, hy) {
+    const eyes=eyeOffsets(dir);
+    ctx.save(); ctx.shadowColor='#ff2020'; ctx.shadowBlur=8;
+    eyes.forEach(([ox,oy])=>{
+        const ex=hx+ox+1.5, ey=hy+oy+1.5;
+        ctx.fillStyle='#ff3030'; ctx.beginPath(); ctx.arc(ex,ey,2.2,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle='rgba(255,40,40,0.85)'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(ex,ey); ctx.lineTo(ex+dir.x*11,ey+dir.y*11); ctx.stroke();
+    });
+    ctx.restore();
+}
+function drawAccessoryGoldchain(hx, hy) {
+    ctx.save(); ctx.shadowColor='#ffd700'; ctx.shadowBlur=5;
+    ctx.strokeStyle='#ffd700'; ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.moveTo(hx+2,hy+12); ctx.quadraticCurveTo(hx+9,hy+21,hx+16,hy+12); ctx.stroke();
+    ctx.fillStyle='#fff2a0'; ctx.fillRect(hx+7,hy+16,4,4);          // pendant
+    ctx.fillStyle='#b8860b'; ctx.fillRect(hx+8,hy+17,2,2);
+    ctx.restore();
+}
 
 function drawAccessoryMoustache(hx, hy) {
     const eyes=eyeOffsets(dir);
@@ -728,16 +754,19 @@ function drawSnake(flash) {
                 ctx.shadowColor='#7fff7f'; ctx.shadowBlur=5;
                 ctx.fillRect(mx-1,my-1,3,3); ctx.restore();
             }
+            if(si.goldchain) drawAccessoryGoldchain(x,y);
+            if(si.necktie)   drawAccessoryNecktie(x,y,eyeDir);
+            if(si.bow)       drawAccessoryBow(x,y,eyeDir);
             if(si.shades)    drawAccessoryShades(x,y);
             if(si.glasses3d) drawAccessoryGlasses3d(x,y);
+            if(si.lasereyes) drawAccessoryLasereyes(x,y);
             if(si.monocle)   drawAccessoryMonocle(x,y);
             if(si.eyepatch)  drawAccessoryEyepatch(x,y);
             if(si.moustache) drawAccessoryMoustache(x,y);
-            if(si.bow)       drawAccessoryBow(x,y,eyeDir);
-            if(si.necktie)   drawAccessoryNecktie(x,y,eyeDir);
             if(si.cylinder)  drawAccessoryCylinder(x,y);
             if(si.propeller) drawAccessoryPropeller(x,y);
             if(si.wizard)    drawAccessoryWizard(x,y);
+            if(si.blackbelt) drawAccessoryBlackbelt(x,y);
             if(si.crown)     drawAccessoryCrown(x,y);
             if(si.admincrown)drawAccessoryAdmincrown(x,y);
             if(si.halo)      drawAccessoryHalo(x,y);
@@ -1120,15 +1149,20 @@ function drawScoreHead(cx, cy, colorIdx, si) {
     ctx.fillRect(13, 2, 3, 3); ctx.fillRect(13, 16, 3, 3);
     // Accessories (back-to-front; shades/monocle inlined to avoid global dir dependency)
     if(si) {
+        if(si.goldchain)drawAccessoryGoldchain(0, 0);
         if(si.bow)     drawAccessoryBow(0, 0);
         if(si.necktie) drawAccessoryNecktie(0, 0);
         if(si.shades)  { ctx.fillStyle='#111'; [3.5,17.5].forEach(ey=>{ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();}); }
         if(si.glasses3d){ [['#ff2a2a',3.5],['#22e0ff',17.5]].forEach(([c,ey])=>{ctx.fillStyle='#111';ctx.beginPath();ctx.arc(14.5,ey,4,0,Math.PI*2);ctx.fill();ctx.fillStyle=c;ctx.beginPath();ctx.arc(14.5,ey,2.6,0,Math.PI*2);ctx.fill();}); }
+        if(si.lasereyes){ ctx.save(); ctx.shadowColor='#ff2020'; ctx.shadowBlur=6; ctx.fillStyle='#ff3030';
+            [3.5,17.5].forEach(ey=>{ctx.beginPath();ctx.arc(14.5,ey,2.2,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='rgba(255,40,40,0.85)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(14.5,ey);ctx.lineTo(25,ey);ctx.stroke();}); ctx.restore(); }
         if(si.monocle) { ctx.strokeStyle='#ccc'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(14.5,3.5,3.5,0,Math.PI*2); ctx.stroke(); }
         if(si.eyepatch){ ctx.fillStyle='#0a0a0a'; ctx.beginPath(); ctx.ellipse(14.5,3.5,3.4,3,0,0,Math.PI*2); ctx.fill(); }
         if(si.propeller)drawAccessoryPropeller(0, 0);
         if(si.wizard)   drawAccessoryWizard(0, 0);
         if(si.cylinder) drawAccessoryCylinder(0, 0);
+        if(si.blackbelt)drawAccessoryBlackbelt(0, 0);
         if(si.crown)    drawAccessoryCrown(0, 0);
         if(si.admincrown)drawAccessoryAdmincrown(0, 0);
         if(si.halo)     drawAccessoryHalo(0, 0);
