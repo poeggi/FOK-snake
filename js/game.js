@@ -1306,7 +1306,7 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
-    ct('UP/DN:scroll  L/R:move  ||:space  A:ok  ESC:del',CW/2,CH-10,'#888',10);
+    ct('UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,CH-10,'#888',10);
 }
 
 function _drawGourangaPending(now) {
@@ -1854,48 +1854,36 @@ function handleKey(key, pde) {
     }
     else if(phase==='nameEntry'){
         if(GDIRS[key]&&pde)pde();
+        // The dialed letter belongs to the cursor slot: it is written into the name when
+        // you move off it or confirm, so it is never lost. OK/Enter place-and-advance;
+        // the name is submitted only by selecting the return glyph on the dial.
+        const _placeName=()=>{
+            const c=NAME_CHARS[nameCharIdx];
+            if(c==='\r') return;
+            if(nameCursorPos<nameStr.length) nameStr=nameStr.slice(0,nameCursorPos)+c+nameStr.slice(nameCursorPos+1);
+            else if(nameStr.length<MAX_NAME) nameStr+=c;
+            _nameFlashPos=nameCursorPos; _nameFlashAt=simNow;
+        };
+        const _syncDial=()=>{ if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;} };
+        const _submitName=()=>{
+            if(!nameStr.trim()) return;
+            try{localStorage.setItem('lastSName',nameStr);}catch{}
+            addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
+            _scoreboardCache=getScores();phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
+        };
         if(key==='ArrowUp')  {nameCharIdx=(nameCharIdx-1+NAME_CHARS.length)%NAME_CHARS.length;Snd.sfxPlay('nav',cfg.music);}
         else if(key==='ArrowDown'){nameCharIdx=(nameCharIdx+1)%NAME_CHARS.length;Snd.sfxPlay('nav',cfg.music);}
-        else if(key==='ArrowLeft'){
-            if(nameCursorPos>0){nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
-        }
-        else if(key==='ArrowRight'){
-            if(nameCursorPos<nameStr.length){nameCursorPos++;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
-        }
-        else if(key==='NameAdd'){
-            const ch=NAME_CHARS[nameCharIdx];
-            if(ch==='\r'){
-                if(!nameStr.trim()) return;
-                try{localStorage.setItem('lastSName',nameStr);}catch{}
-                addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
-                _scoreboardCache=getScores();phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
-            } else if(nameCursorPos<nameStr.length){
-                nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);
-                nameCursorPos=Math.min(nameCursorPos+1,nameStr.length);
-                _nameFlashPos=nameCursorPos-1; _nameFlashAt=simNow;
-                Snd.sfxPlay('nav',cfg.music);
-            } else if(nameStr.length<MAX_NAME){
-                nameStr+=ch; nameCursorPos++;
-                _nameFlashPos=nameCursorPos-1; _nameFlashAt=simNow;
-                Snd.sfxPlay('nav',cfg.music);
-            } else {
-                // name full and cursor at end: wrap to start so user can replace
-                nameCursorPos=0;
-                const ci=NAME_CHARS.indexOf(nameStr[0]); if(ci>=0)nameCharIdx=ci;
-                Snd.sfxPlay('nav',cfg.music);
-            }
+        else if(key==='ArrowLeft'){ _placeName(); if(nameCursorPos>0)nameCursorPos--; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='ArrowRight'){ _placeName(); if(nameCursorPos<MAX_NAME-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
+        else if(key==='NameAdd'||key==='Enter'){
+            if(NAME_CHARS[nameCharIdx]==='\r'){ _submitName(); }
+            else { _placeName(); if(nameCursorPos<MAX_NAME-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
         }
         else if(key.length===1&&NAME_CHARS.includes(key.toUpperCase())){
             const ch=key.toUpperCase();
-            if(nameCursorPos<nameStr.length){nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);nameCursorPos=Math.min(nameCursorPos+1,nameStr.length);}
-            else if(nameStr.length<MAX_NAME){nameStr+=ch;nameCursorPos++;}
-            Snd.sfxPlay('nav',cfg.music);
-        }
-        else if(key==='Enter'){
-            if(!nameStr.trim()) return;
-            try { localStorage.setItem('lastSName', nameStr); } catch {}
-            addScore(nameStr,score,level); Snd.sfxPlay('select',cfg.music);
-            _scoreboardCache=getScores(); phase='scores'; showHUD(false); setTimeout(()=>nameInp.blur(),10);
+            if(nameCursorPos<nameStr.length) nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);
+            else if(nameStr.length<MAX_NAME) nameStr+=ch;
+            if(nameCursorPos<MAX_NAME-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music);
         }
     }
 }
