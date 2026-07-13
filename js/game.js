@@ -1704,6 +1704,7 @@ const GAME_KEYS = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter
 function handleKey(key, pde) {
     // Let browser handle F-keys (F5 reload, F11 fullscreen, etc.)
     if (key.length > 1 && !GAME_KEYS.has(key)) return;
+    _uiDirty = true;   // any input redraws the frozen/static screens next frame
     if (phase === 'splash') {
         // Capture only the meaningful keys: arrows fast-forward the coin drop,
         // Space/Enter start the game. Everything else is ignored (no preventDefault)
@@ -2091,7 +2092,7 @@ function updateMuteBtn(){
         c.fillRect(rx*2+16,ry*2,2,2);
     }));
 }
-function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicStop(); else{Snd.audioResume();Snd.sfxPlay('nav',cfg.music);} updateMuteBtn(); saveCfg(); }
+function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicStop(); else{Snd.audioResume();Snd.sfxPlay('nav',cfg.music);} updateMuteBtn(); saveCfg(); _uiDirty=true; }
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();
@@ -2131,7 +2132,25 @@ function _updateNonCanvasUI() {
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
 
-let _lastDraw = 0, _pauseDrawn = false, _qcSel = -1, _newsDrawn = false;
+let _lastDraw = 0, _uiDirty = true, _lastPhase = '';
+// Per-screen render policy in ONE place; loop() applies it generically (no per-screen
+// code in the loop). freeze: static screen, skipped when idle. anim(): optional
+// "still animating while idle" predicate that keeps it redrawing. hud: show HUD row.
+const SCREENS = {
+    splash:       { d:()=>drawSplash(simNow),    hud:false },
+    menu:         { d:()=>drawMenu(simNow),      hud:false },
+    news:         { d:()=>drawNews(simNow),      hud:false, freeze:true, anim:()=> simNow-_newsAt < 700 },
+    settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> !!_dataMsg && simNow-_dataMsgAt < 2600 },
+    scores:       { d:()=>drawScores(),          hud:false, freeze:true },
+    achievements: { d:()=>drawAchievements(),    hud:false, freeze:true },
+    shop:         { d:()=>drawShop(),            hud:false },
+    credits:      { d:()=>drawCredits(),         hud:false },
+    nameEntry:    { d:()=>drawNameEntry(simNow), hud:false },
+    quitConfirm:  { d:()=>drawQuitConfirm(),     hud:false, freeze:true },
+    resetConfirm: { d:()=>drawResetConfirm(),    hud:false, freeze:true },
+    paused:       { d:()=>drawGameBoard(simNow), hud:true,  freeze:true },
+};
+const _GAME_SCREEN = { d:()=>drawGameBoard(simNow), hud:true };   // playing/dying/levelReady/levelDone
 function loop(rafNow) {
     requestAnimationFrame(loop);
     // Optional 30 FPS cap: skip whole frames (the fixed-timestep sim catches up via
@@ -2164,40 +2183,16 @@ function loop(rafNow) {
     if(ran>=MAX_CATCHUP) _acc=0;
     updateHUD();   // HUD sync moved out of the sim (step) into presentation
 
-    // Draw once per frame from the simulated state.
-    const now=simNow;
-    if(phase!=='paused') _pauseDrawn=false;
-    if(phase!=='quitConfirm') _qcSel=-1;
-    if(phase!=='news') _newsDrawn=false;
-    let skip=false;
-    if     (phase==='splash')       {drawSplash(now);      showHUD(false);}
-    else if(phase==='menu')         {drawMenu(now);        showHUD(false);}
-    else if(phase==='news'){
-        // Animate the spin-open; once it settles the page is static -> draw once, then skip.
-        if(now-_newsAt < 700){ drawNews(now); showHUD(false); }
-        else if(!_newsDrawn){ drawNews(now); showHUD(false); _newsDrawn=true; }
-        else skip=true;
-    }
-    else if(phase==='settings')     {drawSettings();       showHUD(false);}
-    else if(phase==='scores')       {drawScores();         showHUD(false);}
-    else if(phase==='achievements') {drawAchievements();   showHUD(false);}
-    else if(phase==='shop')         {drawShop();           showHUD(false);}
-    else if(phase==='credits')      {drawCredits();        showHUD(false);}
-    else if(phase==='nameEntry')    {drawNameEntry(now);}
-    else if(phase==='quitConfirm'){
-        // Frozen board + static dialog: redraw only when the YES/NO selection changes.
-        if(quitConfirmSel===_qcSel) skip=true;
-        else { drawQuitConfirm(); _qcSel=quitConfirmSel; }
-    }
-    else if(phase==='resetConfirm') {drawResetConfirm();}
-    else if(phase==='paused'){
-        // Nothing animates while paused: draw the board + overlay once, then skip
-        // whole frames so the paused screen holds a steady rate instead of dipping.
-        if(_pauseDrawn) skip=true;
-        else { drawGameBoard(now); showHUD(true); _pauseDrawn=true; }
-    }
-    else                            {drawGameBoard(now);   showHUD(true);}
-    if(!skip) drawAchPopups(now);
+    // Generic draw: pick the phase's policy and apply it uniformly. A freezable screen
+    // is skipped (last frame kept on the canvas) while nothing changed (_uiDirty) and
+    // nothing is animating -- neither a global overlay nor the screen's own anim().
+    if(phase!==_lastPhase){ _uiDirty=true; _lastPhase=phase; }
+    const s = SCREENS[phase] || _GAME_SCREEN;
+    const transient = achPopups.length>0 || confetti.length>0;
+    let skip = s.freeze && !_uiDirty && !transient && !(s.anim && s.anim());
+    if(!skip){ s.d(); showHUD(s.hud); }
+    if(!skip) drawAchPopups(simNow);
+    _uiDirty = false;
 }
 
 document.fonts.ready.then(() => requestAnimationFrame(loop));
