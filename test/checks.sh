@@ -15,3 +15,6 @@ node test/smoke.js
 
 echo "[checks] sim invariants"
 node test/sim-invariants.js
+
+echo "[checks] sim determinism"
+node test/sim-determinism.js

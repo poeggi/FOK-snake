@@ -228,7 +228,19 @@ function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGam
 // GAME LOGIC
 // ================================================================
 const ck = p => `${p.x},${p.y}`;
-const ri = n => Math.floor(Math.random() * n);
+// Seeded PRNG (mulberry32) drives ALL simulation randomness so a game is fully
+// reproducible from (seed + inputs) -- the basis for replay-validated high scores
+// and lockstep 1v1. Seed the RNG per game in startGame(); cosmetic-only randomness
+// (particles, splash text) stays on Math.random and never touches sim state.
+let _rngState = 1, gameSeed = 0;
+function seedRng(s){ _rngState = (s >>> 0) || 1; }
+function rng(){
+    _rngState = (_rngState + 0x6D2B79F5) | 0;
+    let t = Math.imul(_rngState ^ (_rngState >>> 15), 1 | _rngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const ri = n => Math.floor(rng() * n);
 function freeCell(blocked) {
     let p, tries=0;
     do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p)) && ++tries<1000);
@@ -236,7 +248,8 @@ function freeCell(blocked) {
     return p;
 }
 
-function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(Math.random()*30); _earlyHeartCount=0;
+function startGame(seed) { gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
+    level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(rng()*30); _earlyHeartCount=0;
     let best=0; try{ for(const s of getScores()) if((s.score||0)>best) best=s.score; }catch{}
     _shimmerThreshold=Math.max(best,25000);
     beginLevel(); }
@@ -244,7 +257,7 @@ function startGame() { level=1; lives=START_LIVES; score=0; perfectCount=0; luck
 // Edge ring is always fragile; the ring one cell inward is fragile 25% of the time.
 function _barFragile(x,y) {
     if(x===0||x===COLS-1||y===0||y===ROWS-1) return true;
-    if(x===1||x===COLS-2||y===1||y===ROWS-2) return Math.random()<0.25;
+    if(x===1||x===COLS-2||y===1||y===ROWS-2) return rng()<0.25;
     return false;
 }
 function beginLevel(isRespawn=false) {
@@ -273,9 +286,9 @@ function beginLevel(isRespawn=false) {
     const _bl=bars.length;
     for(let i=0;i<_bl;i++){
         const b=bars[i];
-        if(Math.random()>=0.1) continue;
+        if(rng()>=0.1) continue;
         const dirs=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
-        for(let i=dirs.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[dirs[i],dirs[j]]=[dirs[j],dirs[i]];}
+        for(let i=dirs.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[dirs[i],dirs[j]]=[dirs[j],dirs[i]];}
         for(const d of dirs){
             const nx=b.x+d.x, ny=b.y+d.y;
             if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
@@ -288,7 +301,7 @@ function beginLevel(isRespawn=false) {
         }
     }
     spawnGem();
-    if(isRespawn && (((level===7||level===8)&&lives===2)||((level===9||level===10)&&lives===1)) && Math.random()<0.10){
+    if(isRespawn && (((level===7||level===8)&&lives===2)||((level===9||level===10)&&lives===1)) && rng()<0.10){
         const hBlocked=new Set([...snake,...bars].map(ck));
         heart=freeCell(hBlocked); heartAt=simNow;
     }
@@ -297,11 +310,11 @@ function beginLevel(isRespawn=false) {
 
 let gemOptimal=0, gemSteps=0;
 function _tryGouranga(blocked) {
-    if(Math.random()>=0.01) return;
+    if(rng()>=0.01) return;
     // Diagonals are rarer (20% combined) than the orthogonal lines
-    const {dx,dy}=Math.random()<0.2
-        ? (Math.random()<0.5?{dx:1,dy:1}:{dx:1,dy:-1})
-        : (Math.random()<0.5?{dx:1,dy:0}:{dx:0,dy:1});
+    const {dx,dy}=rng()<0.2
+        ? (rng()<0.5?{dx:1,dy:1}:{dx:1,dy:-1})
+        : (rng()<0.5?{dx:1,dy:0}:{dx:0,dy:1});
     for(let tries=0;tries<30;tries++){
         const sx=ri(dx?COLS-6:COLS);
         const sy=dy>0?ri(ROWS-6):dy<0?6+ri(ROWS-6):ri(ROWS);
@@ -346,7 +359,7 @@ function spawnGem() {
         if(_gourangaActive) return;
     }
     gem=freeCell(new Set([...snake,...bars].map(ck)));
-    const rv=Math.random();
+    const rv=rng();
     gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
     if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
     else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
@@ -366,13 +379,13 @@ function spawnGem() {
         gemOptimal=pd+2;
     }
     gemSteps=0;
-    if(!powerPellet&&!_powerMode&&Math.random()<0.002){
+    if(!powerPellet&&!_powerMode&&rng()<0.002){
         const ppB=new Set([...snake,...bars].map(ck)); ppB.add(ck(gem));
         if(heart) ppB.add(ck(heart));
         powerPellet=freeCell(ppB); powerPelletAt=simNow;
     }
     // Time crystal: level 6+, per-gem chance scales 0.1%/level (L6 0.1% .. L10 0.5%)
-    if(!timeCrystal&&!_slowMode&&level>=6&&Math.random()<(level-5)*0.001){
+    if(!timeCrystal&&!_slowMode&&level>=6&&rng()<(level-5)*0.001){
         const tcB=new Set([...snake,...bars].map(ck)); tcB.add(ck(gem));
         if(powerPellet) tcB.add(ck(powerPellet));
         if(heart) tcB.add(ck(heart));
