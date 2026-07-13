@@ -18,3 +18,6 @@ node test/sim-invariants.js
 
 echo "[checks] sim determinism"
 node test/sim-determinism.js
+
+echo "[checks] sim side-effect sequence"
+node test/sim-events.js
