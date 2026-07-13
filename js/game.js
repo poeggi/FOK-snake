@@ -1782,6 +1782,11 @@ function handleKey(key, pde) {
     if(key==='Backspace' && (phase==='settings'||phase==='shop')) key='Escape';
 
     // Escape = quit confirm in-game, or back in menus
+    // Backspace deletes a character in name entry (physical keyboard), same as ESC.
+    if(key==='Backspace' && phase==='nameEntry'){
+        if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
+        if(pde)pde(); return;
+    }
     if(key==='Escape'){
         if(phase==='nameEntry'){
             if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
