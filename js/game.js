@@ -1327,7 +1327,7 @@ function _openBox(box){
     if(box.id==='admin'){
         const si=cfg.shopItems||(cfg.shopItems={});
         _adminConsumed=true;
-        if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',refund}; }
+        if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',rarity:'legendary',refund}; }
         else { si.admincrown=true; _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
         saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('perfect',cfg.music); return;
     }
@@ -1337,7 +1337,7 @@ function _openBox(box){
     if(res.type==='coins'){ addFOKoins(res.amount); _boxReward={kind:'coins',amount:res.amount}; }
     else {
         const si=cfg.shopItems||(cfg.shopItems={});
-        if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,refund}; }
+        if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,rarity:res.rarity,refund}; }
         else { si[res.id]=true; if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
     }
     saveCfg();
@@ -1353,7 +1353,11 @@ function _drawBoxReveal(){
     const r=_boxReward;
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=18;
     if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',10); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',18); }
-    else if(r.kind==='dupe'){ ct('DUPLICATE - SOLD',CW/2,CH/2-16,'#aaaaaa',11); ct('+'+r.refund.toLocaleString()+' FK',CW/2,CH/2+12,'#ffd700',14); }
+    else if(r.kind==='dupe'){ const dit=_findItem(r.id), drc=_RARITY_COL[r.rarity]||'#aaaaaa';
+        if(dit&&dit.icon) drawPixelIcon(CW/2-16,CH/2-52,dit.icon,4);
+        ct(dit?dit.name:r.id,CW/2,CH/2+2,'#ffffff',12);
+        ct('DUPLICATE',CW/2,CH/2+22,drc,9);
+        ct('SOLD +'+r.refund.toLocaleString()+' FK',CW/2,CH/2+40,'#ffd700',11); }
     else { const it=_findItem(r.id), rc=_RARITY_COL[r.rarity]||'#fff';
         if(it&&it.icon) drawPixelIcon(CW/2-16,CH/2-46,it.icon,4);
         ct((r.rarity||'').toUpperCase(),CW/2,CH/2+10,rc,10);
@@ -1812,7 +1816,7 @@ function rollBox(box){
         for(const o of ['coins','common','rare','epic','legendary']){ acc+=box.odds[o]||0; if(r<acc){ outcome=o; break; } }
         cfg.boxPity = (outcome==='coins'||outcome==='common') ? (cfg.boxPity||0)+1 : 0;
     }
-    if(outcome==='coins') return { type:'coins', amount: Math.round(box.price*(0.2+Math.random()*0.3)) };
+    if(outcome==='coins') return { type:'coins', amount: Math.round(box.price*(0.2+Math.random()*0.3)/100)*100 };
     const pool=_boxLootPool(outcome, box.id==='admin');
     return { type:'item', id: pool[Math.floor(Math.random()*pool.length)], rarity:outcome };
 }

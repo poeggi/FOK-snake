@@ -27,7 +27,7 @@ const driver = `
     for(let i=0;i<40000;i++){
       const res = rollBox(BOXES[i % BOXES.length]);
       if(res.type==='item'){ items++; if(res.id==='admincrown') sawAdmin=true; }
-      else coins++;
+      else { coins++; if(res.amount%100!==0) throw 'coin reward '+res.amount+' is not a multiple of 100'; }
       const junk = res.type==='coins' || (res.type==='item' && res.rarity==='common');
       streak = junk ? streak+1 : 0; if(streak>maxStreak) maxStreak=streak;
     }
