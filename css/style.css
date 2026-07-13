@@ -19,6 +19,9 @@ body {
 .hud-row { display: flex; justify-content: space-between; width: 100%; }
 .hl { color: #888; } .hv { color: #7fff7f; }
 #lives-group { display: inline-flex; align-items: center; gap: 4px; }
+/* Lives hearts canvas: never let flex shrink it (that squeezed the hearts horizontally);
+   size it off the HUD scale, keep pixels crisp. */
+#hv-lives-cv { flex: none; image-rendering: pixelated; height: calc(12px * var(--ui-scale)); width: auto; }
 .hv-wrap { display: inline-flex; align-items: baseline; }
 #topbar {
     width: min(600px, calc(100vw - 16px));

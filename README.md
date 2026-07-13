@@ -13,7 +13,7 @@ Snake FOK Edition uses classic Snake as its starting point, but it is as much a 
 | ![Epic Gem](docs/gem-epic.svg) | **Epic Gem** | Extremely rare rainbow gem. Worth 100x or 200x the normal score bonus. |
 | ![Gouranga Gem](docs/gem-gouranga.svg) | **Gouranga Bonus** | Seven orange gems appear in a line -- horizontal, vertical, or diagonal. Collect all seven in sequence for escalating x2, x4, x6 ... score multipliers. Hare Krishna. |
 | ![Power Pellet](docs/power-pellet.svg) | **Power Pellet** | A Pac-Man nod. All barricades turn fragile for 5.5 seconds -- crash through everything. Barricades blink as the effect fades. |
-| | **Time Crystal** | Rare icy pickup from level 6 onward (chance rises with the level). Collect it to slow the whole board to level-3 speed for 30 seconds; a field-wide shimmer marks the warp and blinks as it runs out. |
+| ![Time Crystal](docs/time-crystal.svg) | **Time Crystal** | Rare icy pickup from level 6 onward (chance rises with the level). Collect it to slow the whole board to level-3 speed for 30 seconds; a field-wide shimmer marks the warp and blinks as it runs out. |
 | ![1UP Heart](docs/heart.svg) | **1UP Heart** | Extra life. Appears once during levels 4-6 and occasionally on respawn in later levels. Blinks before disappearing. Can push you above the starting three lives. |
 | ![Barricade](docs/barricade.svg) | **Barricade** | Solid orange brick. Colliding costs a life. Grows in number each level. |
 | ![Fragile Barricade](docs/barricade-fragile.svg) | **Fragile Barricade** | Crumbling border block. The snake can smash straight through it for +1000 FOKoins and a debris effect. Activated by the Power Pellet. |
