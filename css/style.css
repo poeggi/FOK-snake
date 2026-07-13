@@ -94,13 +94,19 @@ body {
     /* Side info panel -- 100px; floats left or right depending on handed setting */
     #side-info {
         display: flex; flex-direction: column; justify-content: flex-start;
-        align-items: center; gap: 14px;
+        /* Hug the canvas side (right by default) so the SND/FPS boxes sit as close to
+           the canvas as the gamepad buttons do on the other side -- no horizontal
+           padding, content aligned toward the canvas. */
+        align-items: flex-end; gap: 14px;
         width: 100px; flex-shrink: 0; overflow: hidden;
         position: relative;
-        padding: 16px 4px;
+        padding: 16px 0;
     }
     #topbar { width: auto; padding: 0; gap: 8px; order: 0; }
-    #fps-el { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); }
+    #fps-el { position: absolute; bottom: 16px; right: 0; left: auto; transform: none; }
+    /* Left-handed: side-info is on the right, so hug the canvas on the left instead. */
+    body.lefty #side-info { align-items: flex-start; }
+    body.lefty #fps-el { right: auto; left: 0; }
     #hud { width: auto; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: auto; }
     .hud-row { flex-direction: column; gap: 8px; }
     .hud-row > span { display: flex; flex-direction: column; gap: 2px; }
