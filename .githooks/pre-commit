@@ -21,8 +21,9 @@ fi
 SW="sw.js"
 [ -f "$SW" ] || exit 0
 
-# Derive MAJOR.MINOR from latest git tag
-TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0")
+# Derive MAJOR.MINOR from latest version tag (vN...). --match ignores non-version
+# tags such as `pre-refactor`, so they never poison the derived version.
+TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0")
 TAG_CLEAN=${TAG#v}
 DOT_COUNT=$(echo "$TAG_CLEAN" | tr -cd '.' | wc -c)
 if [ "$DOT_COUNT" -eq 0 ]; then

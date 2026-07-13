@@ -12,3 +12,6 @@ node test/check-ascii.js
 
 echo "[checks] headless smoke test"
 node test/smoke.js
+
+echo "[checks] sim invariants"
+node test/sim-invariants.js

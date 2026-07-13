@@ -1,71 +1,8 @@
-// Headless smoke test: load the real game in a stubbed DOM/canvas, drive the
-// menus and a few gameplay ticks, and assert no exceptions. This is the repo's
-// liveness net -- a syntax error or a broken state transition fails the run.
+// Headless smoke test: drive the menus, settings sub-menus, backup/restore,
+// config-load tolerance, and a short gameplay run -- asserting no exceptions.
 // Run: node test/smoke.js   (exit 0 = pass, 1 = fail)
-const fs = require('fs');
-const vm = require('vm');
-const path = require('path');
-const JS_DIR = path.join(__dirname, '..', 'js');
+const { runTest } = require('./harness');
 
-// ---- Canvas 2D context stub (Proxy: any method is a no-op; a few return values) ----
-function ctxStub() {
-    const base = {
-        measureText: () => ({ width: 60 }),
-        createLinearGradient: () => ({ addColorStop() {} }),
-        createRadialGradient: () => ({ addColorStop() {} }),
-        getImageData: () => ({ data: [] }),
-        canvas: { width: 600, height: 400 },
-    };
-    return new Proxy(base, { get: (t, p) => (p in t ? t[p] : () => {}), set: () => true });
-}
-// ---- Generic DOM element stub ----
-function elStub(id) {
-    return {
-        id, style: {}, textContent: '', value: '', width: 600, height: 400, files: [],
-        getContext: () => ctxStub(),
-        addEventListener() {}, removeEventListener() {}, appendChild() {}, removeChild() {},
-        setAttribute() {}, removeAttribute() {}, focus() {}, blur() {}, click() {}, remove() {},
-        getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 400 }),
-        classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-        querySelector() { return elStub('q'); },
-    };
-}
-const _els = {};
-const documentStub = {
-    getElementById: id => (_els[id] || (_els[id] = elStub(id))),
-    createElement: tag => elStub(tag + '#new'),
-    addEventListener() {}, removeEventListener() {},
-    body: elStub('body'),
-    fonts: { ready: Promise.resolve() },
-    hidden: false, visibilityState: 'visible',
-};
-const _store = {};
-const localStorageStub = {
-    getItem: k => (k in _store ? _store[k] : null),
-    setItem: (k, v) => { _store[k] = String(v); },
-    removeItem: k => { delete _store[k]; },
-    clear: () => { for (const k in _store) delete _store[k]; },
-};
-const sandbox = {
-    console, Promise, setTimeout, clearTimeout,
-    document: documentStub, localStorage: localStorageStub,
-    navigator: { serviceWorker: { addEventListener() {}, register: () => Promise.resolve(), controller: null }, userAgent: 'node' },
-    performance: { now: () => 0 },
-    requestAnimationFrame: () => 0, cancelAnimationFrame() {},
-    matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
-    caches: { keys: () => Promise.resolve([]), match: () => Promise.resolve(null), open: () => Promise.resolve({ addAll() {}, put() {}, match() {} }) },
-    Blob: class { constructor() {} }, URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
-    FileReader: class { readAsText() {} },
-    Image: class { constructor() { this.onload = null; } },
-    addEventListener() {}, removeEventListener() {},
-};
-sandbox.window = sandbox;
-sandbox.window.matchMedia = sandbox.matchMedia;
-const ctx = vm.createContext(sandbox);
-
-// ---- Load real source + append driver in ONE scope so `let` bindings are visible ----
-const src = ['assets.js', 'audio.js', 'game.js']
-    .map(f => fs.readFileSync(path.join(JS_DIR, f), 'utf8')).join('\n');
 const driver = `
 ;(function(){
   const R = globalThis.__R = { steps: [], err: null, ok: false };
@@ -142,13 +79,4 @@ const driver = `
   } catch(e) { R.err = String(e && e.stack || e); }
 })();
 `;
-try {
-    vm.runInContext(src + driver, ctx, { filename: 'fok-bundle.js' });
-} catch (e) {
-    console.log('LOAD ERROR:\n' + (e.stack || e));
-    process.exit(1);
-}
-const R = sandbox.__R;
-console.log(R.steps.join('\n'));
-if (!R || R.err) { console.log('\nSMOKE FAIL: ' + (R ? R.err : 'no result')); process.exit(1); }
-console.log('\nSMOKE PASSED');
+runTest('SMOKE', driver);
