@@ -241,6 +241,12 @@ function rng(){
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 const ri = n => Math.floor(rng() * n);
+// The simulation records side-effects (audio, coins, achievements, bonus text,
+// fireworks, HUD, particles) as events instead of performing them; the presentation
+// layer replays them in drainSimEvents(). This keeps the sim free of DOM/audio so a
+// server can replay it headlessly.
+let simEvents = [];
+function emit(e){ simEvents.push(e); }
 function freeCell(blocked) {
     let p, tries=0;
     do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p)) && ++tries<1000);
@@ -305,7 +311,7 @@ function beginLevel(isRespawn=false) {
         const hBlocked=new Set([...snake,...bars].map(ck));
         heart=freeCell(hBlocked); heartAt=simNow;
     }
-    renderBarsOffscreen(); Snd.musicGameUnpause(); showHUD(true);
+    emit({t:'bars'}); emit({t:'munpause'}); emit({t:'showhud',v:true});
 }
 
 let gemOptimal=0, gemSteps=0;
@@ -361,8 +367,8 @@ function spawnGem() {
     gem=freeCell(new Set([...snake,...bars].map(ck)));
     const rv=rng();
     gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
-    if(gem.tier===2) Snd.sfxPlay('epic_spawn',cfg.music);
-    else if(gem.tier===1) Snd.sfxPlay('lucky_spawn',cfg.music);
+    if(gem.tier===2) emit({t:'sfx',name:'epic_spawn'});
+    else if(gem.tier===1) emit({t:'sfx',name:'lucky_spawn'});
     gemAt=gem.spawnAt=simNow;
     // Fewest actual moves to the gem, routing around the snake's own body and solid
     // barricades. Manhattan distance ignored those, making the "fewest steps" x2 bonus
@@ -406,7 +412,7 @@ function step(now) {
     const head={x:(snake[0].x+dir.x+COLS)%COLS,y:(snake[0].y+dir.y+ROWS)%ROWS};
     const hk=ck(head);
     const protect = now - spawnAt < SPAWN_PROTECT;
-    if(_powerMode && now-_powerModeAt>=_POWER_DUR){ _powerMode=false; renderBarsOffscreen(); }
+    if(_powerMode && now-_powerModeAt>=_POWER_DUR){ _powerMode=false; emit({t:'bars'}); }
     if(!protect){
         const hitBar=bars.find(b=>ck(b)===hk);
         if(hitBar){
@@ -415,25 +421,20 @@ function step(now) {
                 if(hitBar.paired){const p=bars.find(b=>b.pairEnd&&ck(b.pairEnd)===primCk);if(p)primCk=ck(p);}
                 const primBar=bars.find(b=>ck(b)===primCk);
                 const secCk=primBar&&primBar.pairEnd?ck(primBar.pairEnd):null;
-                _crushEffects.push({x:hitBar.x,y:hitBar.y,at:now,
-                    pts:Array.from({length:20},()=>({
-                        ang:Math.random()*Math.PI*2, spd:3+Math.random()*9,
-                        sz:2+Math.random()*4,
-                        col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
-                    }))});
+                emit({t:'crush', x:hitBar.x, y:hitBar.y});
                 bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk));
-                const barReward=level*100; addFOKoins(barReward); showBonus(now,'+'+barReward+' FK!');
-                Snd.sfxPlay('crash',cfg.music);
-                if(!_powerMode) renderBarsOffscreen();
+                const barReward=level*100; emit({t:'coin',n:barReward}); emit({t:'bonus',label:'+'+barReward+' FK!'});
+                emit({t:'sfx',name:'crash'});
+                if(!_powerMode) emit({t:'bars'});
             } else { die(now); return; }
         }
     }
     if(powerPellet&&ck(powerPellet)===hk){
         powerPellet=null; _powerMode=true; _powerModeAt=now;
-        score+=level*200; showBonus(now,'POWER UP!');
+        score+=level*200; emit({t:'bonus',label:'POWER UP!'});
     }
-    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;showBonus(now,'+1 UP!');}
-    if(timeCrystal&&ck(timeCrystal)===hk){timeCrystal=null;_slowMode=true;_slowModeAt=now;gPer=_lvlGper(3);showBonus(now,'TIME WARP!');}
+    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;emit({t:'bonus',label:'+1 UP!'});}
+    if(timeCrystal&&ck(timeCrystal)===hk){timeCrystal=null;_slowMode=true;_slowModeAt=now;gPer=_lvlGper(3);emit({t:'bonus',label:'TIME WARP!'});}
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
     const anyAte=ate||ateGourangaIdx>=0;
@@ -447,16 +448,16 @@ function step(now) {
             const bonusMult=(levelBonusCount+1)*2;
             score+=level*100*bonusMult;
             levelBonusCount++;
-            if(levelBonusCount>=5) unlockAch('bonus_3');
+            if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'});
             if(_gourangaEaten.size>=7){
                 _gourangaActive=false;
-                unlockAch('gouranga');
-                showBonus(now,'GOURANGA!'); Snd.sfxPlay('perfect',cfg.music);
+                emit({t:'ach',id:'gouranga'});
+                emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'});
             } else {
-                showBonus(now,`x${bonusMult} BONUS!`);
-                Snd.sfxPlay('eat',cfg.music);
+                emit({t:'bonus',label:`x${bonusMult} BONUS!`});
+                emit({t:'sfx',name:'eat'});
             }
-            unlockAch('first_gem');
+            emit({t:'ach',id:'first_gem'});
         }
         if(ate){
             const base=level*100;
@@ -468,38 +469,38 @@ function step(now) {
             const diffMult=(cfg.diff===2&&level>=2)?2:1;
             score+=bonus?base*bonusMult*mult*diffMult:base*mult*diffMult;
             if(tier===2){
-                showBonus(now,bonus?`EPIC x${100*bonusMult}!`:'EPIC x100!');
-                Snd.sfxPlay('epic_eat',cfg.music);
-                unlockAch('epic_gem');
-                epicLevelCount++; if(epicLevelCount>=2) unlockAch('epic_double');
+                emit({t:'bonus',label:bonus?`EPIC x${100*bonusMult}!`:'EPIC x100!'});
+                emit({t:'sfx',name:'epic_eat'});
+                emit({t:'ach',id:'epic_gem'});
+                epicLevelCount++; if(epicLevelCount>=2) emit({t:'ach',id:'epic_double'});
             } else if(tier===1){
-                showBonus(now,bonus?`LUCKY x${10*bonusMult}!`:'LUCKY x10!');
-                Snd.sfxPlay('lucky_eat',cfg.music);
-                unlockAch('lucky_gem');
-                luckyCount++; if(luckyCount>=3) unlockAch('lucky_streak');
+                emit({t:'bonus',label:bonus?`LUCKY x${10*bonusMult}!`:'LUCKY x10!'});
+                emit({t:'sfx',name:'lucky_eat'});
+                emit({t:'ach',id:'lucky_gem'});
+                luckyCount++; if(luckyCount>=3) emit({t:'ach',id:'lucky_streak'});
             } else if(bonus){
-                showBonus(now,`x${bonusMult} BONUS!`);
-                Snd.sfxPlay('bonus',cfg.music);
-            } else Snd.sfxPlay('eat',cfg.music);
-            unlockAch('first_gem');
-            if(bonus){ levelBonusCount++; if(levelBonusCount>=5) unlockAch('bonus_3'); } else levelBonusCount=0;
+                emit({t:'bonus',label:`x${bonusMult} BONUS!`});
+                emit({t:'sfx',name:'bonus'});
+            } else emit({t:'sfx',name:'eat'});
+            emit({t:'ach',id:'first_gem'});
+            if(bonus){ levelBonusCount++; if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'}); } else levelBonusCount=0;
         }
-        if(score>=64000)  unlockAch('score_25k');
-        if(score>=100000) unlockAch('score_100k');
+        if(score>=64000)  emit({t:'ach',id:'score_25k'});
+        if(score>=100000) emit({t:'ach',id:'score_100k'});
         if(gemsDone>=GEMS_PER_LEVEL){
             gem=null; score+=level*500;
             if(perfectLevel){
-                score+=level*1000; spawnFireworks(now); Snd.sfxPlay('perfect',cfg.music);
-                addFOKoins(10000);
-                unlockAch('perfect_level');
-                perfectCount++; if(perfectCount>=3) unlockAch('triple_perf');
-            } else Snd.sfxPlay('levelUp',cfg.music);
-            unlockAch('level1');
-            if(level>=5)  unlockAch('level5');
+                score+=level*1000; emit({t:'fw'}); emit({t:'sfx',name:'perfect'});
+                emit({t:'coin',n:10000});
+                emit({t:'ach',id:'perfect_level'});
+                perfectCount++; if(perfectCount>=3) emit({t:'ach',id:'triple_perf'});
+            } else emit({t:'sfx',name:'levelUp'});
+            emit({t:'ach',id:'level1'});
+            if(level>=5)  emit({t:'ach',id:'level5'});
             if(level>=10){
-                unlockAch('level10');
-                if(cfg.diff===2)               unlockAch('hard_champ');
-                if(lives>=START_LIVES)         unlockAch('no_deaths');
+                emit({t:'ach',id:'level10'});
+                if(cfg.diff===2)               emit({t:'ach',id:'hard_champ'});
+                if(lives>=START_LIVES)         emit({t:'ach',id:'no_deaths'});
             }
             phase='levelDone'; phaseAt=now;
         } else {
@@ -507,7 +508,6 @@ function step(now) {
         }
     } else snake.pop();
     if(anyAte && cfg.diff > 0) snake.push({...snake[snake.length - 1]});
-    updateHUD();
 }
 
 let bonusAt = -9999, bonusLabel = '';
@@ -540,7 +540,33 @@ function spawnFireworks(now) {
 function die(now) {
     lives--; phase='dying'; phaseAt=now;
     deathMsg=lives>0?`LIFE LOST  (${lives} left)`:'GAME OVER!';
-    Snd.sfxPlay('die',cfg.music); Snd.musicGamePause();
+    emit({t:'sfx',name:'die'}); emit({t:'mpause'});
+}
+
+// Presentation replays the sim's recorded side-effects. Called once per sim tick
+// from loop(), right after update(); simNow is that tick's timestamp.
+function drainSimEvents(){
+    for(const e of simEvents){
+        switch(e.t){
+            case 'sfx':      Snd.sfxPlay(e.name, cfg.music); break;
+            case 'mpause':   Snd.musicGamePause(); break;
+            case 'munpause': Snd.musicGameUnpause(); break;
+            case 'mstop':    Snd.musicStop(); break;
+            case 'coin':     addFOKoins(e.n); break;
+            case 'ach':      unlockAch(e.id); break;
+            case 'bonus':    showBonus(simNow, e.label); break;
+            case 'fw':       spawnFireworks(simNow); break;
+            case 'bars':     renderBarsOffscreen(); break;
+            case 'showhud':  showHUD(e.v); break;
+            case 'crush':    _crushEffects.push({ x:e.x, y:e.y, at:simNow,
+                                 pts:Array.from({length:20},()=>({
+                                     ang:Math.random()*Math.PI*2, spd:3+Math.random()*9,
+                                     sz:2+Math.random()*4,
+                                     col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
+                                 })) }); break;
+        }
+    }
+    simEvents.length = 0;
 }
 
 function togglePause() {
@@ -2360,7 +2386,7 @@ function update() {
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(lives>0)beginLevel(true);
-        else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';showHUD(false);Snd.musicStop();}
+        else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='over';emit({t:'showhud',v:false});emit({t:'mstop'});}
     }
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
@@ -2395,8 +2421,9 @@ function loop(rafNow) {
     if(frameMs>250) frameMs=250;
     _acc+=frameMs;
     let ran=0;
-    while(_acc>=TICK_MS && ran<MAX_CATCHUP){ _acc-=TICK_MS; update(); ran++; }
+    while(_acc>=TICK_MS && ran<MAX_CATCHUP){ _acc-=TICK_MS; update(); drainSimEvents(); ran++; }
     if(ran>=MAX_CATCHUP) _acc=0;
+    updateHUD();   // HUD sync moved out of the sim (step) into presentation
 
     // Draw once per frame from the simulated state.
     const now=simNow;
