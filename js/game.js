@@ -261,6 +261,10 @@ function drainSimEvents(){
             case 'fw':       spawnFireworks(simNow); break;
             case 'bars':     renderBarsOffscreen(); break;
             case 'showhud':  showHUD(e.v); break;
+            case 'gameover':
+                try{ nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME); }catch{ nameStr=''; }
+                nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0; nameCursorPos=nameStr.length; nameReason='over';
+                showHUD(false); Snd.musicStop(); break;
             case 'crush':    _crushEffects.push({ x:e.x, y:e.y, at:simNow,
                                  pts:Array.from({length:20},()=>({
                                      ang:Math.random()*Math.PI*2, spd:3+Math.random()*9,

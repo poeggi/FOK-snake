@@ -21,3 +21,6 @@ node test/sim-determinism.js
 
 echo "[checks] sim side-effect sequence"
 node test/sim-events.js
+
+echo "[checks] sim headless purity"
+node test/sim-purity.js
