@@ -1378,7 +1378,7 @@ function _drawShopTabs(){
         ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi[i]:'#3a3a3a';
         if(active){ ctx.shadowColor=hi[i]; ctx.shadowBlur=8; }
         rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
-        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', 8);
+        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', 10);
     }
 }
 function drawShop() {
