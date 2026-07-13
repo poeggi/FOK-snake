@@ -115,6 +115,12 @@ const driver = `
     if(_boxList().length!==BOXES.length) throw 'ADMIN box still offered after being claimed';
     log('admin box ok');
 
+    // Multi-page newspaper: render and flip pages without error.
+    phase='news'; _newsAt=0; newsPage=0; drawNews(1000);
+    press('ArrowRight'); if(newsPage!==1) throw 'news: LEFT/RIGHT did not flip pages';
+    drawNews(1000); press('ArrowLeft'); if(newsPage!==0) throw 'news: page flip did not wrap back';
+    log('multi-page news ok: pages='+((ANNOUNCEMENT&&ANNOUNCEMENT.pages&&ANNOUNCEMENT.pages.length)||1));
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

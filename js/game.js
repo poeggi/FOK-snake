@@ -947,12 +947,16 @@ function _drawNewspaperPage(now) {
     ctx.save(); ctx.translate(_logoRx,0); ctx.scale(-1,1); ctx.translate(-_logoRx,0);
     drawScoreHead(_logoRx, _logoY, _logoCol, _logoSi); ctx.restore();
     ct('EXTRA * EXTRA * READ ALL ABOUT IT', cx, py+72, '#6a5f4a', 8);
-    const a=ANNOUNCEMENT||{lines:[]};
-    ct(a.headline||'', cx, py+112, '#8a1810', 14);                  // headline
-    let y=py+150;
+    const pages=(ANNOUNCEMENT&&ANNOUNCEMENT.pages)||[ANNOUNCEMENT||{lines:[]}];
+    const a=pages[Math.min(newsPage,pages.length-1)]||{lines:[]};
+    ct(a.headline||'', cx, py+108, '#8a1810', 14);                  // headline
+    let y=py+146;
     (a.lines||[]).forEach(line=>{ if(line===''){ y+=10; return; } ct(line, cx, y, '#2a281e', 10); y+=22; });
+    if(pages.length>1){                                             // page flipper
+        ct('< '+(newsPage+1)+' / '+pages.length+' >', cx, py+ph-20, '#6a5f4a', 8);
+    }
 }
-let _newsAt = 0;
+let _newsAt = 0, newsPage = 0;
 function drawNews(now) {
     drawGrid(); drawOvBg(0.92);
     const t=Math.min(1,(now-_newsAt)/650);                          // retro spin-and-grow open
@@ -961,7 +965,8 @@ function drawNews(now) {
     const s=0.05+0.95*t; ctx.scale(s,s); ctx.translate(-CW/2,-CH/2);
     _drawNewspaperPage(now);
     ctx.restore();
-    if(t>=1) ct('A:back  ESC:back', CW/2, CH-12, '#888', 10);
+    if(t>=1){ const multi=ANNOUNCEMENT&&ANNOUNCEMENT.pages&&ANNOUNCEMENT.pages.length>1;
+        ct(multi?'L/R:page   A/ESC:back':'A:back  ESC:back', CW/2, CH-12, '#888', 10); }
 }
 function drawSplashText(now) {
     if(!_splashText) return;
@@ -2034,7 +2039,7 @@ function handleKey(key, pde) {
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){_enterShop();}
             else if(menuSel===5){phase='credits';creditsScroll=CH-20;creditsSpeed=0.8;_creditsNormal=0.8;}
-            else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=simNow;}
+            else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=simNow;newsPage=0;}
             if(pde)pde();
         }
     }
@@ -2075,7 +2080,12 @@ function handleKey(key, pde) {
         Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
     }
     else if(phase==='news'){
-        if(key==='ArrowUp'||key==='ArrowDown'||key==='ArrowLeft'||key==='ArrowRight') return;
+        const pages=(ANNOUNCEMENT&&ANNOUNCEMENT.pages)||[];
+        if(key==='ArrowLeft'||key==='ArrowRight'){
+            if(pages.length>1){ newsPage=(newsPage+(key==='ArrowRight'?1:-1)+pages.length)%pages.length; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); }
+            return;
+        }
+        if(key==='ArrowUp'||key==='ArrowDown') return;
         Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
     }
     else if(phase==='shop'){

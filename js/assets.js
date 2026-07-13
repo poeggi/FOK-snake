@@ -28,16 +28,29 @@ const SYM_YEN = { w:5, h:7, px:[[0,0],[4,0],[1,1],[3,1],[2,2],[0,3],[1,3],[2,3],
 const DEATH_DUR = T(54), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18);
 // Main-menu announcement. Set to null when there is nothing to announce.
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
-// unread badge), a headline, and body lines ('' makes a blank gap line).
-const ANNOUNCEMENT = { id:'v1.2.0', headline:'WE ARE BEEFING THINGS UP!', lines:[
-    'NEW IN v1.2:',
-    'Time Crystal in levels 6+',
-    'Shop page 2 - 5 new items',
-    'Smileys in your name',
-    'Snappier touch controls',
-    '',
-    'MULTIPLAYER coming soon.',
-    'Stay tuned!' ] };
+// unread badge) and one or more pages, each a headline + body lines ('' = blank
+// gap line). Pages are flipped with LEFT/RIGHT; the newest goes first.
+const ANNOUNCEMENT = { id:'v1.5.0', pages:[
+    { headline:'MYSTERY BOXES ARRIVE!', lines:[
+        'NEW IN v1.5:',
+        'MYSTERY BOXES in the shop!',
+        '4 tiers: Common to Legendary',
+        'Win exclusive BOX GEAR',
+        'Dupes auto-sell for FOKoins',
+        '',
+        'The ADMIN BOX: 1 in 750 visits',
+        '',
+        'Good luck - it is a lottery!' ] },
+    { headline:'WE ARE BEEFING THINGS UP!', lines:[
+        'NEW IN v1.2:',
+        'Time Crystal in levels 6+',
+        'Shop page 2 - 5 new items',
+        'Smileys in your name',
+        'Snappier touch controls',
+        '',
+        'MULTIPLAYER coming soon.',
+        'Stay tuned!' ] },
+] };
 // Minecraft-style title splash lines; one is picked at random each load.
 // Keep them short and ASCII so they fit the tilted, pulsing draw.
 const SPLASHES = [
