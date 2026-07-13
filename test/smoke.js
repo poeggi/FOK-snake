@@ -60,6 +60,10 @@ const driver = `
     settingsCat=-1; settingsSel=SETTINGS_CATS.length; press('Enter');
     if(phase!=='menu') throw 'BACK from category list should return to menu';
 
+    // Menu static cache: rebuild on selection change, then blit + animated overlay.
+    menuSel=0; drawMenu(simNow); menuSel=1; drawMenu(simNow); drawMenu(simNow);
+    log('drawMenu (cached) ok');
+
     // Config load tolerance: an old/partial save (missing new keys, out-of-range
     // values) and outright garbage must not throw and must fall back to defaults.
     localStorage.setItem(CFG_KEY, JSON.stringify({ music:false, diff:99, snakeColor:-1 }));

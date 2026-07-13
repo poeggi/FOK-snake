@@ -337,6 +337,11 @@ const _barsCtx=_barsCanvas.getContext('2d');
 // (instead of grid + bars separately). Rebuilt only when bars change (see _composeBg).
 const _bgCanvas=document.createElement('canvas'); _bgCanvas.width=CW; _bgCanvas.height=CH;
 const _bgCtx=_bgCanvas.getContext('2d');
+// Main-menu static cache: everything except the animated splash text + unread badge.
+// Rebuilt only when the visible static content changes (selection, version, diff line).
+const _menuCanvas=document.createElement('canvas'); _menuCanvas.width=CW; _menuCanvas.height=CH;
+const _menuCtx=_menuCanvas.getContext('2d');
+let _mc={sel:-1,ver:'',diff:''};
 (()=>{
     const g=_gridCanvas.getContext('2d');
     g.fillStyle='#07070e'; g.fillRect(0,0,CW,CH);
@@ -354,16 +359,16 @@ function drawGrid() { ctx.drawImage(_gridCanvas, 0, 0); }
 function _composeBg() { _bgCtx.drawImage(_gridCanvas, 0, 0); _bgCtx.drawImage(_barsCanvas, 0, 0); }
 _composeBg();
 function drawOvBg(a) { ctx.fillStyle=`rgba(7,7,14,${a||0.88})`; ctx.fillRect(0,0,CW,CH); }
-function ct(text,x,y,color,size) {
-    ctx.fillStyle=color||'#7fff7f';
-    ctx.font=`${size||10}px "Press Start 2P"`;
-    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(text,x,y);
+function ct(text,x,y,color,size,c=ctx) {
+    c.fillStyle=color||'#7fff7f';
+    c.font=`${size||10}px "Press Start 2P"`;
+    c.textAlign='center'; c.textBaseline='middle'; c.fillText(text,x,y);
 }
-function menuItem(text,y,sel) {
-    ctx.globalAlpha=sel?1:0.78;
-    ctx.shadowColor=sel?'#7fff7f':'#cccccc'; ctx.shadowBlur=sel?12:1;
-    ct(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',14);
-    ctx.shadowBlur=0; ctx.globalAlpha=1;
+function menuItem(text,y,sel,c=ctx) {
+    c.globalAlpha=sel?1:0.78;
+    c.shadowColor=sel?'#7fff7f':'#cccccc'; c.shadowBlur=sel?12:1;
+    ct(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',14,c);
+    c.shadowBlur=0; c.globalAlpha=1;
 }
 
 // High-contrast barricades (>4.5:1 on dark bg) - bright amber brick
@@ -837,28 +842,31 @@ function drawSplash(now) {
     }
 }
 
-function drawNewspaper(now, sel) {
-    const w=30, h=26, x=CW-w-20, y=CH-h-30;
-    ctx.save();
-    if(sel){ ctx.shadowColor='#ffe08a'; ctx.shadowBlur=14; }
-    ctx.fillStyle=sel?'#fff8e0':'#d8d2c0'; ctx.fillRect(x,y,w,h);       // paper
-    ctx.shadowBlur=0;
-    ctx.fillStyle=sel?'#e8dcb0':'#b8b298'; ctx.fillRect(x+w-4,y+2,4,h-2); // folded edge
-    ctx.fillStyle='#2a2a2a'; ctx.fillRect(x+3,y+3,w-9,4);               // masthead
-    ctx.fillStyle=sel?'#555':'#777';
-    for(let i=0;i<4;i++) ctx.fillRect(x+3,y+10+i*4,w-16,2);            // text lines
-    ctx.fillStyle=sel?'#888':'#999'; ctx.fillRect(x+w-11,y+10,8,8);   // photo box
-    ctx.restore();
-    if(!announceSeen()){                                              // unread badge
-        ctx.save(); ctx.fillStyle='#ff3355'; ctx.shadowColor='#ff3355'; ctx.shadowBlur=8;
-        ctx.beginPath(); ctx.arc(x+w-2,y+1,3.5+Math.sin(now/220),0,Math.PI*2); ctx.fill(); ctx.restore();
-    }
-    // NEWS label on the bottom line, baseline-aligned with the version string
-    ctx.save();
-    ctx.globalAlpha=sel?1:0.78; ctx.shadowColor=sel?'#7fff7f':'#cccccc'; ctx.shadowBlur=sel?12:1;
-    ctx.font='14px "Press Start 2P"'; ctx.textAlign='right'; ctx.textBaseline='bottom';
-    ctx.fillStyle=sel?'#7fff7f':'#cccccc'; ctx.fillText('NEWS', CW-10, CH-8);
-    ctx.restore();
+const _NP_W=30, _NP_H=26, _NP_X=CW-30-20, _NP_Y=CH-26-30;   // newspaper icon rect
+// Static newspaper (icon + NEWS label) drawn into the menu cache. No badge here.
+function _drawNewspaper(c, sel) {
+    const w=_NP_W, h=_NP_H, x=_NP_X, y=_NP_Y;
+    c.save();
+    if(sel){ c.shadowColor='#ffe08a'; c.shadowBlur=14; }
+    c.fillStyle=sel?'#fff8e0':'#d8d2c0'; c.fillRect(x,y,w,h);       // paper
+    c.shadowBlur=0;
+    c.fillStyle=sel?'#e8dcb0':'#b8b298'; c.fillRect(x+w-4,y+2,4,h-2); // folded edge
+    c.fillStyle='#2a2a2a'; c.fillRect(x+3,y+3,w-9,4);               // masthead
+    c.fillStyle=sel?'#555':'#777';
+    for(let i=0;i<4;i++) c.fillRect(x+3,y+10+i*4,w-16,2);          // text lines
+    c.fillStyle=sel?'#888':'#999'; c.fillRect(x+w-11,y+10,8,8);   // photo box
+    c.restore();
+    c.save();
+    c.globalAlpha=sel?1:0.78; c.shadowColor=sel?'#7fff7f':'#cccccc'; c.shadowBlur=sel?12:1;
+    c.font='14px "Press Start 2P"'; c.textAlign='right'; c.textBaseline='bottom';
+    c.fillStyle=sel?'#7fff7f':'#cccccc'; c.fillText('NEWS', CW-10, CH-8);
+    c.restore();
+}
+// Animated unread badge -- drawn on the live canvas each frame (overlay).
+function _drawNewspaperBadge(now, unread) {
+    if(!unread) return;
+    ctx.save(); ctx.fillStyle='#ff3355'; ctx.shadowColor='#ff3355'; ctx.shadowBlur=8;
+    ctx.beginPath(); ctx.arc(_NP_X+_NP_W-2,_NP_Y+1,3.5+Math.sin(now/220),0,Math.PI*2); ctx.fill(); ctx.restore();
 }
 function _drawNewspaperPage(now) {
     const pw=CW-64, ph=CH-64, px=(CW-pw)/2, py=(CH-ph)/2, cx=CW/2;
@@ -899,26 +907,35 @@ function drawSplashText(now) {
     ctx.fillStyle='#ffff00'; ctx.fillText(_splashText, 0, 0);
     ctx.restore();
 }
-function drawMenu(now) {
-    drawGrid();
-    ctx.drawImage(_scanCanvas, 0, 0);
-    ctx.shadowColor='#7fff7f'; ctx.shadowBlur=38;
-    ct('S N A K E',CW/2,78,'#7fff7f',40);
-    ctx.shadowBlur=0;
-    ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',10);
-    drawSplashText(now);
+// Static menu -> offscreen cache. Everything here changes only on an event.
+function _composeMenu(diffLine){
+    const c=_menuCtx;
+    c.drawImage(_gridCanvas,0,0);
+    c.drawImage(_scanCanvas,0,0);
+    c.shadowColor='#7fff7f'; c.shadowBlur=38;
+    ct('S N A K E',CW/2,78,'#7fff7f',40,c);
+    c.shadowBlur=0;
+    ct('F O K   E D I T I O N',CW/2,122,'#4a7a4a',10,c);
     const msp=MENU_ITEMS.length<=5?38:30;
-    MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel));
-    if(ANNOUNCEMENT) drawNewspaper(now, menuSel===MENU_ITEMS.length);
-    ct(`DIFF:${DIFF[cfg.diff].label}  AUDIO:${cfg.music?'ON':'OFF'}  STYLE:${cfg.musicStyle===0?'NEW':'CLASSIC'}`,CW/2,362,'#4a7a4a',10);
-    // Bottom bar: version left, hint center
-    ctx.save();
-    ctx.font='10px "Press Start 2P"'; ctx.textBaseline='bottom'; ctx.shadowBlur=0;
-    ctx.fillStyle='#4a7a4a'; ctx.textAlign='left';
-    ctx.fillText(_swVersion, 10, CH-8);
-    ctx.fillStyle='#888'; ctx.textAlign='center';
-    ctx.fillText('UP/DN:nav  A:ok  START:quick', CW/2, CH-8);
-    ctx.restore();
+    MENU_ITEMS.forEach((item,i)=>menuItem(item,162+i*msp,i===menuSel,c));
+    if(ANNOUNCEMENT) _drawNewspaper(c, menuSel===MENU_ITEMS.length);
+    ct(diffLine,CW/2,362,'#4a7a4a',10,c);
+    c.save();
+    c.font='10px "Press Start 2P"'; c.textBaseline='bottom'; c.shadowBlur=0;
+    c.fillStyle='#4a7a4a'; c.textAlign='left';
+    c.fillText(_swVersion, 10, CH-8);
+    c.fillStyle='#888'; c.textAlign='center';
+    c.fillText('UP/DN:nav  A:ok  START:quick', CW/2, CH-8);
+    c.restore();
+}
+function drawMenu(now) {
+    const diffLine=`DIFF:${DIFF[cfg.diff].label}  AUDIO:${cfg.music?'ON':'OFF'}  STYLE:${cfg.musicStyle===0?'NEW':'CLASSIC'}`;
+    if(menuSel!==_mc.sel || _swVersion!==_mc.ver || diffLine!==_mc.diff){
+        _composeMenu(diffLine); _mc.sel=menuSel; _mc.ver=_swVersion; _mc.diff=diffLine;
+    }
+    ctx.drawImage(_menuCanvas,0,0);           // static layer (one blit)
+    drawSplashText(now);                       // animated overlay
+    if(ANNOUNCEMENT) _drawNewspaperBadge(now, !announceSeen());
 }
 
 // Settings are grouped into sub-menus. Each leaf carries a live label plus
@@ -2114,7 +2131,7 @@ function _updateNonCanvasUI() {
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
 
-let _lastDraw = 0, _pauseDrawn = false;
+let _lastDraw = 0, _pauseDrawn = false, _qcSel = -1;
 function loop(rafNow) {
     requestAnimationFrame(loop);
     // Optional 30 FPS cap: skip whole frames (the fixed-timestep sim catches up via
@@ -2150,6 +2167,7 @@ function loop(rafNow) {
     // Draw once per frame from the simulated state.
     const now=simNow;
     if(phase!=='paused') _pauseDrawn=false;
+    if(phase!=='quitConfirm') _qcSel=-1;
     let skip=false;
     if     (phase==='splash')       {drawSplash(now);      showHUD(false);}
     else if(phase==='menu')         {drawMenu(now);        showHUD(false);}
@@ -2160,7 +2178,11 @@ function loop(rafNow) {
     else if(phase==='shop')         {drawShop();           showHUD(false);}
     else if(phase==='credits')      {drawCredits();        showHUD(false);}
     else if(phase==='nameEntry')    {drawNameEntry(now);}
-    else if(phase==='quitConfirm')  {drawQuitConfirm();}
+    else if(phase==='quitConfirm'){
+        // Frozen board + static dialog: redraw only when the YES/NO selection changes.
+        if(quitConfirmSel===_qcSel) skip=true;
+        else { drawQuitConfirm(); _qcSel=quitConfirmSel; }
+    }
     else if(phase==='resetConfirm') {drawResetConfirm();}
     else if(phase==='paused'){
         // Nothing animates while paused: draw the board + overlay once, then skip
