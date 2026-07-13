@@ -29,7 +29,7 @@ body {
    larger reference; appearance:none + flex:none kill the <button> vs <span>
    user-agent differences (min-height/chrome) that made them diverge on some TVs. */
 #fps-el, #btn-mute {
-    box-sizing: border-box; width: 72px; height: 28px; min-height: 28px;
+    box-sizing: border-box; width: 76px; height: 28px; min-height: 28px;
     flex: 0 0 auto; line-height: 1;
     display: flex; align-items: center; justify-content: center;
     border-radius: 3px; padding: 0 4px;
