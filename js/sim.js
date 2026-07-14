@@ -252,11 +252,11 @@ function step(now) {
             const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
             if(!bonus && tier===0) perfectLevel=false;
             const bonusMult=(levelBonusCount+1)*2;
-            const mult=tier===2?100:tier===1?10:1;
+            const mult=tier===2?80:tier===1?10:1;
             const diffMult=(cfg.diff===2&&level>=2)?2:1;
             score+=bonus?base*bonusMult*mult*diffMult:base*mult*diffMult;
             if(tier===2){
-                emit({t:'bonus',label:bonus?`EPIC x${100*bonusMult}!`:'EPIC x100!'});
+                emit({t:'bonus',label:bonus?`EPIC x${80*bonusMult}!`:'EPIC x80!'});
                 emit({t:'sfx',name:'epic_eat'});
                 emit({t:'ach',id:'epic_gem'});
                 epicLevelCount++; if(epicLevelCount>=2) emit({t:'ach',id:'epic_double'});
