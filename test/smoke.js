@@ -121,6 +121,13 @@ const driver = `
     drawNews(1000); press('ArrowLeft'); if(newsPage!==0) throw 'news: page flip did not wrap back';
     log('multi-page news ok: pages='+((ANNOUNCEMENT&&ANNOUNCEMENT.pages&&ANNOUNCEMENT.pages.length)||1));
 
+    // Backup integrity checksum: non-zero for real data, and any edit changes it.
+    const _snap={v:1,hs:'x',coins:'100',ach:'{}',cfg:'{}',name:'AB'};
+    const _good=_sumOf(_snap);
+    if(!(_good>0)) throw 'save checksum should be non-zero for real data';
+    if(_sumOf({..._snap,coins:'999999'})===_good) throw 'editing data must change the checksum';
+    log('save checksum ok');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

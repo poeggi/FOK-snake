@@ -1883,9 +1883,15 @@ function _saveSnapshot() {
         cfg:   localStorage.getItem(CFG_KEY),
         name:  localStorage.getItem('lastSName') };
 }
+// FNV-1a over the backup's data fields -- a light integrity check so a hand-edited file is
+// rejected on restore. Recomputed the same way on both sides from a fixed key order.
+function _sum(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } return h; }
+function _sumOf(d){ return _sum(JSON.stringify({v:d.v,hs:d.hs,coins:d.coins,ach:d.ach,cfg:d.cfg,name:d.name})); }
 function backupStats() {
     try {
-        const blob=new Blob([JSON.stringify(_saveSnapshot())],{type:'application/json'});
+        const snap=_saveSnapshot();
+        snap.crc=_sumOf(snap);              // integrity checksum, written as the final field
+        const blob=new Blob([JSON.stringify(snap)],{type:'application/json'});
         const url=URL.createObjectURL(blob);
         const a=document.createElement('a');
         a.href=url; a.download='snake-fok-backup.json';
@@ -1905,6 +1911,9 @@ _restoreInp.addEventListener('change',()=>{
         try {
             const d=JSON.parse(rd.result);
             if(!d||typeof d!=='object') throw 0;
+            // Integrity: reject a file whose checksum does not match its data. Files that carry
+            // no checksum (older backups predate it) are still accepted for compatibility.
+            if(d.crc && d.crc!==_sumOf(d)) throw 0;
             const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
             set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name');
             _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
