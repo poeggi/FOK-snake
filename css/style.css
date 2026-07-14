@@ -13,7 +13,10 @@
 body {
     background: #07070e;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 100dvh; min-height: 100dvh; padding: 0; gap: 8px;
+    height: 100dvh; min-height: 100dvh;
+    /* Top breathing room for the HUD text (scales with it); canvas bottom margin is
+       handled in layout(). Horizontal stays 0 so the canvas keeps its full width. */
+    padding: round(calc(8px * var(--ui-scale)), 1px) 0 0; gap: 8px;
     font-family: 'Press Start 2P', 'Courier New', monospace; color: #ccc;
     user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none;
