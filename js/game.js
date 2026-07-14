@@ -2585,8 +2585,11 @@ function _updateNonCanvasUI() {
     const onSplash = phase === 'splash';
     if (_uiSplashShown === onSplash) return;
     _uiSplashShown = onSplash;
-    document.getElementById('btn-mute').style.visibility = onSplash ? 'hidden' : '';
-    document.getElementById('fps-el').style.visibility = onSplash ? 'hidden' : '';
+    // Fade in via opacity (not visibility) so the boxes stay laid-out + composited the whole
+    // time -- flipping visibility made a bordered box paint incompletely on the first reveal.
+    const mute=document.getElementById('btn-mute'), fps=document.getElementById('fps-el');
+    mute.style.opacity = fps.style.opacity = onSplash ? '0' : '1';
+    mute.style.pointerEvents = fps.style.pointerEvents = onSplash ? 'none' : '';
     document.getElementById('gamepad').classList.toggle('splash', onSplash);
 }
 
