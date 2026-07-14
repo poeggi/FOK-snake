@@ -740,7 +740,12 @@ function drawSplashText(now) {
     if(!txt) return;
     ctx.save();
     ctx.translate(CW*0.78, 120); ctx.rotate(-0.34);
-    const s = 1 + 0.05*(1+Math.sin(now/150));   // smooth 1.0..1.10 pulse; abs(sin) gave a cusp that snapped each cycle
+    // Pulse off the real frame clock (performance.now), NOT the passed simNow: simNow is
+    // quantized to 60Hz sim ticks and the fixed-timestep loop runs 0/1/2 ticks per drawn
+    // frame, so it stalls one frame then jumps the next -> visible stutter. Wall-clock is
+    // continuous and matches the display cadence, so the pulse is fluent.
+    const t = (typeof performance!=='undefined' && performance.now) ? performance.now() : now;
+    const s = 1 + 0.05*(1+Math.sin(t/150));   // smooth 1.0..1.10 pulse (no abs() cusp)
     ctx.scale(s, s);
     ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='#3a2a00'; ctx.fillText(txt, 1.5, 1.5);   // retro drop shadow

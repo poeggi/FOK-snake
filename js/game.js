@@ -631,18 +631,12 @@ window.addEventListener('resize', syncLandscapePanels);
 window.addEventListener('orientationchange', () => setTimeout(syncLandscapePanels, 120));
 requestAnimationFrame(syncLandscapePanels);
 
-// Scale SND/FPS font to match canvas display size when the canvas is CSS-upscaled beyond its 600px native width
-// The browser sizes the canvas (aspect-ratio + max-width/height inside a flex:1 #wrap =
-// rules R1 "fit" + R2 "maximize on the binding axis"). layout() just reads the result
-// back into the CSS vars that drive the chrome: --ui-scale (= displayed/native) sizes the
-// fonts+boxes, --stage-w matches the HUD/topbar width to the canvas. A ResizeObserver
-// re-runs it whenever the canvas resizes, so it self-converges if a font tweak nudges the
-// layout; the last-width guard stops that from looping. --canvas-aspect is set once.
-// R1+R2 in JS: size the canvas to the largest CW:CH box that fits its #wrap region
-// (which flex:1 hands whatever space the shown chrome leaves), minus a 4px margin. Then
-// publish the scale so the chrome fonts/boxes follow (--ui-scale) and the HUD matches the
-// canvas width (--stage-w). We observe #wrap (the input), not the canvas (our output), and
-// the last-width guard stops the font->reflow->resize feedback from looping.
+// layout(): size the canvas to the largest CW:CH box that fits its #wrap region (flex hands
+// it whatever the shown chrome leaves), minus a 4px margin -- R1 "fit" + R2 "maximize on the
+// binding axis". Then read the result back into the CSS vars that drive the chrome: --ui-scale
+// (= displayed/native) sizes the fonts+boxes, --stage-w matches the HUD/topbar to the canvas
+// width. A ResizeObserver on #wrap (the input, not the canvas = our output) re-runs it; a
+// last-width guard stops the font->reflow->resize feedback from looping.
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
 const _pmq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: portrait)') : { matches:false };
 let _lastCw = -1, _dbgEl = null;
