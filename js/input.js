@@ -173,7 +173,7 @@ function handleKey(key, pde) {
             Snd.sfxPlay('select',cfg.music);
             if(menuSel===0)startGame();
             else if(menuSel===1){phase='settings';settingsCat=-1;settingsSel=0;}
-            else if(menuSel===2){phase='scores';_scoreboardCache=getScores();}
+            else if(menuSel===2){phase='scores';_scoreboardCache=getScores();scoresTab=0;}
             else if(menuSel===3){phase='achievements';achPage=0;}
             else if(menuSel===4){_enterShop();}
             else if(menuSel===5){phase='credits';creditsScroll=CH-20;creditsSpeed=0.8;_creditsNormal=0.8;}
@@ -211,7 +211,12 @@ function handleKey(key, pde) {
         else if(key==='Enter'){Snd.sfxPlay('nav',cfg.music);phase='menu';creditsSpeed=0.8;_creditsNormal=0.8;if(pde)pde();}
     }
     else if(phase==='scores'){
-        if(key==='ArrowUp'||key==='ArrowDown'||key==='ArrowLeft'||key==='ArrowRight') return;
+        if(key==='ArrowLeft'||key==='ArrowRight'){
+            const nt = key==='ArrowRight' ? 1 : 0;   // LOCAL left, GLOBAL right
+            if(nt!==scoresTab){ scoresTab=nt; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); }
+            return;
+        }
+        if(key==='ArrowUp'||key==='ArrowDown') return;
         Snd.sfxPlay('nav',cfg.music); phase='menu'; if(pde)pde();
     }
     else if(phase==='achievements'){
@@ -314,7 +319,7 @@ function handleKey(key, pde) {
             if(!nameStr.trim()) return;
             try{localStorage.setItem('lastSName',nameStr);}catch (e){}
             addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
-            _scoreboardCache=getScores();phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
+            _scoreboardCache=getScores();scoresTab=0;phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
         };
         if(key==='ArrowUp')  {nameCharIdx=(nameCharIdx-1+NAME_CHARS.length)%NAME_CHARS.length;Snd.sfxPlay('nav',cfg.music);}
         else if(key==='ArrowDown'){nameCharIdx=(nameCharIdx+1)%NAME_CHARS.length;Snd.sfxPlay('nav',cfg.music);}

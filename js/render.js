@@ -940,9 +940,32 @@ function drawScoreHead(cx, cy, colorIdx, si) {
 }
 
 let _scoreboardCache = null;
+let scoresTab = 0;   // 0 = LOCAL (this device), 1 = GLOBAL (central server -- not wired yet)
+function _drawScoreTabs(){
+    const labels=['LOCAL','GLOBAL'];
+    const hi=['#7fff7f','#ffd24a'], fill=['rgba(28,60,20,0.85)','rgba(60,48,16,0.85)'], txt=['#bfffbf','#ffe9b0'];
+    const m=6, tabH=20, tabY=44, tabW=(CW-2*m)/labels.length;
+    for(let i=0;i<labels.length;i++){
+        const tx=m+i*tabW, active=(i===scoresTab);
+        ctx.fillStyle=active?fill[i]:'rgba(16,16,16,0.6)';
+        rr(tx+2,tabY,tabW-4,tabH,4); ctx.fill();
+        ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi[i]:'#3a3a3a';
+        if(active){ ctx.shadowColor=hi[i]; ctx.shadowBlur=8; }
+        rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
+        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', FONT.HINT);
+    }
+}
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct('HIGH SCORES',CW/2,28,'#7fff7f',FONT.TITLE); ctx.shadowBlur=0;
+    _drawScoreTabs();
+    if(scoresTab===1){
+        // GLOBAL: reserved for centrally-stored scores fetched from the server. Not wired yet.
+        ct('GLOBAL SCORES',CW/2,CH/2-14,'#ffd24a',FONT.MENU);
+        ct('COMING SOON',CW/2,CH/2+12,'#aaa',FONT.HINT);
+        ct('L/R:tab   A/ESC:back',CW/2,CH-14,'#888',FONT.HINT);
+        return;
+    }
     const scores=_scoreboardCache||[];
     if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',FONT.HINT); }
     else {
@@ -959,7 +982,7 @@ function drawScores() {
         });
         ctx.textAlign='center';
     }
-    ct('A:back',CW/2,CH-14,'#888',FONT.HINT);
+    ct('L/R:tab   A/ESC:back',CW/2,CH-14,'#888',FONT.HINT);
 }
 
 function drawAchievements() {
