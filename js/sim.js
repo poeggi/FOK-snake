@@ -69,11 +69,11 @@ function beginLevel(isRespawn=false) {
     powerPellet=null; _powerMode=false;
     timeCrystal=null; _slowMode=false;
     clearBoost();
-    const blocked = new Set([...snake,{x:cx+1,y:cy},{x:cx+2,y:cy}].map(ck));
+    const blocked = new Set(snake.concat([{x:cx+1,y:cy},{x:cx+2,y:cy}]).map(ck));
     const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
     for(let i=0;i<numBars;i++){
         const b=freeCell(blocked); blocked.add(ck(b));
-        bars.push({...b, fragile:_barFragile(b.x,b.y)});
+        bars.push(Object.assign({}, b, {fragile:_barFragile(b.x,b.y)}));
     }
     // ~10% of bars extend into a 2-cell unit; no wrapping so rendering stays simple
     const _bl=bars.length;
@@ -95,7 +95,7 @@ function beginLevel(isRespawn=false) {
     }
     spawnGem();
     if(isRespawn && (((level===7||level===8)&&lives===2)||((level===9||level===10)&&lives===1)) && rng()<0.10){
-        const hBlocked=new Set([...snake,...bars].map(ck));
+        const hBlocked=new Set(snake.concat(bars).map(ck));
         heart=freeCell(hBlocked); heartAt=simNow;
     }
     emit({t:'bars'}); emit({t:'munpause'}); emit({t:'showhud',v:true});
@@ -127,7 +127,7 @@ function _tryGouranga(blocked) {
 function _pathDist(start, goal) {
     const gk = ck(goal);
     if (ck(start) === gk) return 0;
-    const blocked = new Set([...snake.slice(1, -1), ...bars.filter(b => !b.fragile)].map(ck));
+    const blocked = new Set(snake.slice(1, -1).concat(bars.filter(b => !b.fragile)).map(ck));
     const STEP = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
     let frontier = [start], seen = new Set([ck(start)]), dist = 0;
     while (frontier.length) {
@@ -148,10 +148,10 @@ function _pathDist(start, goal) {
 }
 function spawnGem() {
     if(!_gourangaActive && level>=2 && (gemsDone===1||gemsDone===2)){
-        _tryGouranga(new Set([...snake,...bars].map(ck)));
+        _tryGouranga(new Set(snake.concat(bars).map(ck)));
         if(_gourangaActive) return;
     }
-    gem=freeCell(new Set([...snake,...bars].map(ck)));
+    gem=freeCell(new Set(snake.concat(bars).map(ck)));
     const rv=rng();
     gem.tier = rv<0.0005 ? 2 : rv<0.0105 ? 1 : 0;
     if(gem.tier===2) emit({t:'sfx',name:'epic_spawn'});
@@ -173,20 +173,20 @@ function spawnGem() {
     }
     gemSteps=0;
     if(!powerPellet&&!_powerMode&&rng()<0.002){
-        const ppB=new Set([...snake,...bars].map(ck)); ppB.add(ck(gem));
+        const ppB=new Set(snake.concat(bars).map(ck)); ppB.add(ck(gem));
         if(heart) ppB.add(ck(heart));
         powerPellet=freeCell(ppB); powerPelletAt=simNow;
     }
     // Time crystal: level 6+, per-gem chance scales 0.1%/level (L6 0.1% .. L10 0.5%)
     if(!timeCrystal&&!_slowMode&&level>=6&&rng()<(level-5)*0.001){
-        const tcB=new Set([...snake,...bars].map(ck)); tcB.add(ck(gem));
+        const tcB=new Set(snake.concat(bars).map(ck)); tcB.add(ck(gem));
         if(powerPellet) tcB.add(ck(powerPellet));
         if(heart) tcB.add(ck(heart));
         timeCrystal=freeCell(tcB); timeCrystalAt=simNow;
     }
     if(!_earlyHeartUsed&&level>=4&&level<=6){
         if(_earlyHeartCount===_earlyHeartTrigger&&!heart){
-            const hB=new Set([...snake,...bars].map(ck)); hB.add(ck(gem));
+            const hB=new Set(snake.concat(bars).map(ck)); hB.add(ck(gem));
             if(powerPellet) hB.add(ck(powerPellet));
             heart=freeCell(hB); heartAt=simNow; heartIsEarly=true; _earlyHeartUsed=true;
         }
@@ -294,7 +294,7 @@ function step(now) {
             if(!_gourangaActive) spawnGem();
         }
     } else snake.pop();
-    if(anyAte && cfg.diff > 0) snake.push({...snake[snake.length - 1]});
+    if(anyAte && cfg.diff > 0) snake.push(Object.assign({}, snake[snake.length - 1]));
 }
 
 function die(now) {

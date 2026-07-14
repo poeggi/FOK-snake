@@ -59,7 +59,7 @@ function addScore(name, sc, lvl) {
     const now = new Date();
     const date = `${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getFullYear()).slice(-2)}`;
     s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl,
-             diff:cfg.diff, color:cfg.snakeColor||0, shopItems:{...(cfg.wornItems||{})}, date });
+             diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });
     s.sort((a, b) => b.score - a.score);
     try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch {}
     addFOKoins(sc);
@@ -191,9 +191,9 @@ const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
 let cfg = defaultCfg();
 loadCfg();
-if(cfg.wornItems === null){ cfg.wornItems = {...(cfg.shopItems||{})}; saveCfg(); }
-Snd.musicSetVolume(cfg.volume ?? 1);
-Snd.sfxSetVolume(cfg.sfxVol ?? 0.5);
+if(cfg.wornItems === null){ cfg.wornItems = Object.assign({}, cfg.shopItems||{}); saveCfg(); }
+Snd.musicSetVolume((cfg.volume==null?1:cfg.volume));
+Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
 function applyHandedness() { document.body.classList.toggle('lefty', cfg.handed === 1); }
 applyHandedness();
 
@@ -1062,10 +1062,10 @@ const SETTINGS_CATS = [
           act:()=>{cfg.music=!cfg.music;if(!cfg.music)Snd.musicStop();else{Snd.audioResume();Snd.sfxPlay('select',cfg.music);}updateMuteBtn();} },
         { lbl:()=>'AUDIO STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
           act:()=>{cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'VOLUME: '+Math.round((cfg.volume??1)*100)+'%', bar:'#7fff7f', frac:()=>cfg.volume??1,
-          adj:(r)=>{cfg.volume=Math.max(0,Math.min(1,Math.round(((cfg.volume??1)+(r?0.1:-0.1))*10)/10));Snd.musicSetVolume(cfg.volume);} },
-        { lbl:()=>'SFX VOL: '+Math.round((cfg.sfxVol??0.5)*100)+'%', bar:'#aaddff', frac:()=>cfg.sfxVol??0.5,
-          adj:(r)=>{cfg.sfxVol=Math.max(0,Math.min(1,Math.round(((cfg.sfxVol??0.5)+(r?0.1:-0.1))*10)/10));Snd.sfxSetVolume(cfg.sfxVol);} },
+        { lbl:()=>'VOLUME: '+Math.round(((cfg.volume==null?1:cfg.volume))*100)+'%', bar:'#7fff7f', frac:()=>(cfg.volume==null?1:cfg.volume),
+          adj:(r)=>{cfg.volume=Math.max(0,Math.min(1,Math.round((((cfg.volume==null?1:cfg.volume))+(r?0.1:-0.1))*10)/10));Snd.musicSetVolume(cfg.volume);} },
+        { lbl:()=>'SFX VOL: '+Math.round(((cfg.sfxVol==null?0.5:cfg.sfxVol))*100)+'%', bar:'#aaddff', frac:()=>(cfg.sfxVol==null?0.5:cfg.sfxVol),
+          adj:(r)=>{cfg.sfxVol=Math.max(0,Math.min(1,Math.round((((cfg.sfxVol==null?0.5:cfg.sfxVol))+(r?0.1:-0.1))*10)/10));Snd.sfxSetVolume(cfg.sfxVol);} },
     ]},
     { label:'CONTROLS', items:[
         { lbl:()=>'TURBO BOOST: '+(cfg.turbo!==false?'ON':'OFF'),
@@ -1196,7 +1196,7 @@ function drawScores() {
         scores.slice(0,8).forEach((s,i)=>{
             const y=90+i*28;
             ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
-            const diff=['E','N','H'][s.diff??1]??'N';
+            const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
             ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
             ctx.textAlign='right'; ctx.fillText(String(s.score), 348, y);
             ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level}`, 360, y);
@@ -1917,9 +1917,9 @@ _restoreInp.addEventListener('change',()=>{
             const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
             set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name');
             _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
-            if(cfg.wornItems===null){ cfg.wornItems={...(cfg.shopItems||{})}; }
+            if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
             applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
-            Snd.musicSetVolume(cfg.volume??1); Snd.sfxSetVolume(cfg.sfxVol??0.5);
+            Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
             _dataMsg='STATS RESTORED'; _dataMsgAt=simNow;
         } catch { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
     };
@@ -2546,7 +2546,8 @@ function loop(rafNow) {
     _uiDirty = false;
 }
 
-document.fonts.ready.then(() => requestAnimationFrame(loop));
+if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(() => requestAnimationFrame(loop));
+else requestAnimationFrame(loop);
 
 // Align SND button and FPS to the actual canvas top/bottom edges in landscape.
 // CSS can't know where the canvas ends up when it's width-constrained, so JS measures it.
