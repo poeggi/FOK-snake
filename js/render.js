@@ -745,7 +745,7 @@ function drawSplashText(now) {
     // frame, so it stalls one frame then jumps the next -> visible stutter. Wall-clock is
     // continuous and matches the display cadence, so the pulse is fluent.
     const t = (typeof performance!=='undefined' && performance.now) ? performance.now() : now;
-    const s = 1 + 0.05*(1+Math.sin(t/150));   // smooth 1.0..1.10 pulse (no abs() cusp)
+    const s = 1 + 0.04*(1+Math.sin(t/300));   // slow, gentle 1.0..1.08 breathing (pure sine: no cusp, no jump)
     ctx.scale(s, s);
     ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='#3a2a00'; ctx.fillText(txt, 1.5, 1.5);   // retro drop shadow

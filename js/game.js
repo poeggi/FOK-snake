@@ -703,7 +703,16 @@ function layout() {
 window.addEventListener('resize', () => requestAnimationFrame(layout));
 window.addEventListener('orientationchange', () => setTimeout(layout, 120));
 if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
-requestAnimationFrame(layout);
+// Startup can race the web font and the browser's first CSS layout, which occasionally
+// locked a too-small canvas on reload: layout() sets the --fs-* vars it also measures, and
+// the _lastCw "converged" guard then froze a bad early value (the RO on #wrap never re-fires
+// once the canvas has a fixed px size). _relayout forces two passes past that guard -- the
+// 2nd pass re-measures the chrome with the vars the 1st set, so the feedback converges.
+// Run it now, once the font is ready, and again on full load.
+function _relayout(){ _lastCw = -1; layout(); _lastCw = -1; layout(); }
+requestAnimationFrame(_relayout);
+if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_relayout);
+window.addEventListener('load', _relayout);
 
 let _swVersion = '?';
 if ('caches' in window) {

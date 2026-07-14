@@ -1,6 +1,6 @@
 // AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually
-// version snake-v1.5.40, released 2026-07-14 22:53 +0200
-const CACHE = 'snake-v1.5.40';
+// version snake-v1.5.41, released 2026-07-14 23:03 +0200
+const CACHE = 'snake-v1.5.41';
 const ASSETS = ['./', './css/fonts.css', './css/style.css', './docs/barricade-fragile.svg', './docs/barricade.svg', './docs/gem-epic.svg', './docs/gem-gouranga.svg', './docs/gem-lucky.svg', './docs/gem.svg', './docs/heart.svg', './docs/power-pellet.svg', './docs/time-crystal.svg', './fonts/PressStart2P-Regular.woff2', './icon.svg', './js/assets.js', './js/audio.js', './js/game.js', './js/input.js', './js/render.js', './js/sim.js', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -23,7 +23,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
     if (e.request.method !== 'GET') return;
     e.respondWith(
-        fetch(e.request.clone())
+        fetch(e.request.clone(), { cache: 'no-store' })   // bypass the browser HTTP cache: GitHub Pages sets max-age=600, which otherwise serves stale JS for ~10 min after a push even when online
             .then(res => {
                 if (res.ok) {
                     const copy = res.clone();
