@@ -2568,9 +2568,13 @@ let _lastCw = -1;
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
-        const availW = wrap.clientWidth - 8, availH = wrap.clientHeight - 8;  // 4px each side
-        if (availW <= 0 || availH <= 0) return;
-        const scale = Math.min(availW / CW, availH / CH, CANVAS_MAX_H / CH);  // fit both (R1), tighter axis binds (R2), capped
+        const wW = wrap.clientWidth, wH = wrap.clientHeight;
+        if (wW <= 0 || wH <= 0) return;
+        // Adaptive margin: ~2% of the smaller side (clamped 4-48px). Barely-there on a phone
+        // (keeps the fill), comfortable breathing room on a big desktop/TV. Only bites the
+        // binding axis, so it never shrinks the phone's width fill.
+        const m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
+        const scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);  // R1 fit, R2 binds, capped
         const cw = CW * scale;
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
