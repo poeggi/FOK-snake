@@ -2283,20 +2283,19 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40, SWIPE_MENU=40;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
-let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false;
+let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 canvas.addEventListener('touchstart',e=>{
     //Snd.audioResume();
     e.preventDefault();
     if(phase==='nameEntry'){ nameInp.focus(); }
     const t=e.touches[0];
-    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false;
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
 },{passive:false});
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
     if(!_swipeBase||phase==='splash') return;
-    if(phase!=='playing'&&phase!=='credits') return;   // menus: one discrete swipe, committed on touchend
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     const t=e.touches[0];
@@ -2313,6 +2312,10 @@ canvas.addEventListener('touchmove',e=>{
     // first or reverse: SWIPE_1 (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention)
     const thresh=(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(boosting?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
     if(dist<thresh) return;
+    // Menu (not playing/credits): a LEFT/RIGHT swipe is one full gesture -- remember it and
+    // fire a single key on touchend (no repeat while dragging). UP/DOWN falls through and
+    // fires live, immediately, as before. _swipeBase is left un-reset so the gesture holds.
+    if(phase!=='playing'&&phase!=='credits'&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
     _swipedThisTouch=true; handleKey(key,null);
     if(phase==='playing'){
         const d=GDIRS[key];
@@ -2332,19 +2335,16 @@ canvas.addEventListener('touchend',e=>{
         return;
     }
     if(_swipeBase){
-        const t=e.changedTouches[0];
-        const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y, adx=Math.abs(dx), ady=Math.abs(dy);
-        // In menus (not playing/credits), the whole swipe -- committed here on finger-up --
-        // counts as ONE arrow key, so one flick = one tab/page/selection step (no repeat
-        // while the finger is down). _swipeBase stayed at the start since touchmove no-ops here.
-        if(phase!=='playing'&&phase!=='credits'&&phase!=='nameEntry'&&Math.max(adx,ady)>=SWIPE_MENU){
-            handleKey(adx>ady?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'),null);
+        // Menu left/right gesture: fire ONE key now, on finger-up. Otherwise, tap -> select.
+        if(phase!=='playing'&&phase!=='credits'&&phase!=='nameEntry'&&_menuHDir){
+            handleKey(_menuHDir,null);
         } else {
-            const isTap=Math.max(adx,ady)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
+            const t=e.changedTouches[0];
+            const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
             if(phase!=='playing'&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
         }
     }
-    _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null;
+    _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
     if(phase==='playing'){boostDir=null;boosting=false;}
     if(phase==='credits'){creditsSpeed=_creditsNormal;}
 },{passive:false});
