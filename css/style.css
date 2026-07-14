@@ -94,11 +94,10 @@ body {
     body.lefty #btn-esc   { grid-column: 2; }
     body.lefty #btn-ok    { grid-column: 1; }
     body.lefty #btn-start { grid-column: 2; }
-    #gamepad.splash #dpad-c,
-    #gamepad.splash #btn-esc { opacity: 0.2; pointer-events: none; }
     .sbtn { height: 48px; }
 }
-.sbtn.dim { opacity: 0.3; pointer-events: none; }
+/* Dimmed/inactive control (button or d-pad) -- driven by the CONTROLS table in game.js. */
+.sbtn.dim, #dpad-c.dim { opacity: 0.3; pointer-events: none; }
 #side-info { display: contents; }
 /* Portrait touch: keep the gamepad low for thumb reach. */
 @media (pointer: coarse) and (orientation: portrait) {

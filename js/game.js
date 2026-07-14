@@ -2569,15 +2569,35 @@ updateMuteBtn();
 const _btnPause = document.getElementById('btn-pause');
 const _btnStart = document.getElementById('btn-start');
 const _btnEsc   = document.getElementById('btn-esc');
+const _CTRL_ELS = { esc:_btnEsc, pause:_btnPause, ok:document.getElementById('btn-ok'), start:_btnStart, dpad:document.getElementById('dpad-c') };
+// Which on-screen controls are LIVE per phase; every control NOT listed is dimmed. One
+// source of truth (mirrors the SCREENS render-policy table) -- read it like a matrix.
+//   esc = back/quit   pause = |I (space)   ok = A (enter)   start = quick-start   dpad
+const CONTROLS = {
+    splash:       ['ok','start'],
+    menu:         ['ok','start','dpad'],
+    settings:     ['esc','ok','dpad'],
+    scores:       ['esc','ok','dpad'],
+    achievements: ['esc','ok','dpad'],
+    news:         ['esc','ok','dpad'],
+    credits:      ['esc','pause','ok','dpad'],
+    shop:         ['esc','pause','ok','dpad'],
+    nameEntry:    ['esc','pause','ok','start','dpad'],
+    playing:      ['esc','pause','ok','dpad'],
+    paused:       ['esc','pause','ok','dpad'],
+    dying:        ['esc','ok','dpad'],
+    levelReady:   ['esc','ok','dpad'],
+    levelDone:    ['esc','ok','dpad'],
+    quitConfirm:  ['esc','ok','start','dpad'],
+    resetConfirm: ['esc','ok','start','dpad'],
+    _default:     ['esc','ok','dpad'],
+};
 let _dimPhase = null;
 function _updateBtnDim() {
     if(phase===_dimPhase) return;
     _dimPhase=phase;
-    const gameplay=['playing','paused','dying','levelReady','levelDone'].includes(phase);
-    const noAction=['settings','scores','achievements','shop','credits','news'].includes(phase);
-    _btnPause.classList.toggle('dim', !['playing','paused','credits','shop','nameEntry'].includes(phase));
-    _btnStart.classList.toggle('dim', gameplay || noAction);
-    _btnEsc.classList.toggle('dim', phase==='menu');
+    const live = CONTROLS[phase] || CONTROLS._default;
+    for(const id in _CTRL_ELS){ const el=_CTRL_ELS[id]; if(el) el.classList.toggle('dim', live.indexOf(id)<0); }
 }
 
 let _uiSplashShown = null;
@@ -2590,7 +2610,6 @@ function _updateNonCanvasUI() {
     const mute=document.getElementById('btn-mute'), fps=document.getElementById('fps-el');
     mute.style.opacity = fps.style.opacity = onSplash ? '0' : '1';
     mute.style.pointerEvents = fps.style.pointerEvents = onSplash ? 'none' : '';
-    document.getElementById('gamepad').classList.toggle('splash', onSplash);
 }
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
