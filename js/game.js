@@ -2574,7 +2574,7 @@ function _updateBtnDim() {
     if(phase===_dimPhase) return;
     _dimPhase=phase;
     const gameplay=['playing','paused','dying','levelReady','levelDone'].includes(phase);
-    const noAction=['settings','scores','achievements','shop','credits'].includes(phase);
+    const noAction=['settings','scores','achievements','shop','credits','news'].includes(phase);
     _btnPause.classList.toggle('dim', !['playing','paused','credits','shop','nameEntry'].includes(phase));
     _btnStart.classList.toggle('dim', gameplay || noAction);
     _btnEsc.classList.toggle('dim', phase==='menu');
