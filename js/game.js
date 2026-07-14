@@ -2618,6 +2618,15 @@ function layout() {
         const root = document.documentElement.style;
         root.setProperty('--ui-scale', scale);
         root.setProperty('--stage-w', cw + 'px');
+        // Chrome font/box sizes rounded to whole px HERE (not with CSS round(), which old
+        // browsers lack). CSS consumes these as var(--*-px), each with a base-size fallback.
+        const rpx = b => Math.round(b * scale) + 'px';
+        root.setProperty('--fs-menu-px',  rpx(FONT.MENU));
+        root.setProperty('--fs-hint-px',  rpx(FONT.HINT));
+        root.setProperty('--pad-top-px',  rpx(8));
+        root.setProperty('--box-w-px',    rpx(92));
+        root.setProperty('--box-h-px',    rpx(28));
+        root.setProperty('--lives-h-px',  rpx(12));
         const iconH = Math.round(16 * scale); _muteCv.style.height = iconH + 'px'; _muteCv.style.width = (iconH * 2) + 'px';
     } catch(_) {}
 }

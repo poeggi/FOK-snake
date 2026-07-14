@@ -13,10 +13,10 @@
 body {
     background: #07070e;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 100dvh; min-height: 100dvh;
+    height: 100vh; height: 100dvh; min-height: 100vh; min-height: 100dvh;
     /* Top breathing room for the HUD text (scales with it); canvas bottom margin is
        handled in layout(). Horizontal stays 0 so the canvas keeps its full width. */
-    padding: round(calc(8px * var(--ui-scale)), 1px) 0 0; gap: 8px;
+    padding: var(--pad-top-px, 8px) 0 0; gap: 8px;
     font-family: 'Press Start 2P', 'Courier New', monospace; color: #ccc;
     user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none;
@@ -25,7 +25,7 @@ body {
 #hud {
     display: flex; flex-direction: column; gap: 3px;
     width: var(--stage-w, min(600px, 100vw));
-    font-size: round(calc(var(--fs-menu) * var(--ui-scale)), 1px); letter-spacing: 0;
+    font-size: var(--fs-menu-px, 14px); letter-spacing: 0;
     opacity: 1; transition: opacity 0.15s;
     order: 1;
 }
@@ -34,7 +34,7 @@ body {
 .hl { color: #888; } .hv { color: #7fff7f; }
 #lives-group { display: inline-flex; align-items: center; gap: 4px; }
 /* Lives hearts canvas: never let flex shrink it (that squeezed the hearts); size off the HUD scale, keep pixels crisp. */
-#hv-lives-cv { flex: none; image-rendering: pixelated; height: round(calc(12px * var(--ui-scale)), 1px); width: auto; }
+#hv-lives-cv { flex: none; image-rendering: pixelated; height: var(--lives-h-px, 12px); width: auto; }
 .hv-wrap { display: inline-flex; align-items: baseline; }
 #topbar {
     width: var(--stage-w, min(600px, 100vw));
@@ -45,14 +45,14 @@ body {
    blur or overflow. appearance:none + flex:none kill <button> vs <span> UA differences. */
 #fps-el, #btn-mute {
     box-sizing: border-box;
-    width: round(calc(92px * var(--ui-scale)), 1px);
-    height: round(calc(28px * var(--ui-scale)), 1px); min-height: round(calc(28px * var(--ui-scale)), 1px);
+    width: var(--box-w-px, 92px);
+    height: var(--box-h-px, 28px); min-height: var(--box-h-px, 28px);
     flex: 0 0 auto; line-height: 1;
     display: flex; align-items: center; justify-content: center;
     border-radius: 3px; padding: 0 4px;
     -webkit-appearance: none; appearance: none;
 }
-#fps-el { font-family: 'Press Start 2P',monospace; font-size: round(calc(var(--fs-hint) * var(--ui-scale)), 1px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
+#fps-el { font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -77,7 +77,7 @@ body {
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {
     background: #0d180d; border: 1px solid #3a5a3a; color: #7fff7f;
-    font-family: 'Press Start 2P',monospace; font-size: round(calc(var(--fs-hint) * var(--ui-scale)), 1px); cursor: pointer; border-radius: 6px;
+    font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px); cursor: pointer; border-radius: 6px;
     -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center;
 }
 .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
