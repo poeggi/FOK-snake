@@ -51,16 +51,15 @@ body {
     display: flex; align-items: center; justify-content: center;
     border-radius: 3px; padding: 0 4px;
     -webkit-appearance: none; appearance: none;
-    /* Start hidden on the splash screen; _updateNonCanvasUI() fades them in (inline opacity)
-       once we leave splash. Moved here from inline styles in index.html. */
-    opacity: 0; pointer-events: none;
 }
+/* Hidden on the splash screen (JS sets body[data-phase]); shown on every other phase. */
+body[data-phase="splash"] #btn-mute, body[data-phase="splash"] #fps-el { opacity: 0; pointer-events: none; }
 #fps-el { font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
-#btn-mute canvas { image-rendering: pixelated; display: block; }
+#btn-mute canvas { image-rendering: pixelated; display: block; height: var(--mute-icon-h, 16px); width: calc(var(--mute-icon-h, 16px) * 2); }
 #btn-mute:hover { border-color: #7fff7f; }
 #btn-mute.muted { border-color: #5a2a2a; }
 /* Canvas region: flex:1 takes the space chrome leaves; the canvas is the largest box of
@@ -78,6 +77,13 @@ body {
     display: block; border: 1px solid #2a2a4e; touch-action: none;
     /* width/height are set by layout() = the largest CW:CH box that fits #wrap (minus 4px). */
 }
+/* Hide the mouse cursor over the board while playing with the keyboard (JS toggles the
+   class on keydown; a mousemove clears it so the cursor reappears for mouse users). */
+body.cursor-hidden #c { cursor: none; }
+/* JS-created utilities: the file-input for Restore, and the DEBUGGING canvas-props overlay. */
+.util-hidden { display: none; }
+.debug-overlay { position: fixed; top: 0; left: 0; z-index: 99999; background: #000d; color: #0f0;
+    font: 11px monospace; padding: 3px; white-space: pre; pointer-events: none; }
 #gamepad { display: none; order: 4; }
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {

@@ -2009,7 +2009,7 @@ function backupStats() {
     } catch (e) { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
 }
 const _restoreInp=document.createElement('input');
-_restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.style.display='none';
+_restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.className='util-hidden';
 document.body.appendChild(_restoreInp);
 _restoreInp.addEventListener('change',()=>{
     const f=_restoreInp.files&&_restoreInp.files[0]; _restoreInp.value='';
@@ -2368,7 +2368,7 @@ function handleKey(key, pde) {
     }
 }
 
-canvas.addEventListener('mousemove', ()=>{ canvas.style.cursor=''; });
+canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('cursor-hidden'); });
 
 // Swipe/gesture control on game canvas.
 // Thresholds (px of finger travel): first move or reverse = SWIPE_1 (16), or SWIPE_N
@@ -2490,7 +2490,7 @@ document.addEventListener('keydown', e=>{
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&phase==='playing'){const d=GDIRS[e.key];if(d){boostDir=d;boostSince=simTick;boosting=false;}}
-    if(phase==='playing') canvas.style.cursor='none';
+    if(phase==='playing') document.body.classList.add('cursor-hidden');   // CSS hides #c cursor; mousemove clears it
 });
 document.addEventListener('keyup', e=>{
     _splashKeyHeld = false;
@@ -2593,23 +2593,14 @@ const CONTROLS = {
     _default:     ['esc','ok','dpad'],
 };
 let _dimPhase = null;
+// One phase-change hook: JS owns the STATE (body[data-phase] + control .dim classes); CSS
+// owns all the appearance consequences (e.g. hiding the SND/FPS boxes on splash).
 function _updateBtnDim() {
     if(phase===_dimPhase) return;
     _dimPhase=phase;
+    document.body.dataset.phase = phase;
     const live = CONTROLS[phase] || CONTROLS._default;
     for(const id in _CTRL_ELS){ const el=_CTRL_ELS[id]; if(el) el.classList.toggle('dim', live.indexOf(id)<0); }
-}
-
-let _uiSplashShown = null;
-function _updateNonCanvasUI() {
-    const onSplash = phase === 'splash';
-    if (_uiSplashShown === onSplash) return;
-    _uiSplashShown = onSplash;
-    // Fade in via opacity (not visibility) so the boxes stay laid-out + composited the whole
-    // time -- flipping visibility made a bordered box paint incompletely on the first reveal.
-    const mute=document.getElementById('btn-mute'), fps=document.getElementById('fps-el');
-    mute.style.opacity = fps.style.opacity = onSplash ? '0' : '1';
-    mute.style.pointerEvents = fps.style.pointerEvents = onSplash ? 'none' : '';
 }
 
 // Advance the simulation by exactly one 60 Hz tick. Only caller: loop().
@@ -2640,7 +2631,6 @@ function loop(rafNow) {
     if(cfg.fps30 && rafNow-_lastDraw < 32) return;
     _lastDraw = rafNow;
     _updateBtnDim();
-    _updateNonCanvasUI();
     fpsFrames++;
     if(rafNow-fpsLast>=500){ const _live=Math.round(fpsFrames*1000/(rafNow-fpsLast));
         if(_fpsRec) _fpsRecordAvg(_live,rafNow); else fpsEl.textContent=`${_live} FPS`;   // recording: box shows locked worst, not live
@@ -2751,8 +2741,7 @@ function layout() {
         // On-screen canvas properties overlay: toggled from the DEBUGGING menu (Show Canvas
         // Props). (#debug in the URL only *enables* debug mode, it does not show this.)
         if (_showCanvasProps) {
-            if (!_dbgEl) { _dbgEl = document.createElement('div');
-                _dbgEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#000d;color:#0f0;font:11px monospace;padding:3px;white-space:pre;pointer-events:none'; document.body.appendChild(_dbgEl); }
+            if (!_dbgEl) { _dbgEl = document.createElement('div'); _dbgEl.className='debug-overlay'; document.body.appendChild(_dbgEl); }
             _dbgEl.style.display = 'block';
             _dbgEl.textContent =
                 'v'+_swVersion+'  dbg'+(cfg.debug||0)+'  dpr'+(window.devicePixelRatio||1)+'  ['+mode+']'+
@@ -2777,7 +2766,7 @@ function layout() {
         root.setProperty('--box-w-px',    rpx(92));
         root.setProperty('--box-h-px',    rpx(28));
         root.setProperty('--lives-h-px',  rpx(12));
-        const iconH = Math.round(16 * scale); _muteCv.style.height = iconH + 'px'; _muteCv.style.width = (iconH * 2) + 'px';
+        root.setProperty('--mute-icon-h', Math.round(16 * scale) + 'px');   // CSS sizes #btn-mute-cv from this
     } catch(_) {}
 }
 window.addEventListener('resize', () => requestAnimationFrame(layout));
