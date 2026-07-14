@@ -51,6 +51,9 @@ body {
     display: flex; align-items: center; justify-content: center;
     border-radius: 3px; padding: 0 4px;
     -webkit-appearance: none; appearance: none;
+    /* Start hidden on the splash screen; _updateNonCanvasUI() fades them in (inline opacity)
+       once we leave splash. Moved here from inline styles in index.html. */
+    opacity: 0; pointer-events: none;
 }
 #fps-el { font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
 #btn-mute {
