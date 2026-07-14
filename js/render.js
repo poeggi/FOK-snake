@@ -740,7 +740,8 @@ function drawSplashText(now) {
     if(!txt) return;
     ctx.save();
     ctx.translate(CW*0.78, 120); ctx.rotate(-0.34);
-    ctx.scale(1+0.10*Math.abs(Math.sin(now/300)), 1+0.10*Math.abs(Math.sin(now/300)));
+    const s = 1 + 0.05*(1+Math.sin(now/150));   // smooth 1.0..1.10 pulse; abs(sin) gave a cusp that snapped each cycle
+    ctx.scale(s, s);
     ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='#3a2a00'; ctx.fillText(txt, 1.5, 1.5);   // retro drop shadow
     ctx.fillStyle= cfg.debug>0 ? '#ff5555' : '#ffff00'; ctx.fillText(txt, 0, 0);
