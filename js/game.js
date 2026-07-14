@@ -740,6 +740,23 @@ function _bodyCols(len, h) {
     }
     return _bodyColCache.cols;
 }
+// While the Power Pellet is active the head becomes a chomping Pac-Man (facing
+// the travel direction). Cosmetic only -- reverts to the normal head when power ends.
+function drawPacHead(x, y, facing) {
+    const now=performance.now();
+    const cx=x+(CS-2)/2, cy=y+(CS-2)/2, r=(CS-2)/2;
+    const open=(0.5+0.5*Math.sin(now/70))*0.30*Math.PI;   // mouth chomps open/closed
+    const ang=Math.atan2(facing.y, facing.x);             // right 0, down +PI/2, up -PI/2, left PI
+    ctx.save();
+    ctx.fillStyle='#ffd11a'; ctx.shadowColor='#ffcc00'; ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r, ang+open, ang-open+Math.PI*2); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur=0;
+    const px=facing.y, py=-facing.x;                       // perpendicular = eye above the mouth
+    ctx.fillStyle='#001500';
+    ctx.beginPath(); ctx.arc(cx+px*r*0.42+facing.x*r*0.12, cy+py*r*0.42+facing.y*r*0.12, 1.6, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+}
 function drawSnake(flash) {
     const sc=SNAKE_COLORS[cfg.snakeColor||0];
     const si=cfg.wornItems||{};
@@ -755,6 +772,10 @@ function drawSnake(flash) {
             return;
         }
         // Head (glow set + reset only here, once per frame).
+        if(_powerMode && !flash){
+            drawPacHead(x, y, dirQueue.length>0?dirQueue[0]:dir);
+            return;
+        }
         ctx.fillStyle=flash?'#bb2222':sc.head;
         if(!flash){ctx.shadowColor=sc.head;ctx.shadowBlur=10;}
         if(_segPathHead){ ctx.translate(x,y); ctx.fill(_segPathHead); ctx.translate(-x,-y); }
@@ -1685,13 +1706,23 @@ function _drawCrushEffects(now) {
     });
 }
 function _drawPowerPellet(now) {
-    const pulse=0.8+0.2*Math.sin((now-powerPelletAt)/220);
-    const cx=powerPellet.x*CS+CS/2, cy=powerPellet.y*CS+CS/2, r=(CS/2-2)*pulse;
+    const pulse=0.85+0.15*Math.sin((now-powerPelletAt)/220);
+    const cx=powerPellet.x*CS+CS/2, cy=powerPellet.y*CS+CS/2;
+    const w=(CS-3)*pulse, h=(CS*0.56)*pulse, r=h/2;    // capsule (stadium): rounded ends
     const hue=(now/7)%360;
     ctx.save();
+    ctx.translate(cx,cy); ctx.rotate(-0.5);            // tilt so it reads as a pill, not a blob
     ctx.shadowColor=`hsl(${hue},100%,70%)`; ctx.shadowBlur=14;
-    ctx.fillStyle=`hsl(${hue},100%,82%)`;
-    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    rr(-w/2,-h/2,w,h,r); ctx.save(); ctx.clip();       // two-tone halves clipped to the capsule
+    ctx.fillStyle='#ffffff';              ctx.fillRect(-w/2,-h/2,w/2,h);
+    ctx.fillStyle=`hsl(${hue},100%,66%)`; ctx.fillRect(0,-h/2,w/2+0.5,h);
+    ctx.restore();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(0,0,0,0.30)'; ctx.lineWidth=1;                    // centre seam
+    ctx.beginPath(); ctx.moveTo(0,-h/2+1); ctx.lineTo(0,h/2-1); ctx.stroke();
+    ctx.strokeStyle=`hsl(${hue},90%,45%)`; rr(-w/2,-h/2,w,h,r); ctx.stroke(); // rim
+    ctx.globalAlpha=0.5; ctx.fillStyle='#fff';                             // shine
+    ctx.beginPath(); ctx.ellipse(-w*0.2,-h*0.22,w*0.16,h*0.16,-0.4,0,Math.PI*2); ctx.fill();
     ctx.restore();
 }
 function _drawTimeCrystal(now) {

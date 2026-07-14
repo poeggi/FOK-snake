@@ -1,12 +1,15 @@
 <svg width="48" height="48" xmlns="http://www.w3.org/2000/svg">
   <rect width="48" height="48" rx="5" fill="#07070e"/>
   <defs>
-    <radialGradient id="g" cx="38%" cy="33%" r="65%">
-      <stop offset="0%"   stop-color="#ffffff"/>
-      <stop offset="25%"  stop-color="#ffaaff"/>
-      <stop offset="55%"  stop-color="#88aaff"/>
-      <stop offset="100%" stop-color="#44ffaa"/>
-    </radialGradient>
+    <clipPath id="cap"><rect x="7" y="17" width="34" height="14" rx="7"/></clipPath>
   </defs>
-  <circle cx="24" cy="24" r="15" fill="url(#g)"/>
+  <g transform="rotate(-24 24 24)">
+    <g clip-path="url(#cap)">
+      <rect x="7"  y="17" width="17" height="14" fill="#ffffff"/>
+      <rect x="24" y="17" width="17" height="14" fill="#ff5bd8"/>
+    </g>
+    <line x1="24" y1="18.5" x2="24" y2="29.5" stroke="#000000" stroke-opacity="0.3" stroke-width="1"/>
+    <rect x="7" y="17" width="34" height="14" rx="7" fill="none" stroke="#c81f9e" stroke-width="1.5"/>
+    <ellipse cx="14" cy="21" rx="4" ry="2" fill="#ffffff" opacity="0.55"/>
+  </g>
 </svg>
