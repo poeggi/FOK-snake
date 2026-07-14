@@ -71,7 +71,7 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false,
-             boxPity:0, shopOpens:0, cfgVer:2 };
+             boxPity:0, shopOpens:0, debug:0, cfgVer:2 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
 // the game in a bad state (e.g. an out-of-range diff or colour index).
@@ -92,6 +92,7 @@ function _sanitizeCfg() {
     cfg.disableGlow = !!cfg.disableGlow;
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
+    cfg.debug       = (Number.isInteger(cfg.debug) && cfg.debug>=0 && cfg.debug<=3) ? cfg.debug : 0;
     if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
     if(cfg.wornItems!==null && (typeof cfg.wornItems!=='object' || Array.isArray(cfg.wornItems))) cfg.wornItems = null;
 }
@@ -1097,11 +1098,25 @@ const SETTINGS_CATS = [
         { lbl:()=>'RESET STATS', act:()=>{quitConfirmSel=1;phase='resetConfirm';} },
     ]},
 ];
-function _settingsList(){ return settingsCat>=0 ? SETTINGS_CATS[settingsCat].items : SETTINGS_CATS; }
+// Hidden DEBUGGING category: only present when cfg.debug > 0. cfg.debug is NOT settable
+// from the normal menus -- you raise it by hand-editing the save file (it rides in the
+// backup). Level: 1 = this menu; 2/3 reserved for in-game debug overlays (later).
+let _showCanvasProps = false;
+const DEBUG_CAT = { label:'DEBUGGING', items:[
+    { lbl:()=>'DEBUG LEVEL: '+(cfg.debug||0),
+      act:()=>{ cfg.debug=((cfg.debug||0)+1)%4; if(cfg.debug===0){settingsCat=-1;settingsSel=0;} Snd.sfxPlay('select',cfg.music); },
+      adj:(r)=>{ cfg.debug=Math.max(0,Math.min(3,(cfg.debug||0)+(r?1:-1))); if(cfg.debug===0){settingsCat=-1;settingsSel=0;} } },
+    { lbl:()=>'SHOW CANVAS PROPS: '+(_showCanvasProps?'ON':'OFF'),
+      act:()=>{ _showCanvasProps=!_showCanvasProps; requestAnimationFrame(layout); Snd.sfxPlay('select',cfg.music); } },
+    { lbl:()=>'EXPORT CANVAS INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportCanvasInfo(); } },
+    { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
+] };
+function _cats(){ return (cfg.debug>0) ? SETTINGS_CATS.concat([DEBUG_CAT]) : SETTINGS_CATS; }
+function _settingsList(){ return settingsCat>=0 ? _cats()[settingsCat].items : _cats(); }
 function drawSettings() {
     drawGrid(); drawOvBg(0.92);
     const inCat=settingsCat>=0;
-    const title=inCat?'SETTINGS/'+SETTINGS_CATS[settingsCat].label:'SETTINGS';
+    const title=inCat?'SETTINGS/'+_cats()[settingsCat].label:'SETTINGS';
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=16; ct(title,CW/2,24,'#7fff7f',FONT.TITLE); ctx.shadowBlur=0;
     const list=_settingsList();
     const startY=90, rowH=28;   // one empty line below the headline before the first entry
@@ -1130,7 +1145,8 @@ function drawSettings() {
             ctx.restore();
         }
         // Transient backup/restore feedback in DATA MANAGEMENT
-        if(SETTINGS_CATS[settingsCat].label==='DATA MANAGEMENT'&&_dataMsg&&simNow-_dataMsgAt<2500){
+        const _cl=_cats()[settingsCat] && _cats()[settingsCat].label;
+        if((_cl==='DATA MANAGEMENT'||_cl==='DEBUGGING')&&_dataMsg&&simNow-_dataMsgAt<2500){
             ctx.shadowColor='#7fff7f'; ctx.shadowBlur=12; ct(_dataMsg,CW/2,CH-34,'#7fff7f',FONT.MENU); ctx.shadowBlur=0;
         }
     }
@@ -1827,7 +1843,35 @@ function resetStats() {
     keys.forEach(k=>{ try { localStorage.removeItem(k); } catch (e) {} });
     _cachedFOKoins = 0;
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
-    cfg.shopItems = {}; cfg.wornItems = null; saveCfg();
+    cfg.shopItems = {}; cfg.wornItems = null; saveCfg();   // NOTE: cfg.debug (+ other settings) intentionally preserved
+}
+// DEBUGGING: snapshot every screen/canvas metric that matters for the layout, so a
+// broken device can export a file we can read. Downloaded as pretty JSON.
+function _canvasInfo(){
+    const wrap=canvas.parentElement, cr=canvas.getBoundingClientRect(), wr=wrap.getBoundingClientRect();
+    const rs=getComputedStyle(document.documentElement), cv=n=>(rs.getPropertyValue(n)||'').trim();
+    return {
+        swVersion:_swVersion, debugLevel:cfg.debug||0, userAgent:navigator.userAgent,
+        devicePixelRatio:window.devicePixelRatio,
+        orientation:(window.screen&&screen.orientation&&screen.orientation.type)||(window.innerWidth>window.innerHeight?'landscape':'portrait'),
+        screen:{ width:screen.width, height:screen.height, availWidth:screen.availWidth, availHeight:screen.availHeight },
+        window:{ innerWidth:window.innerWidth, innerHeight:window.innerHeight },
+        documentElement:{ clientWidth:document.documentElement.clientWidth, clientHeight:document.documentElement.clientHeight },
+        canvasNative:{ width:canvas.width, height:canvas.height },
+        canvasDisplay:{ width:Math.round(cr.width), height:Math.round(cr.height), left:Math.round(cr.left), top:Math.round(cr.top) },
+        wrap:{ clientWidth:wrap.clientWidth, clientHeight:wrap.clientHeight, top:Math.round(wr.top) },
+        cssVars:{ uiScale:cv('--ui-scale'), stageW:cv('--stage-w') },
+        fontScale:FONT
+    };
+}
+function exportCanvasInfo(){
+    try {
+        const blob=new Blob([JSON.stringify(_canvasInfo(),null,2)],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a'); a.href=url; a.download='snake-canvas-info.json';
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        _dataMsg='CANVAS INFO SAVED'; _dataMsgAt=simNow;
+    } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
 }
 
 // ---- Mystery box loot (META: uses Math.random, NOT the seeded sim RNG -- never
@@ -2601,16 +2645,21 @@ function layout() {
         const m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
         const scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);  // R1 fit, R2 binds, capped
         const cw = CW * scale;
-        if (location.hash === '#debug') {   // TEMP: read the real numbers off the device
+        // On-screen canvas properties: toggled from the DEBUGGING menu (Show Canvas Props),
+        // or via #debug in the URL (browsers with an address bar).
+        if (_showCanvasProps || location.hash === '#debug') {
             if (!_dbgEl) { _dbgEl = document.createElement('div');
-                _dbgEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#000d;color:#0f0;font:12px monospace;padding:3px;white-space:pre;pointer-events:none'; document.body.appendChild(_dbgEl); }
+                _dbgEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#000d;color:#0f0;font:11px monospace;padding:3px;white-space:pre;pointer-events:none'; document.body.appendChild(_dbgEl); }
+            _dbgEl.style.display = 'block';
             _dbgEl.textContent =
-                'vp '+Math.round(document.documentElement.clientWidth)+'x'+Math.round(vpH)+
-                '  wrap '+Math.round(wrap.clientWidth)+'x'+Math.round(wrap.clientHeight)+' top'+Math.round(wrapTop)+
+                'v'+_swVersion+'  dbg'+(cfg.debug||0)+'  dpr'+(window.devicePixelRatio||1)+
+                '\nscreen '+screen.width+'x'+screen.height+'  '+((window.innerWidth>window.innerHeight)?'landscape':'portrait')+
+                '\nvp '+Math.round(document.documentElement.clientWidth)+'x'+Math.round(vpH)+
+                '\nwrap '+Math.round(wrap.clientWidth)+'x'+Math.round(wrap.clientHeight)+' top'+Math.round(wrapTop)+
                 '\nwUsed '+Math.round(wW)+'x'+Math.round(wH)+'  m'+m+'  scale '+scale.toFixed(3)+
-                '\ncanvas '+Math.round(cw)+'x'+Math.round(CH*scale)+
+                '\ncanvas css '+Math.round(cw)+'x'+Math.round(CH*scale)+'  native '+canvas.width+'x'+canvas.height+
                 '  bind '+(((wW-2*m)/CW <= (wH-2*m)/CH) ? 'WIDTH' : 'HEIGHT');
-        }
+        } else if (_dbgEl) { _dbgEl.style.display = 'none'; }
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
         canvas.style.width = cw + 'px';

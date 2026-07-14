@@ -128,6 +128,14 @@ const driver = `
     if(_sumOf({..._snap,coins:'999999'})===_good) throw 'editing data must change the checksum';
     log('save checksum ok');
 
+    // Hidden DEBUGGING category: absent at debug=0, present + rendering at debug>0.
+    cfg.debug=0; if(_cats().some(c=>c.label==='DEBUGGING')) throw 'DEBUGGING must be hidden at debug=0';
+    cfg.debug=1; if(!_cats().some(c=>c.label==='DEBUGGING')) throw 'DEBUGGING must appear at debug>0';
+    phase='settings'; settingsCat=_cats().length-1;
+    for(settingsSel=0; settingsSel<=_cats()[settingsCat].items.length; settingsSel++) drawSettings();
+    cfg.debug=0; settingsCat=-1; settingsSel=0;
+    log('debug menu ok');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();
