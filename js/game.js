@@ -2552,17 +2552,30 @@ window.addEventListener('orientationchange', () => setTimeout(syncLandscapePanel
 requestAnimationFrame(syncLandscapePanels);
 
 // Scale SND/FPS font to match canvas display size when the canvas is CSS-upscaled beyond its 600px native width
-function syncFontScale() {
-    const scale = canvas.getBoundingClientRect().width / CW;
-    // One knob drives every DOM chrome font-size AND the SND/FPS box dims (all
-    // calc(... * var(--ui-scale))), so the chrome scales with the canvas. The box
-    // heights come from CSS now; only the speaker icon canvas is sized here.
-    document.documentElement.style.setProperty('--ui-scale', scale);
-    const iconH=Math.round(16*scale); _muteCv.style.height=iconH+'px'; _muteCv.style.width=(iconH*2)+'px';
+// The browser sizes the canvas (aspect-ratio + max-width/height inside a flex:1 #wrap =
+// rules R1 "fit" + R2 "maximize on the binding axis"). layout() just reads the result
+// back into the CSS vars that drive the chrome: --ui-scale (= displayed/native) sizes the
+// fonts+boxes, --stage-w matches the HUD/topbar width to the canvas. A ResizeObserver
+// re-runs it whenever the canvas resizes, so it self-converges if a font tweak nudges the
+// layout; the last-width guard stops that from looping. --canvas-aspect is set once.
+try { document.documentElement.style.setProperty('--canvas-aspect', CW + ' / ' + CH); } catch(_) {}
+let _lastCw = -1;
+function layout() {
+    try {
+        const cw = canvas.getBoundingClientRect().width;
+        if (!cw || Math.abs(cw - _lastCw) < 0.5) return;   // no change -> stop (breaks RO loops)
+        _lastCw = cw;
+        const scale = cw / CW;
+        const root = document.documentElement.style;
+        root.setProperty('--ui-scale', scale);
+        root.setProperty('--stage-w', cw + 'px');
+        const iconH = Math.round(16 * scale); _muteCv.style.height = iconH + 'px'; _muteCv.style.width = (iconH * 2) + 'px';
+    } catch(_) {}
 }
-window.addEventListener('resize', syncFontScale);
-window.addEventListener('orientationchange', () => setTimeout(syncFontScale, 120));
-requestAnimationFrame(syncFontScale);
+window.addEventListener('resize', layout);
+window.addEventListener('orientationchange', () => setTimeout(layout, 120));
+if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas);
+requestAnimationFrame(layout);
 
 let _swVersion = '?';
 if ('caches' in window) {

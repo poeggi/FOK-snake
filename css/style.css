@@ -1,8 +1,19 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Layout in two rules:
+   R1 (fit): the visible game (canvas + chrome that is actually shown) must fit the
+             viewport. #wrap is flex:1 and takes whatever space the chrome leaves, so
+             chrome that is display:none (e.g. the gamepad on non-touch) frees its space
+             automatically. overflow:hidden is the final safety net.
+   R2 (maximize): the canvas is the largest box of its native aspect that fits #wrap --
+             aspect-ratio + max-width/max-height:100% let the browser pick it. In portrait
+             #wrap is tall+narrow so width binds; in landscape it is short+wide so height
+             binds. 4px breathing room via #wrap padding.
+   JS reads the resulting canvas width back into --ui-scale (=cw/CW) and --stage-w, which
+   drive the chrome font sizes (rounded to whole px so they never blur) and the HUD width. */
 body {
     background: #07070e;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    min-height: 100vh; padding: 8px; gap: 10px;
+    height: 100dvh; min-height: 100dvh; padding: 0; gap: 8px;
     font-family: 'Press Start 2P', 'Courier New', monospace; color: #ccc;
     user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none;
@@ -10,8 +21,8 @@ body {
 }
 #hud {
     display: flex; flex-direction: column; gap: 3px;
-    width: min(600px, calc(100vw - 16px));
-    font-size: calc(var(--fs-menu) * var(--ui-scale)); letter-spacing: 0;
+    width: var(--stage-w, min(600px, 100vw));
+    font-size: round(calc(var(--fs-menu) * var(--ui-scale)), 1px); letter-spacing: 0;
     opacity: 1; transition: opacity 0.15s;
     order: 1;
 }
@@ -19,30 +30,26 @@ body {
 .hud-row { display: flex; justify-content: space-between; width: 100%; }
 .hl { color: #888; } .hv { color: #7fff7f; }
 #lives-group { display: inline-flex; align-items: center; gap: 4px; }
-/* Lives hearts canvas: never let flex shrink it (that squeezed the hearts horizontally);
-   size it off the HUD scale, keep pixels crisp. */
-#hv-lives-cv { flex: none; image-rendering: pixelated; height: calc(12px * var(--ui-scale)); width: auto; }
+/* Lives hearts canvas: never let flex shrink it (that squeezed the hearts); size off the HUD scale, keep pixels crisp. */
+#hv-lives-cv { flex: none; image-rendering: pixelated; height: round(calc(12px * var(--ui-scale)), 1px); width: auto; }
 .hv-wrap { display: inline-flex; align-items: baseline; }
 #topbar {
-    width: min(600px, calc(100vw - 16px));
+    width: var(--stage-w, min(600px, 100vw));
     display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
     order: 2;
 }
-/* Mute button and FPS box: identical box. height+min-height pin both to the same
-   larger reference; appearance:none + flex:none kill the <button> vs <span>
-   user-agent differences (min-height/chrome) that made them diverge on some TVs. */
+/* Mute button and FPS box: identical box, sizes + font rounded to whole px so they never
+   blur or overflow. appearance:none + flex:none kill <button> vs <span> UA differences. */
 #fps-el, #btn-mute {
     box-sizing: border-box;
-    /* Box scales with the same --ui-scale as its font so text never overflows;
-       92px base = the old 76px, widened. */
-    width: calc(92px * var(--ui-scale));
-    height: calc(28px * var(--ui-scale)); min-height: calc(28px * var(--ui-scale));
+    width: round(calc(92px * var(--ui-scale)), 1px);
+    height: round(calc(28px * var(--ui-scale)), 1px); min-height: round(calc(28px * var(--ui-scale)), 1px);
     flex: 0 0 auto; line-height: 1;
     display: flex; align-items: center; justify-content: center;
     border-radius: 3px; padding: 0 4px;
     -webkit-appearance: none; appearance: none;
 }
-#fps-el { font-family: 'Press Start 2P',monospace; font-size: calc(var(--fs-hint) * var(--ui-scale)); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
+#fps-el { font-family: 'Press Start 2P',monospace; font-size: round(calc(var(--fs-hint) * var(--ui-scale)), 1px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -50,13 +57,23 @@ body {
 #btn-mute canvas { image-rendering: pixelated; display: block; }
 #btn-mute:hover { border-color: #7fff7f; }
 #btn-mute.muted { border-color: #5a2a2a; }
-#wrap { width: min(600px, calc(100vw - 16px)); order: 3; }
-#c { display: block; width: 100%; height: auto; border: 1px solid #2a2a4e; touch-action: none; }
+/* Canvas region: flex:1 takes the space chrome leaves; the canvas is the largest box of
+   its native aspect that fits, centred, with a 4px margin. */
+#wrap {
+    order: 3; flex: 1 1 0; min-width: 0; min-height: 0;
+    display: flex; align-items: center; justify-content: center; padding: 4px;
+}
+#c {
+    display: block; margin: auto;
+    aspect-ratio: var(--canvas-aspect, 3 / 2);
+    max-width: 100%; max-height: 100%; width: auto; height: auto;
+    border: 1px solid #2a2a4e; touch-action: none;
+}
 #gamepad { display: none; order: 4; }
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {
     background: #0d180d; border: 1px solid #3a5a3a; color: #7fff7f;
-    font-family: 'Press Start 2P',monospace; font-size: calc(var(--fs-hint) * var(--ui-scale)); cursor: pointer; border-radius: 6px;
+    font-family: 'Press Start 2P',monospace; font-size: round(calc(var(--fs-hint) * var(--ui-scale)), 1px); cursor: pointer; border-radius: 6px;
     -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center;
 }
 .sbtn:active { background: #1a3a1a; border-color: #7fff7f; }
@@ -77,29 +94,16 @@ body {
 }
 .sbtn.dim { opacity: 0.3; pointer-events: none; }
 #side-info { display: contents; }
-@media (min-width: 700px) and (min-height: 500px) {
-    #wrap, #hud, #topbar {
-        width: min(calc((100vh - 100px) * 1.5), calc(100vw - 32px), 800px);
-    }
-}
-/* Portrait touch: align to bottom so controls sit close to thumb reach */
+/* Portrait touch: keep the gamepad low for thumb reach. */
 @media (pointer: coarse) and (orientation: portrait) {
-    body { min-height: 100dvh; justify-content: flex-end; padding-top: 0; padding-bottom: 64px; }
-    #gamepad { margin-top: 28px; }
+    body { justify-content: flex-end; padding-bottom: 56px; }
+    #gamepad { margin-top: 20px; }
 }
 @media (pointer: coarse) and (orientation: landscape) {
-    body {
-        flex-direction: row; align-items: stretch; justify-content: center;
-        /* No vertical padding so canvas fills full screen height.
-           Tiny horizontal padding keeps panels off the screen edge. */
-        padding: 0 3px; gap: 6px; height: 100dvh; min-height: unset;
-    }
+    body { flex-direction: row; align-items: stretch; padding: 0 3px; gap: 6px; }
     /* Side info panel -- 100px; floats left or right depending on handed setting */
     #side-info {
         display: flex; flex-direction: column; justify-content: flex-start;
-        /* Hug the canvas side (right by default) so the SND/FPS boxes sit as close to
-           the canvas as the gamepad buttons do on the other side -- no horizontal
-           padding, content aligned toward the canvas. */
         align-items: flex-end; gap: 14px;
         width: 100px; flex-shrink: 0; overflow: hidden;
         position: relative;
@@ -107,22 +111,12 @@ body {
     }
     #topbar { width: auto; padding: 0; gap: 8px; order: 0; }
     #fps-el { position: absolute; bottom: 16px; right: 0; left: auto; transform: none; }
-    /* Left-handed: side-info is on the right, so hug the canvas on the left instead. */
     body.lefty #side-info { align-items: flex-start; }
     body.lefty #fps-el { right: auto; left: 0; }
     #hud { width: auto; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: auto; }
     .hud-row { flex-direction: column; gap: 8px; }
     .hud-row > span { display: flex; flex-direction: column; gap: 2px; }
     #lives-group { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 3px; }
-    #wrap {
-        flex: 1; min-width: 0; width: auto;
-        display: flex; align-items: center; justify-content: center;
-    }
-    /* 32px = 2 * 16px side-info padding, so canvas margins match SND/FPS inset exactly */
-    #c {
-        width: min(calc((100dvh - 32px) * 1.5), 100%);
-        height: auto;
-    }
     /* Right controls panel -- ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
     #gamepad {
         display: flex; flex-direction: column; flex-shrink: 0;
