@@ -192,6 +192,10 @@ const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES
 const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
 let cfg = defaultCfg();
 loadCfg();
+// #debug in the URL is a shortcut to ENABLE debug mode (unlocks the hidden DEBUGGING
+// menu) without hand-editing the save file. It only turns it on -- it does not show the
+// overlay; use the menu's SHOW CANVAS PROPS for that.
+try { if(location.hash === '#debug' && (cfg.debug||0) < 1){ cfg.debug = 1; saveCfg(); } } catch(e){}
 if(cfg.wornItems === null){ cfg.wornItems = Object.assign({}, cfg.shopItems||{}); saveCfg(); }
 Snd.musicSetVolume((cfg.volume==null?1:cfg.volume));
 Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
@@ -1014,13 +1018,14 @@ function drawNews(now) {
         ct(multi?'L/R:page   A/ESC:back':'A:back  ESC:back', CW/2, CH-12, '#888', FONT.HINT); }
 }
 function drawSplashText(now) {
-    if(!_splashText) return;
+    const txt = (cfg.debug>0) ? 'DEBUG MODE' : _splashText;   // banner doubles as the debug-on indicator
+    if(!txt) return;
     ctx.save();
     ctx.translate(CW*0.78, 120); ctx.rotate(-0.34);
     ctx.scale(1+0.10*Math.abs(Math.sin(now/300)), 1+0.10*Math.abs(Math.sin(now/300)));
     ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillStyle='#3a2a00'; ctx.fillText(_splashText, 1.5, 1.5);   // retro drop shadow
-    ctx.fillStyle='#ffff00'; ctx.fillText(_splashText, 0, 0);
+    ctx.fillStyle='#3a2a00'; ctx.fillText(txt, 1.5, 1.5);   // retro drop shadow
+    ctx.fillStyle= cfg.debug>0 ? '#ff5555' : '#ffff00'; ctx.fillText(txt, 0, 0);
     ctx.restore();
 }
 // Static menu -> offscreen cache. Everything here changes only on an event.
@@ -2645,9 +2650,9 @@ function layout() {
         const m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
         const scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);  // R1 fit, R2 binds, capped
         const cw = CW * scale;
-        // On-screen canvas properties: toggled from the DEBUGGING menu (Show Canvas Props),
-        // or via #debug in the URL (browsers with an address bar).
-        if (_showCanvasProps || location.hash === '#debug') {
+        // On-screen canvas properties overlay: toggled from the DEBUGGING menu (Show Canvas
+        // Props). (#debug in the URL only *enables* debug mode, it does not show this.)
+        if (_showCanvasProps) {
             if (!_dbgEl) { _dbgEl = document.createElement('div');
                 _dbgEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#000d;color:#0f0;font:11px monospace;padding:3px;white-space:pre;pointer-events:none'; document.body.appendChild(_dbgEl); }
             _dbgEl.style.display = 'block';
