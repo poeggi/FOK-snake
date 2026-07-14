@@ -1,1 +1,7 @@
 sw.js merge=swver
+# Force LF in the repo and working tree (overrides core.autocrlf), which stops the
+# "LF will be replaced by CRLF" warnings on Windows.
+* text=auto eol=lf
+*.woff2 binary
+*.woff binary
+*.png binary
