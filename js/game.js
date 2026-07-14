@@ -2563,13 +2563,14 @@ requestAnimationFrame(syncLandscapePanels);
 // publish the scale so the chrome fonts/boxes follow (--ui-scale) and the HUD matches the
 // canvas width (--stage-w). We observe #wrap (the input), not the canvas (our output), and
 // the last-width guard stops the font->reflow->resize feedback from looping.
+const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
 let _lastCw = -1;
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
         const availW = wrap.clientWidth - 8, availH = wrap.clientHeight - 8;  // 4px each side
         if (availW <= 0 || availH <= 0) return;
-        const scale = Math.min(availW / CW, availH / CH);  // fit both = R1; tighter axis binds = R2
+        const scale = Math.min(availW / CW, availH / CH, CANVAS_MAX_H / CH);  // fit both (R1), tighter axis binds (R2), capped
         const cw = CW * scale;
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
