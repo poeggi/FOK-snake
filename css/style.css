@@ -61,6 +61,9 @@ body {
    its native aspect that fits, centred, with a 4px margin. */
 #wrap {
     order: 3; flex: 1 1 0; min-width: 0; min-height: 0;
+    /* stretch to the available box (not shrink to the canvas) so layout() measures the
+       region, not its own output -- otherwise the canvas feeds back and collapses to 0. */
+    align-self: stretch;
     display: flex; align-items: center; justify-content: center;
 }
 #c {
