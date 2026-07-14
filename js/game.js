@@ -2283,7 +2283,7 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
 
 const nameInp = document.getElementById('name-inp');
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=50, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40, SWIPE_MENU=40;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false;
 canvas.addEventListener('touchstart',e=>{
@@ -2296,6 +2296,7 @@ canvas.addEventListener('touchstart',e=>{
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
     if(!_swipeBase||phase==='splash') return;
+    if(phase!=='playing'&&phase!=='credits') return;   // menus: one discrete swipe, committed on touchend
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     const t=e.touches[0];
@@ -2332,8 +2333,16 @@ canvas.addEventListener('touchend',e=>{
     }
     if(_swipeBase){
         const t=e.changedTouches[0];
-        const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
-        if(phase!=='playing'&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
+        const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y, adx=Math.abs(dx), ady=Math.abs(dy);
+        // In menus (not playing/credits), the whole swipe -- committed here on finger-up --
+        // counts as ONE arrow key, so one flick = one tab/page/selection step (no repeat
+        // while the finger is down). _swipeBase stayed at the start since touchmove no-ops here.
+        if(phase!=='playing'&&phase!=='credits'&&phase!=='nameEntry'&&Math.max(adx,ady)>=SWIPE_MENU){
+            handleKey(adx>ady?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'),null);
+        } else {
+            const isTap=Math.max(adx,ady)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
+            if(phase!=='playing'&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
+        }
     }
     _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null;
     if(phase==='playing'){boostDir=null;boosting=false;}
