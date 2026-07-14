@@ -1119,6 +1119,11 @@ const DEBUG_CAT = { label:'DEBUGGING', items:[
       act:()=>{ _showCanvasProps=!_showCanvasProps; requestAnimationFrame(layout); Snd.sfxPlay('select',cfg.music); } },
     { lbl:()=>'EXPORT CANVAS INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportCanvasInfo(); } },
     { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
+    { lbl:()=>'LOW-FPS RECORD: '+(_fpsRec?'ON':'OFF'),
+      act:()=>{ _fpsRec=!_fpsRec; if(_fpsRec) _fpsRecReset(); else { try{ fpsEl.style.color=''; }catch(e){} } Snd.sfxPlay('select',cfg.music); } },
+    { lbl:()=>'WORST '+(_fpsSnap?(_fpsSnap.fps+'fps@'+_fpsSnap.phase):'--')+'  MAX '+(_fpsMaxAvg||'--'),
+      act:()=>{ Snd.sfxPlay('nav',cfg.music); } },
+    { lbl:()=>'EXPORT FPS LOG', act:()=>{ Snd.sfxPlay('select',cfg.music); exportFpsLog(); } },
 ] };
 function _cats(){ return (cfg.debug>0 || _debugEntered) ? SETTINGS_CATS.concat([DEBUG_CAT]) : SETTINGS_CATS; }
 function _settingsList(){ return settingsCat>=0 ? _cats()[settingsCat].items : _cats(); }
@@ -1882,6 +1887,56 @@ function exportCanvasInfo(){
         _dataMsg='CANVAS INFO SAVED'; _dataMsgAt=simNow;
     } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
 }
+// ---- Worst-Frame Recorder (DEBUGGING). Passive: reuses loop()'s frame time; per frame it
+// does one compare + one ring-buffer write; a context snapshot is built ONLY on a new worst
+// frame (rare). No per-frame DOM/alloc/timing calls, so it can't shift the FPS it measures. --
+let _fpsRec=false, _fpsStartAt=0, _fpsWorstDt=0, _fpsWorstAvg=Infinity, _fpsMaxAvg=0, _fpsSnap=null;
+const _FPS_RING=new Float32Array(30); let _fpsRingI=0;   // pre-allocated lead-up buffer (frame times)
+function _fpsRecReset(){
+    _fpsStartAt=0; _fpsWorstDt=0; _fpsWorstAvg=Infinity; _fpsMaxAvg=0; _fpsSnap=null; _fpsRingI=0; _FPS_RING.fill(0);
+    try{ fpsEl.style.color='#ff8844'; fpsEl.textContent='REC'; }catch(e){}
+}
+function _fpsRecordAvg(live, rafNow){   // called at the 500ms tick while recording
+    if(_fpsStartAt===0 || rafNow-_fpsStartAt<1500) return;   // warmup
+    if(live<_fpsWorstAvg) _fpsWorstAvg=live;
+    if(live>_fpsMaxAvg)   _fpsMaxAvg=live;                    // max sustained FPS (recorded, never shown live)
+}
+function _fpsRecordFrame(dt, rafNow){   // called every frame while recording (raw dt)
+    _FPS_RING[_fpsRingI]=dt; _fpsRingI=(_fpsRingI+1)%_FPS_RING.length;
+    if(_fpsStartAt===0) _fpsStartAt=rafNow;
+    if(rafNow-_fpsStartAt<1500) return;   // ignore JIT/asset warmup
+    if(dt>500) return;                    // ignore tab-switch/backgrounding gaps
+    if(dt>_fpsWorstDt){                   // new worst hitch -> lock the display + snapshot the context
+        _fpsWorstDt=dt;
+        try{ fpsEl.textContent='LOW '+Math.round(1000/dt); }catch(e){}
+        _fpsSnap=_fpsSnapshot(dt, rafNow);
+    }
+}
+function _fpsSnapshot(dt, rafNow){
+    const g=(f,d)=>{ try{ const v=f(); return v==null?d:v; }catch(e){ return d; } };  // tolerate any absent global
+    const ring=[]; for(let i=0;i<_FPS_RING.length;i++){ ring.push(Math.round(_FPS_RING[(_fpsRingI+i)%_FPS_RING.length])); }
+    const cr=g(()=>canvas.getBoundingClientRect(),null);
+    return {
+        fps:Math.round(1000/dt), frameMs:Math.round(dt), uptimeS:Math.round((rafNow-_fpsStartAt)/1000),
+        phase:phase, level:g(()=>level,0), score:g(()=>score,0), snakeLen:g(()=>snake.length,0),
+        effects:{ power:g(()=>!!_powerMode,false), slow:g(()=>!!_slowMode,false), gouranga:g(()=>!!_gourangaActive,false), boosting:g(()=>!!boosting,false), dying:phase==='dying' },
+        load:{ particles:g(()=>purchaseParticles.length,0), confetti:g(()=>confetti.length,0), achPopups:g(()=>achPopups.length,0), crush:g(()=>_crushEffects.length,0), bars:g(()=>bars.length,0), gemOnBoard:g(()=>gem?1:0,0) },
+        canvas:{ css: cr?(Math.round(cr.width)+'x'+Math.round(cr.height)):'?', uiScale:g(()=>(document.documentElement.style.getPropertyValue('--ui-scale')||'').trim(),''), dpr:window.devicePixelRatio },
+        leadUpFrameMs:ring   // the 30 frame times leading up to the worst (oldest first)
+    };
+}
+function exportFpsLog(){
+    try {
+        const data={ worstFrame:_fpsSnap,
+            worstSustainedFps:(_fpsWorstAvg===Infinity?null:_fpsWorstAvg),
+            maxSustainedFps:(_fpsMaxAvg||null), recording:_fpsRec, device:_canvasInfo() };
+        const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a'); a.href=url; a.download='snake-fps-log.json';
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        _dataMsg='FPS LOG SAVED'; _dataMsgAt=simNow;
+    } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
+}
 
 // ---- Mystery box loot (META: uses Math.random, NOT the seeded sim RNG -- never
 // affects gameplay determinism or leaderboard replay). All loot is cosmetic. ----
@@ -2565,7 +2620,9 @@ function loop(rafNow) {
     _updateBtnDim();
     _updateNonCanvasUI();
     fpsFrames++;
-    if(rafNow-fpsLast>=500){fpsEl.textContent=`${Math.round(fpsFrames*1000/(rafNow-fpsLast))} FPS`;fpsFrames=0;fpsLast=rafNow;}
+    if(rafNow-fpsLast>=500){ const _live=Math.round(fpsFrames*1000/(rafNow-fpsLast));
+        if(_fpsRec) _fpsRecordAvg(_live,rafNow); else fpsEl.textContent=`${_live} FPS`;   // recording: box shows locked worst, not live
+        fpsFrames=0; fpsLast=rafNow; }
 
     // Music routing (skip splash/paused/quitConfirm states)
     if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'){
@@ -2581,6 +2638,7 @@ function loop(rafNow) {
     // backgrounded frame catches up a little then drops the backlog (no spiral).
     if(_lastRAF===0) _lastRAF=rafNow;
     let frameMs=rafNow-_lastRAF; _lastRAF=rafNow;
+    if(_fpsRec) _fpsRecordFrame(frameMs, rafNow);   // raw dt (before the sim cap); no-op when not recording
     if(frameMs>250) frameMs=250;
     _acc+=frameMs;
     let ran=0;
