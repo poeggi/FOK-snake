@@ -1107,16 +1107,20 @@ const SETTINGS_CATS = [
 // from the normal menus -- you raise it by hand-editing the save file (it rides in the
 // backup). Level: 1 = this menu; 2/3 reserved for in-game debug overlays (later).
 let _showCanvasProps = false;
+// cfg.debug guards ENTRY to the DEBUGGING menu; _debugEntered keeps it visible while you
+// are inside it, so dialling the level to 0 shows 0 but doesn't kick you out -- the 0
+// takes effect only when you leave the category (or reload).
+let _debugEntered = false;
 const DEBUG_CAT = { label:'DEBUGGING', items:[
     { lbl:()=>'DEBUG LEVEL: '+(cfg.debug||0),
-      act:()=>{ cfg.debug=((cfg.debug||0)+1)%4; if(cfg.debug===0){settingsCat=-1;settingsSel=0;} Snd.sfxPlay('select',cfg.music); },
-      adj:(r)=>{ cfg.debug=Math.max(0,Math.min(3,(cfg.debug||0)+(r?1:-1))); if(cfg.debug===0){settingsCat=-1;settingsSel=0;} } },
+      act:()=>{ cfg.debug=((cfg.debug||0)+1)%4; Snd.sfxPlay('select',cfg.music); },
+      adj:(r)=>{ cfg.debug=Math.max(0,Math.min(3,(cfg.debug||0)+(r?1:-1))); } },
     { lbl:()=>'SHOW CANVAS PROPS: '+(_showCanvasProps?'ON':'OFF'),
       act:()=>{ _showCanvasProps=!_showCanvasProps; requestAnimationFrame(layout); Snd.sfxPlay('select',cfg.music); } },
     { lbl:()=>'EXPORT CANVAS INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportCanvasInfo(); } },
     { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
 ] };
-function _cats(){ return (cfg.debug>0) ? SETTINGS_CATS.concat([DEBUG_CAT]) : SETTINGS_CATS; }
+function _cats(){ return (cfg.debug>0 || _debugEntered) ? SETTINGS_CATS.concat([DEBUG_CAT]) : SETTINGS_CATS; }
 function _settingsList(){ return settingsCat>=0 ? _cats()[settingsCat].items : _cats(); }
 function drawSettings() {
     drawGrid(); drawOvBg(0.92);
@@ -2134,7 +2138,7 @@ function handleKey(key, pde) {
         }
         if(phase==='resetConfirm'){ phase='settings'; if(pde)pde(); return; }
         if(phase==='settings'){
-            if(settingsCat>=0){ settingsSel=settingsCat; settingsCat=-1; } else phase='menu';
+            if(settingsCat>=0){ settingsSel=settingsCat; settingsCat=-1; _debugEntered=false; } else phase='menu';
             Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return;
         }
         if(phase==='scores'||phase==='credits'||phase==='shop'||phase==='news'){ phase='menu'; Snd.sfxPlay('nav',cfg.music); if(pde)pde(); return; }
@@ -2165,9 +2169,10 @@ function handleKey(key, pde) {
         if(key==='Enter'){
             if(onBack){
                 Snd.sfxPlay('nav',cfg.music);
-                if(inCat){settingsSel=settingsCat;settingsCat=-1;} else phase='menu';
+                if(inCat){settingsSel=settingsCat;settingsCat=-1;_debugEntered=false;} else phase='menu';
             } else if(!inCat){
                 Snd.sfxPlay('select',cfg.music); settingsCat=settingsSel; settingsSel=0;
+                _debugEntered = !!(_cats()[settingsCat] && _cats()[settingsCat].label==='DEBUGGING');
             } else {
                 const it=list[settingsSel];
                 if(it.act) it.act();
