@@ -2637,23 +2637,34 @@ requestAnimationFrame(syncLandscapePanels);
 // canvas width (--stage-w). We observe #wrap (the input), not the canvas (our output), and
 // the last-width guard stops the font->reflow->resize feedback from looping.
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
+const _pmq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: portrait)') : { matches:false };
 let _lastCw = -1, _dbgEl = null;
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
-        const wW = wrap.clientWidth;
-        // Clamp available height to the viewport. On a wide/short window the flex wrap can
-        // report a height taller than the screen (canvas then overflows the bottom). The
-        // wrap's top position is stable, so cap by "wrap-top -> viewport-bottom".
-        const vpH = document.documentElement.clientHeight;
-        const wrapTop = wrap.getBoundingClientRect().top;
-        const wH = Math.min(wrap.clientHeight, Math.max(0, vpH - wrapTop));
-        if (wW <= 0 || wH <= 0) return;
-        // Adaptive margin: ~2% of the smaller side (clamped 4-48px). Barely-there on a phone
-        // (keeps the fill), comfortable breathing room on a big desktop/TV. Only bites the
-        // binding axis, so it never shrinks the phone's width fill.
-        const m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
-        const scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);  // R1 fit, R2 binds, capped
+        const vpW = document.documentElement.clientWidth, vpH = document.documentElement.clientHeight;
+        let wW, wH, m, scale, mode;
+        if (_pmq.matches) {
+            // PORTRAIT (touch): the canvas is width-bound, so size it from the viewport WIDTH
+            // (measuring #wrap would be circular now that it shrink-wraps the canvas). Cap by
+            // the height the chrome leaves so the bottom-stacked column never runs off-screen.
+            mode = 'portrait';
+            const hud=document.getElementById('hud'), tb=document.getElementById('topbar'), gp=document.getElementById('gamepad');
+            const chromeH = (hud?hud.offsetHeight:0) + (tb?tb.offsetHeight:0) + (gp?gp.offsetHeight:0) + 96; // gaps+bottom pad
+            wW = vpW; wH = Math.max(60, vpH - chromeH);
+            m = Math.min(48, Math.max(4, Math.round(wW * 0.02)));
+            scale = Math.min((wW - 2*m) / CW, wH / CH, CANVAS_MAX_H / CH);
+        } else {
+            // LANDSCAPE / DESKTOP: largest CW:CH box that fits the flex:1 #wrap. Clamp height to
+            // the viewport (a wide/short window can report a wrap taller than the screen).
+            mode = 'fit';
+            wW = wrap.clientWidth;
+            const wrapTop = wrap.getBoundingClientRect().top;
+            wH = Math.min(wrap.clientHeight, Math.max(0, vpH - wrapTop));
+            if (wW <= 0 || wH <= 0) return;
+            m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
+            scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);
+        }
         const cw = CW * scale;
         // On-screen canvas properties overlay: toggled from the DEBUGGING menu (Show Canvas
         // Props). (#debug in the URL only *enables* debug mode, it does not show this.)
@@ -2662,13 +2673,11 @@ function layout() {
                 _dbgEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#000d;color:#0f0;font:11px monospace;padding:3px;white-space:pre;pointer-events:none'; document.body.appendChild(_dbgEl); }
             _dbgEl.style.display = 'block';
             _dbgEl.textContent =
-                'v'+_swVersion+'  dbg'+(cfg.debug||0)+'  dpr'+(window.devicePixelRatio||1)+
+                'v'+_swVersion+'  dbg'+(cfg.debug||0)+'  dpr'+(window.devicePixelRatio||1)+'  ['+mode+']'+
                 '\nscreen '+screen.width+'x'+screen.height+'  '+((window.innerWidth>window.innerHeight)?'landscape':'portrait')+
-                '\nvp '+Math.round(document.documentElement.clientWidth)+'x'+Math.round(vpH)+
-                '\nwrap '+Math.round(wrap.clientWidth)+'x'+Math.round(wrap.clientHeight)+' top'+Math.round(wrapTop)+
-                '\nwUsed '+Math.round(wW)+'x'+Math.round(wH)+'  m'+m+'  scale '+scale.toFixed(3)+
-                '\ncanvas css '+Math.round(cw)+'x'+Math.round(CH*scale)+'  native '+canvas.width+'x'+canvas.height+
-                '  bind '+(((wW-2*m)/CW <= (wH-2*m)/CH) ? 'WIDTH' : 'HEIGHT');
+                '\nvp '+Math.round(vpW)+'x'+Math.round(vpH)+
+                '\nused '+Math.round(wW)+'x'+Math.round(wH)+'  m'+m+'  scale '+scale.toFixed(3)+
+                '\ncanvas css '+Math.round(cw)+'x'+Math.round(CH*scale)+'  native '+canvas.width+'x'+canvas.height;
         } else if (_dbgEl) { _dbgEl.style.display = 'none'; }
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;

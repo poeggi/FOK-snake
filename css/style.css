@@ -100,8 +100,12 @@ body {
 #side-info { display: contents; }
 /* Portrait touch: keep the gamepad low for thumb reach. */
 @media (pointer: coarse) and (orientation: portrait) {
+    /* Stack from the bottom for thumb reach: #wrap shrink-wraps the (JS-sized) canvas
+       instead of flex-growing, so HUD + SND/FPS + canvas + gamepad sit as one cluster that
+       justify-content:flex-end pushes to the bottom, leaving the empty space up top. */
     body { justify-content: flex-end; padding-bottom: 56px; }
-    #gamepad { margin-top: 20px; }
+    #wrap { flex: 0 0 auto; }
+    #gamepad { margin-top: 16px; }
 }
 @media (pointer: coarse) and (orientation: landscape) {
     body { flex-direction: row; align-items: stretch; padding: 0 3px; gap: 6px; }
