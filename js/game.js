@@ -2702,19 +2702,21 @@ function layout() {
         const wrap = canvas.parentElement;                 // #wrap
         const vpW = document.documentElement.clientWidth, vpH = document.documentElement.clientHeight;
         let wW, wH, m, scale, mode;
-        if (_pmq.matches) {
-            // PORTRAIT (touch): the canvas is width-bound, so size it from the viewport WIDTH
-            // (measuring #wrap would be circular now that it shrink-wraps the canvas). Cap by
-            // the height the chrome leaves so the bottom-stacked column never runs off-screen.
-            mode = 'portrait';
+        if (!_lsq.matches) {
+            // COLUMN (desktop + portrait touch): #wrap shrink-wraps the JS-sized canvas, so the
+            // body groups [HUD + SND/FPS + canvas + gamepad] and centres (desktop) / bottom-
+            // aligns (portrait). Measuring #wrap would be circular now, so fit into the viewport
+            // width x (viewport height minus the chrome rows, which offsetHeight gives us --
+            // display:none counts as 0, opacity:0 keeps its height).
+            mode = _pmq.matches ? 'portrait' : 'desktop';
             const hud=document.getElementById('hud'), tb=document.getElementById('topbar'), gp=document.getElementById('gamepad');
-            const chromeH = (hud?hud.offsetHeight:0) + (tb?tb.offsetHeight:0) + (gp?gp.offsetHeight:0) + 96; // gaps+bottom pad
+            const chromeH = (hud?hud.offsetHeight:0) + (tb?tb.offsetHeight:0) + (gp?gp.offsetHeight:0) + 96; // gaps+padding
             wW = vpW; wH = Math.max(60, vpH - chromeH);
-            m = Math.min(48, Math.max(4, Math.round(wW * 0.02)));
-            scale = Math.min((wW - 2*m) / CW, wH / CH, CANVAS_MAX_H / CH);
+            m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
+            scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);
         } else {
-            // LANDSCAPE / DESKTOP: largest CW:CH box that fits the flex:1 #wrap. Clamp height to
-            // the viewport (a wide/short window can report a wrap taller than the screen).
+            // LANDSCAPE (touch): largest CW:CH box that fits the flex:1 #wrap between the side
+            // panels. Clamp height to the viewport (a wide/short window can report a tall wrap).
             mode = 'fit';
             wW = wrap.clientWidth;
             const wrapTop = wrap.getBoundingClientRect().top;
