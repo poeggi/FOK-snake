@@ -814,7 +814,7 @@ function drawSnake(flash) {
 }
 
 // ================================================================
-// SCREENS
+// SCREEN RENDERING  (menu / shop / boxes / settings / scores / achievements / credits / news / name-entry)
 // ================================================================
 function drawSplash(now) {
     // Cycle geometry constants
@@ -1859,6 +1859,9 @@ function resetStats() {
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
     cfg.shopItems = {}; cfg.wornItems = null; saveCfg();   // NOTE: cfg.debug (+ other settings) intentionally preserved
 }
+// ================================================================
+// DEBUGGING  (canvas info, JSON exports, worst-frame FPS recorder)
+// ================================================================
 // DEBUGGING: snapshot every screen/canvas metric that matters for the layout, so a
 // broken device can export a file we can read. Downloaded as pretty JSON.
 function _canvasInfo(){
@@ -1879,13 +1882,8 @@ function _canvasInfo(){
     };
 }
 function exportCanvasInfo(){
-    try {
-        const blob=new Blob([JSON.stringify(_canvasInfo(),null,2)],{type:'application/json'});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a'); a.href=url; a.download='snake-canvas-info.json';
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-        _dataMsg='CANVAS INFO SAVED'; _dataMsgAt=simNow;
-    } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
+    try { _downloadJSON('snake-canvas-info.json', _canvasInfo()); _dataMsg='CANVAS INFO SAVED'; _dataMsgAt=simNow; }
+    catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
 }
 // ---- Worst-Frame Recorder (DEBUGGING). Passive: reuses loop()'s frame time; per frame it
 // does one compare + one ring-buffer write; a context snapshot is built ONLY on a new worst
@@ -1927,17 +1925,16 @@ function _fpsSnapshot(dt, rafNow){
 }
 function exportFpsLog(){
     try {
-        const data={ worstFrame:_fpsSnap,
+        _downloadJSON('snake-fps-log.json', { worstFrame:_fpsSnap,
             worstSustainedFps:(_fpsWorstAvg===Infinity?null:_fpsWorstAvg),
-            maxSustainedFps:(_fpsMaxAvg||null), recording:_fpsRec, device:_canvasInfo() };
-        const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a'); a.href=url; a.download='snake-fps-log.json';
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+            maxSustainedFps:(_fpsMaxAvg||null), recording:_fpsRec, device:_canvasInfo() });
         _dataMsg='FPS LOG SAVED'; _dataMsgAt=simNow;
     } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
 }
 
+// ================================================================
+// MYSTERY BOX LOGIC  (loot rolls, odds, pity)
+// ================================================================
 // ---- Mystery box loot (META: uses Math.random, NOT the seeded sim RNG -- never
 // affects gameplay determinism or leaderboard replay). All loot is cosmetic. ----
 function _boxItemValue(id){
@@ -1981,6 +1978,9 @@ function rollBox(box){
     return { type:'item', id: pool[Math.floor(Math.random()*pool.length)], rarity:outcome };
 }
 
+// ================================================================
+// BACKUP / RESTORE / INTEGRITY
+// ================================================================
 // Backup/restore all game data (scores, coins, achievements, shop items, settings)
 // as a downloadable JSON file. A backup is a full clone -- restore overwrites.
 function _saveSnapshot() {
@@ -1995,16 +1995,18 @@ function _saveSnapshot() {
 // rejected on restore. Recomputed the same way on both sides from a fixed key order.
 function _sum(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } return h; }
 function _sumOf(d){ return _sum(JSON.stringify({v:d.v,hs:d.hs,coins:d.coins,ach:d.ach,cfg:d.cfg,name:d.name})); }
+// Serialize an object to a downloaded JSON file. Shared by the backup + the debug exports.
+function _downloadJSON(filename, obj){
+    const blob=new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
 function backupStats() {
     try {
         const snap=_saveSnapshot();
         snap.crc=_sumOf(snap);              // integrity checksum, written as the final field
-        const blob=new Blob([JSON.stringify(snap)],{type:'application/json'});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url; a.download='snake-fok-backup.json';
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
+        _downloadJSON('snake-fok-backup.json', snap);
         _dataMsg='BACKUP SAVED'; _dataMsgAt=simNow;
     } catch (e) { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
 }
