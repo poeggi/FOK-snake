@@ -43,7 +43,7 @@ function freeCell(blocked) {
 
 function startGame(seed) { gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
     level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(rng()*30); _earlyHeartCount=0;
-    let best=0; try{ for(const s of getScores()) if((s.score||0)>best) best=s.score; }catch{}
+    let best=0; try{ for(const s of getScores()) if((s.score||0)>best) best=s.score; }catch (e){}
     _shimmerThreshold=Math.max(best,25000);
     beginLevel(); }
 

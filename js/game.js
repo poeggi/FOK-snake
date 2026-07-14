@@ -42,13 +42,13 @@ function getScores() {
         if(raw === null) return [{name:'SNAKE PLISSKEN',score:42,level:1,diff:1,color:0,shopItems:{},date:'26.11.97'}];
         const a = JSON.parse(raw);
         return Array.isArray(a) ? a : [];
-    } catch { return []; }
+    } catch (e) { return []; }
 }
 function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10) || 0; }
 let _cachedFOKoins = getFOKoins();
 function addFOKoins(n) {
     _cachedFOKoins += n;
-    try { localStorage.setItem(FK_KEY, String(_cachedFOKoins)); } catch {}
+    try { localStorage.setItem(FK_KEY, String(_cachedFOKoins)); } catch (e) {}
     if(_cachedFOKoins >= 5000)    unlockAch('fokoins_1k');
     if(_cachedFOKoins >= 100000)  unlockAch('fokoins_10k');
     if(_cachedFOKoins >= 1000000) unlockAch('fokoins_1m');
@@ -61,10 +61,10 @@ function addScore(name, sc, lvl) {
     s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl,
              diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });
     s.sort((a, b) => b.score - a.score);
-    try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch {}
+    try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch (e) {}
     addFOKoins(sc);
 }
-function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} }
+function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} }
 // Fresh default config each call (new objects, so nothing is shared/aliased).
 // cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
 // must stay disabled -- gate all networking on !cfg.offline.
@@ -101,7 +101,7 @@ function _sanitizeCfg() {
 // backup clears settings that backup never carried.
 function loadCfg() {
     let s = {};
-    try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch {}
+    try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch (e) {}
     if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
     if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
     Object.assign(cfg, defaultCfg(), s);
@@ -128,10 +128,10 @@ function spawnConfetti() {
         });
     }
 }
-function loadAch() { try { achUnlocked = JSON.parse(localStorage.getItem(ACH_KEY) || '{}'); } catch {} }
-function saveAch() { try { localStorage.setItem(ACH_KEY, JSON.stringify(achUnlocked)); } catch {} }
-function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch{ return true; } }
-function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch{} }
+function loadAch() { try { achUnlocked = JSON.parse(localStorage.getItem(ACH_KEY) || '{}'); } catch (e) {} }
+function saveAch() { try { localStorage.setItem(ACH_KEY, JSON.stringify(achUnlocked)); } catch (e) {} }
+function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch (e){ return true; } }
+function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch (e){} }
 const EASY_ACHS = new Set(['first_gem','level1','level5','fokoins_1k','fokoins_10k','fokoins_1m']);
 function unlockAch(id) {
     if(achUnlocked[id]) return;
@@ -277,7 +277,7 @@ function drainSimEvents(){
             case 'bars':     renderBarsOffscreen(); break;
             case 'showhud':  showHUD(e.v); break;
             case 'gameover':
-                try{ nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME); }catch{ nameStr=''; }
+                try{ nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME); }catch (e){ nameStr=''; }
                 nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0; nameCursorPos=nameStr.length; nameReason='over';
                 showHUD(false); Snd.musicStop(); break;
             case 'crush':    _crushEffects.push({ x:e.x, y:e.y, at:simNow,
@@ -1382,7 +1382,7 @@ function _openBox(box){
         saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('unbox',cfg.music); return;
     }
     if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
-    _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch{}
+    _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch (e){}
     const res=rollBox(box);
     if(res.type==='coins'){ addFOKoins(res.amount); _boxReward={kind:'coins',amount:res.amount}; }
     else {
@@ -1824,7 +1824,7 @@ function drawResetConfirm() {
 }
 function resetStats() {
     const keys = [HS_KEY, FK_KEY, ACH_KEY, 'lastSName'];
-    keys.forEach(k=>{ try { localStorage.removeItem(k); } catch {} });
+    keys.forEach(k=>{ try { localStorage.removeItem(k); } catch (e) {} });
     _cachedFOKoins = 0;
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
     cfg.shopItems = {}; cfg.wornItems = null; saveCfg();
@@ -1898,7 +1898,7 @@ function backupStats() {
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
         _dataMsg='BACKUP SAVED'; _dataMsgAt=simNow;
-    } catch { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
+    } catch (e) { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
 }
 const _restoreInp=document.createElement('input');
 _restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.style.display='none';
@@ -1921,12 +1921,12 @@ _restoreInp.addEventListener('change',()=>{
             applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
             Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
             _dataMsg='STATS RESTORED'; _dataMsgAt=simNow;
-        } catch { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
+        } catch (e) { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
     };
     rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=simNow; };
     rd.readAsText(f);
 });
-function restoreStats(){ try{ _restoreInp.click(); }catch{} }
+function restoreStats(){ try{ _restoreInp.click(); }catch (e){} }
 
 const fpsEl = document.getElementById('fps-el');
 
@@ -2168,7 +2168,7 @@ function handleKey(key, pde) {
                 const item=items[shopSel];
                 const si=cfg.shopItems||(cfg.shopItems={});
                 if(item&&_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
-                    _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch {}
+                    _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch (e) {}
                     si[item.id]=true;
                     if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
                     saveCfg();
@@ -2211,7 +2211,7 @@ function handleKey(key, pde) {
         if(levelDoneWaiting){
             levelDoneWaiting=false;
             if(level<MAX_LEVELS){_levelStartLen=cfg.diff===2?snake.length:0;level++;beginLevel();}
-            else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch{nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='win';showHUD(false);Snd.musicStop();}
+            else{phase='nameEntry';try{nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME);}catch (e){nameStr='';}nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0;nameCursorPos=nameStr.length;nameReason='win';showHUD(false);Snd.musicStop();}
             if(pde)pde();
         }
     }
@@ -2238,7 +2238,7 @@ function handleKey(key, pde) {
         const _syncDial=()=>{ if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;} };
         const _submitName=()=>{
             if(!nameStr.trim()) return;
-            try{localStorage.setItem('lastSName',nameStr);}catch{}
+            try{localStorage.setItem('lastSName',nameStr);}catch (e){}
             addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
             _scoreboardCache=getScores();phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
         };
