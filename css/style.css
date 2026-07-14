@@ -61,13 +61,11 @@ body {
    its native aspect that fits, centred, with a 4px margin. */
 #wrap {
     order: 3; flex: 1 1 0; min-width: 0; min-height: 0;
-    display: flex; align-items: center; justify-content: center; padding: 4px;
+    display: flex; align-items: center; justify-content: center;
 }
 #c {
-    display: block; margin: auto;
-    aspect-ratio: var(--canvas-aspect, 3 / 2);
-    max-width: 100%; max-height: 100%; width: auto; height: auto;
-    border: 1px solid #2a2a4e; touch-action: none;
+    display: block; border: 1px solid #2a2a4e; touch-action: none;
+    /* width/height are set by layout() = the largest CW:CH box that fits #wrap (minus 4px). */
 }
 #gamepad { display: none; order: 4; }
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }

@@ -2558,14 +2558,23 @@ requestAnimationFrame(syncLandscapePanels);
 // fonts+boxes, --stage-w matches the HUD/topbar width to the canvas. A ResizeObserver
 // re-runs it whenever the canvas resizes, so it self-converges if a font tweak nudges the
 // layout; the last-width guard stops that from looping. --canvas-aspect is set once.
-try { document.documentElement.style.setProperty('--canvas-aspect', CW + ' / ' + CH); } catch(_) {}
+// R1+R2 in JS: size the canvas to the largest CW:CH box that fits its #wrap region
+// (which flex:1 hands whatever space the shown chrome leaves), minus a 4px margin. Then
+// publish the scale so the chrome fonts/boxes follow (--ui-scale) and the HUD matches the
+// canvas width (--stage-w). We observe #wrap (the input), not the canvas (our output), and
+// the last-width guard stops the font->reflow->resize feedback from looping.
 let _lastCw = -1;
 function layout() {
     try {
-        const cw = canvas.getBoundingClientRect().width;
-        if (!cw || Math.abs(cw - _lastCw) < 0.5) return;   // no change -> stop (breaks RO loops)
+        const wrap = canvas.parentElement;                 // #wrap
+        const availW = wrap.clientWidth - 8, availH = wrap.clientHeight - 8;  // 4px each side
+        if (availW <= 0 || availH <= 0) return;
+        const scale = Math.min(availW / CW, availH / CH);  // fit both = R1; tighter axis binds = R2
+        const cw = CW * scale;
+        if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
-        const scale = cw / CW;
+        canvas.style.width = cw + 'px';
+        canvas.style.height = (CH * scale) + 'px';
         const root = document.documentElement.style;
         root.setProperty('--ui-scale', scale);
         root.setProperty('--stage-w', cw + 'px');
@@ -2574,7 +2583,7 @@ function layout() {
 }
 window.addEventListener('resize', layout);
 window.addEventListener('orientationchange', () => setTimeout(layout, 120));
-if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas);
+if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
 requestAnimationFrame(layout);
 
 let _swVersion = '?';
