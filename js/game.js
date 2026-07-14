@@ -2568,7 +2568,12 @@ let _lastCw = -1;
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
-        const wW = wrap.clientWidth, wH = wrap.clientHeight;
+        const wW = wrap.clientWidth;
+        // Clamp available height to the viewport. On a wide/short window the flex wrap can
+        // report a height taller than the screen (canvas then overflows the bottom). The
+        // wrap's top position is stable, so cap by "wrap-top -> viewport-bottom".
+        const vpH = document.documentElement.clientHeight;
+        const wH = Math.min(wrap.clientHeight, Math.max(0, vpH - wrap.getBoundingClientRect().top));
         if (wW <= 0 || wH <= 0) return;
         // Adaptive margin: ~2% of the smaller side (clamped 4-48px). Barely-there on a phone
         // (keeps the fill), comfortable breathing room on a big desktop/TV. Only bites the
@@ -2586,7 +2591,7 @@ function layout() {
         const iconH = Math.round(16 * scale); _muteCv.style.height = iconH + 'px'; _muteCv.style.width = (iconH * 2) + 'px';
     } catch(_) {}
 }
-window.addEventListener('resize', layout);
+window.addEventListener('resize', () => requestAnimationFrame(layout));
 window.addEventListener('orientationchange', () => setTimeout(layout, 120));
 if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
 requestAnimationFrame(layout);
