@@ -2564,7 +2564,7 @@ requestAnimationFrame(syncLandscapePanels);
 // canvas width (--stage-w). We observe #wrap (the input), not the canvas (our output), and
 // the last-width guard stops the font->reflow->resize feedback from looping.
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
-let _lastCw = -1;
+let _lastCw = -1, _dbgEl = null;
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
@@ -2573,7 +2573,8 @@ function layout() {
         // report a height taller than the screen (canvas then overflows the bottom). The
         // wrap's top position is stable, so cap by "wrap-top -> viewport-bottom".
         const vpH = document.documentElement.clientHeight;
-        const wH = Math.min(wrap.clientHeight, Math.max(0, vpH - wrap.getBoundingClientRect().top));
+        const wrapTop = wrap.getBoundingClientRect().top;
+        const wH = Math.min(wrap.clientHeight, Math.max(0, vpH - wrapTop));
         if (wW <= 0 || wH <= 0) return;
         // Adaptive margin: ~2% of the smaller side (clamped 4-48px). Barely-there on a phone
         // (keeps the fill), comfortable breathing room on a big desktop/TV. Only bites the
@@ -2581,6 +2582,16 @@ function layout() {
         const m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
         const scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);  // R1 fit, R2 binds, capped
         const cw = CW * scale;
+        if (location.hash === '#debug') {   // TEMP: read the real numbers off the device
+            if (!_dbgEl) { _dbgEl = document.createElement('div');
+                _dbgEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#000d;color:#0f0;font:12px monospace;padding:3px;white-space:pre;pointer-events:none'; document.body.appendChild(_dbgEl); }
+            _dbgEl.textContent =
+                'vp '+Math.round(document.documentElement.clientWidth)+'x'+Math.round(vpH)+
+                '  wrap '+Math.round(wrap.clientWidth)+'x'+Math.round(wrap.clientHeight)+' top'+Math.round(wrapTop)+
+                '\nwUsed '+Math.round(wW)+'x'+Math.round(wH)+'  m'+m+'  scale '+scale.toFixed(3)+
+                '\ncanvas '+Math.round(cw)+'x'+Math.round(CH*scale)+
+                '  bind '+(((wW-2*m)/CW <= (wH-2*m)/CH) ? 'WIDTH' : 'HEIGHT');
+        }
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
         canvas.style.width = cw + 'px';
