@@ -248,7 +248,7 @@ async function _netTimeSync(force, budgetMs){
 //   anc = this device's clock offset vs the server (mr = min-rtt, a = age); PTS
 //   rests on it, so a wrong anc puts us out of step with the peer.
 //   P<i>[R] = my index, R=relay; ep = epoch; tgt = clock-driven tick target
-//   ptk = peer-tick (sub-tick, ~0 = aligned); lag/pd = peer one-way pts-delta
+//   ptk = peer-tick (sub-tick, ~0 = aligned); pts live lag / avg. delta = peer one-way pts-delta (latest, then avg + min/max)
 //   rb = rollbacks/resim-ticks, mx = deepest; live = inputs applied with NO rewind
 //   dsy = desync, hok = hash-ok; in = input records rx/tx; pkt = ALL packets rx/tx
 //   path = ICE pair (host=LAN, srflx=hairpin)
@@ -274,7 +274,7 @@ function netDebugQuad(){
         // tgt = the tick the wall PTS says we should be at; d = tgt-simTick, i.e. how far
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
         T.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
-        T.push('lag ' + Math.round(d.lag) + (d.lagN ? '  pd ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
+        T.push('pts live lag ' + Math.round(d.lag) + (d.lagN ? '  avg. delta ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
         S.push('rb ' + _rbDbg.rb + '/' + _rbDbg.resim + ' mx' + _rbDbg.maxRew + '  live ' + _rbDbg.live);
         S.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk + ' fix ' + (_rbDbg.fix|0));
         if(d.inLog.length) N.push('< ' + d.inLog.join(' '));
