@@ -489,7 +489,7 @@ let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // outstanding at all times and the link is never left idle.
 async function _netPollOnce(){
     if(_netPollBusy || !_netOk() || !_netPollDue()) return;
-    const held = (_netSess && !_netSess.game) || phase === 'lobby' || phase === 'duelMenu' || phase === 'friends' || phase === 'friendId';
+    const held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'friends' || phase === 'friendId';   // long-poll during a reconnect so the re-handshake signals arrive fast
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;
