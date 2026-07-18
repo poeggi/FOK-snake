@@ -272,10 +272,32 @@ function exportDebugInfo(){
 let _dbgSnap = null, _dbgPin = '', _dbgPinShow = false;   // _dbgPinShow: hold the PIN on screen until the user moves
 function captureDebugSnapshot(){
     try {
-        let image = null;
-        try { image = canvas.toDataURL('image/webp', 0.7); } catch(e){ try { image = canvas.toDataURL('image/png'); } catch(_){} }
-        _dbgSnap = { app:_swVersion, id:getPlayerId(), when:Date.now(), state:_debugState(), images: image ? [image] : [] };
-        _dataMsg='SNAPSHOT CAPTURED'; _dataMsgAt=simNow;
+        const images = [];
+        // 1) The game canvas at its NATIVE resolution, lossless PNG -- pixel-exact for
+        //    measurement (webp/quality compression would smear cell edges).
+        try { images.push(canvas.toDataURL('image/png')); } catch(_){}
+        // 2) Best-effort full-viewport composite at device-pixel resolution: every visible
+        //    <canvas> (game board + d-pad) drawn at its on-screen box, so the layout is
+        //    measurable as displayed. The HTML chrome (HUD, side buttons) is NOT included --
+        //    there is no reliable DOM-to-image in-browser (SVG foreignObject taints the
+        //    canvas on iOS Safari; screen capture needs a permission prompt).
+        try {
+            const dpr = window.devicePixelRatio || 1;
+            const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+            const off = document.createElement('canvas');
+            off.width = Math.round(vw*dpr); off.height = Math.round(vh*dpr);
+            const octx = off.getContext('2d');
+            octx.fillStyle = getComputedStyle(document.body).backgroundColor || '#000';
+            octx.fillRect(0,0,off.width,off.height);
+            document.querySelectorAll('canvas').forEach(el=>{
+                const r = el.getBoundingClientRect();
+                if(r.width>0 && r.height>0 && el.width>0 && el.height>0)
+                    try { octx.drawImage(el, r.left*dpr, r.top*dpr, r.width*dpr, r.height*dpr); } catch(_){}
+            });
+            images.push(off.toDataURL('image/png'));
+        } catch(_){}
+        _dbgSnap = { app:_swVersion, id:getPlayerId(), when:Date.now(), state:_debugState(), images };
+        _dataMsg = images.length ? 'SNAPSHOT CAPTURED' : 'SNAPSHOT FAILED'; _dataMsgAt=simNow;
         if(typeof Snd !== 'undefined') Snd.sfxPlay('select', cfg.music);
     } catch(e){ _dataMsg='SNAPSHOT FAILED'; _dataMsgAt=simNow; }
 }

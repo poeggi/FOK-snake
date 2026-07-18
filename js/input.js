@@ -776,10 +776,13 @@ nameInp.addEventListener('keydown', e => {
     // stopPropagation the same event bubbles to the document keydown listener and is
     // handled AGAIN -- on iPad the on-screen return key then submitted (-> scores) and
     // immediately confirmed out of the scores screen (-> menu) in one press.
-    e.stopPropagation();
+    e.stopPropagation();   // the document keydown listener must not ALSO handle this
     if (e.key === 'Enter') { handleKey('Enter', () => e.preventDefault()); }
     if (e.key === 'Backspace') { e.preventDefault(); handleKey('Backspace', null); }
-    if (e.key.length === 1) e.preventDefault();
+    // Do NOT preventDefault a character key: that cancels its insertion into the field,
+    // so the 'input' event never fires and the letter is lost. The 'input' handler is the
+    // one that records characters; let the key land. (iPad hardware/soft keyboard both hit
+    // this path once the field is focused.)
 });
 
 // ================================================================
