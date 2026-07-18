@@ -1604,7 +1604,14 @@ function _rbHash(snap){
 // every time either player steers -- a false desync once a second, which is not a
 // divergence at all, just a race. So park the peer's hash and check it only after
 // enough ticks have passed for any in-flight input for t to have landed.
-const RB_SETTLE = 30;        // ~500ms: far beyond any latency we would still be playing at
+const RB_SETTLE = 30;        // HASH settle (~500ms): a hash may only be compared once our own
+                             // snapshot of its tick has stopped moving, or a late input makes it
+                             // read as a false desync every time either player steers.
+const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORITATIVE and does not
+                             // depend on our inputs settling, so apply it the moment its tick is in
+                             // the past (simTick >= tk) -- no wait. Applying immediately keeps the
+                             // correction in the seamless in-ring path; a future-stamped state (tk >
+                             // simTick) still parks here until we reach its tick.
 var _rbHashQ = [];           // [{tk, h}] peer hashes waiting for their tick to settle
 function _rbCheckHash(m){
     _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f:(m.f && typeof m.f === 'object') ? m.f : null });
@@ -1675,7 +1682,7 @@ function _rbStateSettle(){
     const mine = netMyIndex();
     for(let i = _rbStateQ.length - 1; i >= 0; i--){
         const q = _rbStateQ[i];
-        if(simTick < q.tk + RB_SETTLE) continue;         // still in flight: leave it parked
+        if(simTick < q.tk + RB_STATE_SETTLE) continue;   // authoritative: apply almost immediately (not the hash wait)
         _rbStateQ.splice(i, 1);
         if(q.i === mine) continue;                       // never let the peer overwrite our own snake
         const cells = [];
