@@ -196,24 +196,24 @@ runTest('SMOKE-NET', `
     for(let i=0;i<RB_SETTLE+2;i++){ netTickPre(); update(); }
     if(_rbDbg.desync!==_dz0+1) throw 'an un-comparable hash must not be called a desync';
     // A desync is NOT a connection problem: the link is fine, the worlds are not.
-    _rbWarnAt=-1e9; _netSess.lastRecv=performance.now();
+    _rbWarnAt=-1e9; _netSess.lastRecvWall=Date.now();
     if(netDuelWarn()!==null) throw 'a desync must not masquerade as CONNECTION LOST';
     log('divergence detection ok: hash agrees, mismatch flagged, stale hash ignored');
 
     // ---- in-game warning: the other side is not reaching us ----
     // Silence alone would NOT have caught the tick-base bug -- packets kept
     // arriving, they were just all unusable. So refused input counts as evidence too.
-    _rbWarnAt=-1e9; _netSess.lastRecv=performance.now();
+    _rbWarnAt=-1e9; _netSess.lastRecvWall=Date.now();
     if(netDuelWarn()!==null) throw 'a healthy duel must show no warning';
     // The 16-tick heartbeat (~267ms) must be comfortably faster than the ~533ms warn window
     // it prevents, so a healthy link never flashes.
     if(RB_WARN_MS < NET_KEEPALIVE_MS*1.5) throw 'warn window too tight for the keepalive: it will flash on a healthy link';
     _netSess.reconnecting=false;
-    _netSess.lastRecv=performance.now()-Math.round(RB_WARN_MS*0.6);   // under the warn window: still fine
+    _netSess.lastRecvWall=Date.now()-Math.round(RB_WARN_MS*0.6);   // under the warn window: still fine
     if(netDuelWarn()!==null) throw 'a brief gap must not warn';
-    _netSess.lastRecv=performance.now()-Math.round(RB_WARN_MS+200);   // silent past the warn window
+    _netSess.lastRecvWall=Date.now()-Math.round(RB_WARN_MS+200);   // silent past the warn window
     if(netDuelWarn()!=='CONNECTION LOST') throw 'silence past the warn window must warn';
-    _netSess.lastRecv=performance.now();               // packets flowing again...
+    _netSess.lastRecvWall=Date.now();               // packets flowing again...
     if(netDuelWarn()!==null) throw 'a recovered link must clear the warning';
     _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:900,tk:-99999,k:'dir',d:{x:0,y:1}}]}));   // ...but unusable
     if(netDuelWarn()!=='CONNECTION LOST') throw 'refused input must warn even while packets arrive';

@@ -151,7 +151,7 @@ function _duelBeginLevel() {
     _barsV++;
     powerPellet = null; _powerMode = false;
     _duelSpawnGem();
-    _gDue = 0; spawnAt = 0; phase = 'duelReady'; phaseAt = simNow;
+    _gDue = 0; spawnAt = 0; levelDoneWaiting = false; phase = 'duelReady'; phaseAt = simNow;
     emit({t:'lvlreset'}); emit({t:'bars'});
 }
 function startDuel(seed, x10) {
