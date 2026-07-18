@@ -1193,8 +1193,15 @@ function _netPathStat(s){
         if(!pair) return;
         const loc = st.get(pair.localCandidateId), rem = st.get(pair.remoteCandidateId);
         const ty = c => (c && c.candidateType) ? c.candidateType : '?';
+        const addr = c => (c && (c.address || c.ip)) || '';
+        const fam = a => a ? (a.indexOf(':') >= 0 ? 'v6' : 'v4') : '';
         const rtt = (typeof pair.currentRoundTripTime === 'number') ? Math.round(pair.currentRoundTripTime * 1000) + 'ms' : '?';
-        _netDbg.path = ty(loc) + '/' + ty(rem) + '  p2p-rtt ' + rtt;
+        const pn = _netPeerNet[s.peer];
+        // 'deob' = the de-obfuscated real IP (grafted from the peer-net hint) is the one that
+        // connected, i.e. the direct IPv6 path won past mDNS. Otherwise it is a normal host
+        // (LAN mDNS resolved), srflx (STUN reflexive) or prflx pair.
+        const deob = pn && pn.ip && addr(rem) === pn.ip ? ' deob' : '';
+        _netDbg.path = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob + '  p2p-rtt ' + rtt;
     }).catch(()=>{});
 }
 // In-game liveness: the DataChannel is the session -- ping when idle, 3s silence = dead.
