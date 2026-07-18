@@ -269,7 +269,7 @@ function exportDebugInfo(){
 // Debug snapshot -> the cloud (POST /debug/submit.php): the full state plus a screenshot.
 // The debug overlays are HTML elements, so canvas.toDataURL() captures the game WITHOUT them.
 // A captured snapshot is held until SEND DEBUG SNAPSHOT posts it and the server returns a PIN.
-let _dbgSnap = null, _dbgPin = '', _dbgPinShow = false, _dbgSending = false;   // _dbgPinShow: hold the PIN on screen until the user moves; _dbgSending: upload in flight
+let _dbgSnap = null, _dbgPin = '', _dbgPinShow = false, _dbgPinCopied = false, _dbgSending = false;   // _dbgPinShow: hold the PIN on screen until the user moves; _dbgSending: upload in flight
 function captureDebugSnapshot(){
     try {
         const images = [];
@@ -314,11 +314,15 @@ function _flashDbgSnapBtn(){
 async function sendDebugSnapshot(){
     if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=simNow; return; }
     if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
-    _dbgSending=true; _dbgPinShow=false; _dataMsg=''; _uiDirty=true;   // clear old PIN; the persistent UPLOADING indicator takes over
+    _dbgSending=true; _dbgPinShow=false; _dbgPinCopied=false; _dataMsg=''; _uiDirty=true;   // clear old PIN; the persistent UPLOADING indicator takes over
     try {
         const r=await fetch(NET_BASE+'/debug/submit.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_dbgSnap)});
         const j=await r.json().catch(()=>null);
-        if(r.status===200 && j && j.ok && j.pin){ _dbgPin=String(j.pin); _dataMsg='SNAPSHOT SENT - PIN '+_dbgPin; _dbgPinShow=true; }
+        if(r.status===200 && j && j.ok && j.pin){
+            _dbgPin=String(j.pin); _dbgPinShow=true;
+            try { if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(_dbgPin); _dbgPinCopied=true; } } catch(e){}   // best-effort; user activation may have lapsed after the POST
+            _dataMsg='SNAPSHOT SENT - PIN '+_dbgPin+(_dbgPinCopied?' (COPIED)':'');
+        }
         else if(r.status===413) _dataMsg='SNAPSHOT TOO LARGE';
         else _dataMsg='SNAPSHOT SEND FAILED';
     } catch(e){ _dataMsg='SNAPSHOT SEND FAILED'; }

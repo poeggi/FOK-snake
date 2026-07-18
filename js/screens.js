@@ -336,7 +336,7 @@ const DEBUG_CAT = { label:'DEBUGGING', items:[
     { lbl:()=>'EXPORT DEBUG INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportDebugInfo(); } },
     { lbl:()=>'X10 RARE EVENTS: '+(cfg.x10?'ON':'OFF'),
       act:()=>{ cfg.x10=!cfg.x10; Snd.sfxPlay('select',cfg.music); } },   // persisted: the settings handler saveCfg()s after act (also resends the worker cfg)
-    { lbl:()=> _dbgSending ? 'SENDING SNAPSHOT...' : 'SEND DEBUG SNAPSHOT'+(_dbgSnap?(_dbgPin?' (PIN '+_dbgPin+')':''):' (CAPTURE FIRST)'),
+    { lbl:()=> _dbgSending ? 'SENDING SNAPSHOT...' : 'SEND DEBUG SNAPSHOT'+(_dbgSnap?'':' (CAPTURE FIRST)'),
       act:()=>{ if(_dbgSending) return; Snd.sfxPlay('select',cfg.music); sendDebugSnapshot(); } },
     { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
     { lbl:()=>'LOW-FPS RECORD: '+(_fpsRec?'ON':'OFF'),
@@ -382,7 +382,7 @@ function drawSettings() {
         const _cl=_cats()[settingsCat] && _cats()[settingsCat].label;
         if(_cl==='DATA'||_cl==='DEBUGGING'){
             if(_dbgSending) drawStatus('UPLOADING SNAPSHOT'+'.'.repeat(1+Math.floor(simNow/400)%3));   // persistent while the upload is in flight
-            else if(_dbgPinShow && _dbgPin) drawStatus('SNAPSHOT SENT - PIN '+_dbgPin);   // held until the user moves (see settings nav)
+            else if(_dbgPinShow && _dbgPin) drawStatus('SNAPSHOT SENT - PIN '+_dbgPin+(_dbgPinCopied?' (COPIED)':''));   // held until the user moves (see settings nav)
             else if(_dataMsg && simNow-_dataMsgAt<2500) drawStatus(_dataMsg);
         }
     }
