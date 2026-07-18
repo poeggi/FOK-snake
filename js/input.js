@@ -112,14 +112,16 @@ const UI_INPUT = {
         },
         confirm(){
             Snd.sfxPlay('select',cfg.music);
-            if(menuSel===0)beginGame();
-            else if(menuSel===1){phase='duelMenu';duelSel=0;}
-            else if(menuSel===2){phase='settings';settingsCat=-1;settingsSel=0;}
-            else if(menuSel===3){phase='scores';_scoreboardCache=getScores();scoresTab=0;}
-            else if(menuSel===4){phase='achievements';achPage=0;}
-            else if(menuSel===5){_enterShop();}
-            else if(menuSel===6){phase='credits';creditsScroll=CH-20;creditsSpeed=0.8;_creditsNormal=0.8;}
-            else if(ANNOUNCEMENT){markAnnounceSeen();phase='news';_newsAt=simNow;newsPage=0;}
+            switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
+                case 'PLAY':         beginGame(); break;
+                case '1:1':          phase='duelMenu'; duelSel=0; break;
+                case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
+                case 'ACHIEVEMENTS': phase='achievements'; achPage=0; break;
+                case 'SHOP':         _enterShop(); break;
+                case 'SETTINGS':     phase='settings'; settingsCat=-1; settingsSel=0; break;
+                case 'CREDITS':      phase='credits'; creditsScroll=CH-20; creditsSpeed=0.8; _creditsNormal=0.8; break;
+                default: if(ANNOUNCEMENT){ markAnnounceSeen(); phase='news'; _newsAt=simNow; newsPage=0; }   // the virtual newspaper item past the list
+            }
         },
     },
     duelMenu: {

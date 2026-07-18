@@ -37,7 +37,7 @@ let _resetKind = 'stats';          // which reset the confirm screen is arming: 
 let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
-const MENU_ITEMS     = ['PLAY', '1:1', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
+const MENU_ITEMS     = ['PLAY', '1:1', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
 let duelSel = 0;   // 1:1 submenu selection (0 = PLAY LOCAL, 1 = MY ID, 2 = ADD FRIEND, 3 = FRIENDS, 4 = PLAY ONLINE)
 // Local 1:1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
 const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
@@ -269,7 +269,7 @@ function exportDebugInfo(){
 // Debug snapshot -> the cloud (POST /debug/submit.php): the full state plus a screenshot.
 // The debug overlays are HTML elements, so canvas.toDataURL() captures the game WITHOUT them.
 // A captured snapshot is held until SEND DEBUG SNAPSHOT posts it and the server returns a PIN.
-let _dbgSnap = null, _dbgPin = '', _dbgPinShow = false;   // _dbgPinShow: hold the PIN on screen until the user moves
+let _dbgSnap = null, _dbgPin = '', _dbgPinShow = false, _dbgSending = false;   // _dbgPinShow: hold the PIN on screen until the user moves; _dbgSending: upload in flight
 function captureDebugSnapshot(){
     try {
         const images = [];
@@ -299,20 +299,31 @@ function captureDebugSnapshot(){
         _dbgSnap = { app:_swVersion, id:getPlayerId(), when:Date.now(), state:_debugState(), images };
         _dataMsg = images.length ? 'SNAPSHOT CAPTURED' : 'SNAPSHOT FAILED'; _dataMsgAt=simNow;
         if(typeof Snd !== 'undefined') Snd.sfxPlay('select', cfg.music);
+        if(images.length) _flashDbgSnapBtn();   // clear on-button feedback that a shot was taken
     } catch(e){ _dataMsg='SNAPSHOT FAILED'; _dataMsgAt=simNow; }
+}
+// Flash the overlay SNAP button green with a check when a snapshot is captured, then revert.
+let _dbgSnapBtnT = null;
+function _flashDbgSnapBtn(){
+    if(!_dbgSnapBtn) return;
+    _dbgSnapBtn.classList.add('snapped');
+    _dbgSnapBtn.textContent = 'SAVED!';
+    if(_dbgSnapBtnT) clearTimeout(_dbgSnapBtnT);
+    _dbgSnapBtnT = setTimeout(()=>{ if(_dbgSnapBtn){ _dbgSnapBtn.classList.remove('snapped'); _dbgSnapBtn.textContent = 'SNAP'; } }, 900);
 }
 async function sendDebugSnapshot(){
     if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=simNow; return; }
     if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
-    _dataMsg='SENDING SNAPSHOT...'; _dataMsgAt=simNow;
+    _dbgSending=true; _dbgPinShow=false; _dataMsg=''; _uiDirty=true;   // clear old PIN; the persistent UPLOADING indicator takes over
     try {
         const r=await fetch(NET_BASE+'/debug/submit.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_dbgSnap)});
         const j=await r.json().catch(()=>null);
-        if(r.status===200 && j && j.ok && j.pin){ _dbgPin=String(j.pin); _dataMsg='DEBUG PIN '+_dbgPin; _dbgPinShow=true; }
+        if(r.status===200 && j && j.ok && j.pin){ _dbgPin=String(j.pin); _dataMsg='SNAPSHOT SENT - PIN '+_dbgPin; _dbgPinShow=true; }
         else if(r.status===413) _dataMsg='SNAPSHOT TOO LARGE';
         else _dataMsg='SNAPSHOT SEND FAILED';
     } catch(e){ _dataMsg='SNAPSHOT SEND FAILED'; }
-    _dataMsgAt=simNow;
+    finally { _dbgSending=false; }
+    _dataMsgAt=simNow; _uiDirty=true;
 }
 // Level-3 clickable SNAP button (top-right, HTML so it is excluded from the screenshot).
 let _dbgSnapBtn = null;
@@ -604,7 +615,7 @@ const SCREENS = {
     splash:       { d:()=>drawSplash(simNow),    hud:false },
     menu:         { d:()=>drawMenu(simNow),      hud:false },
     news:         { d:()=>drawNews(simNow),      hud:false, freeze:true, anim:()=> simNow-_newsAt < 700 },
-    settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> !!_dataMsg && simNow-_dataMsgAt < 2600 },
+    settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> _dbgSending || (!!_dataMsg && simNow-_dataMsgAt < 2600) },
     scores:       { d:()=>drawScores(),          hud:false, freeze:true },
     achievements: { d:()=>drawAchievements(),    hud:false, freeze:true },
     shop:         { d:()=>drawShop(),            hud:false },

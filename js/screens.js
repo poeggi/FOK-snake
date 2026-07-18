@@ -27,7 +27,7 @@ const STATUS_Y = CH - 76;
 function drawStatus(msg){
     if(!msg) return;
     const col = /FAIL|INVALID|OFFLINE|WRONG|TOO LARGE|NO CLOUD|NO BACKUP|BAD|MISMATCH|BUSY|DESYNC|UNREACHABLE|NOT SUPPORTED|CANNOT|LOST|DECLINE|EXPIRED/i.test(msg) ? '#ff5555'
-              : /SAVED|RESTORED|ADDED|ACCEPTED|CONNECTED|READY/i.test(msg) ? '#7fff7f'
+              : /SAVED|RESTORED|ADDED|ACCEPTED|CONNECTED|READY|SENT/i.test(msg) ? '#7fff7f'
               : '#ffaa44';
     ct(msg, CW/2, STATUS_Y, col, FONT.HINT);
 }
@@ -256,6 +256,8 @@ function drawMenu(now) {
     }
     ctx.drawImage(_menuCanvas,0,0);           // static layer (one blit)
     drawSplashText(now);                       // animated overlay
+    const _upd=(typeof netUpdateNotice==='function')?netUpdateNotice():null;   // server contract ahead of this build
+    if(_upd) ct(_upd, CW/2, 126, _netApiNewer?'#ff6666':'#ffcc44', FONT.HINT);
     if(ANNOUNCEMENT) _drawNewspaperBadge(now, !announceSeen());
 }
 
@@ -334,8 +336,8 @@ const DEBUG_CAT = { label:'DEBUGGING', items:[
     { lbl:()=>'EXPORT DEBUG INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportDebugInfo(); } },
     { lbl:()=>'X10 RARE EVENTS: '+(cfg.x10?'ON':'OFF'),
       act:()=>{ cfg.x10=!cfg.x10; Snd.sfxPlay('select',cfg.music); } },   // persisted: the settings handler saveCfg()s after act (also resends the worker cfg)
-    { lbl:()=>'SEND DEBUG SNAPSHOT'+(_dbgSnap?(_dbgPin?' (PIN '+_dbgPin+')':''):' (CAPTURE FIRST)'),
-      act:()=>{ Snd.sfxPlay('select',cfg.music); sendDebugSnapshot(); } },
+    { lbl:()=> _dbgSending ? 'SENDING SNAPSHOT...' : 'SEND DEBUG SNAPSHOT'+(_dbgSnap?(_dbgPin?' (PIN '+_dbgPin+')':''):' (CAPTURE FIRST)'),
+      act:()=>{ if(_dbgSending) return; Snd.sfxPlay('select',cfg.music); sendDebugSnapshot(); } },
     { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
     { lbl:()=>'LOW-FPS RECORD: '+(_fpsRec?'ON':'OFF'),
       act:()=>{ _fpsRec=!_fpsRec; if(_fpsRec) _fpsRecReset(); else { try{ fpsEl.style.color=''; }catch(e){} } Snd.sfxPlay('select',cfg.music); } },
@@ -379,7 +381,8 @@ function drawSettings() {
         // Transient status line in the DATA / DEBUGGING menus (via the shared toaster)
         const _cl=_cats()[settingsCat] && _cats()[settingsCat].label;
         if(_cl==='DATA'||_cl==='DEBUGGING'){
-            if(_dbgPinShow && _dbgPin) drawStatus('DEBUG PIN '+_dbgPin);   // held until the user moves (see settings nav)
+            if(_dbgSending) drawStatus('UPLOADING SNAPSHOT'+'.'.repeat(1+Math.floor(simNow/400)%3));   // persistent while the upload is in flight
+            else if(_dbgPinShow && _dbgPin) drawStatus('SNAPSHOT SENT - PIN '+_dbgPin);   // held until the user moves (see settings nav)
             else if(_dataMsg && simNow-_dataMsgAt<2500) drawStatus(_dataMsg);
         }
     }

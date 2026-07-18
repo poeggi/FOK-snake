@@ -67,6 +67,8 @@ runTest('SMOKE-UI', `
 
     // Menu static cache: rebuild on selection change, then blit + animated overlay.
     menuSel=0; drawMenu(simNow); menuSel=1; drawMenu(simNow); drawMenu(simNow);
+    _netApiOutdated=true; drawMenu(simNow); _netApiNewer=true; drawMenu(simNow);   // update note renders in the overlay
+    _netApiOutdated=false; _netApiNewer=false;
     log('drawMenu (cached) ok');
 
     // 1:1 submenu renders in all selection states (+ confirmation line), and the

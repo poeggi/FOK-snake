@@ -274,7 +274,9 @@ runTest('SMOKE-NET', `
     // difference: 'pending' = an instruction not picked up yet, 'self' = a client that
     // turned debug on by itself. Deriving one from the other would erase that.
     const _applyHello=(r)=>{   // the response half of _netHello, without the network
-        const _m=_netApiMajor(r.api); _netApiNewer=(_m!==null && _m>NET_API_BUILT);
+        const _m=_netApiMajor(r.api), _mn=_netApiMinor(r.api);
+        _netApiNewer=(_m!==null && _m>NET_API_BUILT);
+        _netApiOutdated=(_m===NET_API_BUILT && _mn>NET_API_BUILT_MINOR);
         if(typeof r.debug==='boolean'){
             if(_netDbgSrv!==null && r.debug!==_netDbgSrv){ cfg.debug=r.debug?Math.max(1,cfg.debug|0):0; }
             else if(_netDbgSrv===null && r.debug && !(cfg.debug|0)){ cfg.debug=1; }
@@ -295,11 +297,17 @@ runTest('SMOKE-NET', `
     cfg.debug=0; _netDbgSrv=null;
     // api MAJOR gate: string "3.1" (same major, +minor) is compatible; a legacy integer
     // still is; only a newer MAJOR ("4.0") disables online.
-    _applyHello({api:'3.1'}); if(_netApiNewer) throw 'a newer MINOR on the same major must stay compatible';
-    _applyHello({api:3});     if(_netApiNewer) throw 'a legacy integer api (3) must read as compatible';
-    _applyHello({api:'4.0'}); if(!_netApiNewer) throw 'a newer MAJOR must gate online off';
-    _netApiNewer=false;
-    log('remote debug ok: instruction honoured on change, self-enabled left alone; api major-gate parses "3.1"');
+    _applyHello({api:'3.1'});
+    if(_netApiNewer||_netApiOutdated) throw 'built against 3.1: the same version must read as up to date';
+    if(netUpdateNotice()) throw 'no update note when up to date';
+    _applyHello({api:3});     if(_netApiNewer||_netApiOutdated) throw 'a legacy integer api (3) must read as compatible';
+    _applyHello({api:'3.2'});   // newer MINOR: still compatible, but an update exists
+    if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
+    if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
+    _applyHello({api:'4.0'});   // newer MAJOR: incompatible
+    if(!_netApiNewer || netUpdateNotice()!=='UPDATE REQUIRED - PLEASE RELOAD') throw 'a newer major must flag UPDATE REQUIRED and gate online off';
+    _netApiNewer=false; _netApiOutdated=false;
+    log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses "3.1" + flags newer minor/major');
     cfg.debug=0;
 
     // The epoch MOVES with a rematch/level start. Missing that made the new round

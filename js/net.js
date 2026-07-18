@@ -20,18 +20,33 @@ const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
 // number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
 // additive. Returns the major integer, or null if unparseable.
+const NET_API_BUILT_MINOR = 1;   // this client is built against 3.1 (the peer-net hint)
 function _netApiMajor(a){
     if(typeof a === 'number') return Math.floor(a);
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
 }
+function _netApiMinor(a){
+    if(typeof a === 'string'){ const m = a.match(/^\s*\d+\.(\d+)/); return m ? +m[1] : 0; }
+    return 0;   // a bare integer (legacy) is x.0
+}
 var _netDbgSrv = null;      // the server's last debug INSTRUCTION (null = never heard one); kept apart from cfg.debug, which is what we DO
-var _netApiNewer = false;   // server contract is newer -> online features disable with a notice
+var _netApiNewer = false;   // server MAJOR is newer -> online features disable with a notice
+var _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
 var _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
 function netStatusNotice(){
     if(cfg.offline) return 'OFFLINE MODE (SETTINGS > NETWORK)';
     if(_netApiNewer) return 'GAME UPDATE REQUIRED - PLEASE RELOAD';
+    if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
     if(_netSrvErr) return 'SERVER UNREACHABLE - RETRYING';
+    return null;
+}
+// Main-menu update note ONLY (no offline/unreachable noise): the server's contract is
+// ahead of this build. REQUIRED = a newer major (online is disabled); AVAILABLE = a newer
+// minor (online still works, but new features are missing). null when we are up to date.
+function netUpdateNotice(){
+    if(_netApiNewer) return 'UPDATE REQUIRED - PLEASE RELOAD';
+    if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
     return null;
 }
 function _netOk(){ return !cfg.offline && !_netApiNewer && typeof fetch === 'function'; }
@@ -403,8 +418,9 @@ async function _netHello(){
     if(_netHs.accepting && Date.now() - _netHs.acceptingAt > 30000){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
     _netSrvErr = false;
-    const _srvMaj = _netApiMajor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
-    _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // only a newer MAJOR gates online off; a newer MINOR (e.g. 3.1) is additive
+    const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
+    _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // newer MAJOR gates online off
+    _netApiOutdated = (_srvMaj === NET_API_BUILT && _srvMin > NET_API_BUILT_MINOR);   // newer MINOR: still works, but flag an update
     // HONOUR the server's debug instruction: an operator flips it per player to
     // diagnose a client in the field without asking its user to do anything. Acted on
     // when the instruction CHANGES, not every heartbeat -- a steady `false` must not

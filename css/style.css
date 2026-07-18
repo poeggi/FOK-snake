@@ -92,7 +92,9 @@ body.cursor-hidden #c { cursor: none; }
 /* Level 3: clickable snapshot-capture button, top-right above the timing dock. */
 .dbg-snap { position: fixed; z-index: 100000; top: 2px; right: 2px; padding: 3px 9px;
     background: #0a2a0a; color: #7fff7f; border: 1px solid #7fff7f; border-radius: 3px;
-    font: bold 11px monospace; cursor: pointer; pointer-events: auto; user-select: none; }
+    font: bold 11px monospace; cursor: pointer; pointer-events: auto; user-select: none;
+    transition: background 0.1s, color 0.1s, box-shadow 0.1s; }
+.dbg-snap.snapped { background: #7fff7f; color: #0a2a0a; box-shadow: 0 0 10px #7fff7f; }
 .dbg-bl { bottom: 0; left: 0;  text-align: left; }
 .dbg-br { bottom: 0; right: 0; text-align: right; }
 #gamepad { display: none; order: 4; }
