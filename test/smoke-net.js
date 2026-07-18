@@ -274,7 +274,7 @@ runTest('SMOKE-NET', `
     // difference: 'pending' = an instruction not picked up yet, 'self' = a client that
     // turned debug on by itself. Deriving one from the other would erase that.
     const _applyHello=(r)=>{   // the response half of _netHello, without the network
-        _netApiNewer=(typeof r.api==='number' && r.api>NET_API_BUILT);
+        const _m=_netApiMajor(r.api); _netApiNewer=(_m!==null && _m>NET_API_BUILT);
         if(typeof r.debug==='boolean'){
             if(_netDbgSrv!==null && r.debug!==_netDbgSrv){ cfg.debug=r.debug?Math.max(1,cfg.debug|0):0; }
             else if(_netDbgSrv===null && r.debug && !(cfg.debug|0)){ cfg.debug=1; }
@@ -282,19 +282,24 @@ runTest('SMOKE-NET', `
         }
     };
     _netDbgSrv=null; cfg.debug=0;
-    _applyHello({api:3, debug:true});                 // operator turns it on
+    _applyHello({api:'3.1', debug:true});             // operator turns it on (server now sends api as "MAJOR.MINOR")
     if((cfg.debug|0)===0) throw 'the server instruction must turn debug ON';
-    _applyHello({api:3, debug:false});                // ...and off again
+    _applyHello({api:'3.1', debug:false});            // ...and off again
     if((cfg.debug|0)!==0) throw 'the server instruction must turn debug OFF again';
     // A STEADY false must not fight a developer who enabled it locally: that is 'self',
     // and it only exists if a repeated instruction is not re-applied every heartbeat.
     cfg.debug=2;
-    _applyHello({api:3, debug:false});
+    _applyHello({api:'3.1', debug:false});
     if((cfg.debug|0)!==2) throw 'a repeated instruction must not stamp on a self-enabled client';
     // The REPORT is what we are actually doing, never what was asked.
     cfg.debug=0; _netDbgSrv=null;
-    if(_netApiNewer) throw 'api 3 must not read as newer than this client';
-    log('remote debug ok: instruction honoured on change, self-enabled left alone');
+    // api MAJOR gate: string "3.1" (same major, +minor) is compatible; a legacy integer
+    // still is; only a newer MAJOR ("4.0") disables online.
+    _applyHello({api:'3.1'}); if(_netApiNewer) throw 'a newer MINOR on the same major must stay compatible';
+    _applyHello({api:3});     if(_netApiNewer) throw 'a legacy integer api (3) must read as compatible';
+    _applyHello({api:'4.0'}); if(!_netApiNewer) throw 'a newer MAJOR must gate online off';
+    _netApiNewer=false;
+    log('remote debug ok: instruction honoured on change, self-enabled left alone; api major-gate parses "3.1"');
     cfg.debug=0;
 
     // The epoch MOVES with a rematch/level start. Missing that made the new round

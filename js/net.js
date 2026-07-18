@@ -16,7 +16,15 @@
 // device offline, or this file deleted (all callers guard with typeof).
 // ============================================================================
 const NET_BASE = 'https://fok-server.poggensee.it';
-const NET_API_BUILT = 3;    // the contract version this client implements (API.md: Versioning; v3 = t.txt clock, epoch-keyed starts + sync gate, remote debug flag)
+const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md: Versioning; v3 = t.txt clock, epoch-keyed starts + sync gate, remote debug flag, 3.1 = peer-net hint)
+// The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
+// number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
+// additive. Returns the major integer, or null if unparseable.
+function _netApiMajor(a){
+    if(typeof a === 'number') return Math.floor(a);
+    if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
+    return null;
+}
 var _netDbgSrv = null;      // the server's last debug INSTRUCTION (null = never heard one); kept apart from cfg.debug, which is what we DO
 var _netApiNewer = false;   // server contract is newer -> online features disable with a notice
 var _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
@@ -395,7 +403,8 @@ async function _netHello(){
     if(_netHs.accepting && Date.now() - _netHs.acceptingAt > 30000){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
     _netSrvErr = false;
-    _netApiNewer = (typeof r.api === 'number' && r.api > NET_API_BUILT);   // re-evaluated every heartbeat: un-latches after a server rollback
+    const _srvMaj = _netApiMajor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
+    _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // only a newer MAJOR gates online off; a newer MINOR (e.g. 3.1) is additive
     // HONOUR the server's debug instruction: an operator flips it per player to
     // diagnose a client in the field without asking its user to do anything. Acted on
     // when the instruction CHANGES, not every heartbeat -- a steady `false` must not
