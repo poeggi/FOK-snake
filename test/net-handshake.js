@@ -80,6 +80,9 @@ const HOOKS = (myId) => `
   globalThis.__setSigFail = (s)=>{ __sigFail = s|0; };
   globalThis.__deliver   = (sig)=>{ _netOnSignal(sig); };
   globalThis.__iceAdded  = ()=> (_netSess && _netSess.pc && _netSess.pc._ice) ? _netSess.pc._ice.slice() : [];
+  globalThis.__gameSess  = (peer, role)=>{ _netSess = _netMkSess(peer, role); _netSess.seed=0x515ED; _netSess.game=true; _netSess.dc={readyState:'open',send(){},close(){}}; _netSess.lastRecv=performance.now(); };
+  globalThis.__reconnect = ()=>{ _netReconnect(_netSess); };
+  globalThis.__rcDbg = ()=>({ has:!!_netSess, rc:!!(_netSess&&_netSess.reconnecting), rcAt:_netSess&&_netSess.reconnectAt, rtc:(typeof _netRtcAvail==='function')?_netRtcAvail():'nofn', relay:!!(_netSess&&_netSess.relay), game:!!(_netSess&&_netSess.game) });
   globalThis.__invite    = (to)=> _netInviteSend(to);   // async: await it to see the server's verdict
   globalThis.__frOk      = (id)=>{ _netFrOkMark(id); };
   globalThis.__isFrOk    = (id)=> !!_netFrOk[id];
@@ -239,6 +242,26 @@ try {
     B.__deliver({ from:A_ID, to:B_ID, type:'ice',
       payload: JSON.stringify({ candidate:'candidate:2 1 udp 1694498815 203.0.113.7 40000 typ srflx raddr 0.0.0.0 rport 0', sdpMid:'0', sdpMLineIndex:0 }) });
     if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
+  });
+
+  // Mid-game reconnect: a dropped p2p link is rebuilt with an rc offer/answer that keeps
+  // the SAME session (epoch, seed, sim) -- it must not restart the match.
+  await acheck('a reconnect rebuilds the link (rc offer/answer) without restarting the match', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(false); B.__setRelay(false);
+    A.__gameSess(B_ID, 'host'); B.__gameSess(A_ID, 'peer');
+    const seedBefore = B.__state().sess.seed, epochBefore = B.__state().sess.epoch;
+    A.__reconnect();
+    if(!A.__rcDbg().rc) throw new Error('host did not enter the reconnecting state');
+    await new Promise(r=>setTimeout(r,0));                 // let the async re-offer resolve
+    const off = A.__out.find(s=>s.type==='offer');
+    if(!off || !JSON.parse(off.payload).rc) throw new Error('host did not send an rc reconnect offer');
+    pump(A, B);                                            // deliver the rc offer to B (still in the game with A)
+    await new Promise(r=>setTimeout(r,0));                 // let B's async re-answer resolve
+    if(B.__state().sess.seed !== seedBefore || B.__state().sess.epoch !== epochBefore)
+      throw new Error('reconnect must NOT reset the peer session (seed/epoch changed)');
+    const ans = B.__out.find(s=>s.type==='answer');
+    if(!ans || !JSON.parse(ans.payload).rc) throw new Error('peer did not send an rc reconnect answer');
   });
 
   // One side demanding relay drags the other along (contract: honored if EITHER set).

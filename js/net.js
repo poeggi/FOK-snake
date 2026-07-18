@@ -59,6 +59,12 @@ const NET_PTS_TOL = 250;
 // Idle keepalive period. Must stay well under the 1s CONNECTION LOST warning: the
 // thing being watched for has to arrive faster than the watcher's patience.
 const NET_KEEPALIVE_MS = 300;
+// Silence ladder (wall-clock ms, derived from the 16-tick heartbeat -- something should
+// arrive every ~267ms). Wall-clock, NOT ticks: a suspended tab freezes simTick too, so only
+// real elapsed time reveals the gap on the side that was asleep.
+const RB_WARN_MS = Math.round(32 * TICK_MS);          // ~533ms (2 missed beats) -> CONNECTION LOST warning
+const RB_RECONNECT_MS = Math.round(128 * TICK_MS);    // ~2133ms (8 missed) -> rebuild the p2p link, keep the match
+const RB_RECONNECT_TIMEOUT_MS = 8000;                 // the rebuild never recovered -> end the match
 // Max JSON we will put in one DataChannel message. 1280 is the IPv6 minimum MTU (and a
 // safe IPv4 floor); ~70B goes to IP+UDP+DTLS+SCTP headers, so the payload budget is
 // what is left. Worst case today: an 'in' with a full 12-input redundant log (~711B)
@@ -451,7 +457,7 @@ async function _netHello(){
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
 let _netPollTick = 0;
 function _netPollDue(){
-    if(_netSess && _netSess.game) return false;
+    if(_netSess && _netSess.game && !_netSess.reconnecting) return false;   // reconnecting: poll so the re-handshake signals flow
     if(phase === 'lobby' || phase === 'duelMenu' || phase === 'friends' || phase === 'friendId') return true;
     if(_netSess) return true;                        // offer/answer/ice in flight
     if(phase === 'menu') return _netPollTick % 10 === 0;
@@ -460,7 +466,7 @@ function _netPollDue(){
 // An unanswered offer is re-sent every 2s (max 3 tries) -- signals are one-shot
 // and expire, so without this a single lost offer killed the whole attempt.
 function _netHsTick(){
-    if(!_netOk() || !_netHs.offerTo || inGame) return;
+    if(!_netOk() || !_netHs.offerTo || (inGame && !(_netSess && _netSess.reconnecting))) return;   // a reconnect re-offer retries even in-game
     // NOTE: do NOT stop on _netSess.game -- a relay session is game=true from the
     // first instant, which killed this retry on the default path. Only the peer's
     // ANSWER (handled in the signal switch) proves delivery and clears offerTo.
@@ -523,6 +529,10 @@ if(typeof document !== 'undefined' && document.addEventListener){
         _netPollAbortNow();
         _netHelloBusy = false;
         if(_netOk()){ _netTimeSync(true).then(()=>_netHello()); _netHello(); if(phase === 'friends') _netFrRefresh(false); }
+        // Resumed into a p2p game? The screen-off likely killed ICE while our liveness timer
+        // was frozen, so the stale timer can't be trusted. If we've been silent past the
+        // reconnect window (real elapsed ms), rebuild the link now instead of waiting.
+        if(_netSess && _netSess.game && !_netSess.relay && !_netSess.reconnectAt && (performance.now() - _netSess.lastRecv) > RB_RECONNECT_MS) _netReconnect(_netSess);
     });
 }
 
@@ -853,6 +863,7 @@ function _netOnSignal(sig){
                 break;
             case 'offer': {
                 const od = _netJson(pl);
+                if(od.rc && _netSess && _netSess.peer === from && _netSess.game){ _netRtcReanswer(from, od); break; }   // reconnect: rebuild the transport, keep the match
                 if(od.sdp) _netRtcAnswer(from, od); else _netRelayAnswer(from, od);   // no sdp = relay mode
                 break;
             }
@@ -972,7 +983,8 @@ function _netMkSess(peer, role){
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false,
-             lastSentTick:-1, lastPhase:'', lastBarsV:-1 };
+             lastSentTick:-1, lastPhase:'', lastBarsV:-1,
+             reconnectAt:0, reconnecting:false };   // mid-game p2p rebuild in progress
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
@@ -1091,6 +1103,12 @@ function _netWire(dc){
     _netSess.dc = dc;
     dc.onopen = () => {
         const s = _netSess; if(!s) return;
+        if(s.reconnectAt){   // a rebuilt channel after a mid-game drop: SAME timeline, no re-start
+            _netReconnectDone(s);
+            s.lastRecv = performance.now();
+            _duelMsg = 'RECONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
+            return;
+        }
         if(s.relay){   // P2P completed AFTER the relay fallback: upgrade to the direct path
             s.relay = false;
             _netLb.msg = 'P2P CONNECTED'; _duelMsg = 'P2P CONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
@@ -1223,8 +1241,73 @@ function _netLiveStart(){
         // than whatever watches for its absence: three per window, so three must
         // genuinely go missing before we say a word.
         if(nowMs - s.lastSent > NET_KEEPALIVE_MS) _netSend(inGame ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });
-        if(nowMs - s.lastRecv > 3000 && !(s.relay && nowMs < s.relayGraceUntil)) _netSessionEnd('CONNECTION LOST');
+        // The re-offer retry is gated off in-game, so drive it from here while reconnecting.
+        if(s.reconnecting && s.role === 'host' && _netHs.offerTo === s.peer && _netHs.offerPayload && Date.now() - _netHs.offeredAt > 2000){
+            _netHs.offeredAt = Date.now(); _netSignal(s.peer, 'offer', _netHs.offerPayload);
+        }
+        if(s.relay && nowMs < s.relayGraceUntil) return;   // relay just engaged: let the peer catch up
+        const silent = nowMs - s.lastRecv;
+        // Ladder: WARN (netDuelWarn) -> RECONNECT (rebuild the link) -> hard KILL if it never recovers.
+        if(silent > RB_RECONNECT_MS){
+            if(!s.reconnectAt) _netReconnect(s);
+            else if(nowMs - s.reconnectAt > RB_RECONNECT_TIMEOUT_MS) _netSessionEnd('CONNECTION LOST');
+        } else if(s.reconnectAt && silent < RB_WARN_MS){
+            _netReconnectDone(s);   // packets flowing again -- recovered
+        }
     }, 250);
+}
+// ---- mid-game reconnect: rebuild the p2p transport WITHOUT restarting the match ----
+// The sim keeps running on both sides throughout (each ticks off the shared clock), so once
+// packets flow again the periodic state+hash recovery re-converges them. We only rebuild the
+// dead RTCPeerConnection/DataChannel; epoch, seed and sim state are untouched.
+function _netReconnect(s){
+    if(!s || s.reconnectAt || s.relay || !_netRtcAvail()) return;
+    s.reconnectAt = performance.now();
+    s.reconnecting = true;             // _netPollDue() polls again so the re-handshake signals flow
+    _netPollAbortNow();                // start a fresh poll immediately, don't wait out a held one
+    _duelMsg = 'RECONNECTING...'; _duelMsgAt = _msgNow(); _uiDirty = true;
+    _netSigLog('~ reconnect');
+    if(s.role === 'host') _netRtcReoffer(s);   // the host re-offers; the peer answers when its own silence trips
+}
+function _netReconnectDone(s){
+    if(!s) return;
+    s.reconnectAt = 0; s.reconnecting = false;
+    _netHs.offerTo = null; _netHs.offerPayload = null;
+}
+function _netRtcRebuild(s){
+    try{ if(s.dc){ s.dc.onopen=s.dc.onmessage=s.dc.onclose=null; s.dc.close(); } }catch(e){}
+    try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
+    s.dc = null;
+    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
+    s.pc = pc;
+    pc.onicecandidate = e => { if(e.candidate) _netSignal(s.peer, 'ice', JSON.stringify(e.candidate)); };
+    pc.onconnectionstatechange = () => { /* a failed rebuild is owned by the liveness timeout */ };
+    return pc;
+}
+async function _netRtcReoffer(s){
+    if(!_netRtcAvail()) return;
+    const pc = _netRtcRebuild(s);
+    _netWire(pc.createDataChannel('fok', { ordered:false, maxRetransmits:0 }));
+    try {
+        const of = await pc.createOffer();
+        await pc.setLocalDescription(of);
+        const payload = JSON.stringify({ sdp:pc.localDescription, rc:1, v:_swVersion });
+        _netHs.offerTo = s.peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
+        _netSignal(s.peer, 'offer', payload);
+    } catch(e){}
+}
+async function _netRtcReanswer(from, d){
+    if(!_netRtcAvail()) return;
+    const s = _netSess;
+    if(!s.reconnectAt){ s.reconnectAt = performance.now(); s.reconnecting = true; _duelMsg = 'RECONNECTING...'; _duelMsgAt = _msgNow(); _uiDirty = true; }
+    const pc = _netRtcRebuild(s);
+    pc.ondatachannel = e => _netWire(e.channel);
+    try {
+        await pc.setRemoteDescription(d.sdp);
+        const an = await pc.createAnswer();
+        await pc.setLocalDescription(an);
+        _netSignal(from, 'answer', JSON.stringify({ sdp:pc.localDescription, rc:1, v:_swVersion }));
+    } catch(e){}
 }
 
 // Server-issued start: both peers call start.php and receive the IDENTICAL
@@ -1418,8 +1501,9 @@ function netDuelWarn(){
     const s = _netSess;
     if(!s || !s.game || !inGame) return null;
     const nowMs = performance.now();
+    if(s.reconnecting) return 'RECONNECTING...';
     if(nowMs - _rbWarnAt < 3000) return 'CONNECTION LOST';
-    if(nowMs - s.lastRecv > 1000 && !(s.relay && nowMs < s.relayGraceUntil)) return 'CONNECTION LOST';
+    if(nowMs - s.lastRecv > RB_WARN_MS && !(s.relay && nowMs < s.relayGraceUntil)) return 'CONNECTION LOST';
     return null;
 }
 function _rbToWire(tk){ return tk - _rbBase; }
@@ -1675,13 +1759,19 @@ function netTickPre(){
     if(!_replaying) _rbPhase = phase;
     if((t & 63) === 0){
         for(const k of _rbLog.keys()) if(k < t - RB_RING - 8) _rbLog.delete(k);
-        // ~1/s state hash: the contract's "relay INPUT events, state hashes and
-        // control messages". Cheap, and the only way to notice a divergence at all.
+        // Full state + hash every 64 ticks (~1s): the state snapshot repairs a divergence,
+        // the hash detects one. Sent at the tick boundary so it has the whole ring window
+        // to arrive. Keyed to the deterministic tick, so both clients emit on the same tick.
         if(!_replaying){
             const sn = _rbRing[_rbRing.length-1].snap;
             _netSend({ t:'h', tk:_rbToWire(t), h:_rbHash(sn), f:_rbHashFields(sn) });
             _rbSendState(t, sn);
         }
+    } else if((t & 15) === 0 && !_replaying){
+        // 16-tick heartbeat (~267ms), on the OFF-64 ticks so it never doubles up with the
+        // full state. Carries the recent input log = free input-redundancy repair, and keeps
+        // SOMETHING on the wire every 16 ticks for liveness.
+        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
     }
 }
 // Rewind to `toTick` and re-simulate to where we were, now including the input

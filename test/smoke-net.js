@@ -205,21 +205,24 @@ runTest('SMOKE-NET', `
     // arriving, they were just all unusable. So refused input counts as evidence too.
     _rbWarnAt=-1e9; _netSess.lastRecv=performance.now();
     if(netDuelWarn()!==null) throw 'a healthy duel must show no warning';
-    // The keepalive must be comfortably faster than the warning it prevents. It used
-    // to run on a 1000ms interval against a 1000ms threshold -- period == threshold,
-    // so the warning flashed before every arrival on a perfectly healthy link.
-    if(NET_KEEPALIVE_MS*3 > 1000) throw 'keepalive too slow for the 1s warning: it will flash on a healthy link';
-    _netSess.lastRecv=performance.now()-900;           // one keepalive late: still fine
-    if(netDuelWarn()!==null) throw 'a single late keepalive must not warn';
-    _netSess.lastRecv=performance.now()-1500;          // nothing heard for 1.5s
-    if(netDuelWarn()!=='CONNECTION LOST') throw 'silence >1s must warn';
+    // The 16-tick heartbeat (~267ms) must be comfortably faster than the ~533ms warn window
+    // it prevents, so a healthy link never flashes.
+    if(RB_WARN_MS < NET_KEEPALIVE_MS*1.5) throw 'warn window too tight for the keepalive: it will flash on a healthy link';
+    _netSess.reconnecting=false;
+    _netSess.lastRecv=performance.now()-Math.round(RB_WARN_MS*0.6);   // under the warn window: still fine
+    if(netDuelWarn()!==null) throw 'a brief gap must not warn';
+    _netSess.lastRecv=performance.now()-Math.round(RB_WARN_MS+200);   // silent past the warn window
+    if(netDuelWarn()!=='CONNECTION LOST') throw 'silence past the warn window must warn';
     _netSess.lastRecv=performance.now();               // packets flowing again...
     if(netDuelWarn()!==null) throw 'a recovered link must clear the warning';
     _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:900,tk:-99999,k:'dir',d:{x:0,y:1}}]}));   // ...but unusable
     if(netDuelWarn()!=='CONNECTION LOST') throw 'refused input must warn even while packets arrive';
     _rbWarnAt=-1e9;
+    // A reconnect in progress reads as RECONNECTING, not a bare CONNECTION LOST.
+    _netSess.reconnecting=true; if(netDuelWarn()!=='RECONNECTING...') throw 'a reconnect must show RECONNECTING';
+    _netSess.reconnecting=false;
     drawDuelBoard(simNow);                             // the red overlay renders
-    log('duel warning ok: silence >1s and unusable input both warn, recovery clears it');
+    log('duel warning ok: silence + unusable input warn, reconnect shows RECONNECTING, recovery clears it');
 
     // ---- clock-driven ticking: the shared clock owns the tick, not our frame timer ----
     // Pacing from local frame time let the two clients slide apart forever (a dropped
