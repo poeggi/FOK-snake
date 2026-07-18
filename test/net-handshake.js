@@ -30,7 +30,8 @@ const HOOKS = (myId) => `
     this.createAnswer = async ()=>({ type:'answer', sdp:'stub' });
     this.setLocalDescription  = async ()=>{};
     this.setRemoteDescription = async ()=>{};
-    this.addIceCandidate = async ()=>{};
+    this._ice = [];
+    this.addIceCandidate = async (c)=>{ this._ice.push(c); };
     this.close = ()=>{};
   };
   // friend.php: records the request order so a test can prove the invite waited.
@@ -78,6 +79,7 @@ const HOOKS = (myId) => `
   };
   globalThis.__setSigFail = (s)=>{ __sigFail = s|0; };
   globalThis.__deliver   = (sig)=>{ _netOnSignal(sig); };
+  globalThis.__iceAdded  = ()=> (_netSess && _netSess.pc && _netSess.pc._ice) ? _netSess.pc._ice.slice() : [];
   globalThis.__invite    = (to)=> _netInviteSend(to);   // async: await it to see the server's verdict
   globalThis.__frOk      = (id)=>{ _netFrOkMark(id); };
   globalThis.__isFrOk    = (id)=> !!_netFrOk[id];
@@ -207,6 +209,36 @@ try {
     const t2 = pump(B, A);
     if(!t2.includes('accept')) throw new Error('expected a plain accept, got ' + t2);
     if(t2.includes('accept-relay')) throw new Error('p2p acceptor must not declare relay');
+  });
+
+  // peer-net hint: the server's IPv6 for the peer de-obfuscates its mDNS host
+  // candidate into a directly-connectable one (real IP + the revealed port). IPv4
+  // and non-mDNS candidates are left alone.
+  await acheck('peer-net de-obfuscates an mDNS IPv6 candidate to a real one', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(false); B.__setRelay(false);
+    const flush = () => new Promise(r=>setTimeout(r,0));
+    A.__invite(B_ID); pump(A, B);
+    B.__answer(true); pump(B, A);     // A gets the accept and kicks off its async offer
+    await flush();                    // let A's createOffer/setLocalDescription resolve + push the offer
+    pump(A, B);                       // A's offer -> B builds its (answerer) PC synchronously
+    if(!B.__state().sess) throw new Error('B has no P2P session to add candidates to');
+    // Server drops peer-net into B's mailbox: A's real IPv6, same family.
+    B.__deliver({ from:'server', to:B_ID, type:'peer-net',
+      payload: JSON.stringify({ peer:A_ID, ip:'2001:db8::a', family:6, self_ip:'2001:db8::b', self_family:6 }) });
+    // A's mDNS host candidate arrives.
+    B.__deliver({ from:A_ID, to:B_ID, type:'ice',
+      payload: JSON.stringify({ candidate:'candidate:1 1 udp 2113937151 9f3a-4b.local 51234 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 }) });
+    const added = B.__iceAdded();
+    if(!added.some(c=>/\.local /.test(c.candidate||''))) throw new Error('the original mDNS candidate was not added');
+    const deob = added.find(c=>/ 2001:db8::a 51234 typ host/.test(c.candidate||''));
+    if(!deob) throw new Error('no de-obfuscated real-IPv6 candidate was added');
+    if((+deob.candidate.split(' ')[3]) <= 2113937151) throw new Error('the de-obfuscated candidate must outrank its mDNS twin');
+    // A server-reflexive candidate (already a real IP) must NOT be grafted again.
+    const n0 = B.__iceAdded().length;
+    B.__deliver({ from:A_ID, to:B_ID, type:'ice',
+      payload: JSON.stringify({ candidate:'candidate:2 1 udp 1694498815 203.0.113.7 40000 typ srflx raddr 0.0.0.0 rport 0', sdpMid:'0', sdpMLineIndex:0 }) });
+    if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
   });
 
   // One side demanding relay drags the other along (contract: honored if EITHER set).

@@ -42,7 +42,7 @@ const NET_KEEPALIVE_MS = 300;
 // and an 'h' with per-field hashes (~561B).
 const NET_PKT_MAX = 1200;
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-var _netDbg = { rtt:-1, relayRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, path:'', inLog:[], sigLog:[],
+var _netDbg = { rtt:-1, relayRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
 var _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
@@ -340,6 +340,7 @@ function netDebugInfo(){
              peerLagMs:_netDbg.lag, peerPtsDeltaAvgMs:_netDbg.lagAvg, peerPtsDeltaMinMs:_netDbg.lagMin, peerPtsDeltaMaxMs:_netDbg.lagMax, peerPtsDeltaN:_netDbg.lagN, ptsSync:{ synced:_netSync.ofs!=null, offsetMs:_netSync.ofs, rttMs:_netSync.rtt, ageMs:_netSync.at?Date.now()-_netSync.at:null },
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,
              session: _netSess ? { peer:_netSess.peer, role:_netSess.role, game:_netSess.game } : null,
+             iceDeob:_netDbg.iceDeob|0, peerNet: _netSess ? (_netPeerNet[_netSess.peer] || null) : null,
              counts:_netCounts };
 }
 
@@ -783,7 +784,7 @@ function _netOnSignal(sig){
     try {
         const from = String(sig.from||'');
         _netSigLog('< '+String(sig.type)+' '+from.slice(0,4));   // debug overlay
-        if(!/^[0-9a-f]{8}$/.test(from) && sig.type !== 'friend') return;
+        if(!/^[0-9a-f]{8}$/.test(from) && sig.type !== 'friend' && sig.type !== 'peer-net') return;   // server-generated: sender is in the payload
         const pl = String(sig.payload||'');
         switch(sig.type){
             case 'invite':
@@ -853,9 +854,23 @@ function _netOnSignal(sig){
             }
             case 'ice':
                 if(_netSess && _netSess.peer === from && _netSess.pc){
-                    try{ _netSess.pc.addIceCandidate(_netJson(pl)).catch(()=>{}); }catch(e){}
+                    const cand = _netJson(pl);
+                    try{ _netSess.pc.addIceCandidate(cand).catch(()=>{}); }catch(e){}
+                    const extra = _netDeobfuscateCand(cand, _netPeerNet[from]);   // mDNS -> real IPv6, probed in parallel
+                    if(extra){ try{ _netSess.pc.addIceCandidate(extra).catch(()=>{}); _netDbg.iceDeob = (_netDbg.iceDeob|0)+1; }catch(e){} }
                 }
                 break;
+            case 'peer-net': {
+                // Server hint (delivered with the accept, before offer/answer): the peer's
+                // public IP + family and our own. Stored to de-obfuscate mDNS candidates.
+                const d = _netJson(pl);
+                const who = d && String(d.peer || '');
+                if(/^[0-9a-f]{8}$/.test(who)){
+                    _netPeerNet[who] = { ip:String(d.ip || ''), fam:d.family|0, selfFam:d.self_family|0 };
+                    _netSigLog('< peer-net f' + (d.family|0) + (d.self_family===d.family && d.family ? ' match' : ''));
+                }
+                break;
+            }
             case 'bye':
                 if(_netSess && _netSess.peer === from) _netSessionEnd('OPPONENT LEFT', true);   // they said it first
                 else if(_netHs.accepting === from){ _netHs.accepting = null; _netLb.msg = 'OPPONENT LEFT'; _uiDirty = true; }   // we accepted, they aborted before offering
@@ -910,6 +925,23 @@ function _netOnSignal(sig){
 
 // ---- WebRTC session: P2P DataChannel; the server only relays SDP/ICE ----
 var _netSess = null;   // {peer, role:'host'|'peer', pc, dc, ...} -- var: hoisted callers must see undefined, never TDZ
+// Server 'peer-net' hints, keyed by peer id: { ip, fam, selfFam }. The server's view of
+// each peer's public IP + address family, used to de-obfuscate mDNS ICE candidates (below).
+var _netPeerNet = {};
+// Rewrite a peer's mDNS host candidate (`<uuid>.local`) to use its real IPv6, learned from
+// the server's peer-net hint. IPv6 ONLY: with no NAT the candidate's (revealed) port is the
+// reachable one, so real-IP + that port is a directly connectable candidate. On IPv4 the
+// port would be NAT-translated and the graft would be wrong, so we never do it there.
+function _netDeobfuscateCand(cand, pn){
+    if(!pn || !pn.ip || pn.fam !== 6 || pn.ip.indexOf(':') < 0) return null;
+    const s = cand && cand.candidate;
+    if(!s || !/ typ host/i.test(s)) return null;
+    const parts = s.split(' ');                       // candidate:<foundation> <comp> <transport> <priority> <address> <port> typ host ...
+    if(parts.length < 6 || !/\.local$/i.test(parts[4])) return null;
+    parts[4] = pn.ip;
+    parts[3] = String((parseInt(parts[3],10)||0) + 1);   // outrank the mDNS twin: this real IP is tried FIRST (the .local one only resolves on a shared LAN)
+    return { candidate: parts.join(' '), sdpMid: cand.sdpMid, sdpMLineIndex: cand.sdpMLineIndex, usernameFragment: cand.usernameFragment };
+}
 function _netMkSess(peer, role){
     return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
