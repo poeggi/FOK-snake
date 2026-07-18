@@ -73,15 +73,21 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - Friend system: 32-bit player ID, friend-link QR code (SHOW MY ID) and an
   in-app camera QR scanner with a dependency-free decoder (ADD FRIEND)
 - Online matchmaking via FOK-server (invite friends with live online status and
-  latency, quick match) -- game traffic itself runs peer-to-peer over a WebRTC
-  DataChannel with symmetric prediction netcode (controls feel local on both
-  ends; the host is the quiet 30 Hz authority, peers reconcile by replay)
+  latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
+  DataChannel, with an HTTP relay fallback when P2P cannot connect. The netcode is
+  deterministic lockstep with rollback: both clients run the same inputs-only sim
+  off a shared PTS clock, so there is no host and controls feel local on both ends;
+  a periodic authoritative-state exchange heals any divergence
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
+- Config backup / restore -- to a JSON file or to the cloud (kept by id + a secret
+  token, with an optional once-a-day auto-backup); the player id also lives in a
+  cookie, so identity survives a browser "clear site data"
 - STRICTLY OFFLINE setting: with it ON (or no network at all) the game never
   sends a single request -- every online feature is strictly additive
-- Debug tools: on-canvas + network overlays (PTS clock, latency, prediction
-  offsets), broad JSON debug export, worst-frame FPS recorder
+- Debug tools: on-screen network / timing / sim overlays (PTS clock, latency,
+  rollback + divergence counters), a JSON debug export, a worst-frame FPS recorder,
+  and a one-click cloud debug snapshot (state + screenshot -> a short support PIN)
 
 ## Server
 

@@ -116,6 +116,13 @@ function drawGrid() { ctx.drawImage(_gridCanvas, 0, 0); }
 function _composeBg() { _bgCtx.drawImage(_gridCanvas, 0, 0); _bgCtx.drawImage(_barsCanvas, 0, 0); }
 _composeBg();
 function drawOvBg(a) { ctx.fillStyle=`rgba(7,7,14,${a||0.88})`; ctx.fillRect(0,0,CW,CH); }
+// "Black glass": frost the current frame (blur) and lay a heavy dark tint over it, so a
+// confirmation dialog stays readable over any busy screen. Canvas is CW x CH with no DPR
+// scaling, so it blurs cleanly onto itself; the blur is guarded for contexts without filter.
+function drawGlass() {
+    try { ctx.save(); ctx.filter='blur(6px)'; ctx.drawImage(ctx.canvas, 0, 0); ctx.filter='none'; ctx.restore(); } catch(e) {}
+    ctx.fillStyle='rgba(4,4,9,0.82)'; ctx.fillRect(0,0,CW,CH);
+}
 // ct()/ctg() live in js/text.js (typography module, loaded before this file).
 
 // High-contrast barricades (>4.5:1 on dark bg) - bright amber brick

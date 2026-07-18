@@ -32,7 +32,8 @@ const ctx = canvas.getContext('2d', { alpha: false });
 // sim owns phase during gameplay; the UI sets it for menus.
 let menuSel = 0, settingsSel = 0, shopSel = 0, shopPage = 0, quitConfirmSel = 1, prevPhase = 'playing';
 let settingsCat = -1;              // -1 = category list; else index into SETTINGS_CATS
-let _dataMsg = '', _dataMsgAt = 0; // transient DATA MANAGEMENT feedback line
+let _dataMsg = '', _dataMsgAt = 0; // transient DATA-menu status line (backup/restore/reset)
+let _resetKind = 'stats';          // which reset the confirm screen is arming: 'stats'|'settings'|'id'
 let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
@@ -119,6 +120,7 @@ let _musicHoldUntil = 0;   // routing is held during the quit-confirm leave-fade
 // NEVER longer than this -- then it plays whether synced or not. Offline/synced: no wait.
 const MUSIC_SYNC_WAIT_MS = 2000;
 let _musicSyncWaitUntil = 0;
+let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVERY menu entry (splash or in-game)
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
 // Let the audio layer re-fetch the live shared-clock seek when the context resumes
@@ -190,8 +192,8 @@ function drainSimEvents(){
             case 'bonus':
             case 'fw':
             case 'crush':    _fxQ.push({ tk:simTick, e }); break;   // deferred 2 ticks, cancellable on rollback
-            case 'mpause':   Snd.musicGamePause(); break;
-            case 'munpause': Snd.musicGameUnpause(); break;
+            case 'mpause':   Snd.musicMute('pause'); break;
+            case 'munpause': Snd.musicUnmute('pause'); break;
             case 'mstop':    Snd.musicStop(); break;
             case 'coin':     addFOKoins(e.n); break;
             case 'ach':      unlockAch(e.id); break;
@@ -216,10 +218,10 @@ function togglePause() {
     // and LOCAL duel; a future ONLINE duel disables it (one player must not freeze the peer).
     if(phase==='playing'||phase==='duel'){
         if(performance.now() < pauseReadyAt) return;
-        Snd.musicGamePause(); _wsend({ t:'pause' });
+        Snd.musicMute('pause'); _wsend({ t:'pause' });
     } else if(phase==='paused'||phase==='duelPaused'){
         pauseReadyAt=performance.now()+1000;
-        Snd.musicGameUnpause(); _wsend({ t:'resume' });
+        Snd.musicUnmute('pause'); _wsend({ t:'resume' });
     }
 }
 
@@ -245,23 +247,62 @@ function _canvasInfo(){
         fontScale:FONT
     };
 }
+// The full debug state (extend freely): canvas/layout, config, fps recorder state, sim
+// summary, identity/social counters, the live net stats, and the on-screen overlay text.
+// Shared by the file export and the cloud snapshot.
+function _debugState(){
+    return {
+        version: _swVersion, exportedAt: new Date().toISOString(),
+        canvas: _canvasInfo(),
+        cfg: Object.assign({}, cfg),
+        sim: { phase, level, score, lives, simTick, inGame, worker: !!_worker },
+        fps: { recording:_fpsRec, worst:_fpsSnap, maxSustained:_fpsMaxAvg||null },
+        player: { id: getPlayerId(), friends: getFriends().length },
+        net: (typeof netDebugInfo === 'function') ? netDebugInfo() : null,
+        overlay: { tl:_dbgTxt.tl, tr:_dbgTxt.tr, bl:_dbgTxt.bl, br:_dbgTxt.br },
+    };
+}
 function exportDebugInfo(){
-    // One broad debug dump (extend freely): canvas/layout, config, fps recorder
-    // state, sim summary, identity/social counters and the live net stats.
-    try {
-        const info = {
-            version: _swVersion, exportedAt: new Date().toISOString(),
-            canvas: _canvasInfo(),
-            cfg: Object.assign({}, cfg),
-            sim: { phase, level, score, lives, simTick, inGame, worker: !!_worker },
-            fps: { recording:_fpsRec, worst:_fpsSnap, maxSustained:_fpsMaxAvg||null },
-            player: { id: getPlayerId(), friends: getFriends().length },
-            net: (typeof netDebugInfo === 'function') ? netDebugInfo() : null,
-        };
-        _downloadJSON('snake-debug-info.json', info);
-        _dataMsg='DEBUG INFO SAVED'; _dataMsgAt=simNow;
-    }
+    try { _downloadJSON('snake-debug-info.json', _debugState()); _dataMsg='DEBUG INFO SAVED'; _dataMsgAt=simNow; }
     catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
+}
+// Debug snapshot -> the cloud (POST /debug/submit.php): the full state plus a screenshot.
+// The debug overlays are HTML elements, so canvas.toDataURL() captures the game WITHOUT them.
+// A captured snapshot is held until SEND DEBUG SNAPSHOT posts it and the server returns a PIN.
+let _dbgSnap = null, _dbgPin = '', _dbgPinShow = false;   // _dbgPinShow: hold the PIN on screen until the user moves
+function captureDebugSnapshot(){
+    try {
+        let image = null;
+        try { image = canvas.toDataURL('image/webp', 0.7); } catch(e){ try { image = canvas.toDataURL('image/png'); } catch(_){} }
+        _dbgSnap = { app:_swVersion, id:getPlayerId(), when:Date.now(), state:_debugState(), images: image ? [image] : [] };
+        _dataMsg='SNAPSHOT CAPTURED'; _dataMsgAt=simNow;
+        if(typeof Snd !== 'undefined') Snd.sfxPlay('select', cfg.music);
+    } catch(e){ _dataMsg='SNAPSHOT FAILED'; _dataMsgAt=simNow; }
+}
+async function sendDebugSnapshot(){
+    if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=simNow; return; }
+    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
+    _dataMsg='SENDING SNAPSHOT...'; _dataMsgAt=simNow;
+    try {
+        const r=await fetch(NET_BASE+'/debug/submit.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_dbgSnap)});
+        const j=await r.json().catch(()=>null);
+        if(r.status===200 && j && j.ok && j.pin){ _dbgPin=String(j.pin); _dataMsg='DEBUG PIN '+_dbgPin; _dbgPinShow=true; }
+        else if(r.status===413) _dataMsg='SNAPSHOT TOO LARGE';
+        else _dataMsg='SNAPSHOT SEND FAILED';
+    } catch(e){ _dataMsg='SNAPSHOT SEND FAILED'; }
+    _dataMsgAt=simNow;
+}
+// Level-3 clickable SNAP button (top-right, HTML so it is excluded from the screenshot).
+let _dbgSnapBtn = null;
+function _updateDbgSnapBtn(){
+    const on = (cfg.debug||0) >= 3;
+    if(on && !_dbgSnapBtn){
+        _dbgSnapBtn = document.createElement('div');
+        _dbgSnapBtn.className = 'dbg-snap'; _dbgSnapBtn.textContent = 'SNAP';
+        _dbgSnapBtn.addEventListener('click', (e)=>{ e.stopPropagation(); captureDebugSnapshot(); });
+        document.body.appendChild(_dbgSnapBtn);
+    }
+    if(_dbgSnapBtn) _dbgSnapBtn.style.display = on ? 'block' : 'none';
 }
 // Debug overlay (DEBUG LEVEL 2+): four corner docks -- network, timing, graphics,
 // sim/game status. Refreshed 4/s, and only when the text actually changed. This is
@@ -582,6 +623,12 @@ function loop(rafNow) {
     // Music routing (skip splash/paused/quitConfirm states)
     if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'&&phase!=='levelReady'&&phase!=='duelReady'&&performance.now()>=_musicHoldUntil){   // ready phases are music-NEUTRAL: menu music fades at PLAY, game music starts at playing/duel
         const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','friendId','invite','lobby','friends'].includes(phase);
+        // Re-assert the shared-clock seek on EVERY menu entry (from splash OR from a game), not
+        // just at boot: hold the menu track until the clock is synced so it opens on the globally
+        // shared bar. Only actually waits when online and not yet synced; otherwise no delay.
+        if(menuPhase && !_wasMenuPhase && typeof _netOk==='function' && _netOk() && (typeof netPts!=='function' || netPts()==null))
+            _musicSyncWaitUntil = performance.now() + MUSIC_SYNC_WAIT_MS;
+        _wasMenuPhase = menuPhase;
         const gamePhase=['playing','dying','levelDone','duel','duelOver'].includes(phase);
         const wt=menuPhase?menuTrack():gamePhase?gameTrack():null;
         // Hold menu music at first entry until the clock syncs (started during the coin drop)
@@ -670,6 +717,7 @@ function loop(rafNow) {
     flushSfxQ();          // event sfx play 2 ticks late (see drainSimEvents)
     flushFxQ();           // event visuals (bonus/crush/fireworks) play 2 ticks late too
     updateNetDebugOverlay(rafNow);
+    _updateDbgSnapBtn();
     checkWorkerStall(rafNow);
     updateSplashExit();   // splash->menu is a UI transition (main-owned)
     updateHUD();          // HUD sync is presentation
@@ -681,21 +729,6 @@ function loop(rafNow) {
         _uiDirty=true;
         if(phase==='duelOver') quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
         _lastPhase=phase;
-    }
-    // PAINT PROBE (DEBUGGING): replace ALL drawing with a near-minimal per-frame paint
-    // (solid fill + one blinking rect + a static hint). Reading the FPS box then separates
-    // the two possible ceilings: still capped below the display rate -> the limit is the
-    // TV's presentation plane (vsync), no draw optimization can lift it; full rate -> we
-    // are render-bound. Any key/tap exits (handled at the top of handleKey), returning to
-    // the screen the game was on -- the probe never touches phase.
-    if(_dbgPaintProbe){
-        ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
-        ctx.fillStyle=(fpsFrames&1)?'#7fff7f':'#1a1a2e';
-        ctx.fillRect(CW/2-3,CH/2-30,6,6);
-        ct('PAINT PROBE',CW/2,CH/2+4,'#7fff7f',FONT.MENU);
-        ct('read the FPS box   any key: exit',CW/2,CH/2+30,'#888',FONT.HINT);
-        _uiDirty=false;
-        return;
     }
     const s = SCREENS[phase] || _GAME_SCREEN;
     const transient = achPopups.length>0 || confetti.length>0;

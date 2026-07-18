@@ -7,7 +7,8 @@ const Snd = (() => {
     let _musicGain = null, _sfxGain = null;
     let _musicVol = 1.0, _sfxVol = 0.5;
     let _currentTrack = null, _channelState = [];
-    let _musicIsPaused = false, _bgSuspended = false;
+    let _silenced = new Set();   // active silence reasons ('mute'|'pause'): music muted but the context stays live
+    let _bgParked = false;       // context parked by a background/interrupt (the only thing that suspends the AC)
     let _seekProvider = null;   // () => shared-clock seek (s) for the current track, or null offline. Set by the game.
     let _musicAnchor = null;    // {t0, seekAbs} last seek: audio-time t0 was placed at shared position seekAbs. Read-only drift probe.
     let _duckF = 1;   // quit-dialog duck: persistent gain modifier every music/sfx writer applies
@@ -119,33 +120,31 @@ const Snd = (() => {
         else if (ch.fn === 'stab')   _tone(freq, when, dur, 'sawtooth', ch.vol, 0);
     }
 
-    // Called whenever AC transitions to running (onstatechange OR resume().then()).
-    // Idempotent: safe to call from both paths on the same resume event.
-    function _onContextRunning() {
-        if (!_ctx || !_currentTrack || !SEQ[_currentTrack] || _musicIsPaused) return;
+    // The ONE audibility predicate. Music plays only when the context is live, nothing has
+    // parked it (background/interrupt), and no silence reason (mute/pause) is held.
+    function _audible() {
+        return _ctx && _ctx.state === 'running' && !_bgParked
+            && _silenced.size === 0 && _currentTrack && SEQ[_currentTrack];
+    }
+
+    // The ONE resume/unmute path. Called whenever something that COULD make music audible
+    // clears (context running, last silence reason removed). Re-anchors the scheduler to the
+    // shared clock -- a pin made while parked/silenced is stale, the audio clock did not
+    // advance while the shared one did -- then fades in from silence over 1/15s. If a
+    // DIFFERENT reason still holds (e.g. resume from background into a still-muted state),
+    // _audible() is false and we leave the gain where the silence left it (0).
+    function _applyMusic() {
+        if (!_audible()) return;
         const now = _ctx.currentTime;
-        // Re-anchor to the shared clock on the running transition. A pin made while the
-        // context was suspended (autoplay gate on a fresh start, or a background) is stale
-        // by however long we waited to resume -- the frozen audio clock did not advance
-        // while the shared clock did. Re-seeking here is what lets a just-started client
-        // line up with an already-running reference; without it the offset was whatever
-        // the suspend happened to last, so it looked random from one restart to the next.
         const seekSec = _seekProvider ? _seekProvider(_currentTrack) : null;
         if (seekSec != null && seekSec > 0)
             _channelState = _seekChannels(SEQ[_currentTrack], 60 / SEQ[_currentTrack].bpm, now, seekSec);
-        if (_bgSuspended) {
-            _bgSuspended = false;
-            // Drop the pre-suspend look-ahead so queued notes do not replay in a burst on
-            // return (the other half of the metallic artifact). If there was no shared clock
-            // to re-seek to, at least schedule fresh from now. Same idea as musicGameUnpause.
-            if (!(seekSec > 0)) _channelState.forEach(s => { s.nextNote = now + 0.05; });
-            _musicGain.gain.cancelScheduledValues(now);
-            _musicGain.gain.setValueAtTime(0, now);
-            _musicGain.gain.setTargetAtTime(0.5 * _musicVol * _duckF, now, 0.02);
-            return;
-        }
+        else
+            _channelState.forEach(s => { s.nextNote = now + 0.05; });   // no shared clock: schedule fresh
+        const target = 0.5 * _musicVol * _duckF;
         _musicGain.gain.cancelScheduledValues(now);
-        _musicGain.gain.setValueAtTime(0.5 * _musicVol * _duckF, now);
+        _musicGain.gain.setValueAtTime(0, now);
+        _musicGain.gain.linearRampToValueAtTime(target, now + 1/15);
     }
 
     // -- Audio context lifecycle -----------------------------------
@@ -163,8 +162,10 @@ const Snd = (() => {
             try { _ctx = new _AC({ latencyHint: 1/60 }); } catch(_e) { _ctx = new _AC(); }
             _musicGain = _ctx.createGain(); _musicGain.gain.value = 0; _musicGain.connect(_ctx.destination);
             _sfxGain = _ctx.createGain(); _sfxGain.gain.value = 0.5 *_sfxVol; _sfxGain.connect(_ctx.destination);
-            _ctx.onstatechange = () => { if (_ctx.state === 'running') _onContextRunning(); };
-            //_ctx.resume().catch(() => {});
+            _ctx.onstatechange = () => {
+                if (_ctx.state === 'running') _applyMusic();
+                else if (_ctx.state === 'interrupted') _bgParked = true;   // iOS OS interruption, maybe w/o a page event
+            };
         } catch(e) { _ctx = null; }
     }
 
@@ -175,30 +176,38 @@ const Snd = (() => {
         // 1-sample silent buffer: iOS hint that this context has audio work
         const buf = _ctx.createBuffer(1, 1, 22050), src = _ctx.createBufferSource();
         src.buffer = buf; src.connect(_ctx.destination); src.start(0);
-        //_ctx.resume().catch(() => {});
-        //_ctx.suspend().catch(() => {});
     }
 
     function audioResume() {
-        // Call from every user gesture. iOS cold-start silently hangs the first resume();
-        // retrying on each gesture is safe (spec-idempotent). Both .then() and onstatechange
-        // call _onContextRunning; whichever fires first wins, second is a no-op.
-        if (_ctx) {
-            return _ctx.resume().then(_onContextRunning).catch(() => {});
-        }
-        return Promise.resolve();
+        // Context tier: un-park and resume the AudioContext (a returning app, an iOS
+        // interrupt ending, or the first user gesture unlocking the autoplay gate). iOS
+        // cold-start can silently hang the first resume(); retrying per gesture is safe
+        // (spec-idempotent). _applyMusic then fades music in IFF nothing else holds it silent.
+        if (!_ctx) return Promise.resolve();
+        _bgParked = false;
+        return _ctx.resume().then(_applyMusic).catch(() => {});
     }
 
-    function audioBgSuspend() {
-        // App backgrounding. On iOS the OS INTERRUPTS the context almost immediately, and any
-        // notes still in the 400ms scheduler look-ahead then render against a frozen sample
-        // clock -- the "metallic" artifact. So freeze FAST: hard-mute (an imperceptible click
-        // as we leave the app) and suspend SYNCHRONOUSLY in the same event, before the OS gets
-        // there. The old path (0.02s fade + a 120ms delayed suspend) lost that race and glitched.
-        if (!_ctx || _ctx.state !== 'running') return;
-        _bgSuspended = true;
-        try { _musicGain.gain.cancelScheduledValues(_ctx.currentTime); _musicGain.gain.setValueAtTime(0, _ctx.currentTime); } catch(e) {}
-        try { _ctx.suspend(); } catch(e) {}
+    function audioSuspend() {
+        // Context tier: park the AudioContext because we are LEAVING (background, tab hide,
+        // iOS interrupt). This is the ONLY thing that suspends the AC -- mute and pause never
+        // do. On iOS the OS interrupts almost immediately, and notes still in the scheduler
+        // look-ahead then render against a frozen clock (the "metallic" artifact). A short
+        // fade avoids a click; it can only render while the clock runs, so the suspend is
+        // DEFERRED past the ramp -- kept to one engine tick (1/60s) to beat the OS interrupt.
+        if (!_ctx || _bgParked) return;             // reentrant no-op once a park is in flight
+        _bgParked = true;                           // mark BEFORE the state check, so a resume still
+                                                    // cleans up even if the OS already interrupted us
+        if (_ctx.state !== 'running') return;       // already suspended/interrupted: nothing to fade
+        const now = _ctx.currentTime, fade = 1/60;
+        try {
+            _musicGain.gain.cancelScheduledValues(now);
+            _musicGain.gain.setValueAtTime(_musicGain.gain.value, now);
+            _musicGain.gain.linearRampToValueAtTime(0, now + fade);
+        } catch(e) {}
+        // Suspend only after the ramp renders, and only if still parked -- a fast return
+        // clears _bgParked on resume, cancelling this pending suspend.
+        setTimeout(() => { if (_bgParked && _ctx) { try { _ctx.suspend(); } catch(e) {} } }, Math.ceil(fade * 1000) + 4);
     }
 
     // -- Music -----------------------------------------------------
@@ -236,9 +245,9 @@ const Snd = (() => {
         //
         // If the context is still SUSPENDED here (autoplay gate), t0 = currentTime is
         // frozen and this pin goes stale by however long we wait to resume -- so
-        // _onContextRunning re-seeks from the live provider on the running transition.
+        // _applyMusic re-seeks from the live provider on the running transition.
         if (!_ctx || _currentTrack === trackId) return;
-        _currentTrack = trackId; _musicIsPaused = false;
+        _currentTrack = trackId; _silenced.delete('pause');
         const _seq = SEQ[trackId], _spb = 60 / _seq.bpm, _t0 = _ctx.currentTime;
         _channelState = _seekChannels(_seq, _spb, _t0, seekSec);
         // Set gain unconditionally: on a suspended AC, setValueAtTime at the frozen
@@ -253,7 +262,7 @@ const Snd = (() => {
     }
 
     function musicStop() {
-        _currentTrack = null; _musicIsPaused = false;
+        _currentTrack = null; _silenced.delete('pause');
         if (_ctx && _musicGain) {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
             _musicGain.gain.setTargetAtTime(0, _ctx.currentTime, 0.04);
@@ -267,7 +276,7 @@ const Snd = (() => {
         // re-raises (e.g. a respawn's munpause behind the dialog) cannot bypass it.
         _duckF = on ? 0.5 : 1;
         if (!_ctx) return;
-        if (_musicGain && _currentTrack && !_musicIsPaused) {
+        if (_musicGain && _audible()) {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
             _musicGain.gain.setTargetAtTime(0.5 * _musicVol * _duckF, _ctx.currentTime, 0.04);
         }
@@ -276,46 +285,50 @@ const Snd = (() => {
 
     function musicFadeOut(sec) {
         // Like musicStop, but with a caller-chosen fade to silence (~sec). Already-
-        // scheduled notes (0.4s lookahead) decay under the envelope -- no clicks.
-        _currentTrack = null; _musicIsPaused = false;
+        // scheduled notes (0.2s lookahead) decay under the envelope -- no clicks.
+        _currentTrack = null; _silenced.delete('pause');
         if (_ctx && _musicGain) {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
             _musicGain.gain.setTargetAtTime(0, _ctx.currentTime, (sec || 0.5) / 3);
         }
     }
 
-    function musicGamePause() {
-        if (!_ctx || !_currentTrack) return;
-        _musicIsPaused = true;
-        _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _musicGain.gain.setTargetAtTime(0, _ctx.currentTime, 0.04);
+    // Silence tier: mute music WITHOUT parking the context. `reason` is 'mute' (the mute
+    // button / settings) or 'pause' (game pause). Reasons STACK in _silenced, so muting while
+    // paused, or backgrounding while muted, all compose -- audio returns only when the LAST
+    // reason clears. Fade out on the first reason; _applyMusic (via musicUnmute) fades back.
+    function musicMute(reason) {
+        const wasClear = _silenced.size === 0;
+        _silenced.add(reason);
+        if (_ctx && _musicGain && wasClear && _ctx.state === 'running') {
+            const now = _ctx.currentTime;
+            _musicGain.gain.cancelScheduledValues(now);
+            _musicGain.gain.setValueAtTime(_musicGain.gain.value, now);
+            _musicGain.gain.linearRampToValueAtTime(0, now + 1/60);
+        }
     }
 
-    function musicGameUnpause() {
-        if (!_ctx || !_currentTrack || !_musicIsPaused) return;   // only resume if actually paused
-        _musicIsPaused = false;
-        const now = _ctx.currentTime;
-        _channelState.forEach(s => { s.nextNote = now + 0.05; });
-        _musicGain.gain.cancelScheduledValues(now);
-        _musicGain.gain.setValueAtTime(0.5 * _musicVol * _duckF, now);
+    function musicUnmute(reason) {
+        _silenced.delete(reason);
+        if (_silenced.size === 0) _applyMusic();   // last reason gone: re-anchor + fade in (if audible)
     }
 
     function musicSetVolume(vol) {
         _musicVol = vol;
-        if (_musicGain && _currentTrack && !_musicIsPaused && _ctx && _ctx.state === 'running') {
+        if (_musicGain && _audible()) {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
             _musicGain.gain.setValueAtTime(0.5 * vol * _duckF, _ctx.currentTime);
         }
     }
 
     function musicTick(musicEnabled) {
-        if (!_ctx || !_currentTrack || !musicEnabled || _musicIsPaused) return;
+        if (!_ctx || !_currentTrack || !musicEnabled || _silenced.size) return;
         if (_ctx.state !== 'running') return;
         const seq = SEQ[_currentTrack], spb = 60 / seq.bpm;
         seq.channels.forEach((ch, ci) => {
             const st = _channelState[ci];
             if (st.nextNote < _ctx.currentTime) st.nextNote = _ctx.currentTime;
-            while (st.nextNote < _ctx.currentTime + 0.40) {
+            while (st.nextNote < _ctx.currentTime + 0.20) {
                 const [f, b] = ch.notes[st.pos];
                 _schedNote(ch, f, st.nextNote, b * spb * 0.84);
                 st.nextNote += b * spb;
@@ -342,13 +355,15 @@ const Snd = (() => {
         if(sNow == null || !(sNow > 0)) return null;
         return (_musicAnchor.seekAbs + (ts.contextTime - _musicAnchor.t0) - sNow) * 1000;
     }
-    function sfxPlay(type, on = true, when = null) {
+    function sfxPlay(type, on = true, when = null, vol = 1) {
         // on: pass cfg.music to gate playback on the sound-enabled setting.
         // when: absolute AudioContext time to start at (sample-accurate, per the
         // server contract's WebAudio scheduling rule); absent/past = immediately.
+        // vol: amplitude scale (1 = normal). The splash coin passes 0.1 when muted so it
+        // still primes the audio pipeline but stays barely audible.
         if (!_ctx || !on) return;
         const now = (when != null && when > _ctx.currentTime) ? when : _ctx.currentTime;
-        const t = (f, w, d, tp) => _tone(f, w, d, tp || 'square', 0.42, 0, _sfxGain);
+        const t = (f, w, d, tp) => _tone(f, w, d, tp || 'square', 0.42 * vol, 0, _sfxGain);
         if (type === 'eat') {
             t(880, now, 0.05); t(1108, now + 0.055, 0.06);
         } else if (type === 'die') {
@@ -381,7 +396,7 @@ const Snd = (() => {
         } else if (type === 'coin') {
             // Deliberately not mute-gated (it doubles as the audio-unlock ping in the
             // splash-exit gesture) -- so stay discreet: half the normal sfx amplitude.
-            const tq = (f, w, d) => _tone(f, w, d, 'square', 0.21, 0, _sfxGain);
+            const tq = (f, w, d) => _tone(f, w, d, 'square', 0.21 * vol, 0, _sfxGain);
             tq(1568, now, 0.03); tq(1319, now + 0.045, 0.04); tq(880, now + 0.095, 0.08);
         } else if (type === 'fail') {
             t(330, now, 0.05, 'sawtooth'); t(196, now + 0.06, 0.12, 'sawtooth');
@@ -427,8 +442,8 @@ const Snd = (() => {
     //audioPreWarm();
 
     return {
-        audioInit, audioResume, audioBgSuspend,
-        musicPlay, musicStop, musicFadeOut, duck, musicGamePause, musicGameUnpause, musicSetVolume, musicTick,
+        audioInit, audioResume, audioSuspend,
+        musicPlay, musicStop, musicFadeOut, duck, musicMute, musicUnmute, musicSetVolume, musicTick,
         setMusicSeekProvider: (fn) => { _seekProvider = fn; },
         sfxPlay, sfxSetVolume, ctxTime, musicDriftMs,
         audioPreWarm,

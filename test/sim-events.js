@@ -19,8 +19,8 @@ const driver = `
       return fn.apply(this, arguments);
     };
     Snd.sfxPlay        = W('sfx', 0, Snd.sfxPlay);
-    Snd.musicGamePause = W('mpause', null, Snd.musicGamePause);
-    Snd.musicGameUnpause = W('munpause', null, Snd.musicGameUnpause);
+    Snd.musicMute      = W('mpause', null, Snd.musicMute);     // game pause -> musicMute('pause')
+    Snd.musicUnmute    = W('munpause', null, Snd.musicUnmute);
     Snd.musicStop      = W('mstop', null, Snd.musicStop);
     addFOKoins         = W('coin', 0, addFOKoins);
     unlockAch          = W('ach', 0, unlockAch);

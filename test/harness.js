@@ -35,6 +35,7 @@ function runInGame(driver) {
         getElementById: id => (_els[id] || (_els[id] = elStub(id))),
         createElement: tag => elStub(tag + '#new'),
         addEventListener() {}, removeEventListener() {},
+        get cookie() { return ''; }, set cookie(v) {},   // Node has no cookie jar: getPlayerId falls back to localStorage
         body: elStub('body'),
         fonts: { ready: Promise.resolve() },
         hidden: false, visibilityState: 'visible',

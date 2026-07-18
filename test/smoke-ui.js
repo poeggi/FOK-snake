@@ -47,9 +47,9 @@ runTest('SMOKE-UI', `
     settingsSel=SETTINGS_CATS.findIndex(c=>c.label==='DATA'); press('Enter');
     if(SETTINGS_CATS[settingsCat].label!=='DATA') throw 'expected DATA';
     settingsSel=0; press('Enter');                     // backup
-    if(_dataMsg!=='BACKUP SAVED') throw 'backup did not report saved';
+    if(_dataMsg!=='CONFIG SAVED TO FILE') throw 'backup did not report saved';
     settingsSel=1; press('Enter');                     // restore (no file) must not throw
-    settingsSel=2; press('Enter');                     // reset -> resetConfirm
+    settingsSel=SETTINGS_CATS[settingsCat].items.findIndex(it=>it.lbl()==='RESET STATS'); press('Enter');   // reset -> resetConfirm
     if(phase!=='resetConfirm') throw 'reset should open resetConfirm';
     press('Escape');
     if(phase!=='settings') throw 'ESC from resetConfirm should return to settings';

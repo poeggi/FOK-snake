@@ -19,6 +19,18 @@ function menuItem(text,y,sel,c=ctx) {
     ctg(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',FONT.MENU,sel?GLOW.TEXT:GLOW.FAINT,c);
     c.globalAlpha=1;
 }
+// The ONE in-menu status toaster. Every menu message (matchmaking, invites, cloud backup /
+// restore, ...) renders here: a single reserved line one row above BACK (which sits at CH-52),
+// the small FONT.HINT, coloured by kind -- red on failure, green on success, amber otherwise.
+// The slot stays blank when there is nothing to say, so it reads identically across menus.
+const STATUS_Y = CH - 76;
+function drawStatus(msg){
+    if(!msg) return;
+    const col = /FAIL|INVALID|OFFLINE|WRONG|TOO LARGE|NO CLOUD|NO BACKUP|BAD|MISMATCH|BUSY|DESYNC|UNREACHABLE|NOT SUPPORTED|CANNOT|LOST|DECLINE|EXPIRED/i.test(msg) ? '#ff5555'
+              : /SAVED|RESTORED|ADDED|ACCEPTED|CONNECTED|READY/i.test(msg) ? '#7fff7f'
+              : '#ffaa44';
+    ct(msg, CW/2, STATUS_Y, col, FONT.HINT);
+}
 
 // ================================================================
 // SCREEN RENDERING  (menu / shop / boxes / settings / scores / achievements / credits / news / name-entry)
@@ -258,7 +270,7 @@ const SETTINGS_CATS = [
     ]},
     { label:'AUDIO', items:[
         { lbl:()=>'AUDIO: '+(cfg.music?'ON':'OFF'),
-          act:()=>{cfg.music=!cfg.music;if(!cfg.music)Snd.musicStop();else{Snd.audioResume();Snd.sfxPlay('select',cfg.music);}updateMuteBtn();} },
+          act:()=>{cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute('mute');else{Snd.audioResume();Snd.musicUnmute('mute');Snd.sfxPlay('select',cfg.music);}updateMuteBtn();} },
         { lbl:()=>'AUDIO STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
           act:()=>{cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'VOLUME: '+Math.round(((cfg.volume==null?1:cfg.volume))*100)+'%', bar:'#7fff7f', frac:()=>(cfg.volume==null?1:cfg.volume),
@@ -297,15 +309,20 @@ const SETTINGS_CATS = [
           act:()=>{cfg.noRemoteCosmetics=!cfg.noRemoteCosmetics;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'DATA', items:[
-        { lbl:()=>'BACKUP STATS', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
-        { lbl:()=>'RESTORE STATS', act:()=>{Snd.sfxPlay('select',cfg.music);restoreStats();} },
-        { lbl:()=>'RESET STATS', act:()=>{quitConfirmSel=1;phase='resetConfirm';} },
+        { lbl:()=>'BACKUP CONFIG TO FILE', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
+        { lbl:()=>'RESTORE CONFIG FROM FILE', act:()=>{Snd.sfxPlay('select',cfg.music);restoreStats();} },
+        { lbl:()=>'BACKUP CONFIG TO CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudBackup();} },
+        { lbl:()=>'RESTORE CONFIG FROM CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudRestore();} },
+        { lbl:()=>'AUTO CLOUD BACKUP: '+(cfg.autoCloud?'ON':'OFF'),
+          act:()=>{cfg.autoCloud=!cfg.autoCloud;saveCfg();Snd.sfxPlay('select',cfg.music);if(cfg.autoCloud&&typeof _maybeAutoCloudBackup==='function')_maybeAutoCloudBackup();} },
+        { lbl:()=>'RESET STATS', act:()=>{_resetKind='stats';quitConfirmSel=1;phase='resetConfirm';} },
+        { lbl:()=>'RESET SETTINGS', act:()=>{_resetKind='settings';quitConfirmSel=1;phase='resetConfirm';} },
+        { lbl:()=>'RESET ID', act:()=>{_resetKind='id';quitConfirmSel=1;phase='resetConfirm';} },
     ]},
 ];
 // Hidden DEBUGGING category: only present when cfg.debug > 0. cfg.debug is NOT settable
 // from the normal menus -- you raise it by hand-editing the save file (it rides in the
-// backup). Level: 1 = this menu; 2/3 reserved for in-game debug overlays (later).
-let _dbgPaintProbe = false;   // DEBUGGING: minimal-paint mode, consumed by loop() in game.js
+// backup). Level: 1 = this menu; 2 = in-game corner overlays; 3 = the clickable snapshot capture.
 // cfg.debug guards ENTRY to the DEBUGGING menu; _debugEntered keeps it visible while you
 // are inside it, so dialling the level to 0 shows 0 but doesn't kick you out -- the 0
 // takes effect only when you leave the category (or reload).
@@ -317,8 +334,8 @@ const DEBUG_CAT = { label:'DEBUGGING', items:[
     { lbl:()=>'EXPORT DEBUG INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportDebugInfo(); } },
     { lbl:()=>'X10 RARE EVENTS: '+(cfg.x10?'ON':'OFF'),
       act:()=>{ cfg.x10=!cfg.x10; Snd.sfxPlay('select',cfg.music); } },   // persisted: the settings handler saveCfg()s after act (also resends the worker cfg)
-    { lbl:()=>'START PAINT PROBE',
-      act:()=>{ _dbgPaintProbe=true; Snd.sfxPlay('select',cfg.music); } },
+    { lbl:()=>'SEND DEBUG SNAPSHOT'+(_dbgSnap?(_dbgPin?' (PIN '+_dbgPin+')':''):' (CAPTURE FIRST)'),
+      act:()=>{ Snd.sfxPlay('select',cfg.music); sendDebugSnapshot(); } },
     { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
     { lbl:()=>'LOW-FPS RECORD: '+(_fpsRec?'ON':'OFF'),
       act:()=>{ _fpsRec=!_fpsRec; if(_fpsRec) _fpsRecReset(); else { try{ fpsEl.style.color=''; }catch(e){} } Snd.sfxPlay('select',cfg.music); } },
@@ -359,10 +376,11 @@ function drawSettings() {
             }
             ctx.restore();
         }
-        // Transient backup/restore feedback in DATA MANAGEMENT
+        // Transient status line in the DATA / DEBUGGING menus (via the shared toaster)
         const _cl=_cats()[settingsCat] && _cats()[settingsCat].label;
-        if((_cl==='DATA MANAGEMENT'||_cl==='DEBUGGING')&&_dataMsg&&simNow-_dataMsgAt<2500){
-            ctg(_dataMsg,CW/2,CH-34,'#7fff7f',FONT.MENU, GLOW.TEXT);
+        if(_cl==='DATA'||_cl==='DEBUGGING'){
+            if(_dbgPinShow && _dbgPin) drawStatus('DEBUG PIN '+_dbgPin);   // held until the user moves (see settings nav)
+            else if(_dataMsg && simNow-_dataMsgAt<2500) drawStatus(_dataMsg);
         }
     }
     const hint=inCat?'UP/DN:nav  L/R:change  A:select  ESC:back':'UP/DN:nav  A:open  ESC:back';
@@ -970,6 +988,18 @@ function drawGameBoard(now) {
     updateHUD();
 }
 
+// The ONE confirmation-dialog renderer: draw the live screen behind, frost it to black glass,
+// then a (danger=red / otherwise amber) question, an optional explanation line, and YES/NO.
+function drawConfirm(o) {
+    if(o.behind) o.behind();
+    drawGlass();
+    ctg(o.title, CW/2, CH/2 - (o.note?54:18), o.danger?'#ff5555':'#ff9900', FONT.MENU, GLOW.TEXT);
+    if(o.note){
+        ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle='#aaa'; ctx.fillText(o.note, CW/2, CH/2-24); ctx.restore();
+    }
+    drawConfirmYesNo('', o.sel);
+}
 function drawConfirmYesNo(title, sel) {
     const YES_X=CW/2-80, NO_X=CW/2+80;
         ctg(title,CW/2,CH/2-18,'#ff9900',FONT.TITLE, GLOW.TITLE);
@@ -986,11 +1016,11 @@ function drawConfirmYesNo(title, sel) {
 function drawQuitConfirm() {
     // LIVE board behind the dialog -- the game keeps running while the player decides
     // (an online duel cannot freeze the opponent; local matches the same semantics).
-    if(players) drawDuelBoard(simNow);
-    else if(snake) drawGameBoard(simNow);
-    else drawGrid();
-    drawOvBg(0.72);
-    drawConfirmYesNo('QUIT TO MENU?', quitConfirmSel);
+    drawConfirm({ title:'QUIT TO MENU?', sel:quitConfirmSel, behind:()=>{
+        if(players) drawDuelBoard(simNow);
+        else if(snake) drawGameBoard(simNow);
+        else drawGrid();
+    }});
     showHUD(false);
 }
 
@@ -1017,7 +1047,7 @@ function drawDuelMenu() {
     });
     menuItem('BACK', CH-52, duelSel===items.length);   // BACK toward the bottom, like drawSettings
     if(items[duelSel] && items[duelSel].note) ct(items[duelSel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
-    if(_duelMsg && _msgNow()-_duelMsgAt<2600) ct(_duelMsg, CW/2, startY+5.6*rowH, '#ffd700', FONT.HINT);
+    if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, CH-14, '#888', FONT.HINT);
 }
 // MY ID: this player's identity + the friend-link QR (moved here from SETTINGS).
@@ -1068,11 +1098,10 @@ function drawLobby(){
     });
     if(!fr.length) ct('NO FRIENDS YET - SEE ADD FRIEND', CW/2, startY, '#555', FONT.HINT);
     menuItem('BACK', CH-52, _netLb.sel===fr.length+1);   // BACK toward the bottom, like drawSettings
-    let infoY = CH-102;
     // Connecting feedback: one dot grows every 200ms while something is pending.
     const dots='.'.repeat(1+Math.floor(((typeof performance!=='undefined')?performance.now():0)/200)%5);
-    if(_netLb.msg) ct(_netLb.msg.replace(/\.\.\.$/,dots), CW/2, infoY, '#ffd700', FONT.HINT);
-    else if(_netHs.sent) ct('INVITED '+fmtFriendId(_netHs.sent)+' - WAITING'+dots, CW/2, infoY, '#ffd700', FONT.HINT);
+    if(_netLb.msg) drawStatus(_netLb.msg.replace(/\.\.\.$/,dots));
+    else if(_netHs.sent) drawStatus('INVITED '+fmtFriendId(_netHs.sent)+' - WAITING'+dots);
     if(_netLb.invite){
         // Incoming invite: full-screen modal on a SOLID background (a transparent
         // layer over the lobby read as a mess). Its own YES/NO row -- NOT
@@ -1135,7 +1164,7 @@ function drawFriends(){
         ct(st, CW/2+180, y, col, FONT.HINT);
     });
     if(!rows.length) ct('NO FRIENDS YET - SEE ADD FRIEND', CW/2, startY+rowH, '#555', FONT.HINT);
-    if(_netFr.msg) ct(_netFr.msg, CW/2, CH-76, '#ffd700', FONT.HINT);
+    if(_netFr.msg) drawStatus(_netFr.msg);
     menuItem('BACK', CH-52, _netFr.sel===rows.length);   // BACK toward the bottom, like drawSettings
     if(_netFr.confirm){
         // Local safety confirm before removing a friend (the SERVER removal itself
@@ -1205,7 +1234,7 @@ function drawDuelBoard(now) {
     if(phase==='duelOver' && now-phaseAt >= FX_SETTLE_MS){   // hold the winner banner 2 ticks, same as the death message: a mispredicted final kill rolled back never flashes "X WINS!"
         // Match over: winner banner + final score, then a PLAY AGAIN? dialog in the
         // quit-dialog skeleton (YES pre-selected via the loop's phase-change hook).
-        drawOvBg(0.62);
+        drawGlass();
         const win=duelWinner;
         const col=win===2?'#cccccc':SNAKE_COLORS[win===0?lk.c0:lk.c1].head;
         const _wn=(typeof netPlayerNames==='function')?netPlayerNames():null;
@@ -1218,11 +1247,10 @@ function drawDuelBoard(now) {
     _drawDuelWarn();   // last: it must sit over the board, not under it
 }
 function drawResetConfirm() {
-    drawSettings();
-    drawOvBg(0.80);
-        ctg('RESET ALL STATS?',CW/2,CH/2-54,'#ff5555',FONT.MENU, GLOW.TEXT);
-    ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillStyle='#888';
-    ctx.fillText('scores  fokoins  achievements  shop',CW/2,CH/2-24);
-    drawConfirmYesNo('', quitConfirmSel);
+    const K = _resetKind;
+    const title = K==='settings' ? 'RESET ALL SETTINGS?' : K==='id' ? 'RESET PLAYER ID?' : 'RESET ALL STATS?';
+    const note  = K==='settings' ? 'audio  controls  display  network   (stats + id kept)'
+                : K==='id'       ? 'NEW ID -- your old friends can no longer invite you'
+                :                  'scores  fokoins  achievements  shop';
+    drawConfirm({ title, note, sel:quitConfirmSel, behind:drawSettings, danger:true });
 }

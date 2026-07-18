@@ -43,7 +43,7 @@ function triggerSplashExit() {
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
     _splashExiting = true;
     _splashExitAt = simNow;
-    Snd.sfxPlay('coin'); Snd.audioResume();
+    Snd.sfxPlay('coin', true, null, cfg.music ? 1 : 0.1);   // muted: 10% so it still primes the pipeline, barely audible
 }
 
 const GAME_KEYS = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape','Backspace',' ','NameAdd']);
@@ -217,6 +217,7 @@ const UI_INPUT = {
     },
     settings: {
         nav(key){
+            _dbgPinShow=false;   // any movement dismisses a held debug PIN
             const inCat=settingsCat>=0, list=_settingsList(), count=list.length+1;   // +1 for BACK
             const onBack=settingsSel===list.length;
             if(key==='ArrowUp')  {settingsSel=(settingsSel-1+count)%count;Snd.sfxPlay('nav',cfg.music);}
@@ -227,6 +228,7 @@ const UI_INPUT = {
             }
         },
         confirm(){
+            _dbgPinShow=false;   // a fresh action dismisses a held debug PIN (SEND re-sets it on success)
             const inCat=settingsCat>=0, list=_settingsList();
             const onBack=settingsSel===list.length;
             if(onBack){
@@ -242,6 +244,7 @@ const UI_INPUT = {
             }
         },
         back(){
+            _dbgPinShow=false;
             if(settingsCat>=0){ settingsSel=settingsCat; settingsCat=-1; _debugEntered=false; } else phase='menu';
             Snd.sfxPlay('nav',cfg.music);
         },
@@ -353,7 +356,11 @@ const UI_INPUT = {
         },
         confirm(){
             Snd.sfxPlay('select',cfg.music);
-            if(quitConfirmSel===0){ resetStats(); }
+            if(quitConfirmSel===0){
+                if(_resetKind==='settings') resetSettings();
+                else if(_resetKind==='id'){ resetPlayerId(); _dataMsg='NEW ID '+fmtPlayerId(); _dataMsgAt=simNow; }
+                else resetStats();
+            }
             phase='settings'; quitConfirmSel=1;
         },
         back(){ phase='settings'; },
@@ -431,9 +438,6 @@ function handleKey(key, pde) {
     // Let browser handle F-keys (F5 reload, F11 fullscreen, etc.)
     if (key.length > 1 && !GAME_KEYS.has(key)) return;
     _uiDirty = true;   // any input redraws the frozen/static screens next frame
-    // PAINT PROBE owns the screen: any key exits it, everything else is swallowed so the
-    // invisible screen underneath cannot be navigated blind.
-    if (_dbgPaintProbe) { _dbgPaintProbe = false; Snd.sfxPlay('nav', cfg.music); if (pde) pde(); return; }
     if (phase === 'splash') {
         // Capture only the meaningful keys: arrows fast-forward the coin drop,
         // Space/Enter start the game. Everything else is ignored (no preventDefault)
@@ -451,7 +455,6 @@ function handleKey(key, pde) {
     }
     if (_splashKeyHeld) return;
     if (performance.now() - _splashLeftAt < 200) return;   // 200ms post-splash debounce, on the WALL clock (simNow gets reset by a game start)
-    Snd.audioResume();
 
     // Global: mute (suppressed during name entry so M is typeable)
     if((key==='m'||key==='M')&&phase!=='nameEntry'){ toggleMute(); return; }
@@ -587,7 +590,6 @@ const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 canvas.addEventListener('touchstart',e=>{
-    //Snd.audioResume();
     e.preventDefault();
     if(phase==='nameEntry'){
         const t0=e.touches[0];
@@ -655,7 +657,6 @@ canvas.addEventListener('touchend',e=>{
     if(phase==='credits'){creditsSpeed=_creditsNormal;}
 },{passive:false});
 
-// Restore audio on pointer gestures mid-game (background resume, desktop mouse, etc.).
 // ================================================================
 // SOURCE: D-PAD  (touch gamepad cross)
 // ================================================================
@@ -715,7 +716,7 @@ function _startDpadRepeat(dir){
 }
 
 dpadCanvas.addEventListener('touchstart',e=>{
-    Snd.audioResume(); e.preventDefault();
+    e.preventDefault();
     if(phase==='nameEntry') nameInp.blur();
     dpadActive=dpadDir(e,dpadCanvas); handleKey(dpadActive,null);
     drawDpad(phase==='splash'?null:dpadActive);
@@ -868,15 +869,61 @@ function updateMuteBtn(){
         c.fillRect(rx*2+16,ry*2,2,2);
     }));
 }
-function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicStop(); else{Snd.audioResume();Snd.sfxPlay('nav',cfg.music);} updateMuteBtn(); saveCfg(); _uiDirty=true; }
+function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute('mute'); else{Snd.audioResume();Snd.musicUnmute('mute');Snd.sfxPlay('nav',cfg.music);} updateMuteBtn(); saveCfg(); _uiDirty=true; }
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();
 // ================================================================
-// SOURCE: AUDIO UNLOCK + BACKGROUND
+// SOURCE: SPLASH INPUT + AUDIO UNLOCK + BACKGROUND
 // ================================================================
-document.addEventListener('pointerdown', () => Snd.audioResume(), {capture:true, passive:true});
-document.addEventListener('touchend', () => Snd.audioResume(), {passive:true});
+// Single-use splash owner. While the coin-drop splash is up, THIS is the only handler that
+// acts on input: it is attached in the CAPTURE phase so it intercepts every gesture before
+// any game handler and swallows it there (stopImmediatePropagation) -- the game handlers stay
+// registered but never see splash input. iOS only unlocks the AudioContext from inside a user
+// gesture, and the first gesture IS the splash exit, so we own both: resume() on the gesture
+// DOWN (which fast-forwards the coin drop but does NOT exit -- we let the gesture finish), and
+// resume() again on UP -- where we leave splash ONLY inside that resume's continuation, so we
+// never transition to the menu before audio is actually unlocked. iOS can hang the first
+// resume() (worse on a long hold, where DOWN was that first call); if it never completes we
+// simply stay on splash and the next gesture retries.
+let _splashHandledUp = false;
+function _splashResumeFF(){                 // gesture DOWN: unlock + fast-forward, do NOT exit yet
+    if(phase !== 'splash') return;
+    Snd.audioResume();
+    // Anchor the fast-forward base ONCE: key auto-repeat re-fires this dozens of times a
+    // second, and re-anchoring every time jerks the coin drop.
+    if(!_splashFast && !_splashExiting){ _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
+}
+function _splashCommit(){                    // gesture UP: leave splash ONLY once the resume completes
+    if(phase !== 'splash' || _splashHandledUp) return;
+    Snd.audioResume().then(() => {
+        if(phase !== 'splash' || _splashHandledUp) return;   // an earlier gesture's resume already left
+        _splashHandledUp = true;
+        triggerSplashExit();                 // coin sfx + start the transition, now that audio is live
+        _splashDetach();
+    });
+}
+function _splashDown(e){ e.stopImmediatePropagation(); if(e.type === 'touchstart') e.preventDefault(); _splashResumeFF(); }
+function _splashUp(e){   e.stopImmediatePropagation(); if(e.type === 'touchend')   e.preventDefault(); _splashCommit(); }
+function _splashKey(e){
+    if(e.ctrlKey || e.metaKey || e.altKey) return;     // let OS shortcuts through, unswallowed
+    const k = e.key;
+    if(k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight'){ e.stopImmediatePropagation(); _splashResumeFF(); }
+    else if(k === 'Enter' || k === ' '){ e.stopImmediatePropagation(); e.preventDefault(); _splashKeyHeld = true; _splashCommit(); }
+    // any other key falls through so browser/OS shortcuts keep working on the splash
+}
+function _splashDetach(){
+    document.removeEventListener('touchstart', _splashDown, true);
+    document.removeEventListener('touchend',   _splashUp,   true);
+    document.removeEventListener('pointerdown',_splashDown, true);
+    document.removeEventListener('pointerup',  _splashUp,   true);
+    document.removeEventListener('keydown',    _splashKey,  true);
+}
+document.addEventListener('touchstart', _splashDown, {capture:true, passive:false});
+document.addEventListener('touchend',   _splashUp,   {capture:true, passive:false});
+document.addEventListener('pointerdown',_splashDown, {capture:true, passive:false});
+document.addEventListener('pointerup',  _splashUp,   {capture:true, passive:false});
+document.addEventListener('keydown',    _splashKey,  {capture:true});
 // Pause audio when app goes to background, resume when it returns
 function onBgHide() {
     // Pause via the worker -- writing phase on the main-thread mirror would be clobbered
@@ -886,10 +933,9 @@ function onBgHide() {
     // freezing our sim while the peer plays on is a guaranteed desync, which is why
     // togglePause() refuses online too.
     const netLive = typeof netGameActive === 'function' && netGameActive();
-    if (phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicGamePause(); }
-    Snd.audioBgSuspend();
+    if (phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicMute('pause'); }
+    Snd.audioSuspend();
 }
 function onBgShow() { if (cfg.music) Snd.audioResume(); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) onBgHide(); else onBgShow(); });
-window.addEventListener('blur', onBgHide);
-window.addEventListener('focus', onBgShow);
+window.addEventListener('pagehide', onBgHide);

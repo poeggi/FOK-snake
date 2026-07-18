@@ -636,6 +636,31 @@ try {
     if(A.__hashNow() === B.__hashNow()) throw new Error('the hash missed a real divergence');
   });
 
+  // ...and once flagged, the authoritative-state packet REPAIRS it. Each client owns its own
+  // snake (its index), so the peer's copy adopts it. Corrupt A's copy of the peer (index 1)
+  // snake, let B -- its owner -- emit a state packet, and A must re-converge after the settle.
+  check('an authoritative-state packet repairs a peer-snake divergence', () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__duelStart(0xBEEF, 'host', 1000);
+    B.__duelStart(0xBEEF, 'peer', 1000);
+    A.__tick(120); B.__tick(120);
+    A.__drain(); B.__drain();
+    if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: identical sims must match');
+    A.__desync();                                  // corrupt A's copy of the peer (index 1) snake
+    if(A.__hashNow() === B.__hashNow()) throw new Error('setup: the corruption should differ');
+    // B emits a state packet on its ~1/s tick; deliver B->A and advance past the settle window
+    // so A adopts B's authoritative snake and rolls forward. B stays the clean reference.
+    // Tick finely and deliver promptly: the apply window is only RB_SETTLE..RB_RING (10 ticks),
+    // which real 60Hz play hits exactly but a coarse jump would skip right over.
+    let repaired = false;
+    for(let i = 0; i < 90 && !repaired; i++){
+      B.__tick(1); B.__drain().forEach(p => A.__recv(p));
+      A.__tick(1); A.__drain();                     // discard A's own packets: B is the reference
+      if(A.__hashNow() === B.__hashNow()) repaired = true;
+    }
+    if(!repaired) throw new Error('no re-converge. A.fix=' + A.__rbDbg().fix + ' A.desync=' + A.__rbDbg().desync);
+  });
+
   await acheck('an in-game restart is sent as rst, not the first-start sched', async () => {
     const A = mk(A_ID);
     A.__duelStart(0xBEEF, 'host', 1000);

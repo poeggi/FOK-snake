@@ -49,7 +49,7 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false,
-             boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3 };
+             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
 // the game in a bad state (e.g. an out-of-range diff or colour index).
@@ -68,6 +68,7 @@ function _sanitizeCfg() {
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
     cfg.disableGlow = !!cfg.disableGlow;
+    cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
@@ -117,6 +118,13 @@ function resetStats() {
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
     cfg.shopItems = {}; cfg.wornItems = null; saveCfg();   // NOTE: cfg.debug (+ other settings) intentionally preserved
 }
+// Reset SETTINGS (preferences) to defaults, keeping stats, owned shop items, the id and
+// friends. Distinct from RESET STATS (scores/coins) and RESET ID (identity).
+function resetSettings() {
+    const d = defaultCfg(), keep = { shopItems:1, wornItems:1, boxPity:1, shopOpens:1, debug:1, x10:1, cfgVer:1 };
+    for(const k in d) if(!keep[k]) cfg[k] = d[k];
+    saveCfg();
+}
 
 // ================================================================
 // BACKUP / RESTORE / INTEGRITY
@@ -129,18 +137,69 @@ function resetStats() {
 // global scores and 1:1 matchmaking (an unguessable SECRET, if ever needed, would be
 // a separate token -- this ID is the public identity).
 const PID_KEY = 'fok-snake-pid';
+// Mirror the ID into a long-lived first-party cookie as well as localStorage. Firefox clears
+// cookies under a DIFFERENT toggle than site data / localStorage (and by last-access, not
+// wholesale), so the ID -- our identity anchor for a future cloud restore -- can outlive a
+// "clear site data" that wiped the save. ONLY the 8-hex id lives here, never scores or config
+// (a cookie rides every request: keep it tiny). Max-Age ~400d is the browser-honoured ceiling.
+const PID_COOKIE = 'fok_pid';
+function _pidCookieGet(){
+    try { const m = document.cookie.match(/(?:^|;\s*)fok_pid=([0-9a-f]{8})(?:;|$)/); return m ? m[1] : null; }
+    catch(e){ return null; }
+}
+function _pidCookieSet(id){
+    try { document.cookie = PID_COOKIE + '=' + id + '; Max-Age=34560000; Path=/; SameSite=Lax; Secure'; } catch(e){}
+}
+// Cookie is the long-lived MASTER reference; localStorage is the backup that can rebuild the
+// cookie if it is absent. Read cookie first, fall back to localStorage, mint only if neither
+// has it -- then keep both in sync (and refresh the cookie's rolling expiry).
 function getPlayerId() {
-    let id = null;
-    try { id = localStorage.getItem(PID_KEY); } catch(e) {}
-    if (!/^[0-9a-f]{8}$/.test(id || '')) {
+    let id = _pidCookieGet();                                   // MASTER: the long-lived cookie
+    if (!/^[0-9a-f]{8}$/.test(id || '')) {                      // cookie gone: fall back to the localStorage backup
+        try { id = localStorage.getItem(PID_KEY); } catch(e) {}
+    }
+    if (!/^[0-9a-f]{8}$/.test(id || '')) {                      // neither store has it: mint a fresh identity
         let b;
         try { b = crypto.getRandomValues(new Uint8Array(4)); }
         catch(e) { b = Array.from({length:4}, () => Math.floor(Math.random()*256)); }
         id = ''; for (let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
-        try { localStorage.setItem(PID_KEY, id); } catch(e) {}
     }
+    try { if (localStorage.getItem(PID_KEY) !== id) localStorage.setItem(PID_KEY, id); } catch(e) {}   // keep the backup current
+    _pidCookieSet(id);                                          // (re)assert the master + refresh its rolling expiry
     return id;
 }
+// Mint a NEW identity (new cookie + localStorage) while keeping every OTHER save value. This
+// is the ID-only reset -- distinct from a full settings/data reset, which is a separate action.
+function resetPlayerId() {
+    let b;
+    try { b = crypto.getRandomValues(new Uint8Array(4)); }
+    catch(e) { b = Array.from({length:4}, () => Math.floor(Math.random()*256)); }
+    let id = ''; for (let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+    try { localStorage.setItem(PID_KEY, id); } catch(e) {}
+    _pidCookieSet(id);
+    return id;
+}
+// Cloud-backup token: the server mints a 128-bit token on the first cloud backup and REQUIRES
+// it (with the id) for every later backup and every restore. Persist it like the id -- cookie
+// (master) + localStorage backup -- so it too survives a site-data wipe, and carry it in the
+// file backup so restoring a file re-establishes cloud access.
+const TOK_KEY = 'fok-snake-tok';
+function _tokCookieGet(){
+    try { const m = document.cookie.match(/(?:^|;\s*)fok_tok=([0-9a-f]{16,64})(?:;|$)/i); return m ? m[1] : null; }
+    catch(e){ return null; }
+}
+function _tokCookieSet(t){ try { document.cookie = 'fok_tok=' + t + '; Max-Age=34560000; Path=/; SameSite=Lax; Secure'; } catch(e){} }
+function getCloudToken(){
+    let t = _tokCookieGet();
+    if(!/^[0-9a-f]{16,64}$/i.test(t||'')){ try { t = localStorage.getItem(TOK_KEY); } catch(e){} }
+    return /^[0-9a-f]{16,64}$/i.test(t||'') ? t : null;
+}
+function setCloudToken(t){
+    if(!/^[0-9a-f]{16,64}$/i.test(t||'')) return;
+    try { localStorage.setItem(TOK_KEY, t); } catch(e){}
+    _tokCookieSet(t);
+}
+try { getPlayerId(); } catch(e){}                              // establish identity + seed both stores at load
 function fmtPlayerId() { return fmtFriendId(getPlayerId()); }
 // The friend-invite URL this client hands out (QR in SETTINGS > USER): opening it loads
 // the game with the friend's ID in the hash -- never sent to any server, PWA/cache-safe.
@@ -192,13 +251,86 @@ function _downloadJSON(filename, obj){
     const a=document.createElement('a'); a.href=url; a.download=filename;
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
+// Apply a restored config snapshot (from a file OR the cloud) to local storage + the cookie.
+// Rejects a snapshot whose checksum does not match (older, checksumless backups still accepted).
+// Restores the id into the cookie (master) and the cloud token too. Returns true on success.
+function _applyRestoredConfig(d){
+    if(!d || typeof d!=='object') return false;
+    if(d.crc && d.crc!==_sumOf(d)) return false;
+    const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
+    set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name'); set(PID_KEY,'pid'); set(FRIENDS_KEY,'friends');
+    if(/^[0-9a-f]{8}$/.test(d.pid||'')) _pidCookieSet(d.pid);   // identity into the cookie (master) too
+    if(d.tok) setCloudToken(d.tok);                            // and the cloud-restore credential
+    _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
+    if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
+    applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
+    Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
+    return true;
+}
 function backupStats() {
     try {
         const snap=_saveSnapshot();
-        snap.crc=_sumOf(snap);              // integrity checksum, written as the final field
+        snap.crc=_sumOf(snap);              // integrity checksum over the manifest fields (crc + tok excluded)
+        snap.tok=getCloudToken()||undefined;   // FILE-only client extension: carries the cloud token so a file restore re-establishes cloud access
         _downloadJSON('snake-fok-backup.json', snap);
-        _dataMsg='BACKUP SAVED'; _dataMsgAt=simNow;
-    } catch (e) { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
+        _dataMsg='CONFIG SAVED TO FILE'; _dataMsgAt=simNow;
+    } catch (e) { _dataMsg='FILE BACKUP FAILED'; _dataMsgAt=simNow; }
+}
+// Cloud backup: POST the whole config to the vault. First time mints a token (store it in
+// both stores + cookie); later backups present it. Payload is opaque to the server.
+async function cloudBackup(silent) {
+    if(typeof _netOk!=='function' || !_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; } return false; }
+    if(!silent){ _dataMsg='CLOUD BACKUP...'; _dataMsgAt=simNow; }
+    let ok=false;
+    try {
+        const snap=_saveSnapshot(); snap.crc=_sumOf(snap);
+        const payload=JSON.stringify(snap);
+        const _post=(body)=>fetch(NET_BASE+'/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const tok=getCloudToken();
+        let r=await _post(tok ? { id:getPlayerId(), payload, token:tok } : { id:getPlayerId(), payload });
+        let j=await r.json().catch(()=>null);
+        // The admin can RESET a backup's token (manual recovery of a tokenless backup). If our
+        // stored token is refused, retry once WITHOUT it: a reset backup then mints a FRESH
+        // token, which we adopt into the cookie. A genuine conflict 403s again and we keep ours.
+        if(r.status===403 && tok){
+            r=await _post({ id:getPlayerId(), payload });
+            j=await r.json().catch(()=>null);
+        }
+        if(r.status===200 && j && j.ok){ setCloudToken(j.token); ok=true; if(!silent) _dataMsg='CLOUD BACKUP SAVED'; }
+        else if(r.status===403){ if(!silent) _dataMsg='CLOUD: WRONG DEVICE'; }
+        else if(r.status===413){ if(!silent) _dataMsg='CLOUD: TOO LARGE'; }
+        else { if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
+    } catch(e){ if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
+    if(!silent) _dataMsgAt=simNow;
+    return ok;
+}
+// Daily automatic cloud backup (opt-in via cfg.autoCloud). Called on a timer; the 24h throttle
+// lives here, so callers can fire it freely. Silent -- no menu feedback line for the auto path.
+const AUTOCLOUD_KEY='fok-snake-autocloud-at';
+async function _maybeAutoCloudBackup(){
+    if(!cfg.autoCloud || typeof _netOk!=='function' || !_netOk()) return;
+    let at=0; try{ at=parseInt(localStorage.getItem(AUTOCLOUD_KEY)||'0',10)||0; }catch(e){}
+    if(Date.now()-at < 86400000) return;                                   // at most once per day
+    if(await cloudBackup(true)){ try{ localStorage.setItem(AUTOCLOUD_KEY, String(Date.now())); }catch(e){} }
+}
+// Cloud restore: GET the vault with id + token, apply it. Needs the token (from the cookie/
+// localStorage, or a prior file restore) -- id alone cannot read someone else's backup.
+async function cloudRestore() {
+    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
+    const tok=getCloudToken();
+    if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=simNow; return; }
+    _dataMsg='CLOUD RESTORE...'; _dataMsgAt=simNow;
+    try {
+        const r=await fetch(NET_BASE+'/api/backup.php?id='+getPlayerId()+'&token='+encodeURIComponent(tok));
+        const j=await r.json().catch(()=>null);
+        if(r.status===200 && j && j.ok && typeof j.payload==='string'){
+            let d=null; try{ d=JSON.parse(j.payload); }catch(e){}
+            _dataMsg=_applyRestoredConfig(d)?'CLOUD RESTORED':'CLOUD: BAD DATA';
+        } else if(r.status===404) _dataMsg='CLOUD: NO BACKUP';
+        else if(r.status===403) _dataMsg='CLOUD: WRONG TOKEN';
+        else _dataMsg='CLOUD RESTORE FAILED';
+    } catch(e){ _dataMsg='CLOUD RESTORE FAILED'; }
+    _dataMsgAt=simNow;
 }
 const _restoreInp=document.createElement('input');
 _restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.className='util-hidden';
@@ -210,17 +342,7 @@ _restoreInp.addEventListener('change',()=>{
     rd.onload=()=>{
         try {
             const d=JSON.parse(rd.result);
-            if(!d||typeof d!=='object') throw 0;
-            // Integrity: reject a file whose checksum does not match its data. Files that carry
-            // no checksum (older backups predate it) are still accepted for compatibility.
-            if(d.crc && d.crc!==_sumOf(d)) throw 0;
-            const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
-            set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name'); set(PID_KEY,'pid'); set(FRIENDS_KEY,'friends');
-            _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
-            if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
-            applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
-            Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
-            _dataMsg='STATS RESTORED'; _dataMsgAt=simNow;
+            _dataMsg=_applyRestoredConfig(d)?'CONFIG RESTORED':'INVALID FILE'; _dataMsgAt=simNow;
         } catch (e) { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
     };
     rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=simNow; };

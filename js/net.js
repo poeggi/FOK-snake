@@ -42,7 +42,7 @@ const NET_KEEPALIVE_MS = 300;
 // and an 'h' with per-field hashes (~561B).
 const NET_PKT_MAX = 1200;
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-var _netDbg = { rtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, path:'', inLog:[], sigLog:[],
+var _netDbg = { rtt:-1, relayRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
 var _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
@@ -253,7 +253,7 @@ function netDebugQuad(){
         T.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
         T.push('lag ' + Math.round(d.lag) + (d.lagN ? '  pd ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
         S.push('rb ' + _rbDbg.rb + '/' + _rbDbg.resim + ' mx' + _rbDbg.maxRew + '  live ' + _rbDbg.live);
-        S.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk);
+        S.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk + ' fix ' + (_rbDbg.fix|0));
         if(d.inLog.length) N.push('< ' + d.inLog.join(' '));
     } else {
         N.push('online ' + _netCounts.online + '  playing ' + _netCounts.playing);
@@ -333,9 +333,9 @@ function netMusicSeekSec(){
 // is synced, then they converge -- the game.js menu-music gate waits briefly for the sync.
 function netMenuSeekSec(){ const p = netPts(); return p != null ? p/1000 : 0; }
 function netDebugInfo(){
-    return { base:NET_BASE, offline:!!cfg.offline, rttMs:_netDbg.rtt, serverClockOfsMs:_netDbg.srvOfs,
+    return { base:NET_BASE, offline:!!cfg.offline, rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
              pts:simTick, peerTickOfs:_netDbg.peerTkOfs, rollbacks:_rbDbg.rb, resimTicks:_rbDbg.resim, maxRewindTicks:_rbDbg.maxRew,
-             inputDrops:_rbDbg.drop, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, epoch:_netSess?_netSess.epoch:null,
+             inputDrops:_rbDbg.drop, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, fixes:_rbDbg.fix|0, epoch:_netSess?_netSess.epoch:null,
              inRx:_netDbg.inRx, inTx:_netDbg.inTx, lastPeerInputs:_netDbg.inLog.slice(),
              peerLagMs:_netDbg.lag, peerPtsDeltaAvgMs:_netDbg.lagAvg, peerPtsDeltaMinMs:_netDbg.lagMin, peerPtsDeltaMaxMs:_netDbg.lagMax, peerPtsDeltaN:_netDbg.lagN, ptsSync:{ synced:_netSync.ofs!=null, offsetMs:_netSync.ofs, rttMs:_netSync.rtt, ageMs:_netSync.at?Date.now()-_netSync.at:null },
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,
@@ -1093,9 +1093,11 @@ function _netRelayStart(s){
 async function _netRelaySend(s, o){
     if(!_netOk()) return;
     try {
+        const _t0 = performance.now();
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o), pts:o.pts }) });
         s.lastSent = performance.now();
+        _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
         if(r.status === 503) _netSessionEnd('SERVER FULL - TRY LATER');   // capped: honest busy, end the attempt
         else if(r.status === 429) { /* relay backlog full: drop this packet, the next correction supersedes it */ }
     } catch(e){}
@@ -1125,7 +1127,7 @@ async function _netRelayLoop(s){
 // srflx/prflx = reflexive -- hairpins out through the router/internet even on one LAN, the usual
 // cause of "same-Wifi but 100ms jitter" -- relay = via a TURN server. Plus the true P2P RTT.
 function _netPathStat(s){
-    if(!s || s.relay){ if(s && s.relay) _netDbg.path = 'relay (server HTTP)'; return; }
+    if(!s || s.relay){ if(s && s.relay) _netDbg.path = 'relay  srv ' + (_netDbg.relayRtt>=0 ? Math.round(_netDbg.relayRtt)+'ms' : '--'); return; }
     if(!s.pc || typeof s.pc.getStats !== 'function') return;
     s.pc.getStats().then(st => {
         let pair = null;
@@ -1291,6 +1293,7 @@ function _netHandleMsg(txt){
         case 'start': break;   // schedule confirmation; its PTS is already in the past
         case 'in': _netDbg.hbRx++; if(_netSess) _netPeerInput(m); break;   // both ends apply the other's input
         case 'h': if(_netSess && inGame) _rbCheckHash(m); break;   // divergence check
+        case 'st': if(_netSess && inGame) _rbCheckState(m); break; // authoritative-state recovery
         case 'again':
             if(_netSess && _netSess.game){ _netSess.peerAgain = true; _netMaybeRestart(); _uiDirty = true; }
             break;
@@ -1329,7 +1332,7 @@ var _rbPeerSeq = -1;         // highest peer sequence applied
 // (~700 bytes) inside both the 1280-byte datagram budget and the relay's 2KB cap.
 const RB_REDUNDANCY = 12;
 var _rbSent = [];            // recent local inputs, resent for redundancy
-var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0 };
+var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0 };
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
 // and it ticks through the menus. So two clients enter a duel with wildly different
 // values (one at 45000, the other at 3000) and their raw ticks mean nothing to each
@@ -1358,12 +1361,12 @@ function netDuelWarn(){
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
-    _rbRing = []; _rbLog = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = [];
+    _rbRing = []; _rbLog = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
     _rbPhase = '';
     _rbWarnAt = -1e9;
-    _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, desyncAt:'' };
+    _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, desyncAt:'' };
 }
 // Two identical sims fed identical inputs produce identical state, so a hash that
 // disagrees IS the divergence -- and, with no state on the wire to fake, it is also
@@ -1461,6 +1464,67 @@ function _rbHashSettle(){
         _duelMsg = 'DESYNC: ' + where.slice(0, 28); _duelMsgAt = _msgNow(); _uiDirty = true;
     }
 }
+// ---- Authoritative-state recovery (same deterministic ~1/s tick as the hash) ----
+// The hash only DETECTS a divergence; this RECOVERS from it. Each client owns its OWN snake
+// and submits it as a flat cell list; the peer overwrites its copy of THAT snake (never its
+// own). Gems/items follow the shared PRNG, so the MORE ADVANCED world (higher gemsDone) wins
+// and its gem/RNG/power state is adopted. Corrections are applied at the SETTLED tick and
+// re-converge through the normal rollback resim -- so both worlds heal without a host.
+var _rbStateQ = [];          // [{tk,i,s,gd,...}] peer states parked until their tick settles
+function _rbSendState(t, sn){
+    if(!sn || !sn.players) return;
+    const mi = netMyIndex(), me = sn.players[mi];
+    if(!me || !Array.isArray(me.snake)) return;
+    const cells = [];
+    for(const c of me.snake) cells.push(c.x, c.y);   // flat [x0,y0,x1,y1,...]: compact on the wire
+    const o = { t:'st', tk:_rbToWire(t), i:mi, s:cells, gd:sn.gemsDone|0, gem:sn.gem, rng:sn._rngState,
+                pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:sn._powerMode, pma:sn._powerModeAt };
+    // A very long snake can push the state past the one-datagram cap; skip it this second
+    // rather than fragment -- the hash still flags the divergence, recovery just lands later.
+    if(JSON.stringify(o).length > NET_PKT_MAX){ _rbDbg.stbig = (_rbDbg.stbig|0) + 1; return; }
+    _netSend(o);
+}
+function _rbCheckState(m){
+    if(typeof m.tk !== 'number' || typeof m.i !== 'number' || !Array.isArray(m.s)) return;
+    _rbStateQ.push({ tk:_rbFromWire(m.tk), i:m.i|0, s:m.s, gd:m.gd|0, gem:m.gem, rng:m.rng,
+                     pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma });
+    if(_rbStateQ.length > 8) _rbStateQ.shift();
+}
+function _rbCellsEqual(a, flat){
+    if(!Array.isArray(a) || a.length * 2 !== flat.length) return false;
+    for(let i = 0; i < a.length; i++) if(a[i].x !== (flat[2*i]|0) || a[i].y !== (flat[2*i+1]|0)) return false;
+    return true;
+}
+// Called each live tick beside _rbHashSettle: apply any peer state whose tick has settled.
+function _rbStateSettle(){
+    if(!_rbStateQ.length) return;
+    const mine = netMyIndex();
+    for(let i = _rbStateQ.length - 1; i >= 0; i--){
+        const q = _rbStateQ[i];
+        if(simTick < q.tk + RB_SETTLE) continue;         // still in flight: leave it parked
+        _rbStateQ.splice(i, 1);
+        if(q.i === mine) continue;                       // never let the peer overwrite our own snake
+        let e = null;
+        for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === q.tk){ e = _rbRing[j]; break; }
+        if(!e || !e.snap || !e.snap.players || !e.snap.players[q.i]) continue;   // aged out / not comparable
+        let changed = false;
+        // Per-owner snake authority: adopt the peer's own snake if our copy of it differs.
+        if(!_rbCellsEqual(e.snap.players[q.i].snake, q.s)){
+            const cells = [];
+            for(let k = 0; k + 1 < q.s.length; k += 2) cells.push({ x:q.s[k]|0, y:q.s[k+1]|0 });
+            e.snap.players[q.i].snake = cells;
+            changed = true;
+        }
+        // Gems/items follow the PRNG: the more advanced world (higher gemsDone) wins.
+        if(q.gd > (e.snap.gemsDone|0)){
+            e.snap.gemsDone = q.gd; e.snap.gem = q.gem; e.snap._rngState = q.rng;
+            e.snap.powerPellet = q.pp; e.snap.powerPelletAt = q.ppa;
+            e.snap._powerMode = q.pm; e.snap._powerModeAt = q.pma;
+            changed = true;
+        }
+        if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i); _rbRollback(q.tk); }
+    }
+}
 // The ring must own its states: simSnapshot() hands out LIVE references (the sim
 // mutates players[i].snake in place), so an un-cloned entry would rot as the game
 // runs. structuredClone keeps the Sets that JSON would silently flatten.
@@ -1530,7 +1594,7 @@ function netTickPre(){
     // live pass.
     const cmds = _rbLog.get(t);
     if(cmds) for(const c of cmds){ if(!c._live) simCommand(c); }
-    if(!_replaying) _rbHashSettle();
+    if(!_replaying){ _rbHashSettle(); _rbStateSettle(); }
     // NO re-anchor here. The tick is floor((netPts() - startPts) / TICK_MS), so moving
     // the anchor while startPts stays put SHIFTS THE WHOLE TIMELINE: the target jumps by
     // however far the clock moved, and if it jumps backwards simTick is suddenly ahead
@@ -1552,6 +1616,7 @@ function netTickPre(){
         if(!_replaying){
             const sn = _rbRing[_rbRing.length-1].snap;
             _netSend({ t:'h', tk:_rbToWire(t), h:_rbHash(sn), f:_rbHashFields(sn) });
+            _rbSendState(t, sn);
         }
     }
 }
@@ -1830,4 +1895,8 @@ if(_netTimers){
     // Sync the clock DURING the coin-drop splash (bounded) so menu music can start already
     // aligned to the shared server time. Soft: offline / no-fetch just skips it.
     setTimeout(()=>{ if(_netOk() && _netSync.ofs == null) _netTimeSync(true, 1800); }, 0);
+    // Daily automatic cloud backup (opt-in). One check a few seconds after boot, then hourly;
+    // the once-a-day throttle lives in _maybeAutoCloudBackup so these fire freely.
+    setTimeout(()=>{ if(typeof _maybeAutoCloudBackup === 'function') _maybeAutoCloudBackup(); }, 6000);
+    setInterval(()=>{ if(typeof _maybeAutoCloudBackup === 'function') _maybeAutoCloudBackup(); }, 3600000);
 }
