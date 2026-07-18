@@ -1490,8 +1490,11 @@ function _netHandleMsg(txt){
 // honoured by rewinding to that tick and re-simulating: the remote snake visibly
 // corrects, and its sounds may land late. That is the price of zero input lag,
 // and it only shows when latency is high.
-const RB_RING = 40;          // ticks we can rewind (~666ms at 60Hz)
-const RB_FUTURE = 30;        // an input authored this far ahead of us is not honest
+const RB_RING = 32;          // ticks we can rewind (~533ms at 60Hz). Rollback is for short hiccups
+                             // only: something arrives every 16 ticks and desync is assumed at 32,
+                             // so a divergence older than the ring gets a full resync, not a rewind.
+const RB_FUTURE = 16;        // an input authored more than one heartbeat (16 ticks) ahead of us is not
+                             // honest -- treat it as a connection problem and refuse it
 var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
 var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
 var _rbSeq = 0;              // our outgoing input sequence
@@ -1675,25 +1678,37 @@ function _rbStateSettle(){
         if(simTick < q.tk + RB_SETTLE) continue;         // still in flight: leave it parked
         _rbStateQ.splice(i, 1);
         if(q.i === mine) continue;                       // never let the peer overwrite our own snake
+        const cells = [];
+        for(let k = 0; k + 1 < q.s.length; k += 2) cells.push({ x:q.s[k]|0, y:q.s[k+1]|0 });
         let e = null;
         for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === q.tk){ e = _rbRing[j]; break; }
-        if(!e || !e.snap || !e.snap.players || !e.snap.players[q.i]) continue;   // aged out / not comparable
-        let changed = false;
-        // Per-owner snake authority: adopt the peer's own snake if our copy of it differs.
-        if(!_rbCellsEqual(e.snap.players[q.i].snake, q.s)){
-            const cells = [];
-            for(let k = 0; k + 1 < q.s.length; k += 2) cells.push({ x:q.s[k]|0, y:q.s[k+1]|0 });
-            e.snap.players[q.i].snake = cells;
-            changed = true;
+        if(e && e.snap && e.snap.players && e.snap.players[q.i]){
+            // Recent enough to be in the ring: patch the historical snapshot and roll forward, so
+            // the correction lands seamlessly (no visible jump).
+            let changed = false;
+            if(!_rbCellsEqual(e.snap.players[q.i].snake, q.s)){ e.snap.players[q.i].snake = cells; changed = true; }
+            if(q.gd > (e.snap.gemsDone|0)){                 // gems/items follow the PRNG: the more advanced world wins
+                e.snap.gemsDone = q.gd; e.snap.gem = q.gem; e.snap._rngState = q.rng;
+                e.snap.powerPellet = q.pp; e.snap.powerPelletAt = q.ppa;
+                e.snap._powerMode = q.pm; e.snap._powerModeAt = q.pma;
+                changed = true;
+            }
+            if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i); _rbRollback(q.tk); }
+        } else if(players && players[q.i]){
+            // Aged out of the ring (a longer stall): we cannot rewind to it, so hard-SNAP the
+            // authoritative peer snake into the live state via simApply (the sanctioned sim
+            // writer -- no raw global writes here). A small visual jump, but it heals a
+            // divergence the ring can no longer reach -- the whole point of the smaller ring.
+            const snap = simSnapshot();
+            let changed = false;
+            if(snap.players && snap.players[q.i] && !_rbCellsEqual(snap.players[q.i].snake, q.s)){ snap.players[q.i].snake = cells; changed = true; }
+            if(q.gd > (snap.gemsDone|0)){
+                snap.gemsDone = q.gd; snap.gem = q.gem; snap._rngState = q.rng;
+                snap.powerPellet = q.pp; snap.powerPelletAt = q.ppa; snap._powerMode = q.pm; snap._powerModeAt = q.pma;
+                changed = true;
+            }
+            if(changed){ simApply(snap); _rbDbg.fix = (_rbDbg.fix|0) + 1; _rbWarnAt = performance.now(); _netSigLog('~ SNAP @' + q.tk + ' i' + q.i); }
         }
-        // Gems/items follow the PRNG: the more advanced world (higher gemsDone) wins.
-        if(q.gd > (e.snap.gemsDone|0)){
-            e.snap.gemsDone = q.gd; e.snap.gem = q.gem; e.snap._rngState = q.rng;
-            e.snap.powerPellet = q.pp; e.snap.powerPelletAt = q.ppa;
-            e.snap._powerMode = q.pm; e.snap._powerModeAt = q.pma;
-            changed = true;
-        }
-        if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i); _rbRollback(q.tk); }
     }
 }
 // The ring must own its states: simSnapshot() hands out LIVE references (the sim

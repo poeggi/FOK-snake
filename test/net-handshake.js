@@ -117,6 +117,15 @@ const HOOKS = (myId) => `
   globalThis.__history = ()=>{ score=8123; lives=2; snake=[{x:3,y:4}]; dir={x:1,y:0}; heart={x:9,y:9};
                               _earlyHeartTrigger=17; perfectCount=5; _shimmerThreshold=91234; };
   globalThis.__desync = ()=>{ players[1].snake[0].x = (players[1].snake[0].x + 3) % COLS; };
+  // HEAVY corruption of our copy of the PEER (index 1), as if we mispredicted it through a long
+  // dropout: a wholly different, longer snake far away, a stale (behind) gem count, wrong RNG.
+  globalThis.__corruptPeer = ()=>{
+    players[1].snake = Array.from({length:11},(_,i)=>({x:(2+i)%COLS, y:16}));
+    gemsDone = Math.max(0, (gemsDone|0) - 4);
+    _rngState = ((_rngState ^ 0x9e3779b9) >>> 0) || 1;
+  };
+  globalThis.__peerSnakeLen = ()=> players ? players[1].snake.length : -1;
+  globalThis.__RB = ()=> ({ ring:RB_RING, settle:RB_SETTLE, future:RB_FUTURE });
   // Drive the real _netRequestStart with a stubbed server, to see what it SENDS.
   globalThis.__reqStart = async (reason, epoch)=>{
     _netSync = { ofs:0, rtt:1, at:Date.now() };
@@ -242,6 +251,25 @@ try {
     B.__deliver({ from:A_ID, to:B_ID, type:'ice',
       payload: JSON.stringify({ candidate:'candidate:2 1 udp 1694498815 203.0.113.7 40000 typ srflx raddr 0.0.0.0 rport 0', sdpMid:'0', sdpMLineIndex:0 }) });
     if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
+  });
+
+  // Heavy desync: an authoritative state whose tick has AGED OUT of the 32-ring cannot be
+  // rolled back to, so it must hard-SNAP into the live state instead of being dropped.
+  check('an aged-out authoritative state hard-snaps a heavy peer desync', () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__duelStart(0xC0FFEE, 'host', 700);
+    B.__duelStart(0xC0FFEE, 'peer', 700);
+    A.__tick(120); B.__tick(120);
+    A.__drain(); B.__drain();
+    if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: identical sims must match');
+    A.__corruptPeer();                                   // A's copy of the peer (index 1) is now wildly wrong (len 11)
+    if(A.__peerSnakeLen() !== 11) throw new Error('setup: corruption should make the peer snake long');
+    // Authoritative peer state stamped OLDER than the ring: too old to rewind to.
+    const oldTk = A.__simTick() - (A.__RB().ring + 6);
+    A.__recv(JSON.stringify({ t:'st', tk:oldTk, i:1, s:[5,5, 6,5, 7,5], gd:0, gem:null, rng:9, pp:null, ppa:0, pm:false, pma:0 }));
+    A.__tick(1);                                          // _rbStateSettle: settled AND aged out -> hard SNAP
+    if(A.__rbDbg().fix === 0) throw new Error('the aged-out state did not hard-snap (fix stayed 0)');
+    if(A.__peerSnakeLen() !== 3) throw new Error('peer snake not resynced to the authoritative cells, len=' + A.__peerSnakeLen());
   });
 
   // Mid-game reconnect: a dropped p2p link is rebuilt with an rc offer/answer that keeps
