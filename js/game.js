@@ -603,7 +603,8 @@ const SCREENS = {
     duelPaused:   { d:()=>drawDuelBoard(simNow), hud:true, freeze:true },
     duelOver:     { d:()=>drawDuelBoard(simNow), hud:true },
 };
-const _GAME_SCREEN = { d:()=>drawGameBoard(simNow), hud:true };   // playing/dying/levelReady/levelDone
+const _GAME_SCREEN = { d:()=>drawGameBoard(simNow), hud:true };   // playing/dying/levelReady/levelDone (single)
+const _DUEL_SCREEN = { d:()=>drawDuelBoard(simNow), hud:true };   // a duel in a shared game phase (dying/levelDone) draws the duel board, not the single-snake one
 function loop(rafNow) {
     requestAnimationFrame(loop);
     // Optional 30 FPS cap: skip whole frames (the sim ticks on in the worker regardless,
@@ -730,7 +731,7 @@ function loop(rafNow) {
         if(phase==='duelOver') quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
         _lastPhase=phase;
     }
-    const s = SCREENS[phase] || _GAME_SCREEN;
+    const s = SCREENS[phase] || (players ? _DUEL_SCREEN : _GAME_SCREEN);   // shared game phases (dying/levelDone) pick the board by snake count
     const transient = achPopups.length>0 || confetti.length>0;
     let skip = s.freeze && !_uiDirty && !transient && !(s.anim && s.anim());
     if(!skip){ s.d(); showHUD(s.hud); }

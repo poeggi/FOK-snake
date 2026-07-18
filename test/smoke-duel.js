@@ -42,7 +42,7 @@ runTest('SMOKE-DUEL', `
         players[0].snake=[{x:10,y:5},{x:9,y:5},{x:8,y:5}]; players[0].dir={x:1,y:0}; players[0].dirQueue=[]; players[0].stepAccum=0;
         players[1].snake=[{x:14,y:5},{x:15,y:5},{x:16,y:5}]; players[1].dir={x:-1,y:0}; players[1].dirQueue=[]; players[1].stepAccum=0;
         gem={x:0,y:0,tier:0}; spawnAt=-999999; phase='duel';
-        for(let i=0;i<200&&phase==='duel';i++) update();
+        for(let i=0;i<200&&(phase==='duel'||phase==='dying');i++) update();
     };
     headOn();
     if(phase!=='duelReady') throw 'duel: first head-on should restart the level, got '+phase;
@@ -57,11 +57,17 @@ runTest('SMOKE-DUEL', `
     gem={x:11,y:5,tier:0};
     const _s0=players[0].score;
     for(let i=0;i<60&&phase==='duel';i++) update();
-    if(level!==2) throw 'duel: finishing 10 gems did not advance the level, level='+level;
-    if(phase!=='duelReady') throw 'duel: level-up should re-enter READY';
+    // Finishing a level waits in the shared 'levelDone' -- it does NOT auto-advance.
+    if(phase!=='levelDone') throw 'duel: finishing the level should wait in levelDone, got '+phase;
+    if(level!==1) throw 'duel: level must not advance before a player continues';
     if(players[0].lives!==3) throw 'duel: level-finisher did not earn a heart back';
     if(players[1].lives!==2) throw 'duel: non-finisher lives changed';
     if(players[0].score<=_s0) throw 'duel: finisher got no score for the gem';
+    for(let i=0;i<120&&!levelDoneWaiting;i++) update();
+    if(!levelDoneWaiting) throw 'duel: level-done wait never armed';
+    simCommand({t:'advance'});                    // a player presses to start the next level
+    if(level!==2) throw 'duel: advance did not start the next level';
+    if(phase!=='duelReady') throw 'duel: next level should re-enter READY';
     if(gemsDone!==0) throw 'duel: new level did not reset gems';
     // ---- POWER MODE rules ----
     // Pellet pickup: powers up, no death, pellet gone.
@@ -101,7 +107,9 @@ runTest('SMOKE-DUEL', `
     duelStep(simNow);
     if(players[1].lives!==_l1-1) throw 'duel: head bite did not kill the victim';
     if(players[0].lives!==_l0) throw 'duel: head bite must not hurt the biter';
-    if(phase!=='duelReady') throw 'duel: head-bite death should restart the level';
+    if(phase!=='dying') throw 'duel: a life-lost should enter the shared dying screen, got '+phase;
+    for(let i=0;i<120&&phase==='dying';i++) update();     // hold the death beat, then respawn
+    if(phase!=='duelReady') throw 'duel: dying should respawn into the next round';
     if(_powerMode) throw 'duel: level restart must clear power mode';
     log('duel power ok: pellet pickup, tail bite (slow, no death), head bite kills');
 

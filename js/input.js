@@ -498,9 +498,11 @@ function handleKey(key, pde) {
     // ---- gameplay phases: continuous controls -> player-indexed sim commands ----
     if(phase==='levelDone'){
         if(levelDoneWaiting){
-            // The sim advances the level (or ends the game on a level-10 clear). No local
-            // state echo: simCommand's own levelDone+waiting guard makes duplicates no-ops.
-            _wsend({t:'advance'});
+            // Start the next level. Single player + local duel: straight to the sim. Online
+            // duel: synced over the wire (netLocalInput sends 'adv' -> the same 'advance'
+            // command at an agreed tick; either player may press, the guard makes the later
+            // press a no-op). simCommand's levelDone+waiting guard makes duplicates safe.
+            if(!(typeof netLocalInput==='function' && netLocalInput('adv',0))) _wsend({t:'advance'});
             if(pde)pde();
         }
     }

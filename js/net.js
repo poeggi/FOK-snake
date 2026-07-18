@@ -1702,6 +1702,7 @@ function _netPeerInput(m){
         if(r.k === 'dir' && okDir)     cmd = { t:'dir', p:oP, dir:d };
         else if(r.k === 'bs' && okDir) cmd = { t:'boost', p:oP, dir:d, now:!!r.n };
         else if(r.k === 'be')          cmd = { t:'boostend', p:oP };
+        else if(r.k === 'adv')         cmd = { t:'advance' };   // peer started the next level
         if(!cmd){ _rbDbg.drop++; _rbWarnAt = performance.now(); continue; }
         // Beyond the rewind window there is no honest way to honour it: applying it
         // at the wrong tick would desync the two worlds silently. Refuse, visibly.
@@ -1766,6 +1767,7 @@ function netLocalInput(kind, p, d, now){
     const tk = simTick + 1;
     const cmd = kind === 'dir' ? { t:'dir', p:myP, dir:{x:d.x,y:d.y} }
               : kind === 'bs'  ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
+              : kind === 'adv' ? { t:'advance' }   // start the next level -- same command single player sends
                                : { t:'boostend', p:myP };
     _rbEnsureSnap(tk);   // pin the PRE-input state as tk's rollback point, before we apply it
     cmd._live = true;    // netTickPre must not apply it a second time (a re-sim still does)

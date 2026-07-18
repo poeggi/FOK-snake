@@ -931,40 +931,44 @@ function drawReadyGo(now, title, subhead){
         ctx.save(); ctx.globalAlpha=a; ctg('GO!', CW/2, CH/2+10, '#ffff44', FONT.JUMBO, GLOW.BIG); ctx.restore();
     }
 }
-function drawGameBoard(now) {
-    drawWorld(now);
-    const dying=phase==='dying';
-    if(phase==='levelDone'){
-        const a=Math.min(1,(now-phaseAt)/150);
-        ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=GLOW.TITLE;
-        ct('LEVEL COMPLETE!',CW/2,levelWasPerfect?CH/2-36:CH/2-18,'#7fff7f',FONT.TITLE); ctx.restore();
-        if(levelWasPerfect){
-            const pa=Math.min(1,(now-phaseAt-180)/200);
-            if(pa>0){
-                ctx.save(); ctx.globalAlpha=pa;
-                ctx.shadowColor='#ffd700'; ctx.shadowBlur=GLOW.TEXT;
-                ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',FONT.MENU);
-                ctx.shadowBlur=0;
-                ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',FONT.HINT);
-                ctx.restore();
-            }
-        }
-        if(levelDoneWaiting&&Math.floor(now/520)%2===0){
-            ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-            ctx.fillStyle='#888'; ctx.fillText('A:next  TAP:next',CW/2,CH-8); ctx.restore();
+// Level-done + death overlays: shared by the single and duel boards. levelWasPerfect is
+// only ever set in single player, so the PERFECT block self-skips in a duel.
+function drawLevelDoneFx(now){
+    const a=Math.min(1,(now-phaseAt)/150);
+    ctx.save(); ctx.globalAlpha=a; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=GLOW.TITLE;
+    ct('LEVEL COMPLETE!',CW/2,levelWasPerfect?CH/2-36:CH/2-18,'#7fff7f',FONT.TITLE); ctx.restore();
+    if(levelWasPerfect){
+        const pa=Math.min(1,(now-phaseAt-180)/200);
+        if(pa>0){
+            ctx.save(); ctx.globalAlpha=pa;
+            ctx.shadowColor='#ffd700'; ctx.shadowBlur=GLOW.TEXT;
+            ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',FONT.MENU);
+            ctx.shadowBlur=0;
+            ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',FONT.HINT);
+            ctx.restore();
         }
     }
+    if(levelDoneWaiting&&Math.floor(now/520)%2===0){
+        ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
+        ctx.fillStyle='#888'; ctx.fillText('A:next  TAP:next',CW/2,CH-8); ctx.restore();
+    }
+}
+function drawDeathFx(now){
+    if(now-phaseAt < FX_SETTLE_MS) return;   // 2-tick hold: a rolled-back death never flashes
+    const t=(now-phaseAt)/DEATH_DUR;
+    ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5); ctx.shadowColor='#ff4444';
+    if(!players && lives===0){ctx.shadowBlur=GLOW.BIG;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.JUMBO);}   // duel deaths are always a life-lost (out-of-hearts -> duelOver)
+    else{ctx.shadowBlur=GLOW.TITLE;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.TITLE);}
+    ctx.restore();
+}
+function drawGameBoard(now) {
+    drawWorld(now);
+    if(phase==='levelDone') drawLevelDoneFx(now);
     if(phase==='levelReady') drawReadyGo(now, `LEVEL ${level}`, ()=>{
         ctx.shadowColor='#aaa'; ctx.shadowBlur=GLOW.TEXT;
         ct('GET READY',CW/2,CH/2+38,'#aaa',FONT.MENU);
     });
-    if(dying && now-phaseAt >= FX_SETTLE_MS){   // hold the death message 2 ticks: a mispredicted death rolled back inside that window never flashes it
-        const t=(now-phaseAt)/DEATH_DUR;
-        ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5); ctx.shadowColor='#ff4444';
-        if(lives===0){ctx.shadowBlur=GLOW.BIG;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.JUMBO);}
-        else{ctx.shadowBlur=GLOW.TITLE;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.TITLE);}
-        ctx.restore();
-    }
+    if(phase==='dying') drawDeathFx(now);
     if(phase==='paused'){
         drawOvBg(0.55);
                 ctg('PAUSED',CW/2,CH/2+10,'#7fff7f',FONT.JUMBO, GLOW.BIG);
@@ -1224,6 +1228,8 @@ function drawDuelBoard(now) {
     drawWorld(now);           // background + collectibles + both snakes: the shared layer
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
     if(phase==='duelReady') drawReadyGo(now, (typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1', ()=>_drawDuelControls(lk));
+    if(phase==='levelDone') drawLevelDoneFx(now);
+    if(phase==='dying') drawDeathFx(now);
     if(phase==='duelPaused'){
         // Identical to the classic paused overlay, incl. the bottom hint.
         drawOvBg(0.55);

@@ -229,7 +229,9 @@ function duelStep(now) {
             phase = 'duelOver'; phaseAt = now;
             emit({t:'mpause'});
         } else {
-            _duelBeginLevel();   // heart lost, the CURRENT level restarts (classic respawn)
+            // Heart lost, match goes on: same death beat as single player (dying -> respawn).
+            deathMsg = (dead[0]&&dead[1]) ? 'BOTH LOSE A LIFE' : (dead[0] ? 'P1 LIFE LOST' : 'P2 LIFE LOST');
+            phase = 'dying'; phaseAt = now;
         }
         return;
     }
@@ -279,8 +281,9 @@ function duelStep(now) {
             // Twist: the level-finisher earns a heart back (max 3).
             if (players[eater].lives < START_LIVES) players[eater].lives++;
             emit({t:'sfx',name:'levelUp'});
-            if (level < MAX_LEVELS) level++;   // at 10 the duel continues at max difficulty
-            _duelBeginLevel();
+            // Same "press to continue" gate as single player: wait in 'levelDone' for 'advance'.
+            levelWasPerfect = false;   // no perfect-level bonus in a duel
+            phase = 'levelDone'; phaseAt = now;
             return;
         }
         emit({t:'sfx',name:'eat'});
@@ -604,7 +607,8 @@ function update() {
         phase='playing'; _gDue=gPer; _stepAccum=0; spawnAt=now; phaseAt=0;
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
-        if(lives>0)beginLevel(true);
+        if(players)_duelBeginLevel();                    // duel: out-of-hearts already went to duelOver, so this is always a restart
+        else if(lives>0)beginLevel(true);
         else{phase='nameEntry';emit({t:'gameover'});}   // presentation loads the last name, hides HUD, stops music
     }
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
@@ -684,7 +688,8 @@ function simCommand(m){
             // mirror that an in-flight stale snapshot can re-arm, so a held Enter could
             // send 'advance' twice -- without this check that would skip a level.
             if(phase!=='levelDone' || !levelDoneWaiting) break;
-            if(level<MAX_LEVELS){ _levelStartLen = cfg.diff===2?snake.length:0; level++; beginLevel(); }
+            if(players){ if(level<MAX_LEVELS) level++; _duelBeginLevel(); }   // duel is endless: at 10 it re-runs max difficulty
+            else if(level<MAX_LEVELS){ _levelStartLen = cfg.diff===2?snake.length:0; level++; beginLevel(); }
             else { phase='nameEntry'; emit({t:'gameover', reason:'win'}); }
             break;
         case 'pause':
