@@ -1,315 +1,225 @@
 // ============================================================================
-// game.js -- CORE: constants, persistence, app state, game logic, debug tools,
-// mystery-box rolls, backup/restore, the main loop and layout/bootstrap.
-// Presentation lives in render.js, input handling in input.js -- both loaded
-// AFTER this file. All three share one global scope (no bundler).
+// game.js -- the APPLICATION CORE and nothing else: app state, the sim-event
+// drain, pause/quit coordination, the worker bridge (coalescing / watchdog /
+// in-process fallback), the shop+box economy, debug tools (which poke loop
+// internals), the main loop, layout and bootstrap.
+// Persistent data lives in storage.js (before this file); typography in
+// text.js, drawing in render.js/screens.js, input in input.js (all after).
+// Shared global scope (no bundler); cross-file references bind at call time.
 // ============================================================================
 // ================================================================
 // CONSTANTS (static data in assets.js)
 // ================================================================
 
-function drawPixelIcon(x, y, icon, cs) {
-    icon.d.forEach((row, ry) => {
-        let rx = 0;
-        for (const c of row) {
-            if(c !== '.' && icon.p[c]){
-                ctx.fillStyle = icon.p[c];
-                ctx.fillRect(Math.round(x+rx*cs), Math.round(y+ry*cs), Math.ceil(cs), Math.ceil(cs));
-            }
-            rx++;
-        }
-    });
-}
 
 // ================================================================
 // CANVAS
 // ================================================================
 const canvas = document.getElementById('c');
 canvas.width = CW; canvas.height = CH;
-const ctx = canvas.getContext('2d');
-// Canvas font sizes: declared in css/fonts.css (:root --fs-*), read once here so the
-// canvas and the DOM chrome share one source. Hardcoded fallbacks keep the headless
-// tests (no getComputedStyle) working. Use FONT.* at every call site -- never a raw px.
-const FONT = (() => {
-    let rt = null; try { rt = getComputedStyle(document.documentElement); } catch(_) {}
-    const px = (n, def) => { try { return parseInt(rt.getPropertyValue('--fs-' + n)) || def; } catch(_) { return def; } };
-    return { DISPLAY: px('display',40), JUMBO: px('jumbo',26), TITLE: px('title',18), MENU: px('menu',14), HINT: px('hint',10) };
-})();
-
-// ================================================================
-// PERSISTENCE
-// ================================================================
-const HS_KEY = 'fok-snake-hs';
-const FK_KEY = 'fok-snake-coins';
-const CFG_KEY = 'fok-snake-cfg';
-function getScores() {
-    try {
-        const raw = localStorage.getItem(HS_KEY);
-        if(raw === null) return [{name:'SNAKE PLISSKEN',score:42,level:1,diff:1,color:0,shopItems:{},date:'26.11.97'}];
-        const a = JSON.parse(raw);
-        return Array.isArray(a) ? a : [];
-    } catch (e) { return []; }
-}
-function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10) || 0; }
-let _cachedFOKoins = getFOKoins();
-function addFOKoins(n) {
-    _cachedFOKoins += n;
-    try { localStorage.setItem(FK_KEY, String(_cachedFOKoins)); } catch (e) {}
-    if(_cachedFOKoins >= 5000)    unlockAch('fokoins_1k');
-    if(_cachedFOKoins >= 100000)  unlockAch('fokoins_10k');
-    if(_cachedFOKoins >= 1000000) unlockAch('fokoins_1m');
-    if(_cachedFOKoins >= 5000000) unlockAch('fokoins_100k');
-}
-function addScore(name, sc, lvl) {
-    const s = getScores();
-    const now = new Date();
-    const date = `${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getFullYear()).slice(-2)}`;
-    s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl,
-             diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });
-    s.sort((a, b) => b.score - a.score);
-    try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch (e) {}
-    addFOKoins(sc);
-}
-function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} }
-// Fresh default config each call (new objects, so nothing is shared/aliased).
-// cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
-// must stay disabled -- gate all networking on !cfg.offline.
-function defaultCfg() {
-    return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false,
-             boxPity:0, shopOpens:0, debug:0, cfgVer:2 };
-}
-// Clamp/coerce every field so a corrupt, partial, or foreign save can never put
-// the game in a bad state (e.g. an out-of-range diff or colour index).
-function _sanitizeCfg() {
-    const idx = (v,n,d) => (Number.isInteger(v) && v>=0 && v<n) ? v : d;
-    const unit = (v,d) => (typeof v==='number' && isFinite(v)) ? Math.max(0,Math.min(1,v)) : d;
-    cfg.diff        = idx(cfg.diff, DIFF.length, 1);
-    cfg.snakeColor  = idx(cfg.snakeColor, SNAKE_COLORS.length, 0);
-    cfg.musicStyle  = idx(cfg.musicStyle, 2, 0);
-    cfg.handed      = idx(cfg.handed, 2, 0);
-    cfg.volume      = unit(cfg.volume, 1);
-    cfg.sfxVol      = unit(cfg.sfxVol, 0.5);
-    cfg.music       = cfg.music !== false;
-    cfg.turbo       = cfg.turbo !== false;
-    cfg.touchSelect = !!cfg.touchSelect;
-    cfg.offline     = !!cfg.offline;
-    cfg.fps30       = !!cfg.fps30;
-    cfg.disableGlow = !!cfg.disableGlow;
-    cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
-    cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
-    cfg.debug       = (Number.isInteger(cfg.debug) && cfg.debug>=0 && cfg.debug<=3) ? cfg.debug : 0;
-    if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
-    if(cfg.wornItems!==null && (typeof cfg.wornItems!=='object' || Array.isArray(cfg.wornItems))) cfg.wornItems = null;
-}
-// Error-tolerant load: parse failures fall back to defaults; keys absent from an
-// older or partial save (including a restored old backup) keep their defaults;
-// every value is sanitized. Reset-to-defaults-then-overlay so restoring an old
-// backup clears settings that backup never carried.
-function loadCfg() {
-    let s = {};
-    try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch (e) {}
-    if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
-    if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
-    Object.assign(cfg, defaultCfg(), s);
-    _sanitizeCfg();
-}
-
-const ACH_KEY = 'fok-snake-ach';
-let achUnlocked = {};
-let achPopups = [];   // {id, at}
-let confetti = [];
-const CONFETTI_COLS = ['#ff4444','#ff9900','#ffff44','#44ff88','#44ccff','#aa44ff','#ff44cc','#ffffff'];
-function spawnConfetti() {
-    for(let i=0;i<60;i++){
-        confetti.push({
-            x: CW*0.65+Math.random()*CW*0.35,
-            y: -6-Math.random()*30,
-            vx: -0.5-Math.random()*2.5,
-            vy: 1.2+Math.random()*2.8,
-            rot: Math.random()*Math.PI*2,
-            vrot: (Math.random()-0.5)*0.18,
-            w: 5+Math.random()*6, h: 3+Math.random()*4,
-            color: CONFETTI_COLS[i%CONFETTI_COLS.length],
-            life:0, maxLife:100+Math.floor(Math.random()*80),
-        });
-    }
-}
-function loadAch() { try { achUnlocked = JSON.parse(localStorage.getItem(ACH_KEY) || '{}'); } catch (e) {} }
-function saveAch() { try { localStorage.setItem(ACH_KEY, JSON.stringify(achUnlocked)); } catch (e) {} }
-function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch (e){ return true; } }
-function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch (e){} }
-const EASY_ACHS = new Set(['first_gem','level1','level5','fokoins_1k','fokoins_10k','fokoins_1m']);
-function unlockAch(id) {
-    if(achUnlocked[id]) return;
-    if(cfg.diff === 0 && !EASY_ACHS.has(id)) return;
-    achUnlocked[id] = Date.now(); saveAch();
-    addFOKoins(1000);
-    achPopups.push({ id, at: simNow });
-    spawnConfetti();
-}
-loadAch();
-
-// ================================================================
-// CREDITS DATA
-// ================================================================
-const CRED = [
-    ['gap',50],['title','S N A K E'],['sub','F O K   E D I T I O N'],['gap',60],
-    ['hdr','--- CREDITS ---'],['gap',40],
-    ['hdr','CONCEPTUAL SUPERVISION'],['txt','Jonas and Kai P.'],['gap',28],
-    ['hdr','CREATIVE DIRECTION'],['txt','Jonas P.'],['gap',28],
-    ['hdr','CREATIVE ADVISOR'],['txt','Maartje P.'],['gap',28],
-    ['hdr','EXECUTIVE PRODUCTION'],['txt','Kai P.'],['gap',28],
-    ['hdr','LEAD DEVELOPER'],['txt','Claude P.'],['sml','(types at 10,000 tokens/min)'],['gap',28],
-    ['hdr','MUSICAL COMPOSITION'],['txt','Claude M.'],['sml','(self-taught. mostly.)'],['gap',28],
-    ['hdr','VISUAL ARTS'],['txt','Claude V.'],['sml','(knows exactly 7 colors)'],['gap',28],
-    ['hdr','QUALITY ASSURANCE'],['txt','The Snake'],['sml','(mortality rate: 100%)'],['gap',28],
-    ['hdr','LEVEL DESIGN'],['txt','A Random Number Generator'],['sml','(certified barricade placement specialist)'],['gap',28],
-    ['hdr','GEM MANAGEMENT'],['txt','The Gems'],['sml','(eaten without consent since 2026)'],['gap',28],
-    ['hdr','STRUCTURAL ENGINEERING'],['txt','The Barricades'],['sml','(load-bearing. do not touch.)'],['gap',28],
-    ['hdr','SNAKE PSYCHOLOGY'],['txt','Dr. S. Nake, PhD'],['sml','(expert in self-collision trauma)'],['gap',28],
-    ['hdr','CATERING'],['txt','The Break Room Snake'],['sml','(she also ate the coffee machine)'],['gap',40],
-    ['hdr','SPECIAL THANKS'],
-    ['txt','Everyone who played.'],['txt','Everyone who crashed into themselves.'],
-    ['txt','The one person who reached Level 10.'],['txt','You know who you are.'],['gap',40],
-    ['hdr','IN MEMORIAM'],
-    ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',28],
-    ['txt','No animals were harmed...'],['sml','(the snakes beg to differ)'],['gap',50],
-    ['coins'],['sml','(spend them in the SHOP)'],['gap',50],
-    ['sml','(C) 2026 FOK STUDIOS'],['sml','All wrongs reserved.'],
-    ['gap',30],['txt','PRESS A TO EXIT'],['gap',280],
-    ['gap',420],
-    ['secret','No Eastereggs here ;)'],['gap',240],
-];
-const CRED_H = { title:54, sub:22, hdr:28, txt:26, sml:24, coins:28, secret:28 };
-function credTotalH() { let h=0; for(const[t,v] of CRED) h += t==='gap' ? v : (CRED_H[t]||22); return h; }
-const CRED_TOTAL_H = credTotalH();
+// alpha:false = opaque canvas: the compositor can blit instead of alpha-blending it over
+// the page every frame -- a real win on weak/embedded GPUs (TVs). Safe because every
+// screen paints the full canvas first (grid/bg blit). Old browsers ignore the options arg.
+const ctx = canvas.getContext('2d', { alpha: false });
+// Canvas typography (FONT sizes + GLOW radii) lives in js/text.js, fed from
+// css/fonts.css. Use FONT.* / GLOW.* at every call site -- never raw numbers.
 
 // ================================================================
 // APP STATE
 // ================================================================
-// phases: splash|menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|nameEntry|quitConfirm|resetConfirm
-let phase = 'splash';
+// phase (splash|menu|settings|scores|credits|playing|levelReady|paused|dying|levelDone|
+// nameEntry|quitConfirm|resetConfirm) and _shimmerThreshold are declared in sim.js -- the
+// sim owns phase during gameplay; the UI sets it for menus.
 let menuSel = 0, settingsSel = 0, shopSel = 0, shopPage = 0, quitConfirmSel = 1, prevPhase = 'playing';
 let settingsCat = -1;              // -1 = category list; else index into SETTINGS_CATS
 let _dataMsg = '', _dataMsgAt = 0; // transient DATA MANAGEMENT feedback line
-let _shimmerThreshold = 25000;
+let _scoreboardCache = null;
+let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
-const MENU_ITEMS     = ['PLAY', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
+const MENU_ITEMS     = ['PLAY', '1:1', 'SETTINGS', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'CREDITS'];
+let duelSel = 0;   // 1:1 submenu selection (0 = PLAY LOCAL, 1 = MY ID, 2 = ADD FRIEND, 3 = FRIENDS, 4 = PLAY ONLINE)
+// Local 1:1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
+const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
 let cfg = defaultCfg();
+let inGame = false, _worker = null;   // Worker state (see the SIM WORKER section near the bootstrap)
 loadCfg();
 // #debug in the URL is a shortcut to ENABLE debug mode (unlocks the hidden DEBUGGING
 // menu) without hand-editing the save file. It only turns it on -- it does not show the
-// overlay; use the menu's SHOW CANVAS PROPS for that.
+// overlay; the overlays appear at DEBUG LEVEL 2+.
 try { if(location.hash === '#debug' && (cfg.debug||0) < 1){ cfg.debug = 1; saveCfg(); } } catch(e){}
+// Arrived via a friend link (QR): the inviter goes straight into the friends list.
+// On iOS in a BROWSER the installed app can never receive this URL (no link capture,
+// and Safari storage is isolated from the home-screen app), so an invite screen after
+// the splash hands the code over manually (drawInvite): copy it / type it in the app.
+// Installing from THIS page still carries it over automatically (storage is cloned).
+let _inviteFid = null;
+try {
+    const fm = /^#friend=([0-9a-f]{8})$/.exec(location.hash);
+    if (fm) {
+        addFriend(fm[1]);
+        const standalone = (navigator.standalone === true) ||
+            (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+        const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+            (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+        if (ios && !standalone) _inviteFid = fm[1];
+    }
+} catch(e) {}
+let inviteSel = 0, _inviteMsg = '', _inviteMsgAt = 0;
+let _friendIdBack = 'duelMenu';   // where the MY ID screen returns to (1:1 menu or SETTINGS > USER)
 if(cfg.wornItems === null){ cfg.wornItems = Object.assign({}, cfg.shopItems||{}); saveCfg(); }
 Snd.musicSetVolume((cfg.volume==null?1:cfg.volume));
 Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
 function applyHandedness() { document.body.classList.toggle('lefty', cfg.handed === 1); }
 applyHandedness();
 
-let level, lives, score, _levelStartLen = 0;
-let snake, dir, dirQueue;
-let gem, gemsDone, bars;
-// Sim clock: simTick is the integer source of truth; simNow is its ms projection
-// (simTick * TICK_MS). All game state reads simNow/simTick, never performance.now().
-let simTick = 0, simNow = 0, _acc = 0, _lastRAF = 0;
-// gPer = engine ticks per game tick (the level's fixed boost period). _gDue counts
-// down to the next game tick; _stepAccum accrues movement (normal +1, boost +2 per
-// game tick) and spends 2 per snake step -> normal moves every 2nd game tick, boost
-// every game tick, without ever changing gPer.
-let gPer, _gDue = 0, _stepAccum = 0, phaseAt = 0, gemAt, deathMsg, pauseAt;
-let spawnAt = 0, levelDoneWaiting = false;
-let pauseReadyAt = 0, escReadyAt = 0;
-let perfectLevel = true, levelWasPerfect = false, fireworks = [];
-let levelBonusCount = 0, epicLevelCount = 0;
-let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
-let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0, _crushEffects=[];
-let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
-const _POWER_DUR=T(330);   // 5.5s power mode
-const EARLY_HEART_TTL=T(600);   // 10s early-heart lifespan
-const SPAWN_PROTECT=T(60);      // 1s post-spawn collision immunity
-let timeCrystal=null, timeCrystalAt=0, _slowMode=false, _slowModeAt=0;
-const _SLOW_DUR=T(1800);   // 30s time-warp slow
-let perfectCount = 0, luckyCount = 0;
+// ALL sim state (snake, gem, bars, score, level, lives, the sim clock, power/heart/crystal,
+// gouranga, boost, phase, ...) now lives in sim.js so the sim is self-contained and can run
+// in a Web Worker. game.js keeps only presentation / main-loop state:
+// Splash lifecycle (coin drop / fast-forward / exit): main-owned UI state. Input
+// handlers set it, updateSplashExit (called from loop) finishes the transition.
+let _splashLeftAt = 0;
+let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
+let _splashExiting = false, _splashExitAt = 0;
+function updateSplashExit() {
+    if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
+        _splashExiting = false;
+        phase = _inviteFid ? 'invite' : 'menu'; inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
+        // Hold menu music briefly for the clock sync (started during the coin drop), so it
+        // opens on the globally-shared bar. Only when online and not yet synced; else no wait.
+        if(typeof _netOk === 'function' && _netOk() && (typeof netPts !== 'function' || netPts() == null))
+            _musicSyncWaitUntil = performance.now() + MUSIC_SYNC_WAIT_MS;
+        _wsend({ t:'phase', phase:'menu' });   // sync the worker: it owns phaseAt
+    }
+}
+let _clkHold = 0;   // frame counter for the clock's hold-back correction (see loop)
+let _lastRAF = 0;                           // last RAF timestamp (worst-frame FPS recorder)
+let pauseReadyAt = 0;                       // pause input debounce gate
 let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
+// What the name-entry dialog edits: 'score' (game-over high score), 'user' (SETTINGS >
+// USER player name), 'friend' (1:1 ADD FRIEND: 8 hex digits + live camera scan).
+let entryMode = 'score';
+function _entryChars() { return entryMode === 'friend' ? HEX_CHARS : NAME_CHARS; }
+function _entryMax()   { return entryMode === 'friend' ? 8 : MAX_NAME; }
+// Transient confirmation line on the 1:1 menu. Stamped on the WALL clock, not the
+// sim clock: a duel restarts simNow at 0 while the worker's own simNow has been
+// free-running since page load, so ending a session swaps a small simNow for a huge
+// one -- and any message stamped in sim time instantly reads as ancient and never
+// draws. That is precisely the message you most want ("OPPONENT LEFT").
+let _duelMsg = '', _duelMsgAt = 0;
+function _msgNow(){ return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
 let _nameFlashAt = 0, _nameFlashPos = -1;
 let creditsScroll = 0, creditsSpeed = 0.8, _creditsNormal = 0.8;
 let purchaseParticles = [], purchaseAnimAt = 0;
 let fpsFrames = 0, fpsLast = 0;
 
+let _musicHoldUntil = 0;   // routing is held during the quit-confirm leave-fade (0.25s)
+// Menu music starts aligned to the shared server clock (all clients on the same audio style
+// land on the same bar). At first menu entry we briefly hold it while the clock syncs, but
+// NEVER longer than this -- then it plays whether synced or not. Offline/synced: no wait.
+const MUSIC_SYNC_WAIT_MS = 2000;
+let _musicSyncWaitUntil = 0;
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
+// Let the audio layer re-fetch the live shared-clock seek when the context resumes
+// (e.g. a fresh start that pinned the track while still suspended by the autoplay gate).
+// It hands us the track id; menu tracks seek to absolute PTS, the game track to its
+// start-PTS offset. null when unsynced/offline -> the audio layer leaves it be.
+if (typeof Snd !== 'undefined' && Snd.setMusicSeekProvider) Snd.setMusicSeekProvider((trackId) => {
+    if (typeof netPts !== 'function' || netPts() == null) return null;
+    if (trackId === 'ambient' || trackId === 'classicMenu')
+        return (typeof netMenuSeekSec === 'function') ? netMenuSeekSec() : null;
+    return (typeof netMusicSeekSec === 'function') ? netMusicSeekSec() : null;
+});
 
 // ================================================================
 // GAME LOGIC
 // ================================================================
-let bonusAt = -9999, bonusLabel = '';
-function showBonus(now, label) { bonusAt = now; bonusLabel = label; }
-
-function spawnFireworks(now) {
-    levelWasPerfect = true;
-    const palette = ['#ff4040','#ff9000','#ffee00','#40ff80','#00ccff','#cc44ff','#ff44aa','#ffffff'];
-    for (let b = 0; b < 8; b++) {
-        const delay = b * 310 + Math.random() * 80;
-        const x = 55 + Math.random() * (CW - 110);
-        const y = 22 + Math.random() * (CH * 0.62);
-        const col = palette[b % palette.length];
-        for (let i = 0; i < 22; i++) {
-            const angle = (i / 22) * Math.PI * 2;
-            const spd = 1.7 + Math.random() * 2.4;
-            fireworks.push({
-                startAt: now + delay,
-                x, y,
-                vx: Math.cos(angle) * spd,
-                vy: Math.sin(angle) * spd - 0.7,
-                color: col,
-                life: 0,
-                maxLife: 52 + Math.floor(Math.random() * 38),
-            });
+// Event-driven cosmetic feedback -- sounds, particle bursts (crush/fireworks) and
+// floating labels (bonus) -- plays on a fixed 2-engine-tick (1/30s) delay, in EVERY
+// mode. An online correction arriving in that window cancels a wrongly predicted
+// effect before it is seen or heard (see _rbRollback, which filters both queues, and
+// drainSimEvents, which re-queues on replay). Uniform delay across modes keeps the
+// feel identical whether or not a peer is connected. Sound is the more intrusive to
+// retract, but a false confetti burst or "+1 UP!" is jarring too.
+const _FX_DEFER = new Set(['sfx', 'bonus', 'crush', 'fw']);   // deferred + rollback-cancellable
+const FX_SETTLE_MS = 1000 / 30;   // 2 ticks, for phase-derived messages (death, duel winner)
+let _sfxQ = [];
+let _fxQ  = [];          // visual effects awaiting their 2-tick delay: { tk, e } (raw sim event)
+let _sfxAnchor = null;   // { tk, actx }: maps the tick timeline onto AudioContext time
+function flushSfxQ(){
+    if(!_sfxQ.length) return;
+    const ct = Snd.ctxTime();
+    if(ct == null){   // no audio context (muted boot, harness): plain tick gate
+        while(_sfxQ.length && simTick - _sfxQ[0].tk >= 2) Snd.sfxPlay(_sfxQ.shift().name, cfg.music);
+        return;
+    }
+    // (Re)anchor when tick time and audio time drift apart (pause, menu, seek).
+    if(!_sfxAnchor || Math.abs((simTick - _sfxAnchor.tk)/60 - (ct - _sfxAnchor.actx)) > 0.25)
+        _sfxAnchor = { tk: simTick, actx: ct };
+    while(_sfxQ.length){
+        const when = _sfxAnchor.actx + (_sfxQ[0].tk + 2 - _sfxAnchor.tk) / 60;   // the exact 2-ticks-late moment
+        if(when > ct + 0.05) break;                    // outside the scheduling lookahead
+        Snd.sfxPlay(_sfxQ.shift().name, cfg.music, when);
+    }
+}
+// Fire the deferred visual effects that have now aged their 2 ticks. Uses the
+// current simNow (fire time), so the effect's own animation clock starts when it
+// actually appears -- the 33ms it waited is imperceptible.
+function flushFxQ(){
+    while(_fxQ.length && simTick - _fxQ[0].tk >= 2){
+        const e = _fxQ.shift().e;
+        switch(e.t){
+            case 'bonus': showBonus(simNow, e.label); break;
+            case 'fw':    spawnFireworks(simNow); break;
+            case 'crush': _crushEffects.push({ x:e.x, y:e.y, at:simNow,
+                              pts:Array.from({length:20},()=>({
+                                  ang:Math.random()*Math.PI*2, spd:3+Math.random()*9,
+                                  sz:2+Math.random()*4,
+                                  col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
+                              })) }); break;
         }
     }
 }
-
-// Presentation replays the sim's recorded side-effects. Called once per sim tick
-// from loop(), right after update(); simNow is that tick's timestamp.
+let _replaying = false;   // reconciliation replay: re-queue the deferred cosmetics only
 function drainSimEvents(){
     for(const e of simEvents){
+        if(_replaying && !_FX_DEFER.has(e.t)) continue;   // non-cosmetic side effects already ran live during prediction
         switch(e.t){
-            case 'sfx':      Snd.sfxPlay(e.name, cfg.music); break;
+            case 'sfx':      _sfxQ.push({ tk:simTick, name:e.name }); break;
+            case 'bonus':
+            case 'fw':
+            case 'crush':    _fxQ.push({ tk:simTick, e }); break;   // deferred 2 ticks, cancellable on rollback
             case 'mpause':   Snd.musicGamePause(); break;
             case 'munpause': Snd.musicGameUnpause(); break;
             case 'mstop':    Snd.musicStop(); break;
             case 'coin':     addFOKoins(e.n); break;
             case 'ach':      unlockAch(e.id); break;
-            case 'bonus':    showBonus(simNow, e.label); break;
-            case 'fw':       spawnFireworks(simNow); break;
             case 'bars':     renderBarsOffscreen(); break;
+            case 'lvlreset': fireworks=[]; _crushEffects=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
             case 'showhud':  showHUD(e.v); break;
             case 'gameover':
+                entryMode = 'score';
+                nameReason = e.reason || 'over';   // 'win' when set by the level-10 clear, else death
                 try{ nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME); }catch (e){ nameStr=''; }
-                nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0; nameCursorPos=nameStr.length; nameReason='over';
+                nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0; nameCursorPos=nameStr.length;
                 showHUD(false); Snd.musicStop(); break;
-            case 'crush':    _crushEffects.push({ x:e.x, y:e.y, at:simNow,
-                                 pts:Array.from({length:20},()=>({
-                                     ang:Math.random()*Math.PI*2, spd:3+Math.random()*9,
-                                     sz:2+Math.random()*4,
-                                     col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
-                                 })) }); break;
         }
     }
     simEvents.length = 0;
 }
 
 function togglePause() {
-    if(phase==='playing'){
+    if(typeof netGameActive==='function' && netGameActive()) return;   // online: no pause (quit via ESC works)
+    // Phase (playing<->paused, duel<->duelPaused) and the clock freeze/thaw are handled by
+    // the worker; main only gates the input and drives the music. Pause exists in classic
+    // and LOCAL duel; a future ONLINE duel disables it (one player must not freeze the peer).
+    if(phase==='playing'||phase==='duel'){
         if(performance.now() < pauseReadyAt) return;
-        phase='paused'; pauseAt=simNow; Snd.musicGamePause();
-    } else if(phase==='paused'){
-        gemAt+=simNow-pauseAt; phase='playing'; _gDue=gPer; _stepAccum=0;
+        Snd.musicGamePause(); _wsend({ t:'pause' });
+    } else if(phase==='paused'||phase==='duelPaused'){
         pauseReadyAt=performance.now()+1000;
-        Snd.musicGameUnpause();
+        Snd.musicGameUnpause(); _wsend({ t:'resume' });
     }
 }
 
@@ -335,10 +245,84 @@ function _canvasInfo(){
         fontScale:FONT
     };
 }
-function exportCanvasInfo(){
-    try { _downloadJSON('snake-canvas-info.json', _canvasInfo()); _dataMsg='CANVAS INFO SAVED'; _dataMsgAt=simNow; }
+function exportDebugInfo(){
+    // One broad debug dump (extend freely): canvas/layout, config, fps recorder
+    // state, sim summary, identity/social counters and the live net stats.
+    try {
+        const info = {
+            version: _swVersion, exportedAt: new Date().toISOString(),
+            canvas: _canvasInfo(),
+            cfg: Object.assign({}, cfg),
+            sim: { phase, level, score, lives, simTick, inGame, worker: !!_worker },
+            fps: { recording:_fpsRec, worst:_fpsSnap, maxSustained:_fpsMaxAvg||null },
+            player: { id: getPlayerId(), friends: getFriends().length },
+            net: (typeof netDebugInfo === 'function') ? netDebugInfo() : null,
+        };
+        _downloadJSON('snake-debug-info.json', info);
+        _dataMsg='DEBUG INFO SAVED'; _dataMsgAt=simNow;
+    }
     catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
 }
+// Debug overlay (DEBUG LEVEL 2+): four corner docks -- network, timing, graphics,
+// sim/game status. Refreshed 4/s, and only when the text actually changed. This is
+// a READOUT, not an animation:
+// nobody reads 60 updates a second, and it used to do exactly that -- rebuilding the
+// whole string and writing textContent every frame, each write forcing a reflow, in a
+// tool whose entire job is to not perturb what it measures. The numbers it shows
+// (rtt, anchor, rollbacks) move far slower than a frame anyway.
+const NET_DBG_MS = 250;
+// Four corner debug docks (DEBUG LEVEL 2+): TL=network, TR=timing, BL=graphics,
+// BR=sim/game status. Each corner only rewrites when its own text changes, so a
+// static quadrant costs no reflow. netDebugQuad() supplies net/timing/sim; the
+// graphics quadrant is built here from the cached layout + the live FPS box.
+let _netDbgAt = 0, _dbgCorner = null, _dbgTxt = { tl:'', tr:'', bl:'', br:'' }, _dbgShown = false;
+function _mkDbgCorner(cls){ const el = document.createElement('div'); el.className = 'debug-overlay ' + cls; document.body.appendChild(el); return el; }
+function _gfxDbgText(){
+    const L = _layoutDbg;
+    return 'v' + _swVersion + ' dbg' + (cfg.debug||0) + ' dpr' + (window.devicePixelRatio||1) + ' [' + (L.mode||'?') + ']' +
+        '\nscr ' + screen.width + 'x' + screen.height + ' ' + ((window.innerWidth>window.innerHeight)?'land':'port') +
+        '\nvp ' + Math.round(L.vpW||0) + 'x' + Math.round(L.vpH||0) +
+        '\nused ' + Math.round(L.wW||0) + 'x' + Math.round(L.wH||0) + ' m' + (L.m||0) + ' s' + (L.scale||0).toFixed(2) +
+        '\ncv ' + Math.round(L.cw||0) + 'x' + Math.round(L.ch||0) + ' nat ' + canvas.width + 'x' + canvas.height +
+        '\n' + ((fpsEl && fpsEl.textContent) || '-- FPS');
+}
+function updateNetDebugOverlay(rafNow){
+    const on = (cfg.debug||0) >= 2;
+    if(!on){
+        if(_dbgCorner && _dbgShown){ for(const k in _dbgCorner) _dbgCorner[k].style.display = 'none'; _dbgShown = false; }
+        return;
+    }
+    if(!_dbgCorner){ _dbgCorner = { tl:_mkDbgCorner('dbg-tl'), tr:_mkDbgCorner('dbg-tr'), bl:_mkDbgCorner('dbg-bl'), br:_mkDbgCorner('dbg-br') }; }
+    if(!_dbgShown){ for(const k in _dbgCorner) _dbgCorner[k].style.display = 'block'; _dbgShown = true; }   // not every frame
+    if(rafNow - _netDbgAt < NET_DBG_MS) return;
+    _netDbgAt = rafNow;
+    // Online: the full rollback/latency readout. Offline (menus + LOCAL 1:1 + solo): net
+    // is meaningless, so timing shows the sim clock -- simTick free-runs from page load and
+    // the worker owns it, so a frozen counter is a stalled worker. mseek lets two clients
+    // verify menu-music sync on-device (same audio style => same seek, mod the loop length).
+    const online = typeof netGameActive === 'function' && netGameActive();
+    let net, time, simNet;
+    if(typeof netDebugQuad === 'function'){ const q = netDebugQuad(); net = q.net; time = q.time; simNet = q.sim; }
+    else { net = 'net: not loaded'; time = 'pts ' + simTick; simNet = ''; }
+    if(!online){
+        const _synced = (typeof netPts === 'function') && netPts() != null;
+        const _mseek = (typeof netMenuSeekSec === 'function') ? netMenuSeekSec() : 0;
+        time += '\nsync ' + (_synced ? 'ok mseek ' + _mseek.toFixed(2) + 's' : (cfg.offline ? 'offline' : '...'));
+    }
+    // Music drift vs the shared clock (read-only probe): + leads, - lags. Two side-by-side
+    // clients should both read near 0; a long-up client trending away is the DAC-drift cause.
+    if(typeof Snd !== 'undefined' && Snd.musicDriftMs){ const _d = Snd.musicDriftMs(); if(_d != null) time += '\naudio drift ' + (_d>=0?'+':'') + _d.toFixed(0) + 'ms'; }
+    // Sim/game quadrant: game state (this file's) then the net rollback health (simNet).
+    const sim = ['phase ' + phase, 'worker ' + (_worker?1:0) + ' ingame ' + (inGame?1:0)];
+    if(simNet) sim.push(simNet);
+    const simTxt = sim.join('\n');
+    const gfx = _gfxDbgText();
+    if(net    !== _dbgTxt.tl){ _dbgTxt.tl = net;    _dbgCorner.tl.textContent = net; }
+    if(time   !== _dbgTxt.tr){ _dbgTxt.tr = time;   _dbgCorner.tr.textContent = time; }
+    if(gfx    !== _dbgTxt.bl){ _dbgTxt.bl = gfx;    _dbgCorner.bl.textContent = gfx; }
+    if(simTxt !== _dbgTxt.br){ _dbgTxt.br = simTxt; _dbgCorner.br.textContent = simTxt; }
+}
+
 // ---- Worst-Frame Recorder (DEBUGGING). Passive: reuses loop()'s frame time; per frame it
 // does one compare + one ring-buffer write; a context snapshot is built ONLY on a new worst
 // frame (rare). No per-frame DOM/alloc/timing calls, so it can't shift the FPS it measures. --
@@ -389,6 +373,48 @@ function exportFpsLog(){
 // ================================================================
 // MYSTERY BOX LOGIC  (loot rolls, odds, pity)
 // ================================================================
+// Shop/box behaviours (moved from the screens: they mutate coins/cfg, they do not draw).
+function _gearList(){ const si=cfg.shopItems||{}; return BOX_ITEMS.filter(b=>si[b.id]); }
+let _boxOpenAt = 0, _boxReward = null;
+// ADMIN box: surfaces on the boxes tab once every ADMIN_BOX_EVERY shop opens, then is
+// consumed for the run once claimed. _boxList() appends it only while available.
+let _adminAvail = false, _adminConsumed = false;
+function _boxList(){ return (_adminAvail && !_adminConsumed) ? BOXES.concat([ADMIN_BOX]) : BOXES; }
+// Enter the shop: count the open, decide whether the ADMIN box is up this visit, and
+// jump straight to it (boxes tab, selected) when it is so the grand prize is unmissable.
+function _enterShop(){
+    cfg.shopOpens = (cfg.shopOpens||0) + 1;
+    _adminAvail = (cfg.shopOpens % (cfg.x10?Math.max(1,Math.round(ADMIN_BOX_EVERY/10)):ADMIN_BOX_EVERY) === 0);
+    _adminConsumed = false;
+    phase='shop'; purchaseAnimAt=0;
+    shopPage = _adminAvail ? BOX_PAGE : 0;
+    shopSel  = _adminAvail ? BOXES.length : 0;
+    saveCfg();
+}
+function _findItem(id){ return SHOP_ITEMS.find(i=>i.id===id) || BOX_ITEMS.find(i=>i.id===id); }
+
+function _openBox(box){
+    if(box.id==='admin'){
+        const si=cfg.shopItems||(cfg.shopItems={});
+        _adminConsumed=true;
+        if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',rarity:'legendary',refund}; }
+        else { si.admincrown=true; _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
+        saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('unbox',cfg.music); return;
+    }
+    if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
+    _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch (e){}
+    const res=rollBox(box);
+    if(res.type==='coins'){ addFOKoins(res.amount); _boxReward={kind:'coins',amount:res.amount}; }
+    else {
+        const si=cfg.shopItems||(cfg.shopItems={});
+        if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,rarity:res.rarity,refund}; }
+        else { si[res.id]=true; if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
+    }
+    saveCfg();
+    _boxOpenAt=simNow;
+    Snd.sfxPlay('unbox',cfg.music);
+}
+
 // ---- Mystery box loot (META: uses Math.random, NOT the seeded sim RNG -- never
 // affects gameplay determinism or leaderboard replay). All loot is cosmetic. ----
 function _boxItemValue(id){
@@ -421,8 +447,13 @@ function rollBox(box){
         cfg.boxPity = 0;
         outcome = Math.random()<0.25 ? 'legendary' : 'epic';
     } else {
-        const r=Math.random(); let acc=0; outcome='coins';
-        for(const o of ['coins','common','rare','epic','legendary']){ acc+=box.odds[o]||0; if(r<acc){ outcome=o; break; } }
+        // DEBUG x10: rare/epic/legendary weights x10, coins/common absorb via the total.
+        const F=cfg.x10?10:1;
+        const w={coins:box.odds.coins||0, common:box.odds.common||0,
+                 rare:(box.odds.rare||0)*F, epic:(box.odds.epic||0)*F, legendary:(box.odds.legendary||0)*F};
+        const total=w.coins+w.common+w.rare+w.epic+w.legendary;
+        const r=Math.random()*total; let acc=0; outcome='coins';
+        for(const o of ['coins','common','rare','epic','legendary']){ acc+=w[o]; if(r<acc){ outcome=o; break; } }
         cfg.boxPity = (outcome==='coins'||outcome==='common') ? (cfg.boxPity||0)+1 : 0;
     }
     // Coins consolation: you get back 25%-75% of the price (lose 75% at worst, ~50% on
@@ -431,68 +462,6 @@ function rollBox(box){
     const pool=_boxLootPool(outcome, box.id==='admin');
     return { type:'item', id: pool[Math.floor(Math.random()*pool.length)], rarity:outcome };
 }
-
-// ================================================================
-// BACKUP / RESTORE / INTEGRITY
-// ================================================================
-// Backup/restore all game data (scores, coins, achievements, shop items, settings)
-// as a downloadable JSON file. A backup is a full clone -- restore overwrites.
-function _saveSnapshot() {
-    return { v:1,
-        hs:    localStorage.getItem(HS_KEY),
-        coins: localStorage.getItem(FK_KEY),
-        ach:   localStorage.getItem(ACH_KEY),
-        cfg:   localStorage.getItem(CFG_KEY),
-        name:  localStorage.getItem('lastSName') };
-}
-// FNV-1a over the backup's data fields -- a light integrity check so a hand-edited file is
-// rejected on restore. Recomputed the same way on both sides from a fixed key order.
-function _sum(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } return h; }
-function _sumOf(d){ return _sum(JSON.stringify({v:d.v,hs:d.hs,coins:d.coins,ach:d.ach,cfg:d.cfg,name:d.name})); }
-// Serialize an object to a downloaded JSON file. Shared by the backup + the debug exports.
-function _downloadJSON(filename, obj){
-    const blob=new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=filename;
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-}
-function backupStats() {
-    try {
-        const snap=_saveSnapshot();
-        snap.crc=_sumOf(snap);              // integrity checksum, written as the final field
-        _downloadJSON('snake-fok-backup.json', snap);
-        _dataMsg='BACKUP SAVED'; _dataMsgAt=simNow;
-    } catch (e) { _dataMsg='BACKUP FAILED'; _dataMsgAt=simNow; }
-}
-const _restoreInp=document.createElement('input');
-_restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.className='util-hidden';
-document.body.appendChild(_restoreInp);
-_restoreInp.addEventListener('change',()=>{
-    const f=_restoreInp.files&&_restoreInp.files[0]; _restoreInp.value='';
-    if(!f) return;
-    const rd=new FileReader();
-    rd.onload=()=>{
-        try {
-            const d=JSON.parse(rd.result);
-            if(!d||typeof d!=='object') throw 0;
-            // Integrity: reject a file whose checksum does not match its data. Files that carry
-            // no checksum (older backups predate it) are still accepted for compatibility.
-            if(d.crc && d.crc!==_sumOf(d)) throw 0;
-            const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
-            set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name');
-            _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
-            if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
-            applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
-            Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
-            _dataMsg='STATS RESTORED'; _dataMsgAt=simNow;
-        } catch (e) { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
-    };
-    rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=simNow; };
-    rd.readAsText(f);
-});
-function restoreStats(){ try{ _restoreInp.click(); }catch (e){} }
-
-const fpsEl = document.getElementById('fps-el');
 
 // ================================================================
 // MAIN LOOP
@@ -522,6 +491,21 @@ const CONTROLS = {
     nameEntry:    ['esc','pause','ok','start','dpad'],
     playing:      ['esc','pause','ok','dpad'],
     paused:       ['esc','pause','ok','dpad'],
+    duelMenu:     ['esc','ok','dpad'],
+    friends:      ['esc','ok','dpad'],
+    lobby:        ['esc','ok','dpad'],
+    friendId:     ['esc','ok','dpad'],
+    invite:       ['esc','ok','dpad'],
+    // A duel's local player gets exactly the same controls as a classic player:
+    // duel mirrors playing, duelPaused mirrors paused. The dpad was excluded back
+    // when a duel was always LOCAL (two players, one keyboard -- beginDuel() still
+    // gates that on _hasKeyboard). An ONLINE duel has one local player, so on a
+    // phone the dpad is the only steering there is, and .dim is pointer-events:none
+    // -- it was dead, not merely dim. (Online also dims 'pause': see _updateBtnDim.)
+    duelReady:    ['esc','pause','dpad'],
+    duel:         ['esc','pause','ok','dpad'],
+    duelPaused:   ['esc','pause','ok','dpad'],
+    duelOver:     ['esc','ok','dpad'],
     dying:        ['esc','ok','dpad'],
     levelReady:   ['esc','ok','dpad'],
     levelDone:    ['esc','ok','dpad'],
@@ -529,14 +513,21 @@ const CONTROLS = {
     resetConfirm: ['esc','ok','start','dpad'],
     _default:     ['esc','ok','dpad'],
 };
-let _dimPhase = null;
+let _dimKey = null;
 // One phase-change hook: JS owns the STATE (body[data-phase] + control .dim classes); CSS
 // owns all the appearance consequences (e.g. hiding the SND/FPS boxes on splash).
 function _updateBtnDim() {
-    if(phase===_dimPhase) return;
-    _dimPhase=phase;
+    // Keyed on phase AND online-ness: the same duel phase has a different live set
+    // online, so phase alone would cache the wrong one.
+    const online = typeof netGameActive==='function' && netGameActive();
+    const key = phase + (online ? '|net' : '');
+    if(key===_dimKey) return;
+    _dimKey=key;
     document.body.dataset.phase = phase;
-    const live = CONTROLS[phase] || CONTROLS._default;
+    let live = CONTROLS[phase] || CONTROLS._default;
+    // An online duel cannot pause (togglePause refuses: one player must not freeze
+    // the peer), so the button is dimmed rather than left live-but-inert.
+    if(online) live = live.filter(id => id !== 'pause');
     for(const id in _CTRL_ELS){ const el=_CTRL_ELS[id]; if(el) el.classList.toggle('dim', live.indexOf(id)<0); }
 }
 
@@ -556,49 +547,156 @@ const SCREENS = {
     shop:         { d:()=>drawShop(),            hud:false },
     credits:      { d:()=>drawCredits(),         hud:false },
     nameEntry:    { d:()=>drawNameEntry(simNow), hud:false },
-    quitConfirm:  { d:()=>drawQuitConfirm(),     hud:false, freeze:true },
+    // Quit overlay does NOT freeze: the game keeps running behind it (a lone player in a
+    // future online match cannot freeze the opponent; local matches the same semantics).
+    quitConfirm:  { d:()=>drawQuitConfirm(),     hud:false },
     resetConfirm: { d:()=>drawResetConfirm(),    hud:false, freeze:true },
     paused:       { d:()=>drawGameBoard(simNow), hud:true,  freeze:true },
+    duelMenu:     { d:()=>drawDuelMenu(),        hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
+    friendId:     { d:()=>drawFriendId(),        hud:false, freeze:true },
+    lobby:        { d:()=>drawLobby(),           hud:false },
+    friends:      { d:()=>drawFriends(),         hud:false },
+    invite:       { d:()=>drawInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
+    duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
+    duel:         { d:()=>drawDuelBoard(simNow), hud:true },
+    duelPaused:   { d:()=>drawDuelBoard(simNow), hud:true, freeze:true },
+    duelOver:     { d:()=>drawDuelBoard(simNow), hud:true },
 };
 const _GAME_SCREEN = { d:()=>drawGameBoard(simNow), hud:true };   // playing/dying/levelReady/levelDone
 function loop(rafNow) {
     requestAnimationFrame(loop);
-    // Optional 30 FPS cap: skip whole frames (the fixed-timestep sim catches up via
-    // the _acc accumulator, so gameplay speed is unchanged -- only the draw rate drops).
+    // Optional 30 FPS cap: skip whole frames (the sim ticks on in the worker regardless,
+    // so gameplay speed is unchanged -- only the draw rate drops).
     if(cfg.fps30 && rafNow-_lastDraw < 32) return;
     _lastDraw = rafNow;
     _updateBtnDim();
+    // FPS = frame DELIVERY, not paint count: every loop pass counts, because on a frozen
+    // screen skipping the repaint IS keeping up (nothing needed drawing). The box maxes at
+    // the display rate and drops only when the main thread cannot serve RAF fast enough.
+    // The fps30 cap returns before counting, so capped mode honestly reads ~30.
     fpsFrames++;
     if(rafNow-fpsLast>=500){ const _live=Math.round(fpsFrames*1000/(rafNow-fpsLast));
         if(_fpsRec) _fpsRecordAvg(_live,rafNow); else fpsEl.textContent=`${_live} FPS`;   // recording: box shows locked worst, not live
         fpsFrames=0; fpsLast=rafNow; }
 
     // Music routing (skip splash/paused/quitConfirm states)
-    if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'){
-        const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm'].includes(phase);
-        const gamePhase=['playing','levelReady','dying','levelDone'].includes(phase);
+    if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'&&phase!=='levelReady'&&phase!=='duelReady'&&performance.now()>=_musicHoldUntil){   // ready phases are music-NEUTRAL: menu music fades at PLAY, game music starts at playing/duel
+        const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','friendId','invite','lobby','friends'].includes(phase);
+        const gamePhase=['playing','dying','levelDone','duel','duelOver'].includes(phase);
         const wt=menuPhase?menuTrack():gamePhase?gameTrack():null;
-        if(cfg.music&&wt) Snd.musicPlay(wt);
+        // Hold menu music at first entry until the clock syncs (started during the coin drop)
+        // or the 2s wall passes -- so it opens on the globally-shared bar. Once playing,
+        // musicPlay no-ops, so this only gates the START.
+        const holdMenu = menuPhase && performance.now() < _musicSyncWaitUntil && (typeof netPts==='function' && netPts()==null);
+        // Menu music fades in 0.5s (splash entry + return from game); the game track punches
+        // in at GO. BOTH are seeked to the shared clock -- the duel track to its start PTS,
+        // the menu track to absolute PTS -- so clients hear the same bar at the same moment.
+        if(cfg.music&&wt&&!holdMenu) Snd.musicPlay(wt, menuPhase?0.5:0,
+            menuPhase ? (typeof netMenuSeekSec==='function' ? netMenuSeekSec() : 0)
+                      : (typeof netMusicSeekSec==='function' ? netMusicSeekSec() : 0));
         else if(!wt&&!menuPhase&&!gamePhase) Snd.musicStop();
     }
     Snd.musicTick(cfg.music);
 
-    // Fixed-timestep sim: run update() once per elapsed tick, capped so a slow or
-    // backgrounded frame catches up a little then drops the backlog (no spiral).
+    // The sim now runs in js/sim-worker.js; its snapshots are applied in _initWorker()'s
+    // onmessage (state mirror + event replay). loop() only presents. Keep the frame dt for
+    // the worst-frame FPS recorder.
     if(_lastRAF===0) _lastRAF=rafNow;
     let frameMs=rafNow-_lastRAF; _lastRAF=rafNow;
-    if(_fpsRec) _fpsRecordFrame(frameMs, rafNow);   // raw dt (before the sim cap); no-op when not recording
-    if(frameMs>250) frameMs=250;
-    _acc+=frameMs;
-    let ran=0;
-    while(_acc>=TICK_MS && ran<MAX_CATCHUP){ _acc-=TICK_MS; update(); drainSimEvents(); ran++; }
-    if(ran>=MAX_CATCHUP) _acc=0;
-    updateHUD();   // HUD sync moved out of the sim (step) into presentation
+    if(_fpsRec) _fpsRecordFrame(frameMs, rafNow);
+    // No worker (file:// forbids Worker construction; exotic browsers): tick the sim
+    // in-process with the classic fixed-timestep accumulator. Input already reaches it via
+    // _wsend's simCommand fallback, so this is the only missing piece. Pause freezes
+    // ticking exactly like the worker's stopped clock does.
+    if(!_worker || (typeof netGameActive==='function' && netGameActive())){
+        // Mirror the worker's clock semantics exactly: stopped while paused (including
+        // paused behind the quit dialog), running otherwise. The quit dialog must not stop
+        // the game -- in worker mode the WORKER's phase stays 'playing' behind the main
+        // thread's 'quitConfirm'; in-process there is only ONE shared phase, so tick under
+        // the underlying phase and restore the dialog afterwards (terminal phases end it,
+        // same rule as applyWorkerFrame).
+        const dlg = phase==='quitConfirm';
+        const under = dlg ? prevPhase : phase;
+        if(under!=='paused' && under!=='duelPaused'){
+            if(dlg) phase = under;
+            // ONE tick rule for every mode: the fixed-timestep accumulator, exactly what
+            // single player does (the worker runs this same clock and NOTHING can stall
+            // it). netTickPre snapshots the tick's starting state and feeds it the inputs
+            // authored for it -- ours and the peer's through the same door, which is what
+            // lets a rollback re-simulate the tick identically.
+            let ran=0;
+            let fb=frameMs; if(fb>250) fb=250;
+            _fbAcc+=fb;
+            while(_fbAcc>=TICK_MS && ran<MAX_CATCHUP){ _fbAcc-=TICK_MS; if(typeof netTickPre==='function') netTickPre(); update(); ran++; }
+            if(ran>=MAX_CATCHUP) _fbAcc=0;
+            // The shared clock STEERS this, it does not gate it. Gating on it -- ticking
+            // only while simTick < target -- meant the sim stopped dead the instant the
+            // target was not ahead of us: READY/GO frozen, input piling up unapplied, the
+            // game dead for seconds at every duel start. A clock that can stop the game is
+            // not a clock, it is a switch. Single player never had this because its worker
+            // ticks regardless.
+            // So: nudge by at most ONE tick per frame toward the target. Behind -> one
+            // extra tick; ahead -> hold the accumulator back a tick. Drift is corrected
+            // within a frame or two and the sim NEVER stops.
+            // BOUNDED. Holding the accumulator back every frame cancels the accumulation
+            // exactly, which is the gate again wearing a different hat -- it stalled the
+            // sim just as dead. So only correct drift we could plausibly have EARNED
+            // (a couple of seconds); a bigger gap means the origin is wrong, and chasing
+            // a wrong origin is how the game ends up frozen waiting for a moment that
+            // never comes. Run free instead: drifting from the peer is recoverable
+            // (rollback), a dead game is not.
+            const _tgt = (typeof netTickTarget==='function') ? netTickTarget() : null;
+            const _d = _tgt === null ? 0 : _tgt - simTick;
+            if(_tgt !== null && Math.abs(_d) <= 120 && ran < MAX_CATCHUP){
+                if(_d > 1){ if(typeof netTickPre==='function') netTickPre(); update(); }   // behind: one extra tick
+                // AHEAD: hold a tick back, but only every 8th frame. Doing it EVERY frame
+                // takes back exactly what the frame just added -- the sim does not slow
+                // down, it STOPS, for as long as we are ahead. That is what made the game
+                // dead for seconds after the start: startPts a moment in the future pins
+                // simTick at a standstill until wall time reaches it, input piling up in
+                // dirQueue with nothing to step it. A correction that can zero the tick
+                // rate is not a correction. This one converges at ~90% speed.
+                else if(_d < -1 && (++_clkHold & 7) === 0) _fbAcc = Math.max(-TICK_MS, _fbAcc - TICK_MS);
+            }
+            if(simEvents.length) drainSimEvents();
+            if(dlg){
+                prevPhase = phase;   // the game behind the dialog may have evolved (death, level change)
+                if(phase!=='nameEntry' && phase!=='duelOver') phase = 'quitConfirm';
+                else Snd.duck(false);   // the game ended behind the dialog: undo the 50% duck
+            }
+        }
+    }
+    applyWorkerFrame();   // mirror the newest worker snapshot + replay its events (coalesced)
+    flushSfxQ();          // event sfx play 2 ticks late (see drainSimEvents)
+    flushFxQ();           // event visuals (bonus/crush/fireworks) play 2 ticks late too
+    updateNetDebugOverlay(rafNow);
+    checkWorkerStall(rafNow);
+    updateSplashExit();   // splash->menu is a UI transition (main-owned)
+    updateHUD();          // HUD sync is presentation
 
     // Generic draw: pick the phase's policy and apply it uniformly. A freezable screen
     // is skipped (last frame kept on the canvas) while nothing changed (_uiDirty) and
     // nothing is animating -- neither a global overlay nor the screen's own anim().
-    if(phase!==_lastPhase){ _uiDirty=true; _lastPhase=phase; }
+    if(phase!==_lastPhase){
+        _uiDirty=true;
+        if(phase==='duelOver') quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
+        _lastPhase=phase;
+    }
+    // PAINT PROBE (DEBUGGING): replace ALL drawing with a near-minimal per-frame paint
+    // (solid fill + one blinking rect + a static hint). Reading the FPS box then separates
+    // the two possible ceilings: still capped below the display rate -> the limit is the
+    // TV's presentation plane (vsync), no draw optimization can lift it; full rate -> we
+    // are render-bound. Any key/tap exits (handled at the top of handleKey), returning to
+    // the screen the game was on -- the probe never touches phase.
+    if(_dbgPaintProbe){
+        ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
+        ctx.fillStyle=(fpsFrames&1)?'#7fff7f':'#1a1a2e';
+        ctx.fillRect(CW/2-3,CH/2-30,6,6);
+        ct('PAINT PROBE',CW/2,CH/2+4,'#7fff7f',FONT.MENU);
+        ct('read the FPS box   any key: exit',CW/2,CH/2+30,'#888',FONT.HINT);
+        _uiDirty=false;
+        return;
+    }
     const s = SCREENS[phase] || _GAME_SCREEN;
     const transient = achPopups.length>0 || confetti.length>0;
     let skip = s.freeze && !_uiDirty && !transient && !(s.anim && s.anim());
@@ -606,6 +704,152 @@ function loop(rafNow) {
     if(!skip) drawAchPopups(simNow);
     _uiDirty = false;
 }
+
+// ================================================================
+// SIM WORKER  (the deterministic sim runs off the render thread: js/sim-worker.js)
+// The worker ticks the sim continuously and posts {snapshot, events} each frame. We mirror
+// the snapshot into the sim globals (render.js reads them) and replay the events. Gameplay
+// input and phase changes are forwarded to the worker. `phase` is MAIN-owned in menus and
+// the in-game QUIT overlay, WORKER-owned during gameplay (playing/dying/levelDone/...).
+// ================================================================
+// _wsend forwards a command to the worker; with no worker (headless test harness / any
+// browser lacking Worker) it applies the command in-process via simCommand so the sim, which
+// is driven directly there, still receives input.
+function _wsend(m){
+    // Online duels run the sim in-process on BOTH ends (prediction + replay need
+    // synchronous access): commands go straight to it, not to the worker (which
+    // idles on its menu phase until the session ends).
+    if(inGame && typeof netGameActive==='function' && netGameActive() && typeof simCommand==='function'){ simCommand(m); return; }
+    if(_worker) _worker.postMessage(m); else if(typeof simCommand==='function') simCommand(m);
+}
+function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x10: !!cfg.x10 }; }
+function beginGame(){
+    if(typeof netEndSession==='function') netEndSession();   // a lingering online session must never eat the local game's frames
+    inGame = true; Snd.musicFadeOut(0.5);   // menu music fades out; READY/GO runs silent
+    const seed = (Math.random()*0x100000000)>>>0;   // main-made so the score submission can carry it
+    if(typeof netNoteGameStart === 'function') netNoteGameStart(seed);
+    _wsend({ t:'start', seed, bestScore:bestScore() });
+}
+// Online duel entry (called by net.js when the DataChannel opens on both ends).
+// BOTH clients start the same deterministic sim from the shared seed and run it
+// locally (in-process). There is no host and no authority: each side sends only
+// its own tick-stamped inputs and rolls back to re-simulate when a late one
+// arrives (net.js). The shared seed + start_pts keep both timelines in step.
+function beginOnlineDuel(seed, hosting){
+    inGame = true; Snd.musicFadeOut(0.5);
+    _musicHoldUntil = performance.now() + 1500;
+    showHUD(true);
+    _fbAcc = 0;                                   // fresh in-process tick accumulator
+    _sfxQ.length = 0; _fxQ.length = 0;            // queued against the OLD tick counter: startDuel rewinds it to 0
+    _wsend({ t:'startDuel', seed:seed>>>0, x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10 });   // routes to the LOCAL sim on both ends
+    if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
+}
+// Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
+// just start the deterministic duel sim in-process.
+function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
+    _wsend({ t:'startDuel', seed:null, x10:!!cfg.x10 }); }
+function _initWorker(){
+    // Headless harness has no Worker: _wsend falls back to simCommand and the tests drive
+    // update() directly. In a browser a construction failure (file://, CSP) must not throw
+    // here -- that would abort the bootstrap below and leave a black screen instead of at
+    // least reaching the console error.
+    if(typeof Worker==='undefined') return;
+    try { _worker = new Worker('js/sim-worker.js'); }
+    catch(err){ console.error('sim worker failed to start -- using the in-process sim', err); return; }
+    _worker.onerror = (err)=>{
+        console.error('sim worker error', (err&&err.message)||err);
+        // Some engines do not throw at construction (e.g. the file:// script load fails
+        // ASYNCHRONOUSLY): a worker that errors before delivering a single frame is dead.
+        // Demote to the in-process sim instead of hanging forever.
+        if(_workerFrames===0) _demoteWorker();
+    };
+    // Coalesce: keep only the LATEST snapshot (an old one has nothing the new one lacks)
+    // but accumulate ALL events (none may be lost). loop() applies once per drawn frame,
+    // so main-thread work is bounded by the draw rate, not the worker's post rate.
+    _worker.onmessage = (e)=>{
+        const m = e.data; if(m.t!=='frame') return;
+        _workerFrames++;
+        _lastWorkerFrameAt = performance.now();   // watchdog heartbeat
+        // bars travel only when changed: when a pending snapshot that carried them is
+        // overwritten by one that did not, carry them forward or they would be lost.
+        if(_pendingSnap && _pendingSnap.bars != null && m.snap.bars == null) m.snap.bars = _pendingSnap.bars;
+        _pendingSnap = m.snap;
+        if(m.events && m.events.length) _pendingEvents.push.apply(_pendingEvents, m.events);
+    };
+    _wsend({ t:'cfg', cfg:_cfgForWorker() });
+    _wsend({ t:'run', on:true });
+    _lastWorkerFrameAt = performance.now();   // arm the watchdog: a worker that never posts at all is also a stall
+}
+let _pendingSnap = null, _pendingEvents = [];
+let _fbAcc = 0;   // fixed-timestep accumulator for the no-worker in-process fallback
+let _lastWorkerFrameAt = 0, _stallLogged = false, _workerFrames = 0;
+// Kill a worker that never became functional and let loop()'s !_worker path take over.
+function _demoteWorker(){
+    console.error('sim worker unusable -- falling back to the in-process sim');
+    try { if(_worker) _worker.terminate(); } catch(e) {}
+    _worker = null; _pendingSnap = null; _pendingEvents = [];
+}
+// Inverse of the worker's transport packing (see sim-worker.js _post -- keep in sync).
+// The snake unpacks into a pooled object array so 60Hz unpacking does not churn the GC;
+// null bars mean "unchanged", so the current mirror array is kept.
+const _mirrorSnake = [];
+function _unpackSnap(snap){
+    const sf = snap.snake;
+    if (sf instanceof Int16Array) {
+        const n = sf.length / 2;
+        if (_mirrorSnake.length > n) _mirrorSnake.length = n;
+        for (let i = 0; i < n; i++) {
+            const o = _mirrorSnake[i] || (_mirrorSnake[i] = {x:0,y:0});
+            o.x = sf[i*2]; o.y = sf[i*2+1];
+        }
+        snap.snake = _mirrorSnake;
+    }
+    const bf = snap.bars;
+    if (bf == null) snap.bars = bars;   // unchanged since last post: keep the mirror's copy
+    else if (bf instanceof Int16Array) {
+        const arr = [];
+        for (let i = 0; i < bf.length; i += 6) {
+            const o = { x: bf[i], y: bf[i+1], fragile: !!bf[i+2] };
+            if (bf[i+3]) o.paired = true;
+            if (bf[i+4] >= 0) o.pairEnd = { x: bf[i+4], y: bf[i+5] };
+            arr.push(o);
+        }
+        snap.bars = arr;   // rare (level begin / crush): a fresh array is fine
+    }
+}
+function applyWorkerFrame(){
+    if(!_pendingSnap) return;
+    if(typeof netGameActive === 'function' && netGameActive()){   // online: the in-process sim owns the state
+        _pendingSnap = null; _pendingEvents.length = 0; return;
+    }
+    _unpackSnap(_pendingSnap);
+    const snapRef = _pendingSnap;
+    const mainOwnsPhase = !inGame || phase==='quitConfirm';   // menus + quit overlay: main keeps its phase
+    const keep = phase, snapPhase = _pendingSnap.phase;
+    simApply(_pendingSnap); _pendingSnap = null;
+    if(mainOwnsPhase){
+        // The quit overlay does not freeze the game -- if it ENDS behind the dialog
+        // (game over / duel decided), the terminal phase takes precedence and closes it.
+        if(keep==='quitConfirm' && (snapPhase==='nameEntry'||snapPhase==='duelOver')){ phase = snapPhase; Snd.duck(false); }
+        else phase = keep;
+    }
+    const evRef = _pendingEvents.length ? _pendingEvents : null;
+    if(evRef){ simEvents = evRef; _pendingEvents = []; drainSimEvents(); }
+}
+// Watchdog: the worker posts continuously except while paused (it freezes the clock then).
+// If frames stop arriving anywhere else, the sim thread is dead/stalled -- say so instead
+// of silently freezing, so it is debuggable in the field.
+function checkWorkerStall(now){
+    if(!_worker || phase==='paused' || phase==='duelPaused' || phase==='quitConfirm') { _stallLogged=false; return; }
+    if(_lastWorkerFrameAt && now-_lastWorkerFrameAt > 3000){
+        // Never delivered a single frame -> the worker is dead (silently blocked script
+        // load etc.): demote to the in-process sim rather than stalling forever.
+        if(_workerFrames===0){ _demoteWorker(); return; }
+        if(!_stallLogged){ console.error('sim worker: no frame for 3s -- simulation stalled'); _stallLogged=true; }
+        fpsEl.textContent='SIM STALL';
+    } else _stallLogged=false;
+}
+_initWorker();
 
 if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(() => requestAnimationFrame(loop));
 else requestAnimationFrame(loop);
@@ -639,7 +883,7 @@ requestAnimationFrame(syncLandscapePanels);
 // last-width guard stops the font->reflow->resize feedback from looping.
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
 const _pmq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: portrait)') : { matches:false };
-let _lastCw = -1, _dbgEl = null;
+let _lastCw = -1, _layoutDbg = {};
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
@@ -669,18 +913,11 @@ function layout() {
             scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);
         }
         const cw = CW * scale;
-        // On-screen canvas properties overlay: toggled from the DEBUGGING menu (Show Canvas
-        // Props). (#debug in the URL only *enables* debug mode, it does not show this.)
-        if (_showCanvasProps) {
-            if (!_dbgEl) { _dbgEl = document.createElement('div'); _dbgEl.className='debug-overlay'; document.body.appendChild(_dbgEl); }
-            _dbgEl.style.display = 'block';
-            _dbgEl.textContent =
-                'v'+_swVersion+'  dbg'+(cfg.debug||0)+'  dpr'+(window.devicePixelRatio||1)+'  ['+mode+']'+
-                '\nscreen '+screen.width+'x'+screen.height+'  '+((window.innerWidth>window.innerHeight)?'landscape':'portrait')+
-                '\nvp '+Math.round(vpW)+'x'+Math.round(vpH)+
-                '\nused '+Math.round(wW)+'x'+Math.round(wH)+'  m'+m+'  scale '+scale.toFixed(3)+
-                '\ncanvas css '+Math.round(cw)+'x'+Math.round(CH*scale)+'  native '+canvas.width+'x'+canvas.height;
-        } else if (_dbgEl) { _dbgEl.style.display = 'none'; }
+        // Cache the layout numbers for the graphics debug quadrant (bottom-left,
+        // built by updateNetDebugOverlay). Layout runs on resize; the overlay reads
+        // this + the live FPS. (#debug in the URL only enables debug mode; the
+        // DEBUG LEVEL 2+ gate on drawing lives in the overlay.)
+        _layoutDbg = { mode, vpW, vpH, wW, wH, m, scale, cw, ch: CH*scale };
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
         canvas.style.width = cw + 'px';
@@ -725,8 +962,22 @@ if ('caches' in window) {
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         const wasControlled = !!navigator.serviceWorker.controller;
+        // Update checks: once per minute, plus immediately on regaining focus when
+        // the last check is over a minute old -- but ONLY on screens where the
+        // resulting auto-reload (controllerchange below) cannot kill anything:
+        // never during a run, a name entry, or an online lobby/handshake.
+        const _updSafe = new Set(['splash']);   // update checks (and their auto-reload) happen ONLY on the splash
+        let _lastUpd = Date.now();
+        const _updCheck = (reg) => {
+            if (Date.now() - _lastUpd < 60000) return;
+            if (!navigator.onLine || inGame || !_updSafe.has(phase)) return;
+            _lastUpd = Date.now();
+            reg.update().catch(() => {});
+        };
         navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
             if (navigator.onLine) reg.update().catch(() => {});
+            if (typeof setInterval === 'function') setInterval(() => _updCheck(reg), 60000);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) _updCheck(reg); });
         });
         let _reloading = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {

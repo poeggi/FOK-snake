@@ -1,16 +1,25 @@
-# FOK Snake -- Server Implementation Prompt
+# FOK Snake -- Server Implementation Prompt (HISTORICAL)
 
-> Paste this as the task brief for the agent/session that builds the server.
-> It is a spec, not a to-do; confirm the OPEN DECISIONS before writing code.
+> STATUS: superseded. This was the original brief for BUILDING a server, written
+> before both the realtime redesign and the server that actually shipped. The
+> server now EXISTS in production; its authoritative, current contract is
+> `FOK-server` `docs/API.md` (api v3) -- treat that as the source of truth, not
+> this file. Kept for the design history and the still-valid parts (anti-cheat,
+> news, FOK transfer, admin). Where this file and API.md disagree, API.md wins.
+>
+> What actually shipped, in short: a PHP backend over plain HTTP (client polls;
+> no WebSocket). Realtime duels are DETERMINISTIC ROLLBACK, inputs-only on the
+> wire, no host and no authority -- see the netcode note below and the client's
+> `js/net.js`. Transport is WebRTC DataChannel (unreliable+unordered) peer-to-
+> peer, STUN only, with an app-level `relay.php` passthrough as the NAT fallback.
 
 ## Context
 
-FOK Snake is an offline-first browser game (client repo at `D:\repos\FOK`,
-GitHub `poeggi/FOK`, work branch `multiplayer`). The client sim was refactored
-onto a deterministic fixed 60 Hz tick clock (commit a5844f7): `simTick` is the
-single source of truth, `LEVEL_CFG` holds ticks-per-move, and all game state is
-a pure function of `simTick`. This determinism is the foundation the server
-should exploit (see Anti-cheat).
+FOK Snake is an offline-first browser game (client repo `poeggi/FOK-snake`). The
+client sim is a deterministic fixed 60 Hz tick clock: `simTick` is the single
+source of truth, `LEVEL_CFG` holds ticks-per-move, and all game state is a pure
+function of `simTick` and a seeded PRNG. This determinism is the foundation both
+the highscore anti-cheat and the duel rollback netcode are built on.
 
 Build a small, single-deploy backend that serves the FOK client. It must never
 break the offline single-player experience: every server feature is additive and
@@ -26,12 +35,17 @@ degrades gracefully when the server is unreachable.
      page 1 and online scores on page 2, loaded lazily.
 
 2. **1:1 multiplayer coordinator**
-   - Matchmaking: pair two waiting players into a duel session.
-   - Facilitate real-time state exchange between the two peers during a duel.
-   - Honor the client's netcode constraints: tick-based sync, dynamic cadence
-     `netInterval = max(4, ticksPerMove)` (4-15 Hz), **binary bit-packed**
-     payloads, and a hard **1280-byte** per-update cap (one un-fragmented
-     IPv6-MTU datagram). See OPEN DECISION on P2P vs relay.
+   - Matchmaking: pair two waiting players into a duel session; issue a shared
+     seed and a shared `start_pts` (tick 0 of the common timeline).
+   - Broker the connection (invite/accept signaling) and provide a relay
+     passthrough for peers that cannot reach each other directly.
+   - NETCODE (as shipped, replacing the old tick-broadcast model): the duel is
+     DETERMINISTIC ROLLBACK. Each client runs the same seeded sim locally and
+     sends only its own tick-stamped INPUTS; there is no host and no authority,
+     so the server never sees or validates game state -- it relays opaque packets.
+     A late input rewinds and re-simulates locally. Packets stay under one
+     IPv6-MTU datagram (~1200 bytes). The server's realtime job is signaling +
+     relay only.
 
 3. **FOK transfer (in-game currency)**
    - Each player has a unique, stable ID. Allow player A to send FOK to player B.
@@ -71,7 +85,8 @@ verifies the resulting score/level. Reject on mismatch.
 
 - **Offline-safe**: client works fully without the server; online features fail
   soft.
-- **Realtime budget**: 1280 bytes/update including all overhead; binary, not JSON.
+- **Realtime budget**: one un-fragmented IPv6-MTU datagram per update (~1200
+  bytes incl. overhead). Only inputs cross the wire (rollback is client-side).
 - **Scale**: modest (hobby scale); prefer operational simplicity over horizontal
   scale. Single binary + single-file DB is fine to start.
 - **Portability of the sim**: server and client run the identical sim code.
@@ -85,7 +100,13 @@ verifies the resulting score/level. Reject on mismatch.
 - Persistence: SQLite to start (single file, sufficient), Postgres if it grows.
 - Realtime duel transport: **WebRTC DataChannel** (unreliable+unordered) with
   the server as **matchmaking + signaling broker**; keeps true P2P and maps the
-  1280-byte cap to one UDP datagram. Server-relay fallback for NAT failures.
+  cap to one UDP datagram. Server-relay fallback for NAT failures.
+
+> AS SHIPPED, this differed: the server is PHP over plain HTTP (clients poll for
+> signaling, e.g. `signal.php`; there is no WebSocket), persistence is SQLite,
+> and the NAT fallback is an app-level `relay.php` passthrough rather than TURN
+> (STUN only). The recommendations below are the original proposal, not the
+> as-built system; see `FOK-server` `docs/API.md`.
 - Admin UI: server-rendered or a tiny SPA; session-cookie auth; bcrypt/argon2
   password hashing; no third-party auth needed at this scale.
 
@@ -99,6 +120,8 @@ verifies the resulting score/level. Reject on mismatch.
 - `POST /api/fok/transfer` -> `{ toId, amount }` (authenticated).
 - `GET  /api/fok/balance`.
 - `WS   /rt` -> matchmaking, duel signaling, in-duel relay fallback.
+  (As shipped: HTTP polling instead -- signal/start/match/time/relay endpoints;
+  see `FOK-server` `docs/API.md` for the real surface.)
 - `*    /admin/**` -> login-gated admin app + stats + news/leaderboard mgmt.
 
 ## Deliverables

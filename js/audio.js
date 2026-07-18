@@ -8,6 +8,10 @@ const Snd = (() => {
     let _musicVol = 1.0, _sfxVol = 0.5;
     let _currentTrack = null, _channelState = [];
     let _musicIsPaused = false, _bgSuspended = false;
+    let _seekProvider = null;   // () => shared-clock seek (s) for the current track, or null offline. Set by the game.
+    let _musicAnchor = null;    // {t0, seekAbs} last seek: audio-time t0 was placed at shared position seekAbs. Read-only drift probe.
+    let _duckF = 1;   // quit-dialog duck: persistent gain modifier every music/sfx writer applies
+    let _noiseBuf = null;   // crash-noise buffer, generated once and shared (see sfx 'crash')
 
     // -- Music data ------------------------------------------------
     const SEQ = {
@@ -119,15 +123,29 @@ const Snd = (() => {
     // Idempotent: safe to call from both paths on the same resume event.
     function _onContextRunning() {
         if (!_ctx || !_currentTrack || !SEQ[_currentTrack] || _musicIsPaused) return;
+        const now = _ctx.currentTime;
+        // Re-anchor to the shared clock on the running transition. A pin made while the
+        // context was suspended (autoplay gate on a fresh start, or a background) is stale
+        // by however long we waited to resume -- the frozen audio clock did not advance
+        // while the shared clock did. Re-seeking here is what lets a just-started client
+        // line up with an already-running reference; without it the offset was whatever
+        // the suspend happened to last, so it looked random from one restart to the next.
+        const seekSec = _seekProvider ? _seekProvider(_currentTrack) : null;
+        if (seekSec != null && seekSec > 0)
+            _channelState = _seekChannels(SEQ[_currentTrack], 60 / SEQ[_currentTrack].bpm, now, seekSec);
         if (_bgSuspended) {
             _bgSuspended = false;
-            _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-            _musicGain.gain.setValueAtTime(0, _ctx.currentTime);
-            _musicGain.gain.setTargetAtTime(0.5 * _musicVol, _ctx.currentTime, 0.02);
+            // Drop the pre-suspend look-ahead so queued notes do not replay in a burst on
+            // return (the other half of the metallic artifact). If there was no shared clock
+            // to re-seek to, at least schedule fresh from now. Same idea as musicGameUnpause.
+            if (!(seekSec > 0)) _channelState.forEach(s => { s.nextNote = now + 0.05; });
+            _musicGain.gain.cancelScheduledValues(now);
+            _musicGain.gain.setValueAtTime(0, now);
+            _musicGain.gain.setTargetAtTime(0.5 * _musicVol * _duckF, now, 0.02);
             return;
         }
-        _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _musicGain.gain.setValueAtTime(0.5 * _musicVol, _ctx.currentTime);
+        _musicGain.gain.cancelScheduledValues(now);
+        _musicGain.gain.setValueAtTime(0.5 * _musicVol * _duckF, now);
     }
 
     // -- Audio context lifecycle -----------------------------------
@@ -137,7 +155,12 @@ const Snd = (() => {
         // Fire-and-forget resume() knocks on the OS audio door immediately.
         if (_ctx) return;
         try {
-            _ctx = new (window.AudioContext || window.webkitAudioContext)();
+            // latencyHint 1/60s: ask for output buffering matched to the engine tick. It is a
+            // HINT -- the browser clamps to what the hardware supports (often more on mobile),
+            // so it minimises/steadies latency rather than guaranteeing 16.7ms. Older engines
+            // reject a constructor arg, so fall back to the no-arg form.
+            const _AC = window.AudioContext || window.webkitAudioContext;
+            try { _ctx = new _AC({ latencyHint: 1/60 }); } catch(_e) { _ctx = new _AC(); }
             _musicGain = _ctx.createGain(); _musicGain.gain.value = 0; _musicGain.connect(_ctx.destination);
             _sfxGain = _ctx.createGain(); _sfxGain.gain.value = 0.5 *_sfxVol; _sfxGain.connect(_ctx.destination);
             _ctx.onstatechange = () => { if (_ctx.state === 'running') _onContextRunning(); };
@@ -167,25 +190,66 @@ const Snd = (() => {
     }
 
     function audioBgSuspend() {
-        // Called when app goes to background. Fades music first to avoid click on hard suspend.
+        // App backgrounding. On iOS the OS INTERRUPTS the context almost immediately, and any
+        // notes still in the 400ms scheduler look-ahead then render against a frozen sample
+        // clock -- the "metallic" artifact. So freeze FAST: hard-mute (an imperceptible click
+        // as we leave the app) and suspend SYNCHRONOUSLY in the same event, before the OS gets
+        // there. The old path (0.02s fade + a 120ms delayed suspend) lost that race and glitched.
         if (!_ctx || _ctx.state !== 'running') return;
-        _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _musicGain.gain.setTargetAtTime(0, _ctx.currentTime, 0.02);
         _bgSuspended = true;
-        setTimeout(() => { try { if (_ctx && _ctx.state === 'running') _ctx.suspend(); } catch(e) {} }, 120);
+        try { _musicGain.gain.cancelScheduledValues(_ctx.currentTime); _musicGain.gain.setValueAtTime(0, _ctx.currentTime); } catch(e) {}
+        try { _ctx.suspend(); } catch(e) {}
     }
 
     // -- Music -----------------------------------------------------
 
-    function musicPlay(trackId) {
-        // Start a music track. No-op if already playing this track.
+    // Per-channel start state for a track seeked to `seekSec` (a shared-clock position
+    // in seconds), anchored at audio-clock `t0`. The sound we schedule at t0 is not
+    // HEARD until the context's output latency later, so we seek that much further
+    // ahead -- otherwise the SOUND lands late by one buffer. Both clients walk the same
+    // notes with the same (compensated) seek, so both land on the same pos.
+    function _seekChannels(seq, spb, t0, seekSec) {
+        const outLat = _ctx.outputLatency || _ctx.baseLatency || 0;
+        const seek = seekSec > 0 ? seekSec + outLat : 0;
+        // Record the anchor for musicDriftMs (measurement only -- does NOT change scheduling):
+        // "audio-time t0 carries shared position seek". seek already includes the outLat
+        // compensation, so a fresh anchor reads ~0 drift against getOutputTimestamp.
+        _musicAnchor = seek > 0 ? { t0, seekAbs: seek } : null;
+        return seq.channels.map(ch => {
+            const loop = ch.notes.reduce((a, n) => a + n[1] * spb, 0);
+            if (!(seek > 0) || !(loop > 0)) return { pos: 0, nextNote: t0 };
+            let into = seek % loop, pos = 0;
+            while (into >= ch.notes[pos][1] * spb) { into -= ch.notes[pos][1] * spb; pos = (pos + 1) % ch.notes.length; }
+            return { pos, nextNote: t0 + (ch.notes[pos][1] * spb - into) };
+        });
+    }
+    function musicPlay(trackId, fadeSec, seekSec) {
+        // Start a music track. No-op if already playing this track. With fadeSec the
+        // gain ramps from its current level to nominal (menu entry uses 0.5s); without,
+        // it is set instantly (game track punches in at GO).
+        //
+        // seekSec starts the track where it WOULD be had it begun that long ago. An
+        // online duel passes the time since the shared start PTS, so both clients drop
+        // into the same bar of the same loop no matter which one got there first --
+        // the track is a function of the shared clock, not of when this tab happened
+        // to reach the phase. Both sides then hear one performance, not two.
+        //
+        // If the context is still SUSPENDED here (autoplay gate), t0 = currentTime is
+        // frozen and this pin goes stale by however long we wait to resume -- so
+        // _onContextRunning re-seeks from the live provider on the running transition.
         if (!_ctx || _currentTrack === trackId) return;
         _currentTrack = trackId; _musicIsPaused = false;
-        _channelState = SEQ[trackId].channels.map(() => ({ pos: 0, nextNote: _ctx.currentTime }));
+        const _seq = SEQ[trackId], _spb = 60 / _seq.bpm, _t0 = _ctx.currentTime;
+        _channelState = _seekChannels(_seq, _spb, _t0, seekSec);
         // Set gain unconditionally: on a suspended AC, setValueAtTime at the frozen
         // currentTime applies immediately when AC resumes and time advances past it.
         _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-        _musicGain.gain.setValueAtTime(0.5 *_musicVol, _ctx.currentTime);
+        if (fadeSec) {
+            _musicGain.gain.setValueAtTime(Math.max(0, _musicGain.gain.value || 0), _ctx.currentTime);
+            _musicGain.gain.setTargetAtTime(0.5 * _musicVol * _duckF, _ctx.currentTime, fadeSec / 3);
+        } else {
+            _musicGain.gain.setValueAtTime(0.5 * _musicVol * _duckF, _ctx.currentTime);
+        }
     }
 
     function musicStop() {
@@ -193,6 +257,30 @@ const Snd = (() => {
         if (_ctx && _musicGain) {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
             _musicGain.gain.setTargetAtTime(0, _ctx.currentTime, 0.04);
+        }
+    }
+
+    function duck(on) {
+        // Temporary 50% level on music + sfx (the in-game quit dialog). Music is only
+        // touched while actually playing (a paused track stays silent); restore returns
+        // both to their configured volumes. _duckF is applied by EVERY gain writer, so
+        // re-raises (e.g. a respawn's munpause behind the dialog) cannot bypass it.
+        _duckF = on ? 0.5 : 1;
+        if (!_ctx) return;
+        if (_musicGain && _currentTrack && !_musicIsPaused) {
+            _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
+            _musicGain.gain.setTargetAtTime(0.5 * _musicVol * _duckF, _ctx.currentTime, 0.04);
+        }
+        if (_sfxGain) _sfxGain.gain.setTargetAtTime(0.5 * _sfxVol * _duckF, _ctx.currentTime, 0.04);
+    }
+
+    function musicFadeOut(sec) {
+        // Like musicStop, but with a caller-chosen fade to silence (~sec). Already-
+        // scheduled notes (0.4s lookahead) decay under the envelope -- no clicks.
+        _currentTrack = null; _musicIsPaused = false;
+        if (_ctx && _musicGain) {
+            _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
+            _musicGain.gain.setTargetAtTime(0, _ctx.currentTime, (sec || 0.5) / 3);
         }
     }
 
@@ -209,14 +297,14 @@ const Snd = (() => {
         const now = _ctx.currentTime;
         _channelState.forEach(s => { s.nextNote = now + 0.05; });
         _musicGain.gain.cancelScheduledValues(now);
-        _musicGain.gain.setValueAtTime(0.5 *_musicVol, now);
+        _musicGain.gain.setValueAtTime(0.5 * _musicVol * _duckF, now);
     }
 
     function musicSetVolume(vol) {
         _musicVol = vol;
         if (_musicGain && _currentTrack && !_musicIsPaused && _ctx && _ctx.state === 'running') {
             _musicGain.gain.cancelScheduledValues(_ctx.currentTime);
-            _musicGain.gain.setValueAtTime(0.5 *vol, _ctx.currentTime);
+            _musicGain.gain.setValueAtTime(0.5 * vol * _duckF, _ctx.currentTime);
         }
     }
 
@@ -238,10 +326,28 @@ const Snd = (() => {
 
     // -- SFX -------------------------------------------------------
 
-    function sfxPlay(type, on = true) {
+    function ctxTime(){ return _ctx ? _ctx.currentTime : null; }
+    // DEBUG (read-only): signed ms the music scheduler LEADS(+)/LAGS(-) the shared clock.
+    // getOutputTimestamp() gives the audio-clock time (contextTime) of the sample AT THE
+    // SPEAKER right now, correlated to real time -- so this measures the true acoustic
+    // position without an outputLatency estimate or a currentTime/Date.now cross-sample.
+    // The scheduler PROMISED audio-time contextTime is heard when the shared clock reads
+    // seekAbs + (contextTime - t0); reality is it is heard NOW (shared = provider). The gap
+    // is the drift. null when unsynced, no track, or the API is unavailable (iOS/suspended).
+    function musicDriftMs(){
+        if(!_ctx || !_currentTrack || !_musicAnchor || !_seekProvider) return null;
+        const ts = _ctx.getOutputTimestamp ? _ctx.getOutputTimestamp() : null;
+        if(!ts || !(ts.contextTime > 0)) return null;
+        const sNow = _seekProvider(_currentTrack);
+        if(sNow == null || !(sNow > 0)) return null;
+        return (_musicAnchor.seekAbs + (ts.contextTime - _musicAnchor.t0) - sNow) * 1000;
+    }
+    function sfxPlay(type, on = true, when = null) {
         // on: pass cfg.music to gate playback on the sound-enabled setting.
+        // when: absolute AudioContext time to start at (sample-accurate, per the
+        // server contract's WebAudio scheduling rule); absent/past = immediately.
         if (!_ctx || !on) return;
-        const now = _ctx.currentTime;
+        const now = (when != null && when > _ctx.currentTime) ? when : _ctx.currentTime;
         const t = (f, w, d, tp) => _tone(f, w, d, tp || 'square', 0.42, 0, _sfxGain);
         if (type === 'eat') {
             t(880, now, 0.05); t(1108, now + 0.055, 0.06);
@@ -273,16 +379,30 @@ const Snd = (() => {
             [523,659,784,1047,1319,1568,2093].forEach((f,i) => t(f, now + i*0.055, 0.24));
             [784,988,1319,1568].forEach(f => t(f, now + 0.45, 0.36, 'triangle'));
         } else if (type === 'coin') {
-            t(1568, now, 0.03); t(1319, now + 0.045, 0.04); t(880, now + 0.095, 0.08);
+            // Deliberately not mute-gated (it doubles as the audio-unlock ping in the
+            // splash-exit gesture) -- so stay discreet: half the normal sfx amplitude.
+            const tq = (f, w, d) => _tone(f, w, d, 'square', 0.21, 0, _sfxGain);
+            tq(1568, now, 0.03); tq(1319, now + 0.045, 0.04); tq(880, now + 0.095, 0.08);
         } else if (type === 'fail') {
             t(330, now, 0.05, 'sawtooth'); t(196, now + 0.06, 0.12, 'sawtooth');
         } else if (type === 'crash') {
             const dur = 0.22;
-            const buf = _ctx.createBuffer(1, Math.ceil(_ctx.sampleRate * dur), _ctx.sampleRate);
-            const data = buf.getChannelData(0);
-            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+            if (!_noiseBuf) {
+                // Generated once from a FIXED-SEED PRNG (mulberry32, like the sim) into a fixed
+                // 44100Hz buffer: the noise is bit-identical on every platform and run; the
+                // BufferSource resamples to the device rate on playback.
+                _noiseBuf = _ctx.createBuffer(1, Math.ceil(44100 * dur), 44100);
+                const data = _noiseBuf.getChannelData(0);
+                let s = 0xC0FFEE | 0;
+                for (let i = 0; i < data.length; i++) {
+                    s = (s + 0x6D2B79F5) | 0;
+                    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+                    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                    data[i] = (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
+                }
+            }
             const src = _ctx.createBufferSource();
-            src.buffer = buf;
+            src.buffer = _noiseBuf;
             const flt = _ctx.createBiquadFilter();
             flt.type = 'bandpass'; flt.frequency.value = 380; flt.Q.value = 0.6;
             const g = _ctx.createGain();
@@ -298,7 +418,7 @@ const Snd = (() => {
 
     function sfxSetVolume(vol) {
         _sfxVol = vol;
-        if (_sfxGain) _sfxGain.gain.value = 0.5 *vol;
+        if (_sfxGain) _sfxGain.gain.value = 0.5 * vol * _duckF;
     }
 
     // Build graph and prime pipeline at load. AC is suspended; prewarm oscillators
@@ -308,8 +428,9 @@ const Snd = (() => {
 
     return {
         audioInit, audioResume, audioBgSuspend,
-        musicPlay, musicStop, musicGamePause, musicGameUnpause, musicSetVolume, musicTick,
-        sfxPlay, sfxSetVolume,
+        musicPlay, musicStop, musicFadeOut, duck, musicGamePause, musicGameUnpause, musicSetVolume, musicTick,
+        setMusicSeekProvider: (fn) => { _seekProvider = fn; },
+        sfxPlay, sfxSetVolume, ctxTime, musicDriftMs,
         audioPreWarm,
     };
 })();

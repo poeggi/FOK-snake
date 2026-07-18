@@ -23,18 +23,20 @@ body {
     overflow: hidden;
 }
 #hud {
-    display: flex; flex-direction: column; gap: 3px;
+    /* 2x2 grid: cells a b / c d. Classic: LIVES SCORE / GEMS LEVEL. Duel: P1-lives
+       P2-lives / P1-score P2-score (what each cell SHOWS is swapped by updateHUD). */
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
     width: var(--stage-w, min(600px, 100vw));
     font-size: var(--fs-menu-px, 14px); letter-spacing: 0;
     opacity: 1; transition: opacity 0.15s;
     order: 1;
 }
 #hud.hidden { opacity: 0; pointer-events: none; }
-.hud-row { display: flex; justify-content: space-between; width: 100%; }
+.hud-cell { display: inline-flex; align-items: center; gap: 4px; }
+#hud-b, #hud-d { justify-self: end; }
 .hl { color: #888; } .hv { color: #7fff7f; }
-#lives-group { display: inline-flex; align-items: center; gap: 4px; }
-/* Lives hearts canvas: never let flex shrink it (that squeezed the hearts); size off the HUD scale, keep pixels crisp. */
-#hv-lives-cv { flex: none; image-rendering: pixelated; height: var(--lives-h-px, 12px); width: auto; }
+/* Lives hearts canvases: never let flex shrink them; size off the HUD scale, crisp pixels. */
+#hv-lives-cv, #hv-lives2-cv { flex: none; image-rendering: pixelated; height: var(--lives-h-px, 12px); width: auto; }
 .hv-wrap { display: inline-flex; align-items: baseline; }
 #topbar {
     width: var(--stage-w, min(600px, 100vw));
@@ -82,8 +84,13 @@ body[data-phase="splash"] #btn-mute, body[data-phase="splash"] #fps-el { opacity
 body.cursor-hidden #c { cursor: none; }
 /* JS-created utilities: the file-input for Restore, and the DEBUGGING canvas-props overlay. */
 .util-hidden { display: none; }
-.debug-overlay { position: fixed; top: 0; left: 0; z-index: 99999; background: #000d; color: #0f0;
-    font: 11px monospace; padding: 3px; white-space: pre; pointer-events: none; }
+.debug-overlay { position: fixed; z-index: 99999; background: #000d; color: #0f0;
+    font: 11px monospace; padding: 3px; white-space: pre; pointer-events: none; max-width: 49vw; }
+/* Four corner docks (DEBUG LEVEL 2+): TL=network, TR=timing, BL=graphics, BR=sim/game. */
+.dbg-tl { top: 0; left: 0;  text-align: left; }
+.dbg-tr { top: 0; right: 0; text-align: right; }
+.dbg-bl { bottom: 0; left: 0;  text-align: left; }
+.dbg-br { bottom: 0; right: 0; text-align: right; }
 #gamepad { display: none; order: 4; }
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {
@@ -117,13 +124,20 @@ body.cursor-hidden #c { cursor: none; }
     #gamepad { margin-top: 16px; }
 }
 @media (pointer: coarse) and (orientation: landscape) {
-    body { flex-direction: row; align-items: stretch; padding: 0 3px; gap: 6px; }
+    /* Edge padding + panel gap scale with the chrome like the side panel does -- a fixed
+       3px reads as zero next to a scaled-up panel on big tablets (phones stay ~3px). */
+    body { flex-direction: row; align-items: stretch;
+           padding: 0 calc(3px * var(--ui-scale, 1)); gap: calc(6px * var(--ui-scale, 1)); }
     #wrap { flex: 1 1 0; }   /* landscape fits the canvas into the flex region between panels */
-    /* Side info panel -- 100px; floats left or right depending on handed setting */
+    /* Side info panel -- floats left or right depending on handed setting. Width scales
+       with the chrome (--ui-scale): its content (mute/FPS boxes, HUD text) is sized off
+       the canvas scale, so a fixed panel would be outgrown on large tablets and clip at
+       the screen edge. layout()'s ResizeObserver re-converges the canvas fit after the
+       panel width settles (the _lastCw guard stops the feedback loop). */
     #side-info {
         display: flex; flex-direction: column; justify-content: flex-start;
         align-items: flex-end; gap: 14px;
-        width: 100px; flex-shrink: 0; overflow: hidden;
+        width: calc(100px * var(--ui-scale, 1)); flex-shrink: 0; overflow: hidden;
         position: relative;
         padding: 16px 0;
     }
@@ -131,10 +145,12 @@ body.cursor-hidden #c { cursor: none; }
     #fps-el { position: absolute; bottom: 16px; right: 0; left: auto; transform: none; }
     body.lefty #side-info { align-items: flex-start; }
     body.lefty #fps-el { right: auto; left: 0; }
-    #hud { width: auto; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: auto; }
-    .hud-row { flex-direction: column; gap: 8px; }
-    .hud-row > span { display: flex; flex-direction: column; gap: 2px; }
-    #lives-group { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 3px; }
+    /* Single column, label above value. Cell order = DOM order (P1 lives topmost);
+       in duel the P2-lives cell is pushed to the bottom, per design. */
+    #hud { width: auto; grid-template-columns: 1fr; gap: 8px; justify-items: start; margin-top: auto; margin-bottom: auto; }
+    .hud-cell { flex-direction: column; align-items: flex-start; gap: 2px; }
+    #hud-b, #hud-d { justify-self: start; }
+    body[data-phase^="duel"] #hud-b { order: 9; }
     /* Right controls panel -- ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
     #gamepad {
         display: flex; flex-direction: column; flex-shrink: 0;
@@ -151,6 +167,15 @@ body.cursor-hidden #c { cursor: none; }
     body.lefty #wrap      { order: 2; }
     body.lefty #side-info { order: 3; }
 }
+/* On-screen-keyboard bridge: focused programmatically when name entry opens, its
+   keystrokes drive the canvas field. It must stay INSIDE the viewport -- iOS Safari
+   shows the keyboard for an off-screen input (left:-9999px) but silently refuses to
+   deliver keystrokes to it. So it lives centred but fully transparent, with a 16px
+   font so focusing it never triggers the iOS auto-zoom. */
 #name-inp {
-    position: fixed; left: -9999px; top: 15%; width: 1px; height: 1px; opacity: 0;
+    position: fixed; top: 50%; left: 50%; width: 2px; height: 2px;
+    opacity: 0; font-size: 16px; border: 0; padding: 0; margin: 0;
+    background: transparent; color: transparent; caret-color: transparent;
+    z-index: -1;   /* behind the canvas: never intercepts taps, focus is programmatic */
 }
+

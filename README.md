@@ -12,7 +12,7 @@ Snake FOK Edition uses classic Snake as its starting point, but it is as much a 
 | ![Lucky Gem](docs/gem-lucky.svg) | **Lucky Gem** | Rare gold gem. Worth 10x or 20x the normal score bonus. |
 | ![Epic Gem](docs/gem-epic.svg) | **Epic Gem** | Extremely rare rainbow gem. Worth 80x or 160x the normal score bonus. |
 | ![Gouranga Gem](docs/gem-gouranga.svg) | **Gouranga Bonus** | Seven orange gems appear in a line -- horizontal, vertical, or diagonal. Collect all seven in sequence for escalating x2, x4, x6 ... score multipliers. Hare Krishna. |
-| ![Power Pellet](docs/power-pellet.svg) | **Power Pellet** | A Pac-Man nod: a two-tone capsule that turns your head into a chomping Pac-Man while it lasts. All barricades turn fragile for 5.5 seconds -- crash through everything. Barricades blink as the effect fades. |
+| ![Power Pellet](docs/power-pellet.svg) | **Power Pellet** | A Pac-Man nod, from level 2 onward: a two-tone capsule that turns your head into a chomping Pac-Man while it lasts. For 6 seconds all barricades turn fragile AND flee across the board like frightened ghosts -- crash through everything. They blink as the effect fades and freeze wherever they are when it ends. |
 | ![Time Crystal](docs/time-crystal.svg) | **Time Crystal** | Rare icy pickup from level 6 onward (chance rises with the level). Collect it to slow the whole board to level-3 speed for 30 seconds; a field-wide shimmer marks the warp and blinks as it runs out. |
 | ![1UP Heart](docs/heart.svg) | **1UP Heart** | Extra life. Appears once during levels 4-6 and occasionally on respawn in later levels. Blinks before disappearing. Can push you above the starting three lives. |
 | ![Barricade](docs/barricade.svg) | **Barricade** | Solid orange brick. Colliding costs a life. Grows in number each level. |
@@ -52,7 +52,7 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - Screen wraps on all edges
 - 3 lives - barricades and self-collision cost one life each
 - 10 gems per level; collect in fewest steps for a x2 score bonus
-- Lucky gems (x10/x20) and Epic gems (x100/x200) spawn randomly
+- Lucky gems (x10/x20) and Epic gems (x80/x160) spawn randomly
 - Time Crystal (level 6+): slows the board to level-3 speed for 30 seconds
 - Pause with Space; quit-to-menu confirm on Escape
 - Two music styles: NEW (3-channel chiptune) and CLASSIC (2-channel retro) - switchable in Settings
@@ -68,17 +68,31 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - Scrolling credits screen
 - Mobile-friendly responsive layout with portrait and landscape support
 - Installable PWA (works offline)
+- 1:1 duels, local (one keyboard) and ONLINE: classic level progression for two,
+  power pellets that turn the opponent's snake into food, PLAY AGAIN rematches
+- Friend system: 32-bit player ID, friend-link QR code (SHOW MY ID) and an
+  in-app camera QR scanner with a dependency-free decoder (ADD FRIEND)
+- Online matchmaking via FOK-server (invite friends with live online status and
+  latency, quick match) -- game traffic itself runs peer-to-peer over a WebRTC
+  DataChannel with symmetric prediction netcode (controls feel local on both
+  ends; the host is the quiet 30 Hz authority, peers reconcile by replay)
+- Global online top-100 high scores, submitted with the deterministic replay
+  material (seed + tick-stamped inputs) for server-side validation
+- STRICTLY OFFLINE setting: with it ON (or no network at all) the game never
+  sends a single request -- every online feature is strictly additive
+- Debug tools: on-canvas + network overlays (PTS clock, latency, prediction
+  offsets), broad JSON debug export, worst-frame FPS recorder
 
-## In development
+## Server
 
-This repo (FOK-snake) is where the online features are being built:
-
-- Global online high-score board, validated server-side by deterministic replay
-- 1v1 online snake duels
-
-To make these possible the engine was refactored onto a deterministic
-fixed-timestep 60 Hz tick clock. See docs/multiplayer-server-prompt.md for the
-server design brief.
+Online features speak to FOK-server (https://fok-server.poggensee.it, repo
+`poeggi/FOK-server`); the client-facing contract is that repo's docs/API.md --
+matchmaking, signaling, PTS time sync, latency reporting and global scores.
+This client requires an **API v3** server (PTS time sync + epoch-keyed starts);
+an older server will not matchmake or start duels. Single-player is unaffected.
+The engine runs on a deterministic fixed-timestep 60 Hz tick clock, which is
+what makes prediction netcode and replay-validated scores possible.
+(docs/multiplayer-server-prompt.md is the historical design brief.)
 
 ## Setup (GitHub Pages)
 

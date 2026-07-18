@@ -1,6 +1,7 @@
 // ================================================================
 // STATIC GAME DATA
 // ================================================================
+const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
@@ -9,7 +10,6 @@ const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 // simulation is deterministic and can later be driven by a server/peer clock.
 const SIM_HZ = 60, TICK_MS = 1000 / SIM_HZ;   // 60 Hz base tick (16.67 ms per tick)
 const T = t => t * TICK_MS;                    // ticks -> sim-clock ms
-const TICKS_PER_NET = 4;                       // network cadence: 1 packet / 4 ticks = 15 Hz
 const MAX_CATCHUP = 5;                          // max sim ticks simulated per rendered frame
 const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
 // Speaker split into two 8x8 icons drawn side by side (total 32x16px at CS=2)
@@ -30,7 +30,25 @@ const DEATH_DUR = T(54), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge) and one or more pages, each a headline + body lines ('' = blank
 // gap line). Pages are flipped with LEFT/RIGHT; the newest goes first.
-const ANNOUNCEMENT = { id:'v1.5.0', pages:[
+const ANNOUNCEMENT = { id:'v2.0.0', pages:[
+    { headline:'MULTIPLAYER IS HERE!', lines:[
+        'NEW IN v2.0:',
+        'Play 1:1 ONLINE against a friend',
+        'Add friends by ID or QR scan',
+        'Quick match with a stranger',
+        'Global high scores',
+        '',
+        'Both snakes, one world -',
+        'no lag, no host, no waiting.' ] },
+    { headline:'AND A LITTLE CHAOS', lines:[
+        'ALSO IN v2.0:',
+        'SPEED ROUNDS: 1 in 20 levels',
+        'runs at level 10 pace',
+        'Power pellet? Eat your rival!',
+        'Tail = they slow. Head = gone.',
+        '',
+        '1:1 menu > PLAY ONLINE',
+        'Bring a friend.' ] },
     { headline:'MYSTERY BOXES ARRIVE!', lines:[
         'NEW IN v1.5:',
         'MYSTERY BOXES in the shop!',
@@ -66,6 +84,7 @@ const SPLASHES = [
 ];
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-!?.,\'"#$@&()[]:+ \r';
+const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs are hex)
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
 // boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2
@@ -230,3 +249,65 @@ const ADMIN_BOX_EVERY = 750; // ADMIN box appears once every N shop opens
 // The GRAND FINALE: a free box that surfaces once every ADMIN_BOX_EVERY shop opens and
 // hands out the ADMIN CROWN -- the one cosmetic you cannot buy or win any other way.
 const ADMIN_BOX = { id:'admin', name:'ADMIN', color:'#ff4455', price:0 };
+
+// ================================================================
+// PRESENTATION DATA  (palettes, particle tables, credits text)
+// ================================================================
+const CONFETTI_COLS = ['#ff4444','#ff9900','#ffff44','#44ff88','#44ccff','#aa44ff','#ff44cc','#ffffff'];
+const RARITY_COLS = { common:'#9aa0a6', rare:'#4a90d9', epic:'#9b59b6', legendary:'#f1c40f' };
+const FIREWORK_COLS = ['#ff4040','#ff9000','#ffee00','#40ff80','#00ccff','#cc44ff','#ff44aa','#ffffff'];
+// Splash coin sparks: [dx, dy, speed, fade] per spark; speed >= 90 renders bright.
+const SPARK_DEFS = [
+    [-0.55,-1,72,1],    [0,-1,80,1],       [0.55,-1,72,1],
+    [-1.1,-0.85,58,1],  [1.1,-0.85,58,1],
+    [-0.25,-1,95,1],    [0.25,-1,95,1],
+    [-1.4,-0.45,44,1],  [1.4,-0.45,44,1],
+    [-0.8,-0.65,65,1],  [0.8,-0.65,65,1],
+    [0,-0.75,108,1],
+    [-0.4,-0.9,118,0.7],[0.4,-0.9,118,0.7],
+    [-1.6,-0.2,38,0.8], [1.6,-0.2,38,0.8],
+    [-0.15,-1,135,0.5], [0.15,-1,135,0.5],
+    [-1.0,-1.0,50,0.9], [1.0,-1.0,50,0.9],
+    [-0.7,-0.3,30,0.7], [0.7,-0.3,30,0.7],
+    [-0.75,-0.75,62,1], [0.75,-0.75,62,1],
+    [-1.2,-0.5,48,0.9], [1.2,-0.5,48,0.9],
+    [-0.35,-0.95,85,1], [0.35,-0.95,85,1],
+    [-1.8,0.1,33,0.8],  [1.8,0.1,33,0.8],
+    [-1.3,-0.15,40,0.8],[1.3,-0.15,40,0.8],
+    [-0.6,-0.5,55,0.9], [0.6,-0.5,55,0.9],
+    [-0.1,-1,148,0.4],  [0.1,-1,148,0.4],
+    [0,-1,125,0.6],
+    [-0.5,-0.85,102,0.7],[0.5,-0.85,102,0.7],
+    [-0.2,-0.98,92,0.8], [0.2,-0.98,92,0.8],
+];
+const SPARK_COLS  = ['#ffd700','#ffcc00','#ffff66','#ff9900','#fff5a0','#ffaa00'];
+const SPARK_BRIGHT = ['#ffffff','#ffffd0','#ffffe8'];
+const CRED = [
+    ['gap',50],['title','S N A K E'],['sub','F O K   E D I T I O N'],['gap',60],
+    ['hdr','--- CREDITS ---'],['gap',40],
+    ['hdr','CONCEPTUAL SUPERVISION'],['txt','Jonas and Kai P.'],['gap',28],
+    ['hdr','CREATIVE DIRECTION'],['txt','Jonas P.'],['gap',28],
+    ['hdr','CREATIVE ADVISOR'],['txt','Maartje P.'],['gap',28],
+    ['hdr','EXECUTIVE PRODUCTION'],['txt','Kai P.'],['gap',28],
+    ['hdr','LEAD DEVELOPER'],['txt','Claude P.'],['sml','(types at 10,000 tokens/min)'],['gap',28],
+    ['hdr','MUSICAL COMPOSITION'],['txt','Claude M.'],['sml','(self-taught. mostly.)'],['gap',28],
+    ['hdr','VISUAL ARTS'],['txt','Claude V.'],['sml','(knows exactly 7 colors)'],['gap',28],
+    ['hdr','QUALITY ASSURANCE'],['txt','The Snake'],['sml','(mortality rate: 100%)'],['gap',28],
+    ['hdr','LEVEL DESIGN'],['txt','A Random Number Generator'],['sml','(certified barricade placement specialist)'],['gap',28],
+    ['hdr','GEM MANAGEMENT'],['txt','The Gems'],['sml','(eaten without consent since 2026)'],['gap',28],
+    ['hdr','STRUCTURAL ENGINEERING'],['txt','The Barricades'],['sml','(load-bearing. do not touch.)'],['gap',28],
+    ['hdr','SNAKE PSYCHOLOGY'],['txt','Dr. S. Nake, PhD'],['sml','(expert in self-collision trauma)'],['gap',28],
+    ['hdr','CATERING'],['txt','The Break Room Snake'],['sml','(she also ate the coffee machine)'],['gap',40],
+    ['hdr','SPECIAL THANKS'],
+    ['txt','Everyone who played.'],['txt','Everyone who crashed into themselves.'],
+    ['txt','The one person who reached Level 10.'],['txt','You know who you are.'],['gap',40],
+    ['hdr','IN MEMORIAM'],
+    ['txt','All snakes lost in beta testing.'],['txt','They knew the risks.'],['gap',28],
+    ['txt','No animals were harmed...'],['sml','(the snakes beg to differ)'],['gap',50],
+    ['coins'],['sml','(spend them in the SHOP)'],['gap',50],
+    ['sml','(C) 2026 FOK STUDIOS'],['sml','All wrongs reserved.'],
+    ['gap',30],['txt','PRESS A TO EXIT'],['gap',280],
+    ['gap',420],
+    ['secret','No Eastereggs here ;)'],['gap',240],
+];
+const CRED_H = { title:54, sub:22, hdr:28, txt:26, sml:24, coins:28, secret:28 };

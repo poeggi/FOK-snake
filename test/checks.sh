@@ -10,8 +10,17 @@ for f in js/*.js; do node --check "$f"; done
 echo "[checks] ASCII-only sources"
 node test/check-ascii.js
 
-echo "[checks] headless smoke test"
-node test/smoke.js
+echo "[checks] worker snapshot mirrors all sim state"
+node test/check-snapshot.js
+
+echo "[checks] no main-thread writes to worker-owned state"
+node test/check-ownership.js
+
+echo "[checks] headless smoke tests"
+for t in test/smoke-*.js; do node "$t"; done
+
+echo "[checks] two-client handshake (invite / connect over a signal bus)"
+node test/net-handshake.js
 
 echo "[checks] sim invariants"
 node test/sim-invariants.js
@@ -27,3 +36,10 @@ node test/sim-purity.js
 
 echo "[checks] mystery-box economy"
 node test/box-odds.js
+
+# On-demand deep profile (NOT part of the default run): bash test/checks.sh --profile
+# Walks every screen + both game modes + hot helpers and flags items above 8ms.
+if [ "${1:-}" = "--profile" ]; then
+    echo "[checks] performance profile"
+    node test/profile.js
+fi

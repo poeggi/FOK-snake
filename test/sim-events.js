@@ -6,7 +6,7 @@
 // inline (old) or via drainSimEvents() (new). Run: node test/sim-events.js
 const { runTest } = require('./harness');
 
-const GOLDEN = '3294a58c:86';
+const GOLDEN = '77bbd51e:86';   // re-recorded: bonus/fireworks/crush visuals joined sfx on the fixed 2-tick delay queue (same 86 effects, delayed 2 ticks so a rollback can cancel them)
 
 const driver = `
 ;(function(){
@@ -45,6 +45,8 @@ const driver = `
       if(phase==='playing') steer();
       update();
       if(typeof drainSimEvents==='function') drainSimEvents();   // new path once it exists
+      if(typeof flushSfxQ==='function') flushSfxQ();               // sfx queue: fixed 2-tick delay
+      if(typeof flushFxQ==='function') flushFxQ();                 // visual queue (bonus/fw/crush): same 2-tick delay
       if(phase==='nameEntry') break;
     }
     const str = rec.join('|');

@@ -14,4 +14,12 @@
     --fs-menu:    14px;   /* menu items, HUD readout, prompts     */
     --fs-hint:    10px;   /* hints, body copy, FPS, gamepad btns  */
     --ui-scale: 1;        /* JS keeps this = canvasDisplayWidth / 600 */
+    /* Text-glow scale (canvas shadowBlur radii, unitless) -- SINGLE SOURCE OF TRUTH,
+       read into the JS GLOW object (js/text.js). Glow COLOUR always follows the text
+       colour at the call site; only the radius is standardized here. */
+    --glow-faint:  1;     /* unselected menu items                 */
+    --glow-text:  12;     /* selected items, secondary overlay text */
+    --glow-title: 16;     /* screen headlines                       */
+    --glow-big:   24;     /* JUMBO overlays: PAUSED/GO!/game over   */
+    --glow-hero:  38;     /* the SNAKE display logo, hero banners   */
 }

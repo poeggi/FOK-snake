@@ -10,7 +10,7 @@ const driver = `
   try {
     // Consistent, large sim clock so handleKey clears the 200ms post-splash guard
     // and phaseAt-based transitions still advance.
-    _splashLeftAt=0; _splashKeyHeld=false;
+    _splashLeftAt=-1e9; _splashKeyHeld=false;
     simTick=20000; simNow=simTick*TICK_MS;
 
     const inBounds = c => c.x>=0 && c.x<COLS && c.y>=0 && c.y<ROWS;

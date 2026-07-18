@@ -21,14 +21,10 @@
         <span id="fps-el"></span>
     </div>
     <div id="hud" class="hidden">
-        <div class="hud-row">
-            <span><span class="hl">LEVEL </span><span class="hv" id="hv-lvl">1</span></span>
-            <span id="lives-group"><span class="hl">LIVES </span><canvas id="hv-lives-cv" width="64" height="12"></canvas></span>
-        </div>
-        <div class="hud-row">
-            <span><span class="hl">GEMS </span><span class="hv-wrap"><span class="hv" id="hv-gems">0</span><span class="hl">/10</span></span></span>
-            <span><span class="hl">SCORE </span><span class="hv" id="hv-score">0</span></span>
-        </div>
+        <span class="hud-cell" id="hud-a"><span class="hl" id="hud-a-l">LIVES </span><canvas id="hv-lives-cv" width="64" height="12"></canvas></span>
+        <span class="hud-cell" id="hud-b"><span class="hl" id="hud-b-l">SCORE </span><span class="hv" id="hv-score">0</span><canvas id="hv-lives2-cv" width="64" height="12" class="util-hidden"></canvas></span>
+        <span class="hud-cell" id="hud-c"><span class="hl" id="hud-c-l">GEMS </span><span class="hv-wrap"><span class="hv" id="hv-gems">0</span><span class="hl" id="hv-gmax">/10</span></span></span>
+        <span class="hud-cell" id="hud-d"><span class="hl" id="hud-d-l">LEVEL </span><span class="hv" id="hv-lvl">1</span></span>
     </div>
 </div>
 <div id="wrap">
@@ -41,13 +37,18 @@
     <button class="sbtn" id="btn-pause">||</button>
     <button class="sbtn" id="btn-start">START</button>
 </div>
-<input id="name-inp" type="text" autocomplete="off" autocorrect="off"
+<input id="name-inp" type="text" tabindex="-1" autocomplete="off" autocorrect="off"
        autocapitalize="characters" spellcheck="false" inputmode="text">
 <script src="js/assets.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/storage.js"></script>
 <script src="js/game.js"></script>
+<script src="js/text.js"></script>
+<script src="js/qr.js"></script>
 <script src="js/render.js"></script>
+<script src="js/screens.js"></script>
 <script src="js/input.js"></script>
+<script src="js/net.js"></script>
 </body>
 </html>

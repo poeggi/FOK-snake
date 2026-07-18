@@ -4,7 +4,6 @@
     "description": "Classic Snake game - 10 levels, arcade music, high scores, FOKoins",
     "start_url": "./",
     "display": "standalone",
-    "orientation": "portrait",
     "background_color": "#07070e",
     "theme_color": "#07070e",
     "icons": [
