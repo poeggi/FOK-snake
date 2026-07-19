@@ -580,6 +580,26 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // Move cooldown: if the finger pauses longer than SWIPE_COOLDOWN (40ms) the last
 // direction is cleared, so the next move uses the first-move threshold and re-moves
 // after a pause feel as responsive as the first direction.
+// ---- Focus-grab clicks: a click whose job is giving this WINDOW focus (two
+// side-by-side clients) must not also operate the game. Detection, not a blanket
+// first-click filter: such a gesture starts with the window still BLURRED -- its
+// focus event lands mid-gesture, between mousedown and click. Exactly that gesture
+// is swallowed at the capture stage; a click in an already-focused window, or one
+// made any time after an alt-tab focus, is never touched.
+let _winBlurred = (typeof document !== 'undefined' && document.hasFocus) ? !document.hasFocus() : false;
+let _grabUntil = 0;
+if(typeof window !== 'undefined' && window.addEventListener){
+    window.addEventListener('blur',  () => { _winBlurred = true; });
+    window.addEventListener('focus', () => { if(_winBlurred){ _winBlurred = false; _grabUntil = performance.now() + 300; } });
+    for(const _t of ['pointerdown', 'mousedown', 'click']){
+        document.addEventListener(_t, e => {
+            if(!_winBlurred && performance.now() >= _grabUntil) return;
+            e.stopPropagation(); e.preventDefault();
+            if(_t === 'pointerdown' || _t === 'mousedown') _grabUntil = performance.now() + 300;   // a held press keeps the grab alive to its click
+            else _grabUntil = 0;                                                                  // the click ends the gesture: everything after is intentional
+        }, { capture: true });
+    }
+}
 // Splash: any pointer or touch on canvas exits splash and unlocks audio
 // Mouse/stylus only: touch devices use the touchstart handler below so that
 // triggerSplashExit() calls Snd.audioResume() inside a touchstart, not a pointerdown
