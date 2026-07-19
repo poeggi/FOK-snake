@@ -1572,7 +1572,7 @@ function _netHandleMsg(txt){
     // matters: unlike the server -- which IS the clock and can be zero-tolerance --
     // we compare against our ESTIMATE of it, so a strict test would discard honest
     // packets. Discards are visible, never silent.
-    if(typeof m.pts === 'number'){
+    if(typeof m.pts === 'number' && Number.isFinite(m.pts)){   // NaN/Infinity would slip the future-gate below and poison the lag stats
         const mine = netPts();
         if(mine != null){
             // MEASURE FIRST, judge second. The samples worth seeing most are exactly the

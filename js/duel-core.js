@@ -201,7 +201,11 @@ const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORIT
                              // simTick) still parks here until we reach its tick.
 var _rbHashQ = [];           // [{tk, h}] peer hashes waiting for their tick to settle
 function _rbCheckHash(m){
-    _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f:(m.f && typeof m.f === 'object') ? m.f : null });
+    // Keep ONLY the known field-hash keys: a hostile peer could otherwise ship an `f`
+    // with tens of thousands of keys that the mismatch diff (_rbHashSettle) then iterates.
+    let f = null;
+    if(m.f && typeof m.f === 'object'){ f = {}; for(const k of RB_HASH_DUEL) if(k in m.f) f[k] = m.f[k]; }
+    _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f });
     if(_rbHashQ.length > 8) _rbHashQ.shift();
 }
 // Called each tick: compare whatever has settled and is still inside the ring.
@@ -268,8 +272,12 @@ function _rbSendState(t, sn){
     if(j.length > NET_PKT_MAX){ _rbDbg.stbig = (_rbDbg.stbig|0) + 1; return; }
     _netSend(o, j);
 }
+// A snake cannot exceed the board (COLS*ROWS cells = 2 ints each); a peer claiming more
+// is malformed/hostile -- reject rather than adopt a giant array the sim then clones and
+// hashes every tick. Applies to both the per-owner 'st' and the resync's packed snakes.
+function _rbCellsSane(flat){ return Array.isArray(flat) && flat.length <= 2 * COLS * ROWS; }
 function _rbCheckState(m){
-    if(typeof m.tk !== 'number' || typeof m.i !== 'number' || !Array.isArray(m.s)) return;
+    if(typeof m.tk !== 'number' || typeof m.i !== 'number' || !_rbCellsSane(m.s)) return;
     _rbStateQ.push({ tk:_rbFromWire(m.tk), i:m.i|0, s:m.s, gd:m.gd|0, gem:m.gem, rng:m.rng,
                      pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma });
     if(_rbStateQ.length > 8) _rbStateQ.shift();
@@ -308,6 +316,8 @@ function _rbApplyResync(m){
     // rng, winner -- the one path that bypasses the per-owner 'st' ownership guard.
     if(netMyIndex() !== 1) return;
     if(!players || !m || !m.p0 || !m.p1) return;
+    if(!_rbCellsSane(m.p0.s) || !_rbCellsSane(m.p1.s)) return;   // reject a resync with an over-board snake
+    if(Array.isArray(m.bars) && m.bars.length > COLS * ROWS) return;
     const T = _rbFromWire(m.tk);
     const unpackInto = (pk, into) => {
         const s = []; for(let k = 0; k + 1 < pk.s.length; k += 2) s.push({ x:pk.s[k]|0, y:pk.s[k+1]|0 });
@@ -362,7 +372,10 @@ function _rbStateSettle(){
             // the correction lands seamlessly (no visible jump).
             let changed = false;
             if(!_rbCellsEqual(e.snap.players[q.i].snake, q.s)){ e.snap.players[q.i].snake = cells; changed = true; }
-            if(q.gd > (e.snap.gemsDone|0)){                 // gems/items follow the PRNG: the more advanced world wins
+            // gems/items follow the PRNG: the more advanced world wins -- but only by a
+            // PLAUSIBLE margin. An unbounded gd (e.g. 0x7fffffff) would let a peer forge the
+            // lead and dictate the shared gem/RNG state; one st cycle is at most a level or two.
+            if(q.gd > (e.snap.gemsDone|0) && q.gd <= (e.snap.gemsDone|0) + 30){
                 e.snap.gemsDone = q.gd; e.snap.gem = q.gem; e.snap._rngState = q.rng;
                 e.snap.powerPellet = q.pp; e.snap.powerPelletAt = q.ppa;
                 e.snap._powerMode = q.pm; e.snap._powerModeAt = q.pma;
@@ -523,6 +536,9 @@ function _rbPeerSteppedSince(pi, tk){
 // deliberately unreliable).
 function _netPeerInput(m){
     if(!netGameActive() || !inGame || !Array.isArray(m.l)) return;
+    // An honest peer sends at most RB_REDUNDANCY records; a hostile one could pack tens of
+    // thousands into one `l` (each an unbounded _rbLog append + a re-sim cost). Cap it.
+    if(m.l.length > RB_REDUNDANCY){ _rbDbg.drop++; return; }
     // Every packet -- including the idle keepalive -- carries the sender's own tick, so
     // read the offset HERE. Reading it per-record only updated while the peer was
     // actively steering, because a redundant record continues past it: the number then
