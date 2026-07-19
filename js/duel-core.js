@@ -44,8 +44,9 @@ const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the
                              // entry and re-sims at most one extra tick -- a sub-microsecond tick
                              // against a full clone saved on every other tick.
 const RB_DEPTH = RB_RING * RB_SNAP_EVERY;   // rewind window in TICKS (~1067ms at 60Hz)
-const RB_FUTURE = 16;        // an input authored more than one heartbeat (16 ticks) ahead of us is not
-                             // honest -- treat it as a connection problem and refuse it
+const RB_FUTURE = 32;        // honest inputs are authored up to a GAME tick ahead (dir stamps its
+                             // effective boundary, simTick + _gDue <= gPer) plus start-time skew;
+                             // beyond half a second ahead is a connection problem -- refuse it
 var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
 var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
 var _rbSeq = 0;              // our outgoing input sequence
