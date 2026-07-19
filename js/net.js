@@ -1680,6 +1680,18 @@ function netTickTarget(){
     }
     return t;
 }
+// The CONTINUOUS tick position on the shared clock (netTickTarget without the floor),
+// for the fractional-phase steer: both clients trim toward firing each tick at the
+// MIDDLE of its wall-time window, so neither is systematically the early one. Same
+// bad-origin guard as the integer target.
+function netTickTargetF(){
+    const s = _netSess;
+    if(!s || !s.game || !inGame || !s.startPts) return null;
+    const p = netPts();
+    if(p == null) return null;
+    const ft = (p - s.startPts) / TICK_MS;
+    return Math.abs(ft - simTick) > 600 ? null : ft;
+}
 // ---- role queries + the two game-loop hooks (called from game.js / input.js) ----
 function netGameActive(){ return !!(_netSess && _netSess.game); }
 // NOT authority -- purely "which snake is mine". Both clients run the same sim.

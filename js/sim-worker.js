@@ -136,7 +136,16 @@ function _step() {
         const d = tgt === null ? 0 : tgt - simTick;
         if (tgt !== null && Math.abs(d) <= 120 && ran < MAX_CATCHUP) {
             if (d > 1) { netTickPre(); update(); ran++; }
-            else if (d <= -1 && (++_dcHold & 31) === 0) _acc = Math.max(-TICK_MS, _acc - TICK_MS);   // ahead by even one: drain it (behind-by-one is the floored target's natural phase)
+            else {
+                // FRACTIONAL-PHASE steer: both clients trim toward firing each tick at
+                // the MIDDLE of its shared-clock window (a fixed convention, no
+                // negotiation), so neither is systematically the early one. Bounded
+                // trim on a free-running accumulator: it can shift ticks, never stall them.
+                const ft = (Date.now() + _dcOfs - _dcStartPts) / TICK_MS;
+                let e = ft - simTick - 0.5;
+                if (e > 1) e = 1; else if (e < -1) e = -1;
+                _acc += Math.max(-0.5, Math.min(0.5, e * 0.05 * TICK_MS));
+            }
         }
         if (simEvents.length) drainSimEvents();
     }

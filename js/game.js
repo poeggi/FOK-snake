@@ -757,11 +757,16 @@ function loop(rafNow) {
                 // simTick at a standstill until wall time reaches it, input piling up in
                 // dirQueue with nothing to step it. A correction that can zero the tick
                 // rate is not a correction. This one converges at ~90% speed.
-                // AHEAD by even one: drain it. Behind-by-one is the natural resting
-                // phase of a floored target; ahead is pure accumulator drift, and a
-                // client idling a tick ahead reads every peer input late -- the
-                // needless-rollback source.
-                else if(_d <= -1 && (++_clkHold & 7) === 0) _fbAcc = Math.max(-TICK_MS, _fbAcc - TICK_MS);
+                // FRACTIONAL-PHASE steer (see sim-worker.js: same rule, per-frame gain):
+                // trim toward the mid-window firing moment both clients agree on.
+                else {
+                    const _ft = (typeof netTickTargetF === 'function') ? netTickTargetF() : null;
+                    if(_ft !== null){
+                        let _e = _ft - simTick - 0.5;
+                        if(_e > 1) _e = 1; else if(_e < -1) _e = -1;
+                        _fbAcc += Math.max(-1, Math.min(1, _e * 0.15 * TICK_MS));
+                    }
+                }
             }
             if(simEvents.length) drainSimEvents();
             if(dlg){
