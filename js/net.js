@@ -248,7 +248,7 @@ async function _netTimeSync(force, budgetMs){
     // begun at a break can land after play resumed -- and adopting it there would be
     // the very mid-game step we just refused. Drop it; the next break re-anchors.
     if(_netSync.ofs != null && (phase === 'duel' || phase === 'duelPaused') && !_netSyncBreak()) best = null;
-    if(best) _netSync = { ofs: best.ofs, rtt: best.rtt, at: Date.now() };
+    if(best){ _netSync = { ofs: best.ofs, rtt: best.rtt, at: Date.now() }; _netClockPush(); }
     const lat = _netLatFromSamples(rtts);
     if(lat != null) _netLat = { value: Math.max(0, Math.min(60000, lat)), at: Date.now(), pending: true };
 }
@@ -759,6 +759,14 @@ function netLobbyLeave(){
     else _netSeekStop();
 }
 function _netRtcAvail(){ return typeof RTCPeerConnection === 'function'; }
+// ---- worker-hosted duel seam (game.js owns the worker; these guard its absence) ----
+function _netWD(){ return typeof netWorkerDuelOn === 'function' && netWorkerDuelOn(); }
+// Push a fresh clock anchor to the worker's core: its tick target derives from ofs +
+// startPts exactly like netTickTarget does here, so every adoption must reach it.
+function _netClockPush(){
+    if(_netWD() && _netSync.ofs != null)
+        _wDuelSend({ t:'duelClock', ofs:_netSync.ofs, startPts:(_netSess && _netSess.startPts) || null });
+}
 
 // ---- invites ----
 async function _netInviteSend(to){
@@ -1164,7 +1172,7 @@ function _netWire(dc){
         if(s.reconnectAt){   // a rebuilt channel after a mid-game drop: SAME timeline, no re-start
             _netReconnectDone(s);
             _netMarkRecv(s);
-            if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;   // the drop diverged us: host ships a full resync
+            if(netMyIndex() === 0){ if(_netWD()) _wDuelSend({ t:'duelResync' }); else _rbResyncSend = RB_RESYNC_BURST; }   // the drop diverged us: host ships a full resync
             _duelMsg = 'RECONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
             return;
         }
@@ -1317,7 +1325,8 @@ function _netLiveStart(){
         // Deterministic, not a jitter edge case. A keepalive must be comfortably faster
         // than whatever watches for its absence: three per window, so three must
         // genuinely go missing before we say a word.
-        if(nowMs - s.lastSent > NET_KEEPALIVE_MS) _netSend(inGame ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });
+        if(nowMs - s.lastSent > NET_KEEPALIVE_MS)
+            _netSend(inGame && !_netWD() ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });   // worker duel: _rbSent lives in the worker; its 16-tick heartbeat covers repair
         // The re-offer retry is gated off in-game, so drive it from here while reconnecting.
         if(s.reconnecting && s.role === 'host' && _netHs.offerTo === s.peer && _netHs.offerPayload && Date.now() - _netHs.offeredAt > 2000){
             _netHs.offeredAt = Date.now(); _netSignal(s.peer, 'offer', _netHs.offerPayload);
@@ -1459,6 +1468,7 @@ async function _netRequestStart(s, reason){
     if(typeof d.now === 'number' && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
         _netSync = { ofs: d.now + _rtt/2 - Date.now(), rtt: _rtt, at: Date.now() };
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
+    _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
     // 'sched' is the FIRST start and is refused while inGame (a stale one must not
     // restart a running match). Every later start -- rematch, level, respawn -- happens
     // WHILE in game, so it must ride 'rst' or the peer silently ignores it and only
@@ -1542,10 +1552,19 @@ function _netHandleMsg(txt){
             break;
         }
         case 'start': break;   // schedule confirmation; its PTS is already in the past
-        case 'in': _netDbg.hbRx++; if(_netSess) _netPeerInput(m); break;   // both ends apply the other's input
-        case 'h': if(_netSess && inGame) _rbCheckHash(m); break;   // divergence check
-        case 'st': if(_netSess && inGame) _rbCheckState(m); break; // authoritative-state recovery
-        case 'rs': if(_netSess && inGame) _rbApplyResync(m); break; // full-state resync (heavy desync)
+        case 'in': _netDbg.hbRx++;   // both ends apply the other's input
+            if(_netSess){ if(_netWD()) _wDuelSend({ t:'peerPkt', m }); else _netPeerInput(m); }
+            break;
+        case 'h':    // divergence check / state recovery / full resync: the core's packets
+        case 'st':   // -- routed to wherever the core runs (sim worker or in-process)
+        case 'rs':
+            if(_netSess && inGame){
+                if(_netWD()) _wDuelSend({ t:'peerPkt', m });
+                else if(m.t === 'h') _rbCheckHash(m);
+                else if(m.t === 'st') _rbCheckState(m);
+                else _rbApplyResync(m);
+            }
+            break;
         case 'again':
             if(_netSess && _netSess.game){ _netSess.peerAgain = true; _netMaybeRestart(); _uiDirty = true; }
             break;
@@ -1659,6 +1678,7 @@ function _netSessionEnd(msg, remoteBye){
 }
 function _netTeardown(){
     _rbReset();
+    if(typeof _wDuelEnd === 'function') _wDuelEnd();   // worker-hosted core: deactivate + reset there too
     const s = _netSess; _netSess = null;   // nulling this stops the relay loop + liveness (both check _netSess === s)
     if(!s) return;
     if(s.peer) delete _netPeerNet[s.peer];   // the IP hint was for THIS match's path; a new match (or a network switch) gets a fresh one

@@ -15,13 +15,60 @@
 //                    {t:'pause'} / {t:'resume'}
 //   worker -> main : {t:'frame', snap, events}      one post per ticked frame
 //
-// Not wired into the game yet -- the main-thread mirror/input wiring is the final step.
+// Runs everything Worker-capable browsers play: classic, local 1:1, and (with
+// duel-core.js, below) the ONLINE duel's sim + rollback. game.js falls back to an
+// in-process sim only where Worker construction fails (file://, exotic browsers).
 // ============================================================================
-importScripts('assets.js', 'sim.js');
+importScripts('assets.js', 'sim.js', 'duel-core.js');
 
 // sim.js reads cfg.diff / cfg.turbo. Declare it on the worker global so those bare
 // references resolve; the main thread sends the real config via {t:'cfg'} before starting.
 self.cfg = { diff: 1, turbo: true };
+
+// ---- ONLINE DUEL MODE: duel-core.js (rollback ring, input log, hashes, resync)
+// runs HERE, off the render thread. net.js stays on main and forwards wire packets
+// in ({t:'peerPkt'}) and local inputs ({t:'lin'}); the core's outbound packets and
+// debug go back over postMessage. duel-core references a handful of main-thread
+// globals -- this prelude gives them worker-appropriate homes.
+let _dcOn = false, _dcMy = 0, _dcOfs = null, _dcStartPts = 0, _dcHold = 0;
+let _dcEvents = [];   // [{tk, e}] tick-tagged sim events for the main-thread 2-tick queues
+let _dcRewTo = 0;     // deepest rewind since the last post (0 = none): main cancels stale fx
+self.inGame = false;
+self._replaying = false;
+self._uiDirty = false;
+self._sfxQ = []; self._fxQ = [];   // core rewinds filter these locally; _dcRewTo carries the fact to main
+self._duelMsg = ''; self._duelMsgAt = 0;
+self._msgNow = () => performance.now();
+self.netGameActive = () => _dcOn;
+self.netMyIndex = () => _dcMy;
+self.netPts = () => _dcOfs == null ? null : Math.round(Date.now() + _dcOfs);
+self._netSend = (o, pre) => { if(_dcOn) postMessage({ t:'wire', o }); };
+self._netSigLog = (line) => { if(_dcOn) postMessage({ t:'dsig', line }); };
+self._netDbg = { inRx:0, inTx:0, inLog:[], peerTkOfs:0, lag:0, hbRx:0, hbTx:0 };
+// Tick-tag events instead of game.js's direct dispatch: main replays them from its own
+// queues (2-tick cosmetic delay); during a rollback re-sim only the deferred cosmetic
+// kinds re-queue -- the same rule as game.js drainSimEvents under _replaying.
+self.drainSimEvents = () => {
+    for(const e of simEvents){
+        if(_replaying && !(e.t==='sfx'||e.t==='bonus'||e.t==='fw'||e.t==='crush')) continue;
+        _dcEvents.push({ tk: simTick, e });
+    }
+    simEvents.length = 0;
+};
+// Note the deepest rewind per post so main can cancel already-queued cosmetics past it.
+const _dcRbOrig = _rbRollback;
+self._rbRollback = function(toTick){
+    const r = _dcRbOrig(toTick);
+    if(r && (!_dcRewTo || toTick < _dcRewTo)) _dcRewTo = toTick;
+    return r;
+};
+// The shared-clock tick target (net.js netTickTarget's worker twin, same 600-tick
+// origin sanity window). null = steer nowhere, free-run at 60Hz.
+function _dcTarget(){
+    if(!_dcOn || !_dcStartPts || _dcOfs == null) return null;
+    const t = Math.floor((Date.now() + _dcOfs - _dcStartPts) / TICK_MS);
+    return Math.abs(t - simTick) > 600 ? null : t;
+}
 
 let _timer = null, _last = 0, _acc = 0;
 
@@ -52,7 +99,17 @@ function _post() {
             snap.bars = bf;
         } else snap.bars = null;
     }
-    postMessage({ t: 'frame', snap, events: simEvents.splice(0) });
+    const msg = { t: 'frame', snap, events: simEvents.splice(0) };
+    if (_dcOn) {
+        // Duel extras: tick-tagged events, the rewind marker, and the debug counters the
+        // main-thread overlay shows. warnAgo travels as an AGE (worker and main have
+        // different performance.now() origins).
+        msg.duel = { ev: _dcEvents.splice(0), rew: _dcRewTo, rb: _rbDbg,
+                     inRx: _netDbg.inRx, inTx: _netDbg.inTx, inLog: _netDbg.inLog, ptk: _netDbg.peerTkOfs,
+                     warnAgo: performance.now() - _rbWarnAt, msg: _duelMsg, msgW: _duelMsgAt ? performance.now() - _duelMsgAt : -1 };
+        _dcRewTo = 0;
+    }
+    postMessage(msg);
 }
 
 // Self-correcting fixed-timestep loop (workers have no requestAnimationFrame). We poll on a
@@ -64,8 +121,20 @@ function _step() {
     if (dt > 250) dt = 250;            // clamp a long stall (e.g. worker was throttled)
     _acc += dt;
     let ran = 0;
-    while (_acc >= TICK_MS && ran < MAX_CATCHUP) { _acc -= TICK_MS; update(); ran++; }
+    while (_acc >= TICK_MS && ran < MAX_CATCHUP) { _acc -= TICK_MS; if (_dcOn) netTickPre(); update(); ran++; }
     if (ran >= MAX_CATCHUP) _acc = 0;
+    if (_dcOn) {
+        // Online duel: the SHARED CLOCK steers the accumulator (same rules as the
+        // in-process path in game.js loop() -- steer, never gate: behind -> one extra
+        // tick per pass, ahead -> hold a tick back occasionally, way off -> free-run).
+        const tgt = _dcTarget();
+        const d = tgt === null ? 0 : tgt - simTick;
+        if (tgt !== null && Math.abs(d) <= 120 && ran < MAX_CATCHUP) {
+            if (d > 1) { netTickPre(); update(); ran++; }
+            else if (d < -1 && (++_dcHold & 31) === 0) _acc = Math.max(-TICK_MS, _acc - TICK_MS);
+        }
+        if (simEvents.length) drainSimEvents();
+    }
     // Post every tick during gameplay; menus/splash only pace cosmetic animation off
     // simNow, so 30 Hz halves the idle message churn with no visible cost. Any tick that
     // emitted events posts regardless -- events must never wait.
@@ -85,6 +154,37 @@ onmessage = (e) => {
     const m = e.data;
     switch (m.t) {
         case 'cfg':      self.cfg = m.cfg; break;
+        // ---- online duel (net.js on main forwards; duel-core here simulates) ----
+        case 'duelStartNet':   // a (re)start: fresh seed/startPts, rollback state rebased
+            _dcMy = m.my|0; _dcOfs = (m.ofs == null ? null : m.ofs); _dcStartPts = m.startPts || 0;
+            _dcOn = true; self.inGame = true;
+            simCommand({ t:'startDuel', seed:m.seed>>>0, x10:!!m.x10 });
+            _rbReset();                                  // AFTER startDuel: it rewinds simTick, the base reads it
+            _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
+            _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
+            _post(); _run(true);
+            break;
+        case 'duelClock':      // main re-anchored (paired with a new start_pts where required)
+            _dcOfs = m.ofs; if (m.startPts != null) _dcStartPts = m.startPts;
+            break;
+        case 'duelResync':     // transport asks the host to ship the full state (reconnect)
+            if (_dcOn) _rbResyncSend = RB_RESYNC_BURST;
+            break;
+        case 'duelEndNet':
+            _dcOn = false; self.inGame = false; _rbReset(); _dcEvents.length = 0; _dcRewTo = 0;
+            break;
+        case 'peerPkt': {      // a wire packet from the peer (pts-gated on main already)
+            if (!_dcOn) break;
+            const p = m.m;
+            if (p.t === 'in'){ _netDbg.hbRx++; _netPeerInput(p); }
+            else if (p.t === 'h')  _rbCheckHash(p);
+            else if (p.t === 'st') _rbCheckState(p);
+            else if (p.t === 'rs') _rbApplyResync(p);
+            break;
+        }
+        case 'lin':            // local input: assign tick, apply, log, emit the wire record
+            if (_dcOn) netLocalInput(m.k, 0, m.d, !!m.n);
+            break;
         case 'run':      _run(m.on); break;
         case 'pause':    if (phase === 'playing' || phase === 'duel') { simCommand(m); _post(); _run(false); } break;   // freeze the clock so timers don't expire while paused
         case 'resume':   if (phase === 'paused' || phase === 'duelPaused') { simCommand(m); _run(true); } break;        // running loop will _post

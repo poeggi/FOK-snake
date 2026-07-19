@@ -706,7 +706,7 @@ function loop(rafNow) {
     // in-process with the classic fixed-timestep accumulator. Input already reaches it via
     // _wsend's simCommand fallback, so this is the only missing piece. Pause freezes
     // ticking exactly like the worker's stopped clock does.
-    if(!_worker || (typeof netGameActive==='function' && netGameActive())){
+    if(!_worker || (typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn())){
         // Mirror the worker's clock semantics exactly: stopped while paused (including
         // paused behind the quit dialog), running otherwise. The quit dialog must not stop
         // the game -- in worker mode the WORKER's phase stays 'playing' behind the main
@@ -804,7 +804,7 @@ function _wsend(m){
     // Online duels run the sim in-process on BOTH ends (prediction + replay need
     // synchronous access): commands go straight to it, not to the worker (which
     // idles on its menu phase until the session ends).
-    if(inGame && typeof netGameActive==='function' && netGameActive() && typeof simCommand==='function'){ simCommand(m); return; }
+    if(inGame && typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn() && typeof simCommand==='function'){ simCommand(m); return; }
     if(_worker) _worker.postMessage(m); else if(typeof simCommand==='function') simCommand(m);
 }
 function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x10: !!cfg.x10 }; }
@@ -824,8 +824,20 @@ function beginOnlineDuel(seed, hosting){
     inGame = true; Snd.musicFadeOut(0.5);
     _musicHoldUntil = performance.now() + 1500;
     showHUD(true);
-    _fbAcc = 0;                                   // fresh in-process tick accumulator
     _sfxQ.length = 0; _fxQ.length = 0;            // queued against the OLD tick counter: startDuel rewinds it to 0
+    if(_worker){
+        // Worker-hosted duel: sim + rollback run in sim-worker (duel-core there). One
+        // message carries everything the core needs; a rematch/level start simply
+        // sends it again with the fresh seed/startPts.
+        _wDuel = true; _pendingDuel = null;
+        _worker.postMessage({ t:'duelStartNet', seed:seed>>>0,
+            x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10,
+            my: hosting ? 0 : 1,
+            ofs: _netSync ? _netSync.ofs : null,
+            startPts: (_netSess && _netSess.startPts) || 0 });
+        return;
+    }
+    _fbAcc = 0;                                   // fresh in-process tick accumulator
     _wsend({ t:'startDuel', seed:seed>>>0, x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10 });   // routes to the LOCAL sim on both ends
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
 }
@@ -852,7 +864,10 @@ function _initWorker(){
     // but accumulate ALL events (none may be lost). loop() applies once per drawn frame,
     // so main-thread work is bounded by the draw rate, not the worker's post rate.
     _worker.onmessage = (e)=>{
-        const m = e.data; if(m.t!=='frame') return;
+        const m = e.data;
+        if(m.t==='wire'){ if(netWorkerDuelOn() && typeof _netSend==='function') _netSend(m.o); return; }   // duel-core's outbound packet
+        if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
+        if(m.t!=='frame') return;
         _workerFrames++;
         _lastWorkerFrameAt = performance.now();   // watchdog heartbeat
         // bars travel only when changed: when a pending snapshot that carried them is
@@ -860,12 +875,40 @@ function _initWorker(){
         if(_pendingSnap && _pendingSnap.bars != null && m.snap.bars == null) m.snap.bars = _pendingSnap.bars;
         _pendingSnap = m.snap;
         if(m.events && m.events.length) _pendingEvents.push.apply(_pendingEvents, m.events);
+        if(m.duel){
+            // Coalesce like events: accumulate ev, keep the DEEPEST rewind, latest counters.
+            const d = m.duel, p = _pendingDuel;
+            if(p){
+                if(d.ev.length) p.ev.push.apply(p.ev, d.ev);
+                if(d.rew && (!p.rew || d.rew < p.rew)) p.rew = d.rew;
+                p.rb = d.rb; p.inRx = d.inRx; p.inTx = d.inTx; p.inLog = d.inLog;
+                p.ptk = d.ptk; p.warnAgo = d.warnAgo; p.msg = d.msg;
+            } else _pendingDuel = d;
+        }
     };
     _wsend({ t:'cfg', cfg:_cfgForWorker() });
     _wsend({ t:'run', on:true });
     _lastWorkerFrameAt = performance.now();   // arm the watchdog: a worker that never posts at all is also a stall
 }
 let _pendingSnap = null, _pendingEvents = [];
+// ---- worker-hosted ONLINE duel: sim + rollback (duel-core.js) run in sim-worker.js;
+// main keeps transport (net.js), input capture and render. These helpers are the
+// main-side seam net.js and duel-core call through (typeof-guarded there).
+let _wDuel = false, _pendingDuel = null;
+function netWorkerDuelOn(){ return !!(_worker && _wDuel); }
+function _wDuelSend(m){ if(_worker) _worker.postMessage(m); }
+function _wDuelEnd(){ if(_wDuel){ _wDuel = false; _pendingDuel = null; if(_worker) _worker.postMessage({ t:'duelEndNet' }); } }
+// Replay the worker duel's tick-tagged events through the SAME queues the in-process
+// path uses: cosmetics keep their 2-tick delay (and stay cancellable by a rewind),
+// everything else dispatches through the one drainSimEvents switch.
+function _applyDuelEvents(list){
+    for(const r of list){
+        const e = r.e;
+        if(e.t === 'sfx') _sfxQ.push({ tk:r.tk, name:e.name });
+        else if(e.t === 'bonus' || e.t === 'fw' || e.t === 'crush') _fxQ.push({ tk:r.tk, e });
+        else { const hold = simEvents; simEvents = [e]; drainSimEvents(); simEvents = hold; }
+    }
+}
 let _fbAcc = 0;   // fixed-timestep accumulator for the no-worker in-process fallback
 let _lastWorkerFrameAt = 0, _stallLogged = false, _workerFrames = 0;
 // Kill a worker that never became functional and let loop()'s !_worker path take over.
@@ -904,7 +947,7 @@ function _unpackSnap(snap){
 }
 function applyWorkerFrame(){
     if(!_pendingSnap) return;
-    if(typeof netGameActive === 'function' && netGameActive()){   // online: the in-process sim owns the state
+    if(typeof netGameActive === 'function' && netGameActive() && !netWorkerDuelOn()){   // online in-process fallback: that sim owns the state
         _pendingSnap = null; _pendingEvents.length = 0; return;
     }
     _unpackSnap(_pendingSnap);
@@ -920,6 +963,18 @@ function applyWorkerFrame(){
     }
     const evRef = _pendingEvents.length ? _pendingEvents : null;
     if(evRef){ simEvents = evRef; _pendingEvents = []; drainSimEvents(); }
+    if(_pendingDuel){
+        const d = _pendingDuel; _pendingDuel = null;
+        // A rewind first: cancel queued cosmetics past it, THEN queue the re-simmed ones.
+        if(d.rew){ _sfxQ = _sfxQ.filter(q => q.tk <= d.rew); _fxQ = _fxQ.filter(q => q.tk <= d.rew); }
+        if(d.ev && d.ev.length) _applyDuelEvents(d.ev);
+        if(d.rb) _rbDbg = d.rb;                       // overlay mirrors of the worker-side core
+        _netDbg.inRx = d.inRx|0; _netDbg.inTx = d.inTx|0;
+        if(d.inLog) _netDbg.inLog = d.inLog;
+        _netDbg.peerTkOfs = d.ptk || 0;
+        if(typeof d.warnAgo === 'number') _rbWarnAt = performance.now() - d.warnAgo;   // age-based: clocks differ
+        if(d.msg && d.msg !== _duelMsg){ _duelMsg = d.msg; _duelMsgAt = _msgNow(); _uiDirty = true; }
+    }
 }
 // Watchdog: the worker posts continuously except while paused (it freezes the clock then).
 // If frames stop arriving anywhere else, the sim thread is dead/stalled -- say so instead

@@ -1,13 +1,13 @@
 // ============================================================================
 // duel-core.js -- the DETERMINISTIC ROLLBACK CORE of the online 1:1 duel: the
 // snapshot ring, the input log, live-apply vs rewind, hashes, state recovery and
-// the full resync. Split out of net.js so the same code can run in TWO homes:
+// the full resync. Split out of net.js so the same code runs in TWO homes:
+//   - the SIM WORKER (the default wherever Worker exists): sim-worker.js
+//     importScripts this file and drives it off its own clock; net.js forwards
+//     wire packets in ({t:'peerPkt'}) and local inputs ({t:'lin'}), and the
+//     core's sends/debug ride postMessage back out;
 //   - the MAIN thread (no-Worker browsers + the headless test harness), driven
-//     by game.js loop() via netTickPre(), talking to net.js directly -- today's
-//     only mode, byte-identical to when this lived inside net.js;
-//   - the SIM WORKER (planned): sim-worker.js will importScripts this file and
-//     drive it off its own clock, with net.js forwarding wire packets in and
-//     wire sends/debug counters back out over postMessage.
+//     by game.js loop() via netTickPre(), talking to net.js directly.
 // net.js keeps everything transport: sessions, signaling, WebRTC, the clock
 // sync, netDuelWarn/netMyIndex/netTickTarget (they read session state).
 // ============================================================================
@@ -575,6 +575,13 @@ function netLocalInput(kind, p, d, now){
     if(!netGameActive()) return false;
     if(p !== 0) return true;
     if(!inGame) return true;
+    // Worker-hosted duel (main thread only): the core lives in the sim worker, so the
+    // input is forwarded there -- the worker's copy of this function does the applying
+    // and emits the wire record back. In the worker (and in-process) this is undefined.
+    if(typeof netWorkerDuelOn === 'function' && netWorkerDuelOn()){
+        _wDuelSend({ t:'lin', k:kind, d: d ? { x:d.x, y:d.y } : null, n: now ? 1 : 0 });
+        return true;
+    }
     const myP = netMyIndex();
     const tk = simTick + 1;
     const cmd = kind === 'dir' ? { t:'dir', p:myP, dir:{x:d.x,y:d.y} }
