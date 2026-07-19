@@ -1617,9 +1617,9 @@ function netDuelWarn(){
     if(s.reconnecting) return 'RECONNECTING...';
     if(nowMs - _rbWarnAt < NET_WARN_FLASH_MS) return 'CONNECTION LOST';
     // Relay arrivals ride jittered HTTP round trips (~200-400ms one-way), so the p2p
-    // silence bar reads routine gaps as loss; relay warns at a laxer bar that still
-    // sits well under its 3s session kill.
-    if(Date.now() - s.lastRecvWall > (s.relay ? 1500 : RB_WARN_MS) && !(s.relay && nowMs < s.relayGraceUntil)) return 'CONNECTION LOST';
+    // silence bar reads routine gaps as loss; relay warns at DOUBLE the p2p bar
+    // (~1067ms), still well under its 3s session kill.
+    if(Date.now() - s.lastRecvWall > (s.relay ? RB_WARN_MS * 2 : RB_WARN_MS) && !(s.relay && nowMs < s.relayGraceUntil)) return 'CONNECTION LOST';
     return null;
 }
 // Which snake is ours. The offerer is P0 and the answerer P1 -- an index, not a
