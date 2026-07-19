@@ -852,6 +852,12 @@ function beginOnlineDuel(seed, hosting){
     _fbAcc = 0;                                   // fresh in-process tick accumulator
     _wsend({ t:'startDuel', seed:seed>>>0, x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10 });   // routes to the LOCAL sim on both ends
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
+    // Phase is SET at start (see sim-worker duelStartNet): seed the accumulator so
+    // ticks fire mid-window on the shared grid from tick 0.
+    if(typeof netTickTargetF === 'function'){
+        const _ft0 = netTickTargetF();
+        if(_ft0 !== null) _fbAcc = Math.max(-TICK_MS, Math.min(TICK_MS, (_ft0 - simTick - 0.5) * TICK_MS));
+    }
 }
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.

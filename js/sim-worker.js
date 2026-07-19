@@ -176,6 +176,14 @@ onmessage = (e) => {
             _rbReset();                                  // AFTER startDuel: it rewinds simTick, the base reads it
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
             _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
+            // Phase is SET at start, not converged to: seed the accumulator so ticks
+            // fire mid-window on the shared grid from tick 0 (both clients compute the
+            // same seed from startPts; the steer then only maintains against drift).
+            _last = performance.now(); _acc = 0;
+            if (_dcOfs != null && _dcStartPts) {
+                const ft0 = (Date.now() + _dcOfs - _dcStartPts) / TICK_MS;
+                _acc = Math.max(-TICK_MS, Math.min(TICK_MS, (ft0 - simTick - 0.5) * TICK_MS));
+            }
             _post(); _run(true);
             break;
         case 'duelClock':      // main re-anchored (paired with a new start_pts where required)
