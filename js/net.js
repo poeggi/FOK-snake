@@ -1070,6 +1070,15 @@ function _netMkSess(peer, role){
 // performance.now() (and every timer) froze during a screen-off.
 function _netMarkRecv(s){ if(s){ s.lastRecv = performance.now(); s.lastRecvWall = Date.now(); } }
 let _netHiddenAt = 0;   // Date.now() when we last went hidden, for the wake-up away-time
+// ICE candidates get ONE retry on a server 5xx: delivery is one-shot, and a lost
+// candidate silently narrows the paths ICE can pick from for the whole match (the
+// direct-IPv6 route rides exactly one of these). Other signals have their own
+// retry ladders (offer re-send, invite staleness) or are expendable.
+async function _netSignalIce(to, payload){
+    const r = await _netSignal(to, 'ice', payload);
+    if(r && !r.json && r.status >= 500 && typeof setTimeout === 'function')
+        setTimeout(() => { _netSignal(to, 'ice', payload); }, 400);
+}
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
     // TODO(netcode/infra): STUN-only, no TURN. Two phones on CELLULAR IPv6 could not connect P2P
@@ -1079,7 +1088,7 @@ function _netRtcInit(peer, role){
     // this iceServers list at it (also retires the unusable relay.php fallback -- see _netRelayStart).
     const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
     _netSess.pc = pc;
-    pc.onicecandidate = e => { if(e.candidate) _netSignal(peer, 'ice', JSON.stringify(e.candidate)); };
+    pc.onicecandidate = e => { if(e.candidate) _netSignalIce(peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => {
         const s = _netSess;
         if(!s || s.pc !== pc || s.relay) return;   // relay mode: the RTC attempt no longer owns the session
@@ -1398,7 +1407,7 @@ function _netRtcRebuild(s){
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
     const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
     s.pc = pc;
-    pc.onicecandidate = e => { if(e.candidate) _netSignal(s.peer, 'ice', JSON.stringify(e.candidate)); };
+    pc.onicecandidate = e => { if(e.candidate) _netSignalIce(s.peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => { /* a failed rebuild is owned by the liveness timeout */ };
     return pc;
 }
