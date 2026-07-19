@@ -556,7 +556,7 @@ function _netPeerInput(m){
         _rbAdd(tk, cmd);
         _netDbg.inRx++;
         _netDbg.inLog.unshift(String(r.k) + '@' + tk);
-        if(_netDbg.inLog.length > 5) _netDbg.inLog.length = 5;
+        if(_netDbg.inLog.length > 4) _netDbg.inLog.length = 4;
         if(tk <= simTick){
             // A late input can often be applied RIGHT NOW instead of rewinding, when doing so
             // reaches the IDENTICAL state a replay-at-tk would -- the whole slack the step
