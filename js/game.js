@@ -93,6 +93,7 @@ function updateSplashExit() {
     }
 }
 let _clkHold = 0;   // frame counter for the clock's hold-back correction (see loop)
+let _clkSnapArm = true;   // phase snap is one-shot per excursion (see loop): armed while in place
 let _lastRAF = 0;                           // last RAF timestamp (worst-frame FPS recorder)
 let pauseReadyAt = 0;                       // pause input debounce gate
 let achPage = 0;
@@ -757,14 +758,19 @@ function loop(rafNow) {
                 // simTick at a standstill until wall time reaches it, input piling up in
                 // dirQueue with nothing to step it. A correction that can zero the tick
                 // rate is not a correction. This one converges at ~90% speed.
-                // FRACTIONAL-PHASE steer (see sim-worker.js: same rule, per-frame gain):
-                // trim toward the mid-window firing moment both clients agree on.
+                // Phase is EVENT-SET, never steered (see sim-worker.js): a displaced
+                // phase (anchor re-base, clamped stall, truncation) snaps back in one
+                // step; the quarter-tick threshold ignores ordinary frame jitter.
+                // One-shot per excursion, as a bounded += delta (see sim-worker.js): a
+                // frozen shared clock can never stall frame-time ticking.
                 else {
                     const _ft = (typeof netTickTargetF === 'function') ? netTickTargetF() : null;
                     if(_ft !== null){
                         let _e = _ft - simTick - 0.5;
                         if(_e > 1) _e = 1; else if(_e < -1) _e = -1;
-                        _fbAcc += Math.max(-1, Math.min(1, _e * 0.15 * TICK_MS));
+                        if(_e > 0.25 || _e < -0.25){ if(_clkSnapArm){ _clkSnapArm = false; _fbAcc += _e * TICK_MS;
+                            _netDbg.psetN = (_netDbg.psetN|0) + 1; _netDbg.psetAt = performance.now(); } }
+                        else _clkSnapArm = true;
                     }
                 }
             }
@@ -854,9 +860,13 @@ function beginOnlineDuel(seed, hosting){
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
     // Phase is SET at start (see sim-worker duelStartNet): seed the accumulator so
     // ticks fire mid-window on the shared grid from tick 0.
+    _clkSnapArm = true; _netDbg.psetN = 0; _netDbg.psetAt = 0;
     if(typeof netTickTargetF === 'function'){
         const _ft0 = netTickTargetF();
-        if(_ft0 !== null) _fbAcc = Math.max(-TICK_MS, Math.min(TICK_MS, (_ft0 - simTick - 0.5) * TICK_MS));
+        if(_ft0 !== null){
+            _fbAcc = Math.max(-TICK_MS, Math.min(TICK_MS, (_ft0 - simTick - 0.5) * TICK_MS));
+            _netDbg.psetN = 1; _netDbg.psetAt = performance.now();   // the start seed IS the first set
+        }
     }
 }
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
@@ -992,6 +1002,8 @@ function applyWorkerFrame(){
         _netDbg.peerTkOfs = d.ptk || 0;
         if(typeof d.warnAgo === 'number') _rbWarnAt = performance.now() - d.warnAgo;   // age-based: clocks differ
         _netDbg.dsyFor = d.dsyFor|0;   // unhealed-desync age, for the escalation deadline
+        _netDbg.psetN = d.psetN|0;     // phase-set counter + age (worker clocks differ: age travels)
+        _netDbg.psetAt = (typeof d.psetAgo === 'number' && d.psetAgo >= 0) ? performance.now() - d.psetAgo : 0;
         if(d.msg && d.msg !== _duelMsg){ _duelMsg = d.msg; _duelMsgAt = _msgNow(); _uiDirty = true; }
     }
 }

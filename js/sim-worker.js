@@ -30,7 +30,8 @@ self.cfg = { diff: 1, turbo: true };
 // in ({t:'peerPkt'}) and local inputs ({t:'lin'}); the core's outbound packets and
 // debug go back over postMessage. duel-core references a handful of main-thread
 // globals -- this prelude gives them worker-appropriate homes.
-let _dcOn = false, _dcMy = 0, _dcOfs = null, _dcStartPts = 0, _dcHold = 0;
+let _dcOn = false, _dcMy = 0, _dcOfs = null, _dcStartPts = 0, _dcHold = 0, _dcSnapArm = true;
+let _dcSnapN = 0, _dcSnapAt = 0;   // phase-set counter + moment, mirrored to the timing overlay
 let _dcEvents = [];   // [{tk, e}] tick-tagged sim events for the main-thread 2-tick queues
 let _dcRewTo = 0;     // deepest rewind since the last post (0 = none): main cancels stale fx
 self.inGame = false;
@@ -111,6 +112,7 @@ function _post() {
         msg.duel = { ev: _dcEvents.splice(0), rew: _dcRewTo, rb: _rbDbg,
                      inRx: _netDbg.inRx, inTx: _netDbg.inTx, inLog: _netDbg.inLog, ptk: _netDbg.peerTkOfs,
                      warnAgo: performance.now() - _rbWarnAt, dsyFor: _rbBadSince ? Date.now() - _rbBadSince : 0,
+                     psetN: _dcSnapN, psetAgo: _dcSnapAt ? performance.now() - _dcSnapAt : -1,
                      msg: _duelMsg, msgW: _duelMsgAt ? performance.now() - _duelMsgAt : -1 };
         _dcRewTo = 0;
     }
@@ -137,14 +139,19 @@ function _step() {
         if (tgt !== null && Math.abs(d) <= 120 && ran < MAX_CATCHUP) {
             if (d > 1) { netTickPre(); update(); ran++; }
             else {
-                // FRACTIONAL-PHASE steer: both clients trim toward firing each tick at
-                // the MIDDLE of its shared-clock window (a fixed convention, no
-                // negotiation), so neither is systematically the early one. Bounded
-                // trim on a free-running accumulator: it can shift ticks, never stall them.
+                // Phase is EVENT-SET, never steered: it only moves when something moved
+                // it (an anchor re-base, a >250ms stall eaten by the dt clamp, a catch-up
+                // truncation, suspend/wake). Detect the displacement and SET it back in
+                // one step -- the same formula as the duel-start seed, no control loop.
+                // The quarter-tick threshold ignores ordinary timer jitter.
+                // ONE-SHOT per excursion (a bounded += delta, then re-arm only once the
+                // phase is back in place): the accumulator keeps accruing frame time
+                // throughout, so a frozen or broken shared clock can never stall ticking.
                 const ft = (Date.now() + _dcOfs - _dcStartPts) / TICK_MS;
                 let e = ft - simTick - 0.5;
                 if (e > 1) e = 1; else if (e < -1) e = -1;
-                _acc += Math.max(-0.5, Math.min(0.5, e * 0.05 * TICK_MS));
+                if (e > 0.25 || e < -0.25) { if (_dcSnapArm) { _dcSnapArm = false; _acc += e * TICK_MS; _dcSnapN++; _dcSnapAt = performance.now(); } }
+                else _dcSnapArm = true;
             }
         }
         if (simEvents.length) drainSimEvents();
@@ -180,9 +187,11 @@ onmessage = (e) => {
             // fire mid-window on the shared grid from tick 0 (both clients compute the
             // same seed from startPts; the steer then only maintains against drift).
             _last = performance.now(); _acc = 0;
+            _dcSnapArm = true; _dcSnapN = 0; _dcSnapAt = 0;
             if (_dcOfs != null && _dcStartPts) {
                 const ft0 = (Date.now() + _dcOfs - _dcStartPts) / TICK_MS;
                 _acc = Math.max(-TICK_MS, Math.min(TICK_MS, (ft0 - simTick - 0.5) * TICK_MS));
+                _dcSnapN = 1; _dcSnapAt = performance.now();   // the start seed IS the first set
             }
             _post(); _run(true);
             break;

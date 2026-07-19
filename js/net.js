@@ -319,6 +319,9 @@ function netDebugQuad(){
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
         T.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
         T.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
+        // pset = phase sets this match (the start seed counts as the first) + how long
+        // ago the last one fired. A healthy match reads "1x" with the age growing.
+        T.push('pset ' + (d.psetN|0) + 'x' + (d.psetAt ? ' ' + ((performance.now() - d.psetAt)/1000).toFixed(0) + 's ago' : ''));
         S.push('rb ' + _rbDbg.rb + '/' + _rbDbg.resim + ' mx' + _rbDbg.maxRew + '  live ' + _rbDbg.live);
         S.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk + ' fix ' + (_rbDbg.fix|0));
         if(d.inLog.length) N.push('< ' + d.inLog.join(' '));
