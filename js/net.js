@@ -70,6 +70,13 @@ const RB_RECONNECT_TIMEOUT_MS = 8000;                 // the rebuild never recov
 // what is left. Worst case today: an 'in' with a full 12-input redundant log (~711B)
 // and an 'h' with per-field hashes (~561B).
 const NET_PKT_MAX = 1200;
+// Send-buffer congestion line: once the SCTP buffer already holds a few packets, a
+// new one would sit BEHIND them and arrive late by the backlog's drain time. For
+// lockstep a late input is worse than a lost one (the redundant log repairs a loss
+// for free; nothing un-delays a delivery), so past this line the repairable periodic
+// traffic is dropped, not queued. At ~4KB/s of duel traffic this should NEVER trip:
+// the counter (CONG in the overlay) being nonzero is itself a finding.
+const NET_SEND_CONG = 4 * NET_PKT_MAX;
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
 var _netDbg = { rtt:-1, relayRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
@@ -290,7 +297,7 @@ function netDebugQuad(){
         N.push('vs ' + _pnm + '  ' + _via);
         N.push(d.path || 'path ?');
         N.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
-        N.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost);
+        N.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : ''));
         // tgt = the tick the wall PTS says we should be at; d = tgt-simTick, i.e. how far
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
         T.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
@@ -378,7 +385,7 @@ function netMenuSeekSec(){ const p = netPts(); return p != null ? p/1000 : 0; }
 function netDebugInfo(){
     return { base:NET_BASE, offline:!!cfg.offline, rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
              pts:simTick, peerTickOfs:_netDbg.peerTkOfs, rollbacks:_rbDbg.rb, resimTicks:_rbDbg.resim, maxRewindTicks:_rbDbg.maxRew,
-             inputDrops:_rbDbg.drop, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, fixes:_rbDbg.fix|0, epoch:_netSess?_netSess.epoch:null,
+             inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, fixes:_rbDbg.fix|0, epoch:_netSess?_netSess.epoch:null,
              inRx:_netDbg.inRx, inTx:_netDbg.inTx, lastPeerInputs:_netDbg.inLog.slice(),
              peerLagMs:_netDbg.lag, peerPtsDeltaAvgMs:_netDbg.lagAvg, peerPtsDeltaMinMs:_netDbg.lagMin, peerPtsDeltaMaxMs:_netDbg.lagMax, peerPtsDeltaN:_netDbg.lagN, ptsSync:{ synced:_netSync.ofs!=null, offsetMs:_netSync.ofs, rttMs:_netSync.rtt, ageMs:_netSync.at?Date.now()-_netSync.at:null },
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,
@@ -1192,6 +1199,18 @@ function _netSend(o){
         // retransmits, a fragmented packet is a packet that mostly does not arrive. The
         // budget leaves room for IP+UDP+DTLS+SCTP headers (~70B) under a 1280 floor.
         if(j.length > NET_PKT_MAX){ _netDbg.oversize = (_netDbg.oversize|0) + 1; _netSigLog('! packet ' + j.length + 'B > budget'); }
+        // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
+        // queue them late. Rare one-shot control messages (sched/rst/start/again/bye)
+        // still queue -- for those, late beats never.
+        if(s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
+            _netDbg.congDrop = (_netDbg.congDrop|0) + 1;
+            if(!_netDbg.congAt || performance.now() - _netDbg.congAt > 1000){
+                _netDbg.congAt = performance.now();
+                _netSigLog('! send buffer congested ' + s.dc.bufferedAmount + 'B');
+            }
+            _uiDirty = true;
+            return;
+        }
         s.dc.send(j); s.lastSent = performance.now();
     }catch(e){}
 }
