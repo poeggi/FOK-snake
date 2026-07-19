@@ -274,6 +274,12 @@ function netDebugQuad(){
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
         N.push('P' + netMyIndex() + (_netSess.relay?'R':'') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
+        // WHO + HOW we are connected to the other side. Name from their profile; IP/family from
+        // the server's peer-net hint (present on BOTH sides -- offerer and accepter alike).
+        const _pn = _netPeerNet[_netSess.peer];
+        const _pnm = (_netSess.peerProfile && _netSess.peerProfile.name) || ('#' + String(_netSess.peer).slice(0,4));
+        const _via = _netSess.relay ? 'relay' : (_pn && _pn.ip ? (_pn.fam===6?'v6 ':_pn.fam===4?'v4 ':'') + _pn.ip : 'p2p (no ip hint)');
+        N.push('vs ' + _pnm + '  ' + _via);
         N.push(d.path || 'path ?');
         N.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
         N.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost);
