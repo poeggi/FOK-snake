@@ -301,6 +301,8 @@ const SETTINGS_CATS = [
           act:()=>{cfg.fps30=!cfg.fps30;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'DISABLE GLOW: '+(cfg.disableGlow?'ON':'OFF'),
           act:()=>{cfg.disableGlow=!cfg.disableGlow;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'DEFER DRAW: '+(cfg.deferDraw?'ON':'OFF'),
+          act:()=>{cfg.deferDraw=!cfg.deferDraw;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'NETWORK', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(cfg.offline?'ON':'OFF'),

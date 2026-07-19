@@ -778,12 +778,30 @@ function loop(rafNow) {
     }
     const s = SCREENS[phase] || (players ? _DUEL_SCREEN : _GAME_SCREEN);   // shared game phases (dying/levelDone) pick the board by snake count
     const transient = achPopups.length>0 || confetti.length>0;
-    let skip = s.freeze && !_uiDirty && !transient && !(s.anim && s.anim());
-    if(!skip){ s.d(); showHUD(s.hud); }
-    if(!skip) drawAchPopups(simNow);
-    _uiDirty = false;
+    const skip = s.freeze && !_uiDirty && !transient && !(s.anim && s.anim());
+    // DEFER DRAW (cfg.deferDraw): schedule the draw as a MessageChannel task instead of
+    // running it inline. The rAF task then returns immediately, so a peer packet queued
+    // during the frame is dispatched to dc.onmessage AHEAD of the draw, cutting receive
+    // jitter -- at the cost of the draw painting one frame later (consistent, so no judder).
+    // Coalesce to the latest state; only one draw in flight. Falls back to inline where
+    // MessageChannel is absent (old TV engines).
+    if(cfg.deferDraw && _drawChan){
+        _drawS = s; _drawSkip = skip; _drawNow = simNow;
+        if(!_drawPending){ _drawPending = true; _drawChan.port2.postMessage(0); }
+    } else {
+        _doDraw(s, skip, simNow);
+    }
     _loopMs[_loopMsN++ % _loopMs.length] = performance.now() - _taskT0;
 }
+function _doDraw(s, skip, now){
+    if(!skip){ s.d(); showHUD(s.hud); drawAchPopups(now); }
+    _uiDirty = false;
+}
+// The yield channel for deferred draws: a MessageChannel task dispatches with ~0 delay and
+// AFTER any dc.onmessage already queued -- so receives drain before the draw runs.
+const _drawChan = (typeof MessageChannel === 'function') ? new MessageChannel() : null;
+let _drawPending = false, _drawS = null, _drawSkip = false, _drawNow = 0;
+if(_drawChan) _drawChan.port1.onmessage = () => { _drawPending = false; if(_drawS) _doDraw(_drawS, _drawSkip, _drawNow); };
 
 // ================================================================
 // SIM WORKER  (the deterministic sim runs off the render thread: js/sim-worker.js)
