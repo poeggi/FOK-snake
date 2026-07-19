@@ -427,8 +427,15 @@ function gameSteer(p, d){
 // Boost input ARMS (device-local, rides to whichever home runs the sim); the real
 // engage/end transitions are issued by simArmTick there -- those are what reach the
 // sim, the wire and the replay log. Nothing here is a transition itself.
-function gameBoostStart(p, d, now){ _wsend({ t:'arm', p, dir:{ x:d.x, y:d.y }, now:!!now }); }
-function gameBoostEnd(p){ _wsend({ t:'arm', p, dir:null }); }
+// The arm slot is the SIM index of the local player: online that is netMyIndex()
+// (the answerer's own snake is players[1]), and local P2 keys are dead online --
+// the same input-player -> sim-index mapping every other input path uses.
+function _armIndex(p){
+    if(typeof netGameActive === 'function' && netGameActive()){ return p === 0 ? netMyIndex() : -1; }
+    return p;
+}
+function gameBoostStart(p, d, now){ const i = _armIndex(p); if(i >= 0) _wsend({ t:'arm', p:i, dir:{ x:d.x, y:d.y }, now:!!now }); }
+function gameBoostEnd(p){ const i = _armIndex(p); if(i >= 0) _wsend({ t:'arm', p:i, dir:null }); }
 // ================================================================
 // ROUTER
 // ================================================================

@@ -661,6 +661,19 @@ try {
     if(A.__simTick() !== B.__simTick()) throw new Error('drove the two sims to different tick counts: test bug');
     if(A.__hashNow() !== B.__hashNow())
       throw new Error('the two clients diverged: a boost transition must replay identically');
+    // The ANSWERER's own snake is players[1]: its arming slot must be the SIM index
+    // (input maps it), or alignment watches the OPPONENT and boost never fires.
+    B.__steer({x:0,y:-1});
+    B.__tick(30);
+    B.__boost({x:0,y:-1});
+    B.__tick(30);
+    const q = B.__drain().filter(x => JSON.parse(x).t === 'in');
+    if(!q.some(x => /"k":"bs"/.test(x))) throw new Error('answerer boost never engaged / crossed the wire');
+    A.__tick(60);
+    q.forEach(x => A.__recv(x));
+    A.__tick(60); B.__tick(60);
+    if(A.__simTick() !== B.__simTick()) throw new Error('drove the two sims to different tick counts: test bug');
+    if(A.__hashNow() !== B.__hashNow()) throw new Error('the answerer boost diverged the sims');
   });
 
   // The other half: a dir that arrives AFTER the step it belonged to (the peer already
