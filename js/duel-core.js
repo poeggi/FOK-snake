@@ -219,7 +219,8 @@ function _rbHashSettle(){
         // NOT a connection warning -- the link is fine, the worlds are not.
         _rbDbg.desync++;
         if(!_rbBadSince) _rbBadSince = Date.now();   // escalation runs from the FIRST unhealed verdict
-        _rbWarnAt = performance.now();
+        // NO connection warning here: the link is fine, the worlds are not. The DESYNC
+        // message below reports it; the escalation deadline handles persistence.
         // The verdict arrives WITH its diagnosis (the 1Hz hash always carries the
         // per-field hashes): name the diverged fields and fire exactly ONE targeted
         // repair -- our own snake for a players divergence, the host's full state for
@@ -327,7 +328,7 @@ function _rbApplyResync(m){
     else { snap.simTick = simTick; snap.simNow = simNow; simApply(snap); _rbRing = []; _rbLog = new Map(); }
     _rbStateQ = []; _rbHashQ = [];
     _rbResyncSend = 0;
-    _rbDbg.fix = (_rbDbg.fix|0) + 1; _rbWarnAt = performance.now();
+    _rbDbg.fix = (_rbDbg.fix|0) + 1;   // a repair landing is HEALING, not a connection event
     _netSigLog('~ RESYNC @' + T);
 }
 function _rbCellsEqual(a, flat){
@@ -364,8 +365,7 @@ function _rbStateSettle(){
             // Aged out of the ring: too old to rewind to. Do NOT incrementally snap the snake
             // (that jumps every second and never heals the structural state); a divergence this
             // deep needs a FULL resync of the whole game state -- the host owns that (below).
-            if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;   // I'm host: ship the full state
-            _rbWarnAt = performance.now();                            // one CONNECTION LOST flash while it heals
+            if(netMyIndex() === 0) _rbResyncSend = 1;   // I'm host: ship ONE full state (the next verdict retries)
         }
     }
 }
