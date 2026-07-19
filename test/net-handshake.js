@@ -701,9 +701,12 @@ try {
     // Then SPAM: rapid 90-degree left/right alternation, pressed faster than steps
     // run, so turns pile into the 3-deep queue and the keyframe filter earns its
     // keep -- the exact pattern that used to shower rollbacks.
-    for(let i = 0; i < 8; i++){ A.__steer(i & 1 ? { x:1, y:0 } : { x:0, y:-1 }); advance(2); }
+    // 12 presses at 1-tick spacing: several land inside one keyframe, so the 3-deep
+    // queue CAP trips and the overflow is dropped at authoring -- local and remote
+    // must agree exactly on which presses survived.
+    for(let i = 0; i < 12; i++){ A.__steer(i & 1 ? { x:1, y:0 } : { x:0, y:-1 }); advance(1); }
     advance(60);
-    for(let i = 0; i < 8; i++){ B.__steer(i & 1 ? { x:0, y:1 } : { x:1, y:0 }); advance(2); }
+    for(let i = 0; i < 12; i++){ B.__steer(i & 1 ? { x:0, y:1 } : { x:1, y:0 }); advance(1); }
     advance(150);
     if(A.__simTick() !== B.__simTick()) throw new Error('tick counts differ: test bug');
     if(A.__rbDbg().desync || B.__rbDbg().desync)
