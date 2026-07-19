@@ -162,6 +162,15 @@ function startDuel(seed, x10) {
     // differ by that offset forever. The duel IS the shared timeline: both clients
     // begin it at the same server-issued start_pts, so both begin it at tick 0.
     simTick = 0; simNow = 0;
+    // Classic-mode globals survive from this device's last single-player game and the duel
+    // never resets them -- but the duel sim DOES read some (a leftover heart/timeCrystal/
+    // gouranga cell blocks a fleeing bar in _moveBarsGhost; a leftover _slowMode expiry
+    // rewrites gPer from local cfg.diff) and _gAt is hashed. Two devices with different
+    // histories would then desync. Zero them so a duel is a function of seed + inputs only.
+    _gAt = 0;
+    heart = null; heartAt = 0; heartIsEarly = false; _earlyHeartUsed = false; _earlyHeartTrigger = -1; _earlyHeartCount = 0;
+    timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;
+    _gourangaLine = []; _gourangaActive = false; _gourangaEaten = new Set();
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
     _duelX10 = !!x10;
     level = 1; duelWinner = -1;

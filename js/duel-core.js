@@ -274,10 +274,10 @@ function _rbCheckState(m){
                      pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma });
     if(_rbStateQ.length > 8) _rbStateQ.shift();
 }
-// ---- FULL RESYNC: the whole duel state, from the HOST as authority, for a divergence too deep
-// for the ring to rewind. The peer adopts everything (level, bars, phase, gems, rng, the host's
-// snake) but KEEPS its own snake -- the host's view of it is stale and the peer's 'st' repairs the
-// host's side. This is the only thing that heals a STRUCTURAL desync (the 'st' packet carries no
+// ---- FULL RESYNC: the whole duel state, from the HOST (P0) as authority, for a divergence too
+// deep for the ring to rewind. ONLY the joiner (P1) applies it (see _rbApplyResync's guard), and
+// it adopts EVERYTHING including both snakes -- keeping its own would guarantee a permanent
+// mismatch. This is the only thing that heals a STRUCTURAL desync (the 'st' packet carries no
 // level/bars/phase). Sent in a small burst because the channel is unreliable and this can fragment.
 const RB_RESYNC_BURST = 4;
 var _rbResyncSend = 0;       // full-resync sends still owed (host only)
@@ -293,13 +293,20 @@ function _rbFullState(sn, tk){
     if(!sn || !sn.players || !sn.players[0] || !sn.players[1]) return null;
     return { t:'rs', tk:_rbToWire(tk),
         ph:sn.phase, lv:sn.level|0, gd:sn.gemsDone|0, gem:sn.gem, ga:sn.gemAt, dm:sn.deathMsg, bv:sn._barsV|0,
-        bars:sn.bars.map(b => [b.x, b.y, (b.fragile?1:0)|(b.paired?2:0), b.pairEnd?b.pairEnd.x:-1, b.pairEnd?b.pairEnd.y:-1]),
+        // gd/gdUntil ride along: they are hashed AND drive bar flight during power mode,
+        // so an rs that dropped them re-diverged the bars (and split rng under power mode).
+        bars:sn.bars.map(b => [b.x, b.y, (b.fragile?1:0)|(b.paired?2:0), b.pairEnd?b.pairEnd.x:-1, b.pairEnd?b.pairEnd.y:-1, b.gd==null?-1:b.gd|0, b.gdUntil|0]),
+        gat:sn._gAt|0,   // hashed: without it the "full" state was not byte-identical
         gp:sn.gPer, gdue:sn._gDue, pha:sn.phaseAt, spa:sn.spawnAt, ldw:!!sn.levelDoneWaiting,
         rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, x10:!!sn._duelX10,
         pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
 }
 function _rbApplyResync(m){
+    // ONLY the joiner (P1) adopts the host's authoritative full state. A host applying a
+    // peer's 'rs' would let that peer overwrite the ENTIRE world -- both snakes, level,
+    // rng, winner -- the one path that bypasses the per-owner 'st' ownership guard.
+    if(netMyIndex() !== 1) return;
     if(!players || !m || !m.p0 || !m.p1) return;
     const T = _rbFromWire(m.tk);
     const unpackInto = (pk, into) => {
@@ -312,7 +319,8 @@ function _rbApplyResync(m){
     // adopt BOTH snakes (keeping our own would guarantee a permanent mismatch -> resync forever).
     const snap = simSnapshot();
     snap.phase = m.ph; snap.level = m.lv|0; snap.gemsDone = m.gd|0; snap.gem = m.gem; snap.gemAt = m.ga; snap.deathMsg = m.dm; snap._barsV = (snap._barsV|0) + 1;
-    snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; return b; });
+    snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; } return b; });
+    snap._gAt = m.gat|0;
     snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
@@ -584,6 +592,11 @@ function _netPeerInput(m){
             if(live && ((tk >> 6) !== (simTick >> 6) || ((simTick & 63) === 0 && tk < simTick))) live = false;
             if(live){
                 simCommand(cmd);
+                // simCommand stamps boostSince = the current simTick; every OTHER path
+                // (author, on-time, rollback replay) runs it at tk-1, so a LATE live apply
+                // must re-anchor there. boostSince rides the hashed players blob -- a wrong
+                // value here is a permanent players desync that 'st' cannot heal.
+                if(cmd.t === 'boost') players[oP].boostSince = tk - 1;
                 _rbDbg.live++;
             } else if(tk < earliest) earliest = tk;   // crossed a step / accrual boundary: rewind
         } else {
