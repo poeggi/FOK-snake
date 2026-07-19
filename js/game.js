@@ -915,8 +915,14 @@ let _lastWorkerFrameAt = 0, _stallLogged = false, _workerFrames = 0;
 // Kill a worker that never became functional and let loop()'s !_worker path take over.
 function _demoteWorker(){
     console.error('sim worker unusable -- falling back to the in-process sim');
+    // A worker dying mid-online-duel takes the whole sim + rollback state with it; the
+    // in-process sim never received startDuel, so it would tick menu state (players=null)
+    // while the session stays "in game" and the peer sees a frozen opponent. End the
+    // online session cleanly instead -- the classic/local fallback then works normally.
+    const wasDuel = _wDuel;
     try { if(_worker) _worker.terminate(); } catch(e) {}
-    _worker = null; _pendingSnap = null; _pendingEvents = [];
+    _worker = null; _pendingSnap = null; _pendingEvents = []; _wDuel = false; _pendingDuel = null;
+    if(wasDuel && typeof netEndSession === 'function') netEndSession();
 }
 // Inverse of the worker's transport packing (see sim-worker.js _post -- keep in sync).
 // The snake unpacks into a pooled object array so 60Hz unpacking does not churn the GC;

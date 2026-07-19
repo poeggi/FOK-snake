@@ -343,7 +343,7 @@ function _rbApplyResync(m){
     let e = null;
     for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === T){ e = _rbRing[j]; break; }
     if(e){ e.snap = _rbClone(snap); _rbRollback(T); }
-    else { snap.simTick = simTick; snap.simNow = simNow; simApply(snap); _rbRing = []; _rbLog = new Map(); }
+    else { snap.simTick = simTick; snap.simNow = simNow; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); }
     _rbStateQ = []; _rbHashQ = [];
     _rbResyncSend = 0;
     _rbDbg.fix = (_rbDbg.fix|0) + 1;   // a repair landing is HEALING, not a connection event
