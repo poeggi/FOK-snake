@@ -309,8 +309,9 @@ function netDebugQuad(){
         // the server's peer-net hint (present on BOTH sides -- offerer and accepter alike).
         const _pn = _netPeerNet[_netSess.peer];
         const _pnm = (_netSess.peerProfile && _netSess.peerProfile.name) || ('#' + String(_netSess.peer).slice(0,4));
-        const _via = _netSess.relay ? 'relay' : (_pn && _pn.ip ? (_pn.fam===6?'v6 ':_pn.fam===4?'v4 ':'') + _pn.ip : 'p2p (no ip hint)');
-        N.push('vs ' + _pnm + '  ' + _via);
+        // The peer's IP gets its OWN line: a full IPv6 next to the name overflows the quadrant.
+        N.push('vs ' + _pnm + '  ' + (_netSess.relay ? 'relay' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam : 'p2p') : 'p2p (no ip hint)'));
+        if(!_netSess.relay && _pn && _pn.ip) N.push(_pn.ip);
         N.push(d.path || 'path ?');
         N.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
         N.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : ''));
