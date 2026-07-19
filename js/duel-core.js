@@ -645,9 +645,34 @@ function netLocalInput(kind, p, d, now){
         return true;
     }
     const myP = netMyIndex();
-    const tk = simTick + 1;
-    const cmd = kind === 'dir' ? { t:'dir', p:myP, dir:{x:d.x,y:d.y} }
-              : kind === 'bs'  ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
+    let tk = simTick + 1;
+    if(kind === 'dir'){
+        // A turn is STEP-granular: it has zero effect before the next game-tick
+        // boundary, so it is AUTHORED there (simTick + _gDue) -- the record then
+        // usually arrives before its own tick and applies with no rewind at all,
+        // the same quantization model boost transitions use. During READY/GO
+        // aiming no game ticks run; those stamp the next engine tick as before.
+        const P = players && players[myP];
+        if(!P) return true;
+        const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;
+        // KEYFRAME FILTER: predict the queue at S (live queue + records already
+        // authored for S) and drop what the sim would drop -- pressing the aim you
+        // already have, a reverse, or past the 3-deep queue. A dropped press never
+        // reaches the log or the wire, so both sims see identical silence.
+        const pend = (_rbLog.get(S) || []).filter(c => c.t === 'dir' && c.p === myP);
+        const last = pend.length ? pend[pend.length - 1].dir
+                   : (P.dirQueue.length ? P.dirQueue[P.dirQueue.length - 1] : P.dir);
+        if((d.x === last.x && d.y === last.y) || (d.x === -last.x && d.y === -last.y)
+           || P.dirQueue.length + pend.length >= 3) return true;
+        _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x,y:d.y} });   // netTickPre applies it AT S, both here and peer-side
+        const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y}, n:0 };
+        _rbSent.push(drec);
+        if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
+        _netDbg.inTx++;
+        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+        return true;
+    }
+    const cmd = kind === 'bs'  ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
               : kind === 'adv' ? { t:'advance' }   // start the next level -- same command single player sends
                                : { t:'boostend', p:myP };
     _rbEnsureSnap(tk);   // pin the PRE-input state as tk's rollback point, before we apply it

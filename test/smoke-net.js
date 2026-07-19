@@ -107,14 +107,16 @@ runTest('SMOKE-NET', `
     netTickPre();
     if(players[1].dirQueue.length!==qd) throw 'a repeated sequence must be ignored, not replayed';
     update();
-    // OUR OWN input must reach our snake IMMEDIATELY -- exactly like single player --
-    // with NO tick in between. Requiring netTickPre to deliver it coupled the controls
-    // to the tick loop, so the moment the loop was not ticking (a match start, before
-    // the clock-driven target moves ahead) the input sat in the log unapplied: dead
-    // controls and dead boost for the first seconds of a duel.
+    // OUR OWN steer is authored at its EFFECTIVE moment -- the next game-tick
+    // boundary -- and applied from the shared input log there, exactly like the
+    // remote copy of the same record: local is a peer with zero latency. The wire
+    // record leaves IMMEDIATELY; the queue receives it when the sim reaches the
+    // boundary (a turn had no effect before that tick anyway).
     const w0=sent.length, q0h=players[0].dirQueue.length;
     gameSteer(0, GDIRS.ArrowUp);
-    if(players[0].dirQueue.length!==q0h+1) throw 'own steer must reach our own snake AT ONCE, with no tick required';
+    if(sent.length!==w0+1) throw 'own steer must hit the wire at once';
+    for(let i=0;i<20 && players[0].dirQueue.length===q0h;i++){ netTickPre(); update(); }
+    if(players[0].dirQueue.length!==q0h+1) throw 'own steer never reached our snake at its boundary';
     const pk=JSON.parse(sent[w0]);
     if(pk.t!=='in'||!Array.isArray(pk.l)||!pk.l.length) throw 'own steer must reach the peer as an input log';
     if(pk.s!==undefined||pk.snake!==undefined) throw 'no state may ride the wire';
@@ -458,7 +460,7 @@ runTest('SMOKE-NET', `
     if(_netSess!==null) throw 'refusing must end the attempt, not leave it half-open';
     fakeSess('peer'); sent.length=0; inGame=true;
     _netSync={ofs:0, rtt:1, at:Date.now()};   // fake a perfect sync
-    gameSteer(0, GDIRS.ArrowUp);
+    _netSend({ t:'pi' });                     // any peer message: every one stamps PTS
     const _pk=JSON.parse(sent[sent.length-1]);
     if(typeof _pk.pts!=='number') throw 'synced peers must stamp PTS on every message';
     if(!Number.isInteger(_pk.pts)) throw 'pts must be whole ms: PHP is_int() rejects a fraction';

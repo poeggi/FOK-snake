@@ -676,6 +676,35 @@ try {
     if(A.__hashNow() !== B.__hashNow()) throw new Error('the answerer boost diverged the sims');
   });
 
+  // A realistic wire: BOTH directions delayed by one tick (~17ms >= a 10ms link),
+  // both players steering, the periodic hash checks flowing through the same delayed
+  // bus -- so alignment is proven continuously (dsy must stay 0), not just at the end.
+  check('a 10ms wire with movement from both sides stays perfectly aligned', () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__duelStart(0xBEEF, 'host', 45000);
+    B.__duelStart(0xBEEF, 'peer', 3000);
+    const qA = [], qB = [];                      // in-flight: [deliverAtStep, packet]
+    let step = 0;
+    const advance = (n) => { for(let i = 0; i < n; i++){
+      step++;
+      while(qB.length && qB[0][0] <= step) B.__recv(qB.shift()[1]);
+      while(qA.length && qA[0][0] <= step) A.__recv(qA.shift()[1]);
+      A.__tick(1); B.__tick(1);
+      A.__drain().forEach(p => qB.push([step + 1, p]));
+      B.__drain().forEach(p => qA.push([step + 1, p]));
+    } };
+    advance(120);
+    A.__steer({x:0,y:-1}); advance(8);
+    B.__steer({x:0,y:-1}); advance(9);
+    A.__steer({x:1,y:0});  advance(7);
+    B.__steer({x:1,y:0});  advance(30);
+    A.__steer({x:0,y:1});  B.__steer({x:0,y:1}); advance(150);
+    if(A.__simTick() !== B.__simTick()) throw new Error('tick counts differ: test bug');
+    if(A.__rbDbg().desync || B.__rbDbg().desync)
+      throw new Error('hash checks flagged a divergence mid-run: A=' + A.__rbDbg().desync + ' B=' + B.__rbDbg().desync);
+    if(A.__hashNow() !== B.__hashNow()) throw new Error('sims diverged under a 10ms wire');
+  });
+
   // The other half: a dir that arrives AFTER the step it belonged to (the peer already
   // moved with the old direction) can only be honoured by rewinding to its tick. That
   // path must still converge too.
