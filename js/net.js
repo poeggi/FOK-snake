@@ -1691,10 +1691,13 @@ function _rbPackPlayer(p){
     return { s, d:p.dir, dq:p.dirQueue, bd:p.boostDir, bs:p.boostSince|0, bg:!!p.boosting,
              sa:p.stepAccum, sc:p.score|0, l:p.lives|0, al:p.alive!==false, su:p.slowUntil|0 };
 }
-function _rbFullState(sn){
+// tk MUST be the ring entry's own tick (not the live simTick, which is one behind in netTickPre),
+// or the peer applies it to the wrong ring slot. Carries EVERY field the hash covers (RB_HASH_DUEL)
+// so an adopting peer becomes byte-identical -- a missing field would keep the hashes apart forever.
+function _rbFullState(sn, tk){
     if(!sn || !sn.players || !sn.players[0] || !sn.players[1]) return null;
-    return { t:'rs', tk:_rbToWire(simTick),
-        ph:sn.phase, lv:sn.level|0, gd:sn.gemsDone|0, gem:sn.gem, bv:sn._barsV|0,
+    return { t:'rs', tk:_rbToWire(tk),
+        ph:sn.phase, lv:sn.level|0, gd:sn.gemsDone|0, gem:sn.gem, ga:sn.gemAt, dm:sn.deathMsg, bv:sn._barsV|0,
         bars:sn.bars.map(b => [b.x, b.y, (b.fragile?1:0)|(b.paired?2:0), b.pairEnd?b.pairEnd.x:-1, b.pairEnd?b.pairEnd.y:-1]),
         gp:sn.gPer, gdue:sn._gDue, pha:sn.phaseAt, spa:sn.spawnAt, ldw:!!sn.levelDoneWaiting,
         rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, x10:!!sn._duelX10,
@@ -1703,26 +1706,35 @@ function _rbFullState(sn){
 }
 function _rbApplyResync(m){
     if(!players || !m || !m.p0 || !m.p1) return;
+    const T = _rbFromWire(m.tk);
     const unpackInto = (pk, into) => {
         const s = []; for(let k = 0; k + 1 < pk.s.length; k += 2) s.push({ x:pk.s[k]|0, y:pk.s[k+1]|0 });
         into.snake = s; into.dir = pk.d; into.dirQueue = pk.dq || []; into.boostDir = pk.bd;
         into.boostSince = pk.bs|0; into.boosting = !!pk.bg; into.stepAccum = pk.sa;
         into.score = pk.sc|0; into.lives = pk.l|0; into.alive = pk.al !== false; into.slowUntil = pk.su|0;
     };
-    const cur = simSnapshot();   // live state; overwrite shared/structural + the OTHER snake, via simApply
-    cur.phase = m.ph; cur.level = m.lv|0; cur.gemsDone = m.gd|0; cur.gem = m.gem; cur._barsV = (cur._barsV|0) + 1;
-    cur.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; return b; });
-    cur.gPer = m.gp; cur._gDue = m.gdue; cur.phaseAt = m.pha; cur.spawnAt = m.spa; cur.levelDoneWaiting = !!m.ldw;
-    cur._rngState = m.rng; cur._speedRound = !!m.sr; cur.duelWinner = m.dw; cur._duelX10 = !!m.x10;
-    cur.powerPellet = m.pp; cur.powerPelletAt = m.ppa; cur._powerMode = !!m.pm; cur._powerModeAt = m.pma; cur._barMoveTick = m.bmt|0;
-    const mine = netMyIndex();
-    unpackInto(mine === 0 ? m.p1 : m.p0, cur.players[mine === 0 ? 1 : 0]);   // adopt the OTHER player; keep our own
-    cur.simTick = simTick; cur.simNow = simNow;                              // keep our own clock-derived tick
-    simApply(cur);
-    _rbRing = []; _rbLog = new Map(); _rbStateQ = []; _rbHashQ = [];         // the old history is void
+    // The FULL authoritative snapshot AT tick T. Lockstep needs both sims byte-identical, so we
+    // adopt BOTH snakes (keeping our own would guarantee a permanent mismatch -> resync forever).
+    const snap = simSnapshot();
+    snap.phase = m.ph; snap.level = m.lv|0; snap.gemsDone = m.gd|0; snap.gem = m.gem; snap.gemAt = m.ga; snap.deathMsg = m.dm; snap._barsV = (snap._barsV|0) + 1;
+    snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; return b; });
+    snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
+    snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
+    snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
+    unpackInto(m.p0, snap.players[0]); unpackInto(m.p1, snap.players[1]);
+    snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;   // ring convention: entry tk=T holds the state at simTick T-1
+    // Apply it at T through the SAME path a normal correction uses: drop it into the ring entry
+    // for T and roll forward, replaying the logged inputs. Both sims then land on identical state
+    // at T and evolve identically -> they converge and STAY converged (no loop). If T has aged out
+    // of the ring (clocks drifted far), fall back to a hard apply at our current tick.
+    let e = null;
+    for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === T){ e = _rbRing[j]; break; }
+    if(e){ e.snap = _rbClone(snap); _rbRollback(T); }
+    else { snap.simTick = simTick; snap.simNow = simNow; simApply(snap); _rbRing = []; _rbLog = new Map(); }
+    _rbStateQ = []; _rbHashQ = [];
     _rbResyncSend = 0;
     _rbDbg.fix = (_rbDbg.fix|0) + 1; _rbWarnAt = performance.now();
-    _netSigLog('~ RESYNC applied');
+    _netSigLog('~ RESYNC @' + T);
 }
 function _rbCellsEqual(a, flat){
     if(!Array.isArray(a) || a.length * 2 !== flat.length) return false;
@@ -1866,8 +1878,9 @@ function netTickPre(){
     // Full resync burst (host only): ship the whole duel state on consecutive ticks so at least
     // one survives the unreliable, possibly-fragmenting channel. Triggered on a heavy desync or a
     // reconnect. Not during a rollback re-sim.
-    if(!_replaying && _rbResyncSend > 0 && netMyIndex() === 0){
-        const full = _rbFullState(_rbRing.length ? _rbRing[_rbRing.length-1].snap : simSnapshot());
+    if(!_replaying && _rbResyncSend > 0 && netMyIndex() === 0 && _rbRing.length){
+        const last = _rbRing[_rbRing.length-1];
+        const full = _rbFullState(last.snap, last.tk);   // stamp the ring entry's OWN tick
         if(full) _netSend(full);
         _rbResyncSend--;
     }

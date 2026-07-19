@@ -128,7 +128,9 @@ const HOOKS = (myId) => `
   globalThis.__RB = ()=> ({ ring:RB_RING, settle:RB_SETTLE, future:RB_FUTURE });
   globalThis.__level = ()=> level;
   globalThis.__snakeLen = (i)=> players ? players[i].snake.length : -1;
-  globalThis.__fullState = ()=> JSON.stringify(_rbFullState(simSnapshot()));   // the host's authoritative resync packet
+  globalThis.__fullState = ()=> JSON.stringify(_rbFullState(simSnapshot(), simTick));   // the host's authoritative resync packet
+  globalThis.__hashFields = ()=> _rbHashFields(simSnapshot());
+  globalThis.__field = (k)=> JSON.stringify(simSnapshot()[k]);
   // Corrupt STRUCTURAL state (not our own snake): wrong level, a wrong view of the peer's snake,
   // wrong gem count -- the kind of divergence the 'st' recovery can NEVER heal.
   globalThis.__corruptStructural = ()=>{ level = (level % 9) + 1; players[0].snake = [{x:1,y:1},{x:2,y:1}]; gemsDone = 99; };
@@ -259,24 +261,30 @@ try {
     if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
   });
 
-  // Heavy/structural desync: the per-owner 'st' packet carries no level/bars/phase, so it can
-  // never heal a structural divergence. The HOST ships a full resync; the peer adopts the whole
-  // authoritative state (level, host snake, gems) but KEEPS its own snake.
-  check('a full resync adopts the host state and heals a structural desync', () => {
+  // The REAL test: a structural desync (which the per-owner 'st' can never heal -- it carries no
+  // level/bars/phase) must be resynced by the host's full-state 'rs' while BOTH sims keep ticking
+  // and exchange packets both ways -- and it must STAY converged, not loop.
+  check('a full resync converges two continuously-ticking sims and stays converged', () => {
     const A = mk(A_ID), B = mk(B_ID);                    // A = host (index 0), B = peer (index 1)
     A.__duelStart(0xF00D, 'host', 400);
     B.__duelStart(0xF00D, 'peer', 400);
-    A.__tick(80); B.__tick(80);
-    A.__drain(); B.__drain();
-    if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: identical sims must match');
-    const hostLevel = A.__level(), hostP0Len = A.__snakeLen(0), keptP1Len = B.__snakeLen(1);
-    B.__corruptStructural();                             // wrong level + wrong view of the host snake + wrong gems
-    if(B.__level() === hostLevel) throw new Error('setup: structural corruption should change the level');
-    B.__recv(A.__fullState());                           // the host ships its whole state (applied on receipt)
-    if(B.__level() !== hostLevel) throw new Error('resync did not adopt the host level, got ' + B.__level());
-    if(B.__snakeLen(0) !== hostP0Len) throw new Error('resync did not adopt the host snake (index 0)');
-    if(B.__snakeLen(1) !== keptP1Len) throw new Error('resync must KEEP the peer own snake (index 1)');
-    if(B.__hashNow() !== A.__hashNow()) throw new Error('after resync + keeping own snake, the sims must agree');
+    const step = (n)=>{ for(let i=0;i<n;i++){ A.__tick(1); B.__tick(1); A.__drain().forEach(p=>B.__recv(p)); B.__drain().forEach(p=>A.__recv(p)); } };
+    step(40);
+    if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: synced sims must match');
+    B.__corruptStructural();                             // structural divergence the 'st' path cannot fix
+    if(A.__hashNow() === B.__hashNow()) throw new Error('setup: corruption should differ');
+    // Keep both ticking + exchanging: the host must DETECT the desync and ship a full resync that
+    // actually converges them (this is what looped before).
+    let converged = false;
+    for(let i=0;i<160 && !converged;i++){ step(1); if(A.__hashNow() === B.__hashNow()) converged = true; }
+    if(!converged){
+      const af = A.__hashFields(), bf = B.__hashFields(), diff = [];
+      for(const k in af) if(af[k] !== bf[k]) diff.push(k + '[A=' + A.__field(k) + ' B=' + B.__field(k) + ']');
+      throw new Error('resync never converged. desync=' + B.__rbDbg().desync + ' fix=' + B.__rbDbg().fix + ' DIFF: ' + diff.join(' | ').slice(0,400));
+    }
+    // And it holds: no re-divergence, no resync loop.
+    step(80);
+    if(A.__hashNow() !== B.__hashNow()) throw new Error('sims did not STAY converged after the resync');
   });
 
   // Mid-game reconnect: a dropped p2p link is rebuilt with an rc offer/answer that keeps
