@@ -53,7 +53,7 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 // desktop/mobile where the glow reads well and the GPU can afford it.
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false, deferDraw:false,
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false, deferDraw:false, duelInMain:false,
              autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
@@ -74,6 +74,7 @@ function _sanitizeCfg() {
     cfg.fps30       = !!cfg.fps30;
     cfg.disableGlow = !!cfg.disableGlow;
     cfg.deferDraw   = !!cfg.deferDraw;
+    cfg.duelInMain  = !!cfg.duelInMain;
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;

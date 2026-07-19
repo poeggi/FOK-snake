@@ -303,6 +303,8 @@ const SETTINGS_CATS = [
           act:()=>{cfg.disableGlow=!cfg.disableGlow;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'DEFER DRAW: '+(cfg.deferDraw?'ON':'OFF'),
           act:()=>{cfg.deferDraw=!cfg.deferDraw;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'DUEL SIM: '+(cfg.duelInMain?'MAIN':'WORKER'),   // applies at the NEXT duel start
+          act:()=>{cfg.duelInMain=!cfg.duelInMain;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'NETWORK', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(cfg.offline?'ON':'OFF'),
