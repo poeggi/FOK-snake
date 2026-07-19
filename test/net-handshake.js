@@ -126,6 +126,12 @@ const HOOKS = (myId) => `
   };
   globalThis.__peerSnakeLen = ()=> players ? players[1].snake.length : -1;
   globalThis.__RB = ()=> ({ ring:RB_RING, settle:RB_SETTLE, future:RB_FUTURE });
+  globalThis.__level = ()=> level;
+  globalThis.__snakeLen = (i)=> players ? players[i].snake.length : -1;
+  globalThis.__fullState = ()=> JSON.stringify(_rbFullState(simSnapshot()));   // the host's authoritative resync packet
+  // Corrupt STRUCTURAL state (not our own snake): wrong level, a wrong view of the peer's snake,
+  // wrong gem count -- the kind of divergence the 'st' recovery can NEVER heal.
+  globalThis.__corruptStructural = ()=>{ level = (level % 9) + 1; players[0].snake = [{x:1,y:1},{x:2,y:1}]; gemsDone = 99; };
   // Drive the real _netRequestStart with a stubbed server, to see what it SENDS.
   globalThis.__reqStart = async (reason, epoch)=>{
     _netSync = { ofs:0, rtt:1, at:Date.now() };
@@ -253,23 +259,24 @@ try {
     if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
   });
 
-  // Heavy desync: an authoritative state whose tick has AGED OUT of the 32-ring cannot be
-  // rolled back to, so it must hard-SNAP into the live state instead of being dropped.
-  check('an aged-out authoritative state hard-snaps a heavy peer desync', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__duelStart(0xC0FFEE, 'host', 700);
-    B.__duelStart(0xC0FFEE, 'peer', 700);
-    A.__tick(120); B.__tick(120);
+  // Heavy/structural desync: the per-owner 'st' packet carries no level/bars/phase, so it can
+  // never heal a structural divergence. The HOST ships a full resync; the peer adopts the whole
+  // authoritative state (level, host snake, gems) but KEEPS its own snake.
+  check('a full resync adopts the host state and heals a structural desync', () => {
+    const A = mk(A_ID), B = mk(B_ID);                    // A = host (index 0), B = peer (index 1)
+    A.__duelStart(0xF00D, 'host', 400);
+    B.__duelStart(0xF00D, 'peer', 400);
+    A.__tick(80); B.__tick(80);
     A.__drain(); B.__drain();
     if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: identical sims must match');
-    A.__corruptPeer();                                   // A's copy of the peer (index 1) is now wildly wrong (len 11)
-    if(A.__peerSnakeLen() !== 11) throw new Error('setup: corruption should make the peer snake long');
-    // Authoritative peer state stamped OLDER than the ring: too old to rewind to.
-    const oldTk = A.__simTick() - (A.__RB().ring + 6);
-    A.__recv(JSON.stringify({ t:'st', tk:oldTk, i:1, s:[5,5, 6,5, 7,5], gd:0, gem:null, rng:9, pp:null, ppa:0, pm:false, pma:0 }));
-    A.__tick(1);                                          // _rbStateSettle: settled AND aged out -> hard SNAP
-    if(A.__rbDbg().fix === 0) throw new Error('the aged-out state did not hard-snap (fix stayed 0)');
-    if(A.__peerSnakeLen() !== 3) throw new Error('peer snake not resynced to the authoritative cells, len=' + A.__peerSnakeLen());
+    const hostLevel = A.__level(), hostP0Len = A.__snakeLen(0), keptP1Len = B.__snakeLen(1);
+    B.__corruptStructural();                             // wrong level + wrong view of the host snake + wrong gems
+    if(B.__level() === hostLevel) throw new Error('setup: structural corruption should change the level');
+    B.__recv(A.__fullState());                           // the host ships its whole state (applied on receipt)
+    if(B.__level() !== hostLevel) throw new Error('resync did not adopt the host level, got ' + B.__level());
+    if(B.__snakeLen(0) !== hostP0Len) throw new Error('resync did not adopt the host snake (index 0)');
+    if(B.__snakeLen(1) !== keptP1Len) throw new Error('resync must KEEP the peer own snake (index 1)');
+    if(B.__hashNow() !== A.__hashNow()) throw new Error('after resync + keeping own snake, the sims must agree');
   });
 
   // Mid-game reconnect: a dropped p2p link is rebuilt with an rc offer/answer that keeps

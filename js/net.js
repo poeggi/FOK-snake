@@ -1113,6 +1113,7 @@ function _netWire(dc){
         if(s.reconnectAt){   // a rebuilt channel after a mid-game drop: SAME timeline, no re-start
             _netReconnectDone(s);
             _netMarkRecv(s);
+            if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;   // the drop diverged us: host ships a full resync
             _duelMsg = 'RECONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
             return;
         }
@@ -1464,6 +1465,7 @@ function _netHandleMsg(txt){
         case 'in': _netDbg.hbRx++; if(_netSess) _netPeerInput(m); break;   // both ends apply the other's input
         case 'h': if(_netSess && inGame) _rbCheckHash(m); break;   // divergence check
         case 'st': if(_netSess && inGame) _rbCheckState(m); break; // authoritative-state recovery
+        case 'rs': if(_netSess && inGame) _rbApplyResync(m); break; // full-state resync (heavy desync)
         case 'again':
             if(_netSess && _netSess.game){ _netSess.peerAgain = true; _netMaybeRestart(); _uiDirty = true; }
             break;
@@ -1536,6 +1538,7 @@ function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
     _rbRing = []; _rbLog = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
+    _rbResyncSend = 0;
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
     _rbPhase = '';
@@ -1604,7 +1607,7 @@ function _rbHash(snap){
 // every time either player steers -- a false desync once a second, which is not a
 // divergence at all, just a race. So park the peer's hash and check it only after
 // enough ticks have passed for any in-flight input for t to have landed.
-const RB_SETTLE = 30;        // HASH settle (~500ms): a hash may only be compared once our own
+const RB_SETTLE = 24;        // HASH settle (~400ms): a hash may only be compared once our own
                              // snapshot of its tick has stopped moving, or a late input makes it
                              // read as a false desync every time either player steers.
 const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORITATIVE and does not
@@ -1642,6 +1645,11 @@ function _rbHashSettle(){
         }
         _rbDbg.desyncAt = where;
         _netSigLog('! DESYNC @' + q.tk + ' ' + where);
+        // A confirmed divergence the rollback recovery could not prevent: the host ships a full
+        // resync so the peer adopts the whole authoritative state (the only cure for a structural
+        // desync). Re-armed here every mismatch, so it keeps trying until the hashes agree again.
+        if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;
+        _rbWarnAt = performance.now();
         _duelMsg = 'DESYNC: ' + where.slice(0, 28); _duelMsgAt = _msgNow(); _uiDirty = true;
     }
 }
@@ -1670,6 +1678,51 @@ function _rbCheckState(m){
     _rbStateQ.push({ tk:_rbFromWire(m.tk), i:m.i|0, s:m.s, gd:m.gd|0, gem:m.gem, rng:m.rng,
                      pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma });
     if(_rbStateQ.length > 8) _rbStateQ.shift();
+}
+// ---- FULL RESYNC: the whole duel state, from the HOST as authority, for a divergence too deep
+// for the ring to rewind. The peer adopts everything (level, bars, phase, gems, rng, the host's
+// snake) but KEEPS its own snake -- the host's view of it is stale and the peer's 'st' repairs the
+// host's side. This is the only thing that heals a STRUCTURAL desync (the 'st' packet carries no
+// level/bars/phase). Sent in a small burst because the channel is unreliable and this can fragment.
+const RB_RESYNC_BURST = 4;
+var _rbResyncSend = 0;       // full-resync sends still owed (host only)
+function _rbPackPlayer(p){
+    const s = []; for(const c of p.snake) s.push(c.x, c.y);
+    return { s, d:p.dir, dq:p.dirQueue, bd:p.boostDir, bs:p.boostSince|0, bg:!!p.boosting,
+             sa:p.stepAccum, sc:p.score|0, l:p.lives|0, al:p.alive!==false, su:p.slowUntil|0 };
+}
+function _rbFullState(sn){
+    if(!sn || !sn.players || !sn.players[0] || !sn.players[1]) return null;
+    return { t:'rs', tk:_rbToWire(simTick),
+        ph:sn.phase, lv:sn.level|0, gd:sn.gemsDone|0, gem:sn.gem, bv:sn._barsV|0,
+        bars:sn.bars.map(b => [b.x, b.y, (b.fragile?1:0)|(b.paired?2:0), b.pairEnd?b.pairEnd.x:-1, b.pairEnd?b.pairEnd.y:-1]),
+        gp:sn.gPer, gdue:sn._gDue, pha:sn.phaseAt, spa:sn.spawnAt, ldw:!!sn.levelDoneWaiting,
+        rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, x10:!!sn._duelX10,
+        pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
+        p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
+}
+function _rbApplyResync(m){
+    if(!players || !m || !m.p0 || !m.p1) return;
+    const unpackInto = (pk, into) => {
+        const s = []; for(let k = 0; k + 1 < pk.s.length; k += 2) s.push({ x:pk.s[k]|0, y:pk.s[k+1]|0 });
+        into.snake = s; into.dir = pk.d; into.dirQueue = pk.dq || []; into.boostDir = pk.bd;
+        into.boostSince = pk.bs|0; into.boosting = !!pk.bg; into.stepAccum = pk.sa;
+        into.score = pk.sc|0; into.lives = pk.l|0; into.alive = pk.al !== false; into.slowUntil = pk.su|0;
+    };
+    const cur = simSnapshot();   // live state; overwrite shared/structural + the OTHER snake, via simApply
+    cur.phase = m.ph; cur.level = m.lv|0; cur.gemsDone = m.gd|0; cur.gem = m.gem; cur._barsV = (cur._barsV|0) + 1;
+    cur.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; return b; });
+    cur.gPer = m.gp; cur._gDue = m.gdue; cur.phaseAt = m.pha; cur.spawnAt = m.spa; cur.levelDoneWaiting = !!m.ldw;
+    cur._rngState = m.rng; cur._speedRound = !!m.sr; cur.duelWinner = m.dw; cur._duelX10 = !!m.x10;
+    cur.powerPellet = m.pp; cur.powerPelletAt = m.ppa; cur._powerMode = !!m.pm; cur._powerModeAt = m.pma; cur._barMoveTick = m.bmt|0;
+    const mine = netMyIndex();
+    unpackInto(mine === 0 ? m.p1 : m.p0, cur.players[mine === 0 ? 1 : 0]);   // adopt the OTHER player; keep our own
+    cur.simTick = simTick; cur.simNow = simNow;                              // keep our own clock-derived tick
+    simApply(cur);
+    _rbRing = []; _rbLog = new Map(); _rbStateQ = []; _rbHashQ = [];         // the old history is void
+    _rbResyncSend = 0;
+    _rbDbg.fix = (_rbDbg.fix|0) + 1; _rbWarnAt = performance.now();
+    _netSigLog('~ RESYNC applied');
 }
 function _rbCellsEqual(a, flat){
     if(!Array.isArray(a) || a.length * 2 !== flat.length) return false;
@@ -1701,20 +1754,12 @@ function _rbStateSettle(){
                 changed = true;
             }
             if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i); _rbRollback(q.tk); }
-        } else if(players && players[q.i]){
-            // Aged out of the ring (a longer stall): we cannot rewind to it, so hard-SNAP the
-            // authoritative peer snake into the live state via simApply (the sanctioned sim
-            // writer -- no raw global writes here). A small visual jump, but it heals a
-            // divergence the ring can no longer reach -- the whole point of the smaller ring.
-            const snap = simSnapshot();
-            let changed = false;
-            if(snap.players && snap.players[q.i] && !_rbCellsEqual(snap.players[q.i].snake, q.s)){ snap.players[q.i].snake = cells; changed = true; }
-            if(q.gd > (snap.gemsDone|0)){
-                snap.gemsDone = q.gd; snap.gem = q.gem; snap._rngState = q.rng;
-                snap.powerPellet = q.pp; snap.powerPelletAt = q.ppa; snap._powerMode = q.pm; snap._powerModeAt = q.pma;
-                changed = true;
-            }
-            if(changed){ simApply(snap); _rbDbg.fix = (_rbDbg.fix|0) + 1; _rbWarnAt = performance.now(); _netSigLog('~ SNAP @' + q.tk + ' i' + q.i); }
+        } else {
+            // Aged out of the ring: too old to rewind to. Do NOT incrementally snap the snake
+            // (that jumps every second and never heals the structural state); a divergence this
+            // deep needs a FULL resync of the whole game state -- the host owns that (below).
+            if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;   // I'm host: ship the full state
+            _rbWarnAt = performance.now();                            // one CONNECTION LOST flash while it heals
         }
     }
 }
@@ -1817,6 +1862,14 @@ function netTickPre(){
         // full state. Carries the recent input log = free input-redundancy repair, and keeps
         // SOMETHING on the wire every 16 ticks for liveness.
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+    }
+    // Full resync burst (host only): ship the whole duel state on consecutive ticks so at least
+    // one survives the unreliable, possibly-fragmenting channel. Triggered on a heavy desync or a
+    // reconnect. Not during a rollback re-sim.
+    if(!_replaying && _rbResyncSend > 0 && netMyIndex() === 0){
+        const full = _rbFullState(_rbRing.length ? _rbRing[_rbRing.length-1].snap : simSnapshot());
+        if(full) _netSend(full);
+        _rbResyncSend--;
     }
 }
 // Rewind to `toTick` and re-simulate to where we were, now including the input
