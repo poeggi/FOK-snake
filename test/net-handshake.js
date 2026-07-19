@@ -260,10 +260,13 @@ try {
     const deob = added.find(c=>/ 2001:db8::a 51234 typ host/.test(c.candidate||''));
     if(!deob) throw new Error('no de-obfuscated real-IPv6 candidate was added');
     if((+deob.candidate.split(' ')[3]) <= 2113937151) throw new Error('the de-obfuscated candidate must outrank its mDNS twin');
-    // A server-reflexive candidate (already a real IP) must NOT be grafted again.
+    // A server-reflexive candidate (already a real IP) must NOT be grafted again --
+    // and a v4 literal waits out the v6 head start before entering the race.
     const n0 = B.__iceAdded().length;
     B.__deliver({ from:A_ID, to:B_ID, type:'ice',
       payload: JSON.stringify({ candidate:'candidate:2 1 udp 1694498815 203.0.113.7 40000 typ srflx raddr 0.0.0.0 rport 0', sdpMid:'0', sdpMLineIndex:0 }) });
+    if(B.__iceAdded().length !== n0) throw new Error('a v4 literal must wait out the v6 head start');
+    await new Promise(r => setTimeout(r, 250));
     if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
   });
 

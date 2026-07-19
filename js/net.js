@@ -1050,12 +1050,37 @@ function _netDeobfuscateCand(cand, pn){
 function _netIceAdd(s, cand){
     if(!s || !s.pc) return;
     if(!s.rdOk){ s.iceQ.push(cand); return; }
-    try{ s.pc.addIceCandidate(cand).catch(()=>{}); }catch(e){}
+    _netIceRelease(s, cand);
+}
+// HAPPY EYEBALLS for the ICE race: v6 should win wherever it is viable, v4 stays the
+// automatic fallback. Two levers, both on the REMOTE candidates we feed the pc:
+//  - v4 literals wait out a short head start, so the v6 pairs run their checks
+//    uncontested first (worst case: +200ms setup on a v4-only path);
+//  - v6 candidates get HALF a type-preference step of extra priority -- outranks any
+//    v4 twin of the same type without ever reordering host vs srflx.
+// mDNS .local candidates (family unknown until resolved) enter immediately.
+const NET_ICE_V4_HOLD_MS = 200;
+function _netCandFam(cand){
+    const p = (cand && cand.candidate || '').split(' '), a = p[4] || '';
+    if(/\.local$/i.test(a)) return 0;
+    return a.indexOf(':') >= 0 ? 6 : (a ? 4 : 0);
+}
+function _netIceBias(cand){
+    if(_netCandFam(cand) !== 6) return cand;
+    const p = cand.candidate.split(' ');
+    p[3] = String((parseInt(p[3], 10) || 0) + 8388608);
+    return { candidate: p.join(' '), sdpMid: cand.sdpMid, sdpMLineIndex: cand.sdpMLineIndex, usernameFragment: cand.usernameFragment };
+}
+function _netIceRelease(s, cand){
+    const pc = s.pc;
+    const add = () => { if(s.pc === pc){ try{ pc.addIceCandidate(_netIceBias(cand)).catch(()=>{}); }catch(e){} } };
+    if(_netCandFam(cand) === 4 && typeof setTimeout === 'function') setTimeout(add, NET_ICE_V4_HOLD_MS);
+    else add();
 }
 function _netIceFlush(s){
     if(!s || !s.pc || !s.iceQ.length) return;
     const q = s.iceQ; s.iceQ = [];
-    for(const c of q){ try{ s.pc.addIceCandidate(c).catch(()=>{}); }catch(e){} }
+    for(const c of q) _netIceRelease(s, c);
 }
 function _netMkSess(peer, role){
     return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
