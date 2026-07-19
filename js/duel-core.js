@@ -189,9 +189,11 @@ function _rbHashBoth(snap){
 // every time either player steers -- a false desync once a second, which is not a
 // divergence at all, just a race. So park the peer's hash and check it only after
 // enough ticks have passed for any in-flight input for t to have landed.
-const RB_SETTLE = 24;        // HASH settle (~400ms): a hash may only be compared once our own
-                             // snapshot of its tick has stopped moving, or a late input makes it
-                             // read as a false desync every time either player steers.
+const RB_SETTLE = 2;         // HASH settle: judge a tick only once our own snapshot of it has
+                             // stopped moving. Inputs are authored at their effective boundary
+                             // (they normally arrive EARLY), so two ticks cover the remaining
+                             // transit jitter -- and a verdict judged too soon merely costs one
+                             // redundant no-op repair under the one-shot protocol.
 const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORITATIVE and does not
                              // depend on our inputs settling, so apply it the moment its tick is in
                              // the past (simTick >= tk) -- no wait. Applying immediately keeps the
