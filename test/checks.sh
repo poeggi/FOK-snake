@@ -21,6 +21,7 @@ for t in test/smoke-*.js; do node "$t"; done
 
 echo "[checks] two-client handshake (invite / connect over a signal bus)"
 node test/net-handshake.js
+node test/relay-sim.js
 
 echo "[checks] sim invariants"
 node test/sim-invariants.js
