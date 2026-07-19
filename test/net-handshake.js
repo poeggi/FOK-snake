@@ -694,11 +694,17 @@ try {
       B.__drain().forEach(p => qA.push([step + 1, p]));
     } };
     advance(120);
-    A.__steer({x:0,y:-1}); advance(8);
-    B.__steer({x:0,y:-1}); advance(9);
-    A.__steer({x:1,y:0});  advance(7);
-    B.__steer({x:1,y:0});  advance(30);
-    A.__steer({x:0,y:1});  B.__steer({x:0,y:1}); advance(150);
+    // SLOW play first: single strokes about a second apart.
+    A.__steer({x:0,y:-1}); advance(60);
+    B.__steer({x:0,y:-1}); advance(60);
+    A.__steer({x:1,y:0});  advance(60);
+    // Then SPAM: rapid 90-degree left/right alternation, pressed faster than steps
+    // run, so turns pile into the 3-deep queue and the keyframe filter earns its
+    // keep -- the exact pattern that used to shower rollbacks.
+    for(let i = 0; i < 8; i++){ A.__steer(i & 1 ? { x:1, y:0 } : { x:0, y:-1 }); advance(2); }
+    advance(60);
+    for(let i = 0; i < 8; i++){ B.__steer(i & 1 ? { x:0, y:1 } : { x:1, y:0 }); advance(2); }
+    advance(150);
     if(A.__simTick() !== B.__simTick()) throw new Error('tick counts differ: test bug');
     if(A.__rbDbg().desync || B.__rbDbg().desync)
       throw new Error('hash checks flagged a divergence mid-run: A=' + A.__rbDbg().desync + ' B=' + B.__rbDbg().desync);
