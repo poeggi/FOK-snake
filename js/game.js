@@ -128,6 +128,11 @@ let _musicHoldUntil = 0;   // routing is held during the quit-confirm leave-fade
 const MUSIC_SYNC_WAIT_MS = 2000;
 let _musicSyncWaitUntil = 0;
 let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVERY menu entry (splash or in-game)
+// Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
+// building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
+// .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','friendId','invite','lobby','friends'];
+const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
 // Let the audio layer re-fetch the live shared-clock seek when the context resumes
@@ -683,14 +688,14 @@ function loop(rafNow) {
 
     // Music routing (skip splash/paused/quitConfirm states)
     if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'&&phase!=='levelReady'&&phase!=='duelReady'&&performance.now()>=_musicHoldUntil){   // ready phases are music-NEUTRAL: menu music fades at PLAY, game music starts at playing/duel
-        const menuPhase=['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','friendId','invite','lobby','friends'].includes(phase);
+        const menuPhase=_MENU_PHASES.indexOf(phase)>=0;
         // Re-assert the shared-clock seek on EVERY menu entry (from splash OR from a game), not
         // just at boot: hold the menu track until the clock is synced so it opens on the globally
         // shared bar. Only actually waits when online and not yet synced; otherwise no delay.
         if(menuPhase && !_wasMenuPhase && typeof _netOk==='function' && _netOk() && (typeof netPts!=='function' || netPts()==null))
             _musicSyncWaitUntil = performance.now() + MUSIC_SYNC_WAIT_MS;
         _wasMenuPhase = menuPhase;
-        const gamePhase=['playing','dying','levelDone','duel','duelOver'].includes(phase);
+        const gamePhase=_GAME_PHASES.indexOf(phase)>=0;
         const wt=menuPhase?menuTrack():gamePhase?gameTrack():null;
         // Hold menu music at first entry until the clock syncs (started during the coin drop)
         // or the 2s wall passes -- so it opens on the globally-shared bar. Once playing,
@@ -1006,7 +1011,7 @@ else requestAnimationFrame(loop);
 
 // Align SND button and FPS to the actual canvas top/bottom edges in landscape.
 // CSS can't know where the canvas ends up when it's width-constrained, so JS measures it.
-const _lsq = window.matchMedia('(pointer: coarse) and (orientation: landscape)');
+const _lsq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: landscape)') : { matches:false };   // guard like _pmq below: matchMedia is absent on some old TV engines
 function syncLandscapePanels() {
     const si = document.getElementById('side-info');
     const fe = document.getElementById('fps-el');

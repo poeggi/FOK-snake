@@ -238,7 +238,7 @@ function _rbHashSettle(){
             for(const k in q.f) if(mine[k] === undefined) bad.push(k + '(absent)');
             if(bad.length){
                 where = bad.join(',');
-                snakes = bad.includes('players');
+                snakes = bad.indexOf('players') >= 0;
                 struct = bad.some(k => k !== 'players');
             }
         }

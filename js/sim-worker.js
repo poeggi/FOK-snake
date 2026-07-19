@@ -85,7 +85,7 @@ function _dcTarget(){
     return Math.abs(t - simTick) > 600 ? null : t;
 }
 
-let _timer = null, _last = 0, _acc = 0;
+let _timer = null, _last = 0, _acc = 0, _running = false;
 
 // Transport packing: cloning ~100 {x,y} objects at 60Hz dominated the sim thread's cost
 // (the tick itself is sub-microsecond). The snake travels as one flat Int16Array (a
@@ -133,9 +133,12 @@ function _post() {
     postMessage(msg);
 }
 
-// Self-correcting fixed-timestep loop (workers have no requestAnimationFrame). We poll on a
-// short interval and run whole ticks for the elapsed real time, so the sim keeps true 60 Hz
-// regardless of interval jitter -- this is the whole point of moving it off the render thread.
+// Self-correcting fixed-timestep loop (workers have no requestAnimationFrame). It runs whole
+// ticks for the REAL elapsed time (dt), so the sim keeps true 60 Hz regardless of timer jitter.
+// It RE-SCHEDULES ITSELF to the next tick boundary (TICK_MS - _acc) instead of oversampling on a
+// fixed 4ms interval -- one wakeup per tick (~60/s) instead of ~250/s, a big idle-CPU win on weak
+// hardware. Jitter is a non-problem: dt is measured, so a late/early fire just accrues the real
+// elapsed time and the count stays locked to the wall clock; _acc carries the sub-tick remainder.
 function _step() {
     const now = performance.now();
     let dt = now - _last; _last = now;
@@ -160,11 +163,22 @@ function _step() {
     const gameplay = phase!=='splash' && phase!=='menu' && phase!=='settings' && phase!=='scores'
                   && phase!=='achievements' && phase!=='shop' && phase!=='credits' && phase!=='news';
     if (ran > 0 && (gameplay || simEvents.length || simTick % 2 === 0)) _post();
+    // Re-arm to the next tick boundary. _acc is the sub-tick remainder already accrued, so
+    // TICK_MS - _acc is the real time until the next tick (clamped to one period). _running is
+    // the authoritative on/off flag -- a fired setTimeout handle stays non-null, so it cannot
+    // double as the stop flag.
+    if (_running) _timer = setTimeout(_step, Math.max(0, Math.min(TICK_MS, TICK_MS - _acc)));
 }
 
 function _run(on) {
-    if (on) { if (_timer) return; _last = performance.now(); _acc = 0; _timer = setInterval(_step, 4); }
-    else if (_timer) { clearInterval(_timer); _timer = null; }
+    if (on) {
+        if (_running) return;
+        _running = true; _last = performance.now();   // NOT _acc: a duel start seeds the phase into _acc just before this
+        _timer = setTimeout(_step, 0);
+    } else {
+        _running = false;
+        if (_timer) { clearTimeout(_timer); _timer = null; }
+    }
 }
 
 // Command handling lives in sim.js (simCommand) so the sim effect is identical here and in

@@ -35,7 +35,8 @@ function addFOKoins(n) {
 function addScore(name, sc, lvl) {
     const s = getScores();
     const now = new Date();
-    const date = `${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getFullYear()).slice(-2)}`;
+    const p2 = n => ('0' + n).slice(-2);   // ES5 pad: padStart is ES2017, absent on old smart-TV engines (this runs at game over)
+    const date = p2(now.getDate()) + '.' + p2(now.getMonth()+1) + '.' + String(now.getFullYear()).slice(-2);
     s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl,
              diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });
     s.sort((a, b) => b.score - a.score);
@@ -46,6 +47,10 @@ function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 // Fresh default config each call (new objects, so nothing is shared/aliased).
 // cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
 // must stay disabled -- gate all networking on !cfg.offline.
+// TODO(perf/tv): consider defaulting disableGlow:true on weak devices (smart-TV / coarse-pointer
+// + no fine pointer). shadowBlur is the dominant per-frame GPU cost (~2-10 blurred fills/frame);
+// off by default on a TV would lift FPS materially. Gate on a device heuristic, keep it on for
+// desktop/mobile where the glow reads well and the GPU can afford it.
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false,
@@ -217,7 +222,7 @@ function getFriends() {
 function addFriend(id) {
     if (!/^[0-9a-f]{8}$/.test(id || '') || id === getPlayerId()) return false;
     const a = getFriends();
-    if (!a.includes(id)) {
+    if (a.indexOf(id) < 0) {   // indexOf: Array.includes is ES2016, absent on old smart-TV engines
         a.push(id);
         try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(a.slice(-64))); } catch(e) {}
     }

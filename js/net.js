@@ -699,7 +699,7 @@ function _netFrRefresh(migrate){
             if(f.name) _netNameSeen(f.id, f.name);
             if(f.state === 'accepted') _netFrOkMark(f.id);
             // an incoming request from someone we also added locally: accept right away
-            if(f.state === 'pending' && !f.outgoing && getFriends().includes(f.id)) _netFrAccept(f.id);
+            if(f.state === 'pending' && !f.outgoing && getFriends().indexOf(f.id) >= 0) _netFrAccept(f.id);
         }
         for(const id of getFriends()){
             if(seen[id]) continue;
@@ -736,7 +736,7 @@ function _netFrRemove(id){
     delete _netFrRequested[id];
     _netFr.msg = 'REMOVED ' + (netFriendName(id) || fmtFriendId(id));
     const done = _netFriendApi('remove', id);
-    if(done && done.then) done.then(r => { if(!r){ const q=_netFrRmQueue(); if(!q.includes(id)){ q.push(id); _netFrRmSave(q); } } });
+    if(done && done.then) done.then(r => { if(!r){ const q=_netFrRmQueue(); if(q.indexOf(id) < 0){ q.push(id); _netFrRmSave(q); } } });
     _uiDirty = true;
 }
 function _netFrFlushRemovals(){
