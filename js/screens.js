@@ -992,7 +992,8 @@ function drawGameBoard(now) {
         ct(bonusLabel,CW/2,CH/2-60,col,sz);
         ctx.restore();
     }
-    updateHUD();
+    // HUD sync is done once per frame in loop() (after applyWorkerFrame makes the globals
+    // current); drawDuelBoard relies on that too, so a second call here was pure duplication.
 }
 
 // The ONE confirmation-dialog renderer: draw the live screen behind, frost it to black glass,
