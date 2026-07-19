@@ -177,9 +177,10 @@ onmessage = (e) => {
             if (!_dcOn) break;
             const p = m.m;
             if (p.t === 'in'){ _netDbg.hbRx++; _netPeerInput(p); }
-            else if (p.t === 'h')  _rbCheckHash(p);
-            else if (p.t === 'st') _rbCheckState(p);
-            else if (p.t === 'rs') _rbApplyResync(p);
+            else if (p.t === 'h')   _rbCheckHash(p);
+            else if (p.t === 'hfr') _rbFieldHashReq(p);
+            else if (p.t === 'st')  _rbCheckState(p);
+            else if (p.t === 'rs')  _rbApplyResync(p);
             break;
         }
         case 'lin':            // local input: assign tick, apply, log, emit the wire record

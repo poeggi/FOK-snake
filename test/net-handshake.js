@@ -752,14 +752,16 @@ try {
     if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: identical sims must match');
     A.__desync();                                  // corrupt A's copy of the peer (index 1) snake
     if(A.__hashNow() === B.__hashNow()) throw new Error('setup: the corruption should differ');
-    // B emits a state packet on its ~1/s tick; deliver B->A and advance past the settle window
-    // so A adopts B's authoritative snake and rolls forward. B stays the clean reference.
-    // Tick finely and deliver promptly: the apply window is only RB_SETTLE..RB_RING (10 ticks),
-    // which real 60Hz play hits exactly but a coarse jump would skip right over.
+    // The st repair channel is mismatch-gated: B only ships state once it can SEE the
+    // divergence -- via A's periodic hash disagreeing with its ring, or A's 'hfr'
+    // field-hash request. So A's h/hfr flow to B; A's own st/rs are discarded, keeping
+    // B the clean reference. B's st then reaches A, which adopts B's authoritative
+    // snake and rolls forward. Tick finely and deliver promptly, like real 60Hz play.
     let repaired = false;
-    for(let i = 0; i < 90 && !repaired; i++){
+    for(let i = 0; i < 220 && !repaired; i++){
       B.__tick(1); B.__drain().forEach(p => A.__recv(p));
-      A.__tick(1); A.__drain();                     // discard A's own packets: B is the reference
+      A.__tick(1);
+      A.__drain().forEach(p => { const t = JSON.parse(p).t; if(t === 'h' || t === 'hfr') B.__recv(p); });
       if(A.__hashNow() === B.__hashNow()) repaired = true;
     }
     if(!repaired) throw new Error('no re-converge. A.fix=' + A.__rbDbg().fix + ' A.desync=' + A.__rbDbg().desync);

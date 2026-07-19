@@ -83,6 +83,7 @@ function _submitName(){
     }
     if(!nameStr.trim()) return;
     try{localStorage.setItem('lastSName',nameStr);}catch (e){}
+    if(typeof netNameChanged==='function') netNameChanged();
     if(entryMode==='user'){ _entryLeave('settings'); Snd.sfxPlay('select',cfg.music); return; }
     addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
     if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level);   // global board (no-op in offline mode)

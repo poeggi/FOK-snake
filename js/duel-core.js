@@ -30,6 +30,12 @@
 // honoured by rewinding to that tick and re-simulating: the remote snake visibly
 // corrects, and its sounds may land late. That is the price of zero input lag,
 // and it only shows when latency is high.
+// Max JSON we will put in one DataChannel message. 1280 is the IPv6 minimum MTU (and a
+// safe IPv4 floor); ~70B goes to IP+UDP+DTLS+SCTP headers, so the payload budget is
+// what is left. Worst case today: an 'in' with a full 12-input redundant log (~711B)
+// and an 'hfr'-reply 'h' with per-field hashes (~561B). Declared HERE (not net.js):
+// both the transport and the core enforce it, and the sim worker loads only the core.
+const NET_PKT_MAX = 1200;
 const RB_RING = 32;          // ring ENTRIES kept. Snapshots are THINNED (RB_SNAP_EVERY), so these
                              // entries span RB_DEPTH ticks at half the per-tick clone cost.
                              // Rollback is for short hiccups only: something arrives every 16
@@ -66,11 +72,15 @@ var _rbPhase = '';   // last seen duel phase: drives the re-anchor at level/resp
 // -1e9, not 0: performance.now() is legitimately ~0 just after load, and a falsy
 // check would then read a real warning as "never warned".
 var _rbWarnAt = -1e9;
+var _rbBadAt = -1e9;      // tick of the last hash mismatch: opens the st repair window
+var _rbFdReqTk = -1;      // tick we asked the peer to re-hash WITH per-field hashes (dedup)
+const RB_ST_WINDOW = 600; // ~10s of st repair after a mismatch, then the wire goes quiet again
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
     _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
     _rbResyncSend = 0;
+    _rbBadAt = -1e9; _rbFdReqTk = -1;
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
     _rbPhase = '';
@@ -113,11 +123,16 @@ const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow'
 // mode leftover (hearts, gouranga sets, the classic snake) through structuredClone
 // dozens of times a second -- dead weight the duel never reads, cloned and GC'd for
 // nothing. Applied back via simApplyDuel (sim.js), which writes exactly this set.
-const RB_SNAP_DUEL = RB_HASH_DUEL.concat(['_barsV','levelDoneWaiting']);
+// Built DIRECTLY from the sim globals -- this runs dozens of times a second, so it
+// must not materialize the full classic-mode snapshot just to subset it. The set =
+// the hash whitelist above plus the two unhashed fields a duel tick still touches.
+// KEEP IN SYNC with simApplyDuel (sim.js), which writes exactly this set back on a
+// rollback restore.
 function _rbDuelSnap(){
-    const full = simSnapshot(), o = {};
-    for(const k of RB_SNAP_DUEL) o[k] = full[k];
-    return o;
+    return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue,
+             phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
+             powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
+             players, duelWinner, _duelX10, _speedRound, _rngState };
 }
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
@@ -191,10 +206,21 @@ function _rbHashSettle(){
         let e = null;
         for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === q.tk){ e = _rbRing[j]; break; }
         if(!e) continue;                                   // aged out of the ring: not comparable
-        if(_rbHash(e.snap) === q.h){ _rbDbg.hashOk++; continue; }
+        if(_rbHash(e.snap) === q.h){ _rbDbg.hashOk++; if(q.tk === _rbFdReqTk) _rbFdReqTk = -1; continue; }
         // Deterministic sims do not drift back into agreement: this one is permanent.
         // NOT a connection warning -- the link is fine, the worlds are not.
-        _rbDbg.desync++;
+        // An 'hfr' REPLY (fields for a tick we already flagged) is the SAME divergence
+        // coming back with names -- it must not count, warn or re-arm a second time.
+        const isReply = !!q.f && q.tk === _rbFdReqTk;
+        if(!isReply){
+            _rbDbg.desync++;
+            _rbBadAt = simTick;                        // open the st repair-channel window
+            // A confirmed divergence the rollback recovery could not prevent: the host ships a full
+            // resync so the peer adopts the whole authoritative state (the only cure for a structural
+            // desync). Re-armed here every mismatch, so it keeps trying until the hashes agree again.
+            if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;
+            _rbWarnAt = performance.now();
+        }
         // NAME the field. Without this a desync is unactionable: it says two worlds
         // differ but not how, and the difference may only exist on real devices.
         let where = '?';
@@ -203,15 +229,33 @@ function _rbHashSettle(){
             for(const k in mine) if(q.f[k] !== undefined && q.f[k] !== mine[k]) bad.push(k);
             for(const k in q.f) if(mine[k] === undefined) bad.push(k + '(absent)');
             if(bad.length) where = bad.join(',');
+            _rbFdReqTk = -1;
+        } else if(q.tk !== _rbFdReqTk){
+            // The periodic hash travels BARE; the field hashes exist only to name a
+            // divergence. Ask the peer to re-hash THIS tick with fields -- its ring
+            // spans RB_DEPTH ticks, and settle plus a round trip sits well inside that.
+            _rbFdReqTk = q.tk;
+            _netSend({ t:'hfr', tk:_rbToWire(q.tk) });
         }
         _rbDbg.desyncAt = where;
         _netSigLog('! DESYNC @' + q.tk + ' ' + where);
-        // A confirmed divergence the rollback recovery could not prevent: the host ships a full
-        // resync so the peer adopts the whole authoritative state (the only cure for a structural
-        // desync). Re-armed here every mismatch, so it keeps trying until the hashes agree again.
-        if(netMyIndex() === 0) _rbResyncSend = RB_RESYNC_BURST;
-        _rbWarnAt = performance.now();
         _duelMsg = 'DESYNC: ' + where.slice(0, 28); _duelMsgAt = _msgNow(); _uiDirty = true;
+    }
+}
+// The peer's whole-hash disagreed with ours for this tick and it wants the per-field
+// hashes to name the divergence: recompute from the ring and reply as a normal 'h'
+// carrying `f` (the requester re-compares it through the same settle path). Aged out
+// of the ring = no reply; the requester's '?' stands.
+function _rbFieldHashReq(m){
+    // The request itself is positive evidence the peer sees a divergence with us --
+    // open our st repair window here too, so repair flows even when the peer's own
+    // hashes never reach us.
+    _rbBadAt = simTick;
+    const tk = _rbFromWire(m.tk);
+    for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === tk){
+        const hb = _rbHashBoth(_rbRing[j].snap);
+        _netSend({ t:'h', tk:m.tk, h:hb.h, f:hb.f });
+        return;
     }
 }
 // ---- Authoritative-state recovery (same deterministic ~1/s tick as the hash) ----
@@ -412,9 +456,15 @@ function netTickPre(){
         // to arrive. Keyed to the deterministic tick, so both clients emit on the same tick.
         if(!_replaying && _rbRing.length){
             const sn = _rbRing[_rbRing.length-1].snap;
-            const hb = _rbHashBoth(sn);   // one pass over the state for both hashes
-            _netSend({ t:'h', tk:_rbToWire(t), h:hb.h, f:hb.f });
-            _rbSendState(t, sn);
+            // The periodic hash travels BARE (~60B). The per-field hashes exist only to
+            // NAME a divergence, so they are fetched on demand ('hfr') on a mismatch --
+            // shipping them every healthy second would spend ~500B/s on data that is
+            // only ever read when the whole hash disagrees.
+            _netSend({ t:'h', tk:_rbToWire(t), h:_rbHash(sn) });
+            // The authoritative-state channel is REPAIR; on a healthy link it is a
+            // byte-for-byte no-op. Send it only while a divergence is recent -- the
+            // hash detects one within ~1s and re-opens the window.
+            if(t - _rbBadAt < RB_ST_WINDOW) _rbSendState(t, sn);
         }
     } else if((t & 15) === 0 && !_replaying){
         // 16-tick heartbeat (~267ms), on the OFF-64 ticks so it never doubles up with the

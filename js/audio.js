@@ -169,15 +169,6 @@ const Snd = (() => {
         } catch(e) { _ctx = null; }
     }
 
-    function audioPreWarm() {
-        // Prime the AC at load: fire a silent buffer to register audio work with the
-        // browser, attempt resume, then suspend so the next gesture does a real resume.
-        if (!_ctx) return;
-        // 1-sample silent buffer: iOS hint that this context has audio work
-        const buf = _ctx.createBuffer(1, 1, 22050), src = _ctx.createBufferSource();
-        src.buffer = buf; src.connect(_ctx.destination); src.start(0);
-    }
-
     function audioResume() {
         // Context tier: un-park and resume the AudioContext (a returning app, an iOS
         // interrupt ending, or the first user gesture unlocking the autoplay gate). iOS
@@ -446,13 +437,11 @@ const Snd = (() => {
     // Build graph and prime pipeline at load. AC is suspended; prewarm oscillators
     // fire the moment the AC first resumes from a user gesture.
     audioInit();
-    //audioPreWarm();
 
     return {
         audioInit, audioResume, audioSuspend,
         musicPlay, musicStop, musicFadeOut, duck, musicMute, musicUnmute, musicSetVolume, musicTick,
         setMusicSeekProvider: (fn) => { _seekProvider = fn; },
         sfxPlay, sfxSetVolume, ctxTime, musicDriftMs,
-        audioPreWarm,
     };
 })();

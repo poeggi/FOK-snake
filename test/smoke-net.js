@@ -524,7 +524,7 @@ runTest('SMOKE-NET', `
     log('friend names ok: learned from profiles, persisted, rendered');
 
     // ---- in-game names: HUD labels + winner banner use them online ----
-    localStorage.setItem('lastSName','KAI');
+    localStorage.setItem('lastSName','KAI'); netNameChanged();   // direct write: the name-entry hook is bypassed
     simTick=0; simNow=0; startDuel(0xC0DE); bars=[];
     fakeSess('host'); _netSess.peerProfile={name:'BUDDY',color:1,shopItems:{}};
     const pn=netPlayerNames();

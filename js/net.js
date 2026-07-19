@@ -56,20 +56,21 @@ const _netTimers = (typeof setInterval === 'function' && typeof clearInterval ==
 // so this is sync error + jitter -- not zero. Zero tolerance here would drop
 // honest packets, which is the silent-drop failure this whole layer keeps hitting.
 const NET_PTS_TOL = 250;
-// Idle keepalive period. Must stay well under the 1s CONNECTION LOST warning: the
-// thing being watched for has to arrive faster than the watcher's patience.
+// Idle keepalive period. Must stay comfortably under RB_WARN_MS (~533ms, below): the
+// thing being watched for has to arrive faster than the watcher's patience -- and
+// in-game the 16-tick input heartbeat (~267ms) is the real cadence anyway.
 const NET_KEEPALIVE_MS = 300;
+// How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
+// a hash mismatch) before the warning clears.
+const NET_WARN_FLASH_MS = 3000;
 // Silence ladder (wall-clock ms, derived from the 16-tick heartbeat -- something should
 // arrive every ~267ms). Wall-clock, NOT ticks: a suspended tab freezes simTick too, so only
 // real elapsed time reveals the gap on the side that was asleep.
 const RB_WARN_MS = Math.round(32 * TICK_MS);          // ~533ms (2 missed beats) -> CONNECTION LOST warning
 const RB_RECONNECT_MS = Math.round(128 * TICK_MS);    // ~2133ms (8 missed) -> rebuild the p2p link, keep the match
 const RB_RECONNECT_TIMEOUT_MS = 8000;                 // the rebuild never recovered -> end the match
-// Max JSON we will put in one DataChannel message. 1280 is the IPv6 minimum MTU (and a
-// safe IPv4 floor); ~70B goes to IP+UDP+DTLS+SCTP headers, so the payload budget is
-// what is left. Worst case today: an 'in' with a full 12-input redundant log (~711B)
-// and an 'h' with per-field hashes (~561B).
-const NET_PKT_MAX = 1200;
+// NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
+// enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a
 // new one would sit BEHIND them and arrive late by the backlog's drain time. For
 // lockstep a late input is worse than a lost one (the redundant log repairs a loss
@@ -150,9 +151,24 @@ function _netVerOk(theirs){
     if(!theirs) return true;                         // said nothing: nothing to refuse over
     return _netVerLine(theirs) === _netVerLine(_swVersion);
 }
+// The local display name, cached: netPlayerNames() runs EVERY FRAME during an online
+// duel (HUD labels), and localStorage.getItem is a synchronous disk-backed read that
+// does not belong in a render path. The name only changes at name entry, so a short
+// TTL keeps the cache honest without any invalidation wiring.
+var _netMyNameC = { v:'', at:0 };
+function _netMyName(){
+    const n = Date.now();
+    if(n - _netMyNameC.at > 10000){
+        let s = ''; try{ s = localStorage.getItem('lastSName') || ''; }catch(e){}
+        _netMyNameC = { v:s, at:n };
+    }
+    return _netMyNameC.v;
+}
+// Name entry wrote lastSName: drop the cache so the next read sees it (the TTL alone
+// only covers writes that bypass the game, e.g. a cloud-backup restore).
+function netNameChanged(){ _netMyNameC.at = 0; }
 function _netProfile(){
-    let n = ''; try{ n = localStorage.getItem('lastSName') || ''; }catch(e){}
-    return { name:(n||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{} };
+    return { name:(_netMyName()||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{} };
 }
 function _netClampProfile(p){
     p = (p && typeof p === 'object') ? p : {};
@@ -338,8 +354,7 @@ function netFriendE2E(id){
 // joiner), for the HUD and the winner banner. null when not in an online game.
 function netPlayerNames(){
     if(!netGameActive()) return null;
-    let mine = ''; try{ mine = localStorage.getItem('lastSName') || ''; }catch(e){}
-    mine = (mine || 'YOU').slice(0, MAX_NAME);
+    const mine = (_netMyName() || 'YOU').slice(0, MAX_NAME);
     const peer = (_netSess.peerProfile && _netSess.peerProfile.name) || netFriendName(_netSess.peer) || fmtFriendId(_netSess.peer);
     return netHosting() ? [mine, peer] : [peer, mine];
 }
@@ -349,21 +364,30 @@ function netPlayerNames(){
 // client rendered P0 with its OWN colour and P1 with the next index, so the two
 // players saw different colours for the same snakes and never saw each other's
 // cosmetics (the profile carried them; nothing read them). null = not online.
+// Memoized: three call sites read this EVERY FRAME (HUD + both board draws), yet every
+// input is fixed for the whole match -- the peer profile object only ever changes by
+// reference, and the shop/settings are unreachable mid-duel.
+var _netLookC = null;
 function netDuelLook(){
     if(!netGameActive()) return null;
+    const _pp = _netSess.peerProfile || null, _host = netHosting();
+    if(_netLookC && _netLookC.pp === _pp && _netLookC.host === _host && _netLookC.col === (cfg.snakeColor|0)
+       && _netLookC.wi === cfg.wornItems && _netLookC.nrc === !!cfg.noRemoteCosmetics) return _netLookC.val;
     const N = SNAKE_COLORS.length;
-    const pp = _netSess.peerProfile || {};
+    const pp = _pp || {};
     const mine   = { c: (cfg.snakeColor|0) % N, i: cfg.wornItems || {} };
     // NETWORK setting: render the peer as a plain default snake (no cosmetics, colour 0).
     // Purely a local view choice -- it never crosses the wire and does not touch the sim.
     const theirs = cfg.noRemoteCosmetics ? { c: 0, i: {} }
                  : { c: Math.abs(pp.color|0) % N,
                      i: (pp.shopItems && typeof pp.shopItems === 'object') ? pp.shopItems : {} };
-    const a = netHosting() ? mine : theirs;   // P0 is always the host
-    const b = netHosting() ? theirs : mine;   // P1 is always the joiner
+    const a = _host ? mine : theirs;          // P0 is always the host
+    const b = _host ? theirs : mine;          // P1 is always the joiner
     let c0 = a.c, c1 = b.c;
     if(c0 === c1) c1 = (c1 + 1) % N;          // same pick: nudge P1 -- deterministic, so both agree
-    return { c0, c1, i0: a.i, i1: b.i };
+    const val = { c0, c1, i0: a.i, i1: b.i };
+    _netLookC = { pp:_pp, host:_host, col:cfg.snakeColor|0, wi:cfg.wornItems, nrc:!!cfg.noRemoteCosmetics, val };
+    return val;
 }
 // The rare-event scale an online match runs with (host's setting on both ends).
 function netDuelX10(){ return _netSess ? !!_netSess.x10 : !!cfg.x10; }
@@ -421,7 +445,7 @@ async function _netHello(){
     if(_netHelloBusy || cfg.offline || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
     _netHelloBusy = true;
     const body = { id: getPlayerId() };
-    try{ const n = localStorage.getItem('lastSName'); if(n) body.name = String(n).slice(0, MAX_NAME); }catch(e){}
+    { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }
     if(_netLat.pending && _netLat.value != null) body.latency = _netLat.value;   // the mandated report
     if(Date.now() - _netLat.at > 180000) _netTimeSync(true);                     // re-measure every few minutes (lands next hello)
     if(_netSess && _netSess.game) body.duel_with = _netSess.peer;
@@ -1555,12 +1579,14 @@ function _netHandleMsg(txt){
         case 'in': _netDbg.hbRx++;   // both ends apply the other's input
             if(_netSess){ if(_netWD()) _wDuelSend({ t:'peerPkt', m }); else _netPeerInput(m); }
             break;
-        case 'h':    // divergence check / state recovery / full resync: the core's packets
-        case 'st':   // -- routed to wherever the core runs (sim worker or in-process)
+        case 'h':    // divergence check / field-hash request / state recovery / full
+        case 'hfr':  // resync: the core's packets -- routed to wherever the core runs
+        case 'st':   // (sim worker or in-process)
         case 'rs':
             if(_netSess && inGame){
                 if(_netWD()) _wDuelSend({ t:'peerPkt', m });
                 else if(m.t === 'h') _rbCheckHash(m);
+                else if(m.t === 'hfr') _rbFieldHashReq(m);
                 else if(m.t === 'st') _rbCheckState(m);
                 else _rbApplyResync(m);
             }
@@ -1579,7 +1605,7 @@ function netDuelWarn(){
     if(!s || !s.game || !inGame) return null;
     const nowMs = performance.now();
     if(s.reconnecting) return 'RECONNECTING...';
-    if(nowMs - _rbWarnAt < 3000) return 'CONNECTION LOST';
+    if(nowMs - _rbWarnAt < NET_WARN_FLASH_MS) return 'CONNECTION LOST';
     if(Date.now() - s.lastRecvWall > RB_WARN_MS && !(s.relay && nowMs < s.relayGraceUntil)) return 'CONNECTION LOST';
     return null;
 }

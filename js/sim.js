@@ -724,7 +724,7 @@ function simApply(s){
     perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boostSince=s.boostSince; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
     players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }
-// Duel-scoped apply: exactly the globals a duel tick can touch (net.js RB_SNAP_DUEL),
+// Duel-scoped apply: exactly the globals a duel tick can touch (duel-core.js _rbDuelSnap),
 // for rollback restores. simApply assigns EVERY field unconditionally, so feeding it a
 // duel-scoped snapshot would wipe the classic-mode globals with undefined; this writes
 // only the duel set and leaves the rest alone.
