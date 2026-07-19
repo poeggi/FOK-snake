@@ -1001,6 +1001,11 @@ function _netMarkRecv(s){ if(s){ s.lastRecv = performance.now(); s.lastRecvWall 
 let _netHiddenAt = 0;   // Date.now() when we last went hidden, for the wake-up away-time
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
+    // TODO(netcode/infra): STUN-only, no TURN. Two phones on CELLULAR IPv6 could not connect P2P
+    // (mDNS host-candidate obfuscation + no usable IPv6 srflx); the peer-net mDNS de-obfuscation
+    // (v2.2.3) is a partial client fix -- RE-TEST on cellular after the recent patches, it may now
+    // work. The bulletproof fix is INFRA: run coturn (STUN+TURN) on the fok-server box and point
+    // this iceServers list at it (also retires the unusable relay.php fallback -- see _netRelayStart).
     const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
     _netSess.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignal(peer, 'ice', JSON.stringify(e.candidate)); };
@@ -1161,6 +1166,10 @@ function _netSend(o){
 // snake stays instant (prediction), corrections just arrive slower. The user
 // sees why: a short message now and a RELAY MODE tag on the board.
 function netRelayActive(){ return !!(_netSess && _netSess.game && _netSess.relay); }
+// TODO(netcode): RELAY MODE IS UNUSABLE (Kai-verified). The HTTP relay.php fallback delivers
+// ~200-400ms one-way, so lockstep churns and it is not actually playable. It is a stopgap. Proper
+// fix: TURN/coturn on the fok-server box (see the iceServers TODO in _netRtcInit); relay.php should
+// be REPLACED/REMOVED once TURN is proven. Do not treat relay as a real path.
 function _netRelayStart(s){
     if(_netSess !== s || s.game) return;
     s.relay = true;
@@ -1353,6 +1362,9 @@ async function _netRtcReanswer(from, d){
 // the second to ask gets the SAME start_pts back, even if it is already in the past.
 // That is the point: a late peer learns exactly how late it is instead of starting
 // from a wrong origin. A `bye` resets the line, so the next match opens at epoch 0.
+// TODO(netcode): per-level RE-ANCHOR to shrink clock drift. Over a long match the two clocks can
+// drift; re-requesting a start_pts at each LEVEL boundary (this function already re-anchors on any
+// halt+epoch, e.g. respawn/rematch) would reset the drift per level. Not wired for level-ups yet.
 async function _netRequestStart(s, reason){
     if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
     // The contract: a fresh sync ALWAYS precedes a new start PTS. Not "a sync from a
@@ -1431,6 +1443,12 @@ function _netHandleMsg(txt){
             // trip to the SERVER. This is the real one-way peer path, and it carries
             // both clients' clock-offset error with it. Worth watching separately:
             // if the average drifts away from ~half the peer RTT, the anchors are off.
+            // TODO(netcode): peer PTS-delta should be ~0 for two instances on ONE machine, but it
+            // jitters up to 6+ ms -- and notably WORSE on the de-obfuscated (peer-net graft) ICE
+            // path. CHECK whether the extra jitter is deob-path-specific or present on every path,
+            // and whether it is send-side (stamping) or receive-side. Harmless today (< 1 tick, no
+            // rollback), but not the ~0 expected. Lever: quantize the stamped PTS to the tick, or
+            // tighten/share the min-RTT clock sync (each instance syncs independently -> anchors differ).
             _netDbg.lag = mine - m.pts;
             _netLagN.push(_netDbg.lag);
             if(_netLagN.length > 64) _netLagN.shift();

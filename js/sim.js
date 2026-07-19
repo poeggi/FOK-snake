@@ -620,6 +620,14 @@ function update() {
         players.forEach(P=>{ P.stepAccum=0; });
     }
     if(phase==='duel'){
+        // TODO(netcode): online duel while CONTINUOUSLY boosting triggers an engine rollback every
+        // few seconds (no fixed period; sometimes two close together) -- otherwise all movement is
+        // live. Not held-key re-send (desktop keydown ignores e.repeat; 'bs' is one-shot), so the
+        // boosted-snake prediction genuinely diverges from the peer's authoritative state and the
+        // ~1s state-recovery corrects it. boostSince SHOULD match both sides (sender sets it at its
+        // simTick, stamps tk=simTick+1; receiver anchors boostSince=tk-1 in net.js _netPeerInput).
+        // Suspect the grace-engage tick or the 2x stepAccum/_gDue accrual below. DIAGNOSE: at a boost
+        // rollback, field-diff the two sims' _rbHashFields to see which key drifts.
         for(const P of players){   // per-player boost latch, same grace rule as classic
             if(P.boostDir&&P.boostDir.x===P.dir.x&&P.boostDir.y===P.dir.y&&P.dirQueue.length===0){
                 if(!P.boosting&&simTick-P.boostSince>=BOOST_GRACE_TICKS)P.boosting=true;

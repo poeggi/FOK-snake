@@ -347,6 +347,13 @@ const Snd = (() => {
     // The scheduler PROMISED audio-time contextTime is heard when the shared clock reads
     // seekAbs + (contextTime - t0); reality is it is heard NOW (shared = provider). The gap
     // is the drift. null when unsynced, no track, or the API is unavailable (iOS/suspended).
+    // TODO(audio): REAL open bug (Kai, devices). ~10% of restarts, menu music between two clients is
+    // audibly ~100ms off while BOTH anc (_netSync.ofs) and this drift read ~0. Clock-disagreement
+    // theory ruled out (that would be single-digit ms and track anc). Leading HYPOTHESIS: on the
+    // affected device getOutputTimestamp is blind (contextTime<=0 -> this returns null / the fallback
+    // fires), so the probe FALSELY reads ~0 while the speaker is off by ~the output latency (BT/mobile
+    // ~100-300ms). Also check: a discrete look-ahead/anchor snap, or a no-seek path (netPts null at
+    // musicPlay). Look here + _seekChannels (outLat/_musicAnchor) + _applyMusic; net.js netMenuSeekSec.
     function musicDriftMs(){
         if(!_ctx || !_currentTrack || !_musicAnchor || !_seekProvider) return null;
         const ts = _ctx.getOutputTimestamp ? _ctx.getOutputTimestamp() : null;
