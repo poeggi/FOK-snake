@@ -1029,6 +1029,15 @@ if ('caches' in window) {
         if (k) _swVersion = k.replace('snake-', '');
     }).catch(() => {});
 }
+// The cache name above does not exist on a first visit (the SW has not installed
+// yet), so read the version straight from sw.js -- network-first serves the code
+// actually running -- as a fallback so it shows immediately instead of '?'.
+if (typeof fetch === 'function') {
+    fetch('./sw.js', { cache: 'no-store' })
+        .then(r => r.text())
+        .then(t => { const m = t.match(/\/\/ version snake-(v[0-9.]+)/); if (m && _swVersion === '?') _swVersion = m[1]; })
+        .catch(() => {});
+}
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
