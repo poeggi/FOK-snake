@@ -1184,16 +1184,18 @@ function _netWire(dc){
     dc.onmessage = e => { if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(String(e.data)); } };
     dc.onclose = () => { const s = _netSess; if(s && s.game && !s.relay && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end
 }
-function _netSend(o){
+// `pre` (optional) is o already serialized -- callers that had to stringify anyway
+// (the st size check) pass it so the packet is not serialized twice.
+function _netSend(o, pre){
     const s = _netSess;
     if(!s) return;
     const pts = netPts();
-    if(pts != null && o.pts === undefined) o.pts = pts;   // API: every peer message carries the sender's PTS
+    if(pts != null && o.pts === undefined){ o.pts = pts; pre = undefined; }   // API: every peer message carries the sender's PTS (added after pre was built: re-serialize)
     if(o.t === 'in' || o.t === 'pi') _netDbg.hbTx++;   // input-channel packets sent (incl. idle keepalives)
     if(s.relay){ _netRelaySend(s, o); return; }
     if(!s.dc || s.dc.readyState !== 'open') return;
     try{
-        const j = JSON.stringify(o);
+        const j = pre !== undefined ? pre : JSON.stringify(o);
         // One datagram or nothing. Over the path MTU, SCTP fragments the message and
         // losing ANY fragment loses the whole thing -- on a channel that never
         // retransmits, a fragmented packet is a packet that mostly does not arrive. The
@@ -1570,9 +1572,14 @@ function _netHandleMsg(txt){
 // honoured by rewinding to that tick and re-simulating: the remote snake visibly
 // corrects, and its sounds may land late. That is the price of zero input lag,
 // and it only shows when latency is high.
-const RB_RING = 32;          // ticks we can rewind (~533ms at 60Hz). Rollback is for short hiccups
-                             // only: something arrives every 16 ticks and desync is assumed at 32,
-                             // so a divergence older than the ring gets a full resync, not a rewind.
+const RB_RING = 32;          // ring ENTRIES kept. Snapshots are THINNED (RB_SNAP_EVERY), so these
+                             // entries span RB_DEPTH ticks at half the per-tick clone cost.
+                             // Rollback is for short hiccups only: something arrives every 16
+                             // ticks; a divergence older than the ring gets a full resync.
+const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the nearest earlier
+                             // entry and re-sims at most one extra tick -- a sub-microsecond tick
+                             // against a full clone saved on every other tick.
+const RB_DEPTH = RB_RING * RB_SNAP_EVERY;   // rewind window in TICKS (~1067ms at 60Hz)
 const RB_FUTURE = 16;        // an input authored more than one heartbeat (16 ticks) ahead of us is not
                              // honest -- treat it as a connection problem and refuse it
 var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
@@ -1615,7 +1622,7 @@ function netDuelWarn(){
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
-    _rbRing = []; _rbLog = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
+    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
     _rbResyncSend = 0;
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
@@ -1653,6 +1660,18 @@ const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow'
     'gPer','_gDue','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
     '_powerMode','_powerModeAt','_barMoveTick','players','duelWinner','_duelX10',
     '_speedRound','_rngState'];
+// Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
+// duel tick still touches (_barsV is the bars change-ticker the renderer watches;
+// levelDoneWaiting gates 'advance'). The full simSnapshot would drag every classic-
+// mode leftover (hearts, gouranga sets, the classic snake) through structuredClone
+// dozens of times a second -- dead weight the duel never reads, cloned and GC'd for
+// nothing. Applied back via simApplyDuel (sim.js), which writes exactly this set.
+const RB_SNAP_DUEL = RB_HASH_DUEL.concat(['_barsV','levelDoneWaiting']);
+function _rbDuelSnap(){
+    const full = simSnapshot(), o = {};
+    for(const k of RB_SNAP_DUEL) o[k] = full[k];
+    return o;
+}
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
 // These cost ~600 bytes/s and turn an unactionable alarm into a field name, which is
@@ -1678,6 +1697,23 @@ function _rbHash(snap){
     let h = 0x811c9dc5;
     for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
     return h >>> 0;
+}
+// Whole hash + per-field hashes from ONE serialization pass. JSON.stringify of the
+// whitelist object is byte-identical to '{' + the '"key":<field JSON>' parts joined by
+// ',' + '}' (insertion order; undefined fields omitted -- exactly what JSON.stringify
+// does), so both hashes come out wire-identical to _rbHash/_rbHashFields while the
+// state is only walked once. This is the 64-tick boundary's hot path: the separate
+// calls were the single biggest recurring main-thread spike.
+function _rbHashBoth(snap){
+    try {
+        const f = {}, parts = [];
+        for(const k of RB_HASH_DUEL){
+            const s = JSON.stringify(snap[k]);   // undefined when the field is absent
+            f[k] = _rbStrHash(s === undefined ? 'u' : s);
+            if(s !== undefined) parts.push('"' + k + '":' + s);
+        }
+        return { h: _rbStrHash('{' + parts.join(',') + '}'), f };
+    } catch(e){ return { h: 0, f: null }; }
 }
 // A hash may only be compared once its tick has SETTLED. The peer hashes tick t with
 // its own input already applied; our snapshot for t stays provisional until that
@@ -1746,10 +1782,13 @@ function _rbSendState(t, sn){
     for(const c of me.snake) cells.push(c.x, c.y);   // flat [x0,y0,x1,y1,...]: compact on the wire
     const o = { t:'st', tk:_rbToWire(t), i:mi, s:cells, gd:sn.gemsDone|0, gem:sn.gem, rng:sn._rngState,
                 pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:sn._powerMode, pma:sn._powerModeAt };
+    const pts = netPts();
+    if(pts != null) o.pts = pts;   // stamped HERE so the size check sees the final packet and the string can be reused
     // A very long snake can push the state past the one-datagram cap; skip it this second
     // rather than fragment -- the hash still flags the divergence, recovery just lands later.
-    if(JSON.stringify(o).length > NET_PKT_MAX){ _rbDbg.stbig = (_rbDbg.stbig|0) + 1; return; }
-    _netSend(o);
+    const j = JSON.stringify(o);
+    if(j.length > NET_PKT_MAX){ _rbDbg.stbig = (_rbDbg.stbig|0) + 1; return; }
+    _netSend(o, j);
 }
 function _rbCheckState(m){
     if(typeof m.tk !== 'number' || typeof m.i !== 'number' || !Array.isArray(m.s)) return;
@@ -1873,9 +1912,21 @@ function _rbAdd(tk, cmd){
 // without this the snapshot would bake it in while the peer -- applying the SAME input
 // at the SAME tick, but after ITS snapshot -- hashed the state without it. Identical
 // sims, different snapshot boundary, and a desync reported on every steer.
+// Head positions per tick (BEFORE the tick ran), kept BESIDE the thinned ring: the
+// live-apply test (_rbPeerSteppedSince) needs the exact-tick head, which the ring no
+// longer holds for every tick. Four ints per tick instead of a full clone.
+var _rbHeads = new Map();
+function _rbNoteHeads(t, force){
+    if(!players || (!force && _rbHeads.has(t))) return;
+    const a = players[0] && players[0].snake[0], b = players[1] && players[1].snake[0];
+    if(!a || !b) return;
+    _rbHeads.set(t, [a.x, a.y, b.x, b.y]);
+}
 function _rbEnsureSnap(t){
+    _rbNoteHeads(t);                          // every tick, including the thinned ones
+    if(t % RB_SNAP_EVERY) return;             // thinned: this tick rewinds via the previous entry
     if(_rbRing.length && _rbRing[_rbRing.length-1].tk === t) return;   // already have it
-    _rbRing.push({ tk:t, snap:_rbClone(simSnapshot()) });
+    _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
     if(_rbRing.length > RB_RING) _rbRing.shift();
 }
 // Which snake is ours. The offerer is P0 and the answerer P1 -- an index, not a
@@ -1938,13 +1989,15 @@ function netTickPre(){
     // re-anchor for free by going through it.
     if(!_replaying) _rbPhase = phase;
     if((t & 63) === 0){
-        for(const k of _rbLog.keys()) if(k < t - RB_RING - 8) _rbLog.delete(k);
+        for(const k of _rbLog.keys()) if(k < t - RB_DEPTH - 8) _rbLog.delete(k);
+        for(const k of _rbHeads.keys()) if(k < t - RB_DEPTH - 8) _rbHeads.delete(k);
         // Full state + hash every 64 ticks (~1s): the state snapshot repairs a divergence,
         // the hash detects one. Sent at the tick boundary so it has the whole ring window
         // to arrive. Keyed to the deterministic tick, so both clients emit on the same tick.
-        if(!_replaying){
+        if(!_replaying && _rbRing.length){
             const sn = _rbRing[_rbRing.length-1].snap;
-            _netSend({ t:'h', tk:_rbToWire(t), h:_rbHash(sn), f:_rbHashFields(sn) });
+            const hb = _rbHashBoth(sn);   // one pass over the state for both hashes
+            _netSend({ t:'h', tk:_rbToWire(t), h:hb.h, f:hb.f });
             _rbSendState(t, sn);
         }
     } else if((t & 15) === 0 && !_replaying){
@@ -1971,13 +2024,14 @@ function _rbRollback(toTick){
     for(let i = _rbRing.length - 1; i >= 0; i--) if(_rbRing[i].tk <= toTick){ idx = i; break; }
     if(idx < 0) return false;                    // older than the ring: unrecoverable
     const from = _rbRing[idx].tk, target = simTick, keep = phase, preBarsV = _barsV;
-    simApply(_rbClone(_rbRing[idx].snap));       // clone: the ring entry stays pristine
+    simApplyDuel(_rbClone(_rbRing[idx].snap));   // clone: the ring entry stays pristine
     _sfxQ = _sfxQ.filter(q => q.tk <= simTick);  // sounds predicted past the rewind: cancelled...
     _fxQ  = _fxQ.filter(q => q.tk <= simTick);   // ...same for visual effects (bonus/crush/fireworks)
     _rbRing.length = idx;                        // these states are void; re-recorded below
     _replaying = true;
     for(let t = from; t <= target; t++){
-        _rbRing.push({ tk:t, snap:_rbClone(simSnapshot()) });
+        _rbNoteHeads(t, true);                   // re-record: the corrected past can move heads
+        if(t % RB_SNAP_EVERY === 0) _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
         const cmds = _rbLog.get(t);
         if(cmds) for(const c of cmds) simCommand(c);
         update();
@@ -1999,15 +2053,14 @@ function _rbRollback(toTick){
 // Did players[pi]'s head move between tick `tk` and now? A moved head means a step ran
 // (and consumed whatever direction was queued) since tk, so a late dir for tk missed its
 // step and must be rewound in. Head unmoved => the dir is still pending => apply it live.
-// The ring holds the PRE-tick snapshot for every ticked tick within RB_RING; if tk aged
-// out (or anything looks off), assume a step happened -> rewind (the safe answer).
+// The heads log covers EVERY tick within the window (the ring itself is thinned); if tk
+// aged out (or anything looks off), assume a step happened -> rewind (the safe answer).
 function _rbPeerSteppedSince(pi, tk){
     if(!players || !players[pi] || !players[pi].snake.length) return true;
-    let snap = null;
-    for(let i = _rbRing.length - 1; i >= 0; i--) if(_rbRing[i].tk === tk){ snap = _rbRing[i].snap; break; }
-    if(!snap || !snap.players || !snap.players[pi] || !snap.players[pi].snake.length) return true;
-    const a = players[pi].snake[0], b = snap.players[pi].snake[0];
-    return a.x !== b.x || a.y !== b.y;
+    const h = _rbHeads.get(tk);
+    if(!h) return true;
+    const a = players[pi].snake[0];
+    return a.x !== h[pi*2] || a.y !== h[pi*2 + 1];
 }
 // The peer's inputs -> our log, always under the OTHER index: a hostile peer can
 // steer nothing but its own snake. Each packet repeats the last few inputs, so a
@@ -2049,7 +2102,7 @@ function _netPeerInput(m){
         if(!cmd){ _rbDbg.drop++; _rbWarnAt = performance.now(); continue; }
         // Beyond the rewind window there is no honest way to honour it: applying it
         // at the wrong tick would desync the two worlds silently. Refuse, visibly.
-        if(tk <= simTick - RB_RING){ _rbDbg.drop++; _rbWarnAt = performance.now(); _netSigLog('! input too old @' + tk); continue; }
+        if(tk <= simTick - RB_DEPTH){ _rbDbg.drop++; _rbWarnAt = performance.now(); _netSigLog('! input too old @' + tk); continue; }
         // Authored far ahead of us: an honest peer stamps its OWN current tick.
         if(tk > simTick + RB_FUTURE){ _rbDbg.drop++; _rbWarnAt = performance.now(); _netSigLog('! input from the future @' + tk); continue; }
         _rbPeerSeq = q;

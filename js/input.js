@@ -535,6 +535,12 @@ document.addEventListener('keydown', e=>{
     const tv=TV_CODES[e.keyCode]||TV_NAMES[e.key];
     if(tv){ e.preventDefault(); handleKey(tv,null); return; }
     if(e.ctrlKey||e.metaKey||e.altKey) return;   // let browser/OS shortcuts (Ctrl+Shift+R etc.) through
+    // Held-key auto-repeat is NOISE during play: steering is a one-shot (the dpad
+    // suppresses its own repeat for the same reason, see the dpad notes), and online
+    // every repeated same-dir steer would go down the wire as a fresh record -- a sim
+    // no-op that still inflates the packet stream and, landing just after a step
+    // boundary, forces a rollback that changes nothing. Menus keep their repeats.
+    if(e.repeat&&(phase==='playing'||phase==='duel'||phase==='duelReady')){ e.preventDefault(); return; }
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&(phase==='playing'||phase==='duel')){

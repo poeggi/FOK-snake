@@ -620,14 +620,12 @@ function update() {
         players.forEach(P=>{ P.stepAccum=0; });
     }
     if(phase==='duel'){
-        // TODO(netcode): online duel while CONTINUOUSLY boosting triggers an engine rollback every
-        // few seconds (no fixed period; sometimes two close together) -- otherwise all movement is
-        // live. Not held-key re-send (desktop keydown ignores e.repeat; 'bs' is one-shot), so the
-        // boosted-snake prediction genuinely diverges from the peer's authoritative state and the
-        // ~1s state-recovery corrects it. boostSince SHOULD match both sides (sender sets it at its
-        // simTick, stamps tk=simTick+1; receiver anchors boostSince=tk-1 in net.js _netPeerInput).
-        // Suspect the grace-engage tick or the 2x stepAccum/_gDue accrual below. DIAGNOSE: at a boost
-        // rollback, field-diff the two sims' _rbHashFields to see which key drifts.
+        // TODO(netcode): RE-TEST boost-time rollbacks on devices. Root cause found: keyboard
+        // auto-repeat re-sent the held direction as a fresh 'dir' record every ~30ms (the
+        // e.repeat gate covered only the boost branch, not handleKey's steer) -- a sim no-op
+        // on the wire that still forces a rollback when it lands across a step boundary,
+        // and boosting doubles the step rate. input.js now drops play-phase repeats. If any
+        // boost rollback remains, field-diff the two sims' _rbHashFields at the rollback.
         for(const P of players){   // per-player boost latch, same grace rule as classic
             if(P.boostDir&&P.boostDir.x===P.dir.x&&P.boostDir.y===P.dir.y&&P.dirQueue.length===0){
                 if(!P.boosting&&simTick-P.boostSince>=BOOST_GRACE_TICKS)P.boosting=true;
@@ -725,4 +723,16 @@ function simApply(s){
     timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
     perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boostSince=s.boostSince; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
     players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
+}
+// Duel-scoped apply: exactly the globals a duel tick can touch (net.js RB_SNAP_DUEL),
+// for rollback restores. simApply assigns EVERY field unconditionally, so feeding it a
+// duel-scoped snapshot would wipe the classic-mode globals with undefined; this writes
+// only the duel set and leaves the rest alone.
+function simApplyDuel(s){
+    phase=s.phase; level=s.level; gem=s.gem; gemsDone=s.gemsDone; bars=s.bars; _barsV=s._barsV;
+    simTick=s.simTick; simNow=s.simNow; gPer=s.gPer; _gDue=s._gDue; phaseAt=s.phaseAt; gemAt=s.gemAt;
+    deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
+    powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt;
+    _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10;
+    _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }

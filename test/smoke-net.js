@@ -160,15 +160,16 @@ runTest('SMOKE-NET', `
     // This is the whole point of the redesign: the input is honoured at the tick it
     // was AUTHORED on, not the tick it happened to arrive on, so both clients end up
     // in the same world without anyone being the authority.
-    const before=_rbDbg.rb, lateTick=simTick-5;
+    const before=_rbDbg.rb, lateTick=simTick-5, tickLeft=simTick;
     const qLate=players[1].dirQueue.length;
     _netHandleMsg(JSON.stringify({t:'in',tk:lateTick,l:[{q:50,tk:lateTick,k:'dir',d:{x:0,y:-1}}]}));
     if(_rbDbg.rb!==before+1) throw 'a late input must trigger exactly one rollback';
-    if(simTick!==_rbRing[_rbRing.length-1].tk) throw 'the re-simulation must land back on the tick we left';
+    if(simTick!==tickLeft) throw 'the re-simulation must land back on the tick we left';
+    if(simTick-_rbRing[_rbRing.length-1].tk>=RB_SNAP_EVERY) throw 'the thinned ring must stay within one snap step of the live tick';
     if(players[1].dirQueue.length===qLate && _rbDbg.resim===0) throw 'the rewind re-simulated nothing';
     // Too old to rewind to: refused rather than applied at the wrong tick (a silent desync).
     const drops=_rbDbg.drop;
-    _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:51,tk:Math.max(0,simTick-RB_RING-1),k:'dir',d:{x:0,y:1}}]}));
+    _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:51,tk:Math.max(0,simTick-RB_DEPTH-1),k:'dir',d:{x:0,y:1}}]}));
     if(_rbDbg.drop!==drops+1) throw 'an un-rewindable input must be refused, not applied late';
     // Authored in our future: an honest peer stamps its own current tick.
     _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:52,tk:simTick+RB_FUTURE+5,k:'dir',d:{x:0,y:1}}]}));

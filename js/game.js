@@ -354,6 +354,17 @@ const NET_DBG_MS = 250;
 // static quadrant costs no reflow. netDebugQuad() supplies net/timing/sim; the
 // graphics quadrant is built here from the cached layout + the live FPS box.
 let _netDbgAt = 0, _dbgCorner = null, _dbgTxt = { tl:'', tr:'', bl:'', br:'' }, _dbgShown = false;
+// Frame-TASK duration (loop() entry to exit), not frame-to-frame time: this is how long
+// the main thread is busy per frame, i.e. the worst-case wait a DataChannel message (or
+// any event) sits out before its handler runs. The ring holds ~2s of samples.
+const _loopMs = new Float32Array(120);
+let _loopMsN = 0;
+function _loopMsStats(){
+    const n = Math.min(_loopMsN, _loopMs.length);
+    if(!n) return null;
+    const a = Array.from(n < _loopMs.length ? _loopMs.subarray(0, n) : _loopMs).sort((x, y) => x - y);
+    return { p50: a[(n * 0.5) | 0], p95: a[Math.min(n - 1, (n * 0.95) | 0)], mx: a[n - 1] };
+}
 function _mkDbgCorner(cls){ const el = document.createElement('div'); el.className = 'debug-overlay ' + cls; document.body.appendChild(el); return el; }
 function _gfxDbgText(){
     const L = _layoutDbg;
@@ -362,7 +373,8 @@ function _gfxDbgText(){
         '\nvp ' + Math.round(L.vpW||0) + 'x' + Math.round(L.vpH||0) +
         '\nused ' + Math.round(L.wW||0) + 'x' + Math.round(L.wH||0) + ' m' + (L.m||0) + ' s' + (L.scale||0).toFixed(2) +
         '\ncv ' + Math.round(L.cw||0) + 'x' + Math.round(L.ch||0) + ' nat ' + canvas.width + 'x' + canvas.height +
-        '\n' + ((fpsEl && fpsEl.textContent) || '-- FPS');
+        '\n' + ((fpsEl && fpsEl.textContent) || '-- FPS') +
+        (function(){ const st = _loopMsStats(); return st ? '\nloop ' + st.p50.toFixed(1) + '/' + st.p95.toFixed(1) + '/' + st.mx.toFixed(1) + 'ms p50/95/mx' : ''; })();
 }
 function updateNetDebugOverlay(rafNow){
     const on = (cfg.debug||0) >= 2;
@@ -648,6 +660,7 @@ function loop(rafNow) {
     // so gameplay speed is unchanged -- only the draw rate drops).
     if(cfg.fps30 && rafNow-_lastDraw < 32) return;
     _lastDraw = rafNow;
+    const _taskT0 = performance.now();
     _updateBtnDim();
     // FPS = frame DELIVERY, not paint count: every loop pass counts, because on a frozen
     // screen skipping the repaint IS keeping up (nothing needed drawing). The box maxes at
@@ -774,6 +787,7 @@ function loop(rafNow) {
     if(!skip){ s.d(); showHUD(s.hud); }
     if(!skip) drawAchPopups(simNow);
     _uiDirty = false;
+    _loopMs[_loopMsN++ % _loopMs.length] = performance.now() - _taskT0;
 }
 
 // ================================================================
