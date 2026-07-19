@@ -1684,9 +1684,9 @@ function netTickTarget(){
     return t;
 }
 // The CONTINUOUS tick position on the shared clock (netTickTarget without the floor),
-// for the fractional-phase steer: both clients trim toward firing each tick at the
-// MIDDLE of its wall-time window, so neither is systematically the early one. Same
-// bad-origin guard as the integer target.
+// for the phase seed at duel start and the one-shot displacement snap: both clients
+// fire each tick at the MIDDLE of its wall-time window, so neither is the early one.
+// Same bad-origin guard as the integer target.
 function netTickTargetF(){
     const s = _netSess;
     if(!s || !s.game || !inGame || !s.startPts) return null;

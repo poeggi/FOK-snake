@@ -92,7 +92,6 @@ function updateSplashExit() {
         _wsend({ t:'phase', phase:'menu' });   // sync the worker: it owns phaseAt
     }
 }
-let _clkHold = 0;   // frame counter for the clock's hold-back correction (see loop)
 let _clkSnapArm = true;   // phase snap is one-shot per excursion (see loop): armed while in place
 let _lastRAF = 0;                           // last RAF timestamp (worst-frame FPS recorder)
 let pauseReadyAt = 0;                       // pause input debounce gate

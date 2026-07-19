@@ -30,7 +30,7 @@ self.cfg = { diff: 1, turbo: true };
 // in ({t:'peerPkt'}) and local inputs ({t:'lin'}); the core's outbound packets and
 // debug go back over postMessage. duel-core references a handful of main-thread
 // globals -- this prelude gives them worker-appropriate homes.
-let _dcOn = false, _dcMy = 0, _dcOfs = null, _dcStartPts = 0, _dcHold = 0, _dcSnapArm = true;
+let _dcOn = false, _dcMy = 0, _dcOfs = null, _dcStartPts = 0, _dcSnapArm = true;
 let _dcSnapN = 0, _dcSnapAt = 0;   // phase-set counter + moment, mirrored to the timing overlay
 let _dcEvents = [];   // [{tk, e}] tick-tagged sim events for the main-thread 2-tick queues
 let _dcRewTo = 0;     // deepest rewind since the last post (0 = none): main cancels stale fx
