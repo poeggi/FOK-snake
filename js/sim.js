@@ -11,6 +11,7 @@ function startLen(lvl) {
 
 function _lvlGper(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
 let boostDir=null, boostSince=0, boosting=false;   // boostSince is a simTick stamp
+let _gAt=0;   // engine tick of the last accrual boundary: a boost flip authored after it has changed nothing yet
 const BOOST_GRACE_TICKS=12;   // ~200ms hold before boost engages (was 10/167ms: a tap could trip it)
 function clearBoost(){boostDir=null;boosting=false;}
 
@@ -589,13 +590,13 @@ function update() {
     simNow = simTick * TICK_MS;
     const now = simNow;
     if(phase==='playing'){
-        if(boostDir&&boostDir.x===dir.x&&boostDir.y===dir.y&&dirQueue.length===0){
-            if(!boosting&&simTick-boostSince>=BOOST_GRACE_TICKS&&cfg.turbo!==false)boosting=true;
-        }else boosting=false;
+        // boosting is COMMAND-DRIVEN: the arming stage (simArmTick, device-local)
+        // issues the real engage/disengage commands; the sim never derives them.
         // Fixed per-level game tick (gPer). Normal steps every 2nd game tick, boost
         // every game tick -- boost changes the accrual, never gPer.
         if(--_gDue<=0){
             _gDue=gPer;
+            _gAt = simTick;   // accrual boundary: boost flips only matter from here on
             _stepAccum += boosting?2:1;
             if(_stepAccum>=2){ _stepAccum-=2; step(now); }
             if(_powerMode && ++_barMoveTick>=2){ _barMoveTick=0; _moveBarsGhost(); }
@@ -626,13 +627,11 @@ function update() {
         // on the wire that still forces a rollback when it lands across a step boundary,
         // and boosting doubles the step rate. input.js now drops play-phase repeats. If any
         // boost rollback remains, field-diff the two sims' _rbHashFields at the rollback.
-        for(const P of players){   // per-player boost latch, same grace rule as classic
-            if(P.boostDir&&P.boostDir.x===P.dir.x&&P.boostDir.y===P.dir.y&&P.dirQueue.length===0){
-                if(!P.boosting&&simTick-P.boostSince>=BOOST_GRACE_TICKS)P.boosting=true;
-            }else P.boosting=false;
-        }
+        // boosting is COMMAND-DRIVEN (see simArmTick): only real transitions arrive,
+        // authored by the owning device -- the sim never re-derives an engage.
         if(--_gDue<=0){
             _gDue=gPer;
+            _gAt = simTick;   // accrual boundary: boost flips only matter from here on
             for(const P of players){ if(P.alive) P.stepAccum += (P.boosting?2:1)*(now<P.slowUntil?0.5:1); }
             if(_powerMode && ++_barMoveTick>=2){ _barMoveTick=0; _moveBarsGhost(); }
             duelStep(now);
@@ -640,6 +639,10 @@ function update() {
     }
     // NOTE: the splash->menu transition is presentation/UI, not simulation -- it lives on
     // the main thread (see updateSplashExit in game.js), so the sim never touches splash state.
+    // Arming ticks WITH the sim (every home, including the headless harness, gets it by
+    // driving update()); it self-guards against rollback re-sims and only ISSUES input
+    // commands, so the sim itself stays a pure function of its inputs.
+    simArmTick();
 }
 
 // ---- Worker snapshot protocol -------------------------------------------------
@@ -651,7 +654,7 @@ function simSnapshot(){
     return {
         phase, _shimmerThreshold, level, lives, score, _levelStartLen,
         snake, dir, dirQueue, gem, gemsDone, bars, _barsV, simTick, simNow,
-        gPer, _gDue, _stepAccum, phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
+        gPer, _gDue, _gAt, _stepAccum, phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
         perfectLevel, levelWasPerfect, levelBonusCount, epicLevelCount,
         _gourangaLine, _gourangaActive, _gourangaEaten,
         heart, heartAt, heartIsEarly, _earlyHeartUsed, _earlyHeartTrigger, _earlyHeartCount,
@@ -684,8 +687,11 @@ function simCommand(m){
             break;
         }
         case 'boost':
-            if(players){ const P=players[m.p||0]; if(P&&P.alive){ P.boostDir=m.dir; P.boostSince=simTick; P.boosting=!!m.now; } break; }
-            boostDir=m.dir; boostSince=simTick; boosting=!!m.now; break;
+            // A 'boost' command IS the engage (real transition, authored by the owner).
+            if(players){ const P=players[m.p||0]; if(P&&P.alive){ P.boostDir=m.dir; P.boostSince=simTick; P.boosting=true; } break; }
+            boostDir=m.dir; boostSince=simTick; boosting=true; break;
+        case 'arm':   // device-local arming passthrough (never logged/replayed; see simArm)
+            simArm(m.p||0, m.dir, m.now); break;
         case 'boostend':
             if(players){ const P=players[m.p||0]; if(P){ P.boostDir=null; P.boosting=false; } break; }
             boostDir=null; boosting=false; break;
@@ -715,7 +721,7 @@ function simCommand(m){
 function simApply(s){
     phase=s.phase; _shimmerThreshold=s._shimmerThreshold; level=s.level; lives=s.lives; score=s.score; _levelStartLen=s._levelStartLen;
     snake=s.snake; dir=s.dir; dirQueue=s.dirQueue; gem=s.gem; gemsDone=s.gemsDone; bars=s.bars; _barsV=s._barsV; simTick=s.simTick; simNow=s.simNow;
-    gPer=s.gPer; _gDue=s._gDue; _stepAccum=s._stepAccum; phaseAt=s.phaseAt; gemAt=s.gemAt; deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
+    gPer=s.gPer; _gDue=s._gDue; _gAt=s._gAt|0; _stepAccum=s._stepAccum; phaseAt=s.phaseAt; gemAt=s.gemAt; deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
     perfectLevel=s.perfectLevel; levelWasPerfect=s.levelWasPerfect; levelBonusCount=s.levelBonusCount; epicLevelCount=s.epicLevelCount;
     _gourangaLine=s._gourangaLine; _gourangaActive=s._gourangaActive; _gourangaEaten=s._gourangaEaten;
     heart=s.heart; heartAt=s.heartAt; heartIsEarly=s.heartIsEarly; _earlyHeartUsed=s._earlyHeartUsed; _earlyHeartTrigger=s._earlyHeartTrigger; _earlyHeartCount=s._earlyHeartCount;
@@ -724,13 +730,54 @@ function simApply(s){
     perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boostSince=s.boostSince; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
     players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }
+// ---- Local boost arming (DEVICE-local: never in the snapshot or the hash) ----
+// A held direction ARMS a boost; after BOOST_GRACE_TICKS of aligned live ticks the
+// REAL engage is issued through the home's `simArmIssue` hook, which routes it like
+// any other input (classic: simCommand + replay log; online: netLocalInput -> wire).
+// Disalignment or release while boosting issues the real end the same way -- so only
+// true transitions ever reach the sim or the wire. `instant` (touch double-tap /
+// swipe) skips the wait. Ticked once per LIVE engine tick by each sim home; never
+// during a rollback re-sim (arming is real input authorship, not replayable state).
+let _armSlots = [];   // per LOCAL player index: {dir, since, go} | {off:true} | empty
+function simArm(p, d, instant){
+    _armSlots[p] = d ? { dir:{ x:d.x, y:d.y }, since:simTick, go:!!instant } : { off:true };
+}
+function simArmTick(){
+    if(typeof _replaying !== 'undefined' && _replaying) return;   // a re-sim replays the log; it must not author anew
+    for(let p = 0; p < 2; p++){
+        const a = _armSlots[p]; if(!a) continue;
+        const P = players ? players[p] : (p === 0 ? { dir, dirQueue, boosting, alive:true } : null);
+        if(!P) { _armSlots[p] = null; continue; }
+        if(a.off){ if(P.boosting) simArmIssue(p, 'be'); _armSlots[p] = null; continue; }
+        if(P.alive === false) continue;
+        const aligned = a.dir.x === P.dir.x && a.dir.y === P.dir.y && P.dirQueue.length === 0;
+        if(!aligned){
+            a.since = simTick;                        // re-aim: the wait starts over
+            if(P.boosting) simArmIssue(p, 'be');      // real end: the boost died with the turn
+        } else if(!P.boosting && cfg.turbo !== false && (a.go || simTick - a.since >= BOOST_GRACE_TICKS)){
+            simArmIssue(p, 'bs', a.dir);              // real engage, authored NOW
+        }
+    }
+}
+// Default issue hook: straight into the sim. Homes with a wire (duel-core) or a
+// replay log (game.js classic) override this.
+var simArmIssue = function(p, kind, d){
+    simCommand(kind === 'bs' ? { t:'boost', p, dir:d } : { t:'boostend', p });
+    if(players) return;
+    // Classic score submissions replay the input log server-side: the ENGAGE (not the
+    // keypress) is the input now, so it is what gets logged, at its authored tick.
+    // The log lives on the main thread: log directly where net.js shares the scope
+    // (in-process + headless), ride a tick-stamped event out of the worker otherwise.
+    if(typeof netLogBoost === 'function'){ if(kind === 'bs') netLogBoost(d, simTick); else netLogBoostEnd(simTick); }
+    else simEvents.push(kind === 'bs' ? { t:'blog', k:'bs', d:{ x:d.x, y:d.y }, tk:simTick } : { t:'blog', k:'be', tk:simTick });
+};
 // Duel-scoped apply: exactly the globals a duel tick can touch (duel-core.js _rbDuelSnap),
 // for rollback restores. simApply assigns EVERY field unconditionally, so feeding it a
 // duel-scoped snapshot would wipe the classic-mode globals with undefined; this writes
 // only the duel set and leaves the rest alone.
 function simApplyDuel(s){
     phase=s.phase; level=s.level; gem=s.gem; gemsDone=s.gemsDone; bars=s.bars; _barsV=s._barsV;
-    simTick=s.simTick; simNow=s.simNow; gPer=s.gPer; _gDue=s._gDue; phaseAt=s.phaseAt; gemAt=s.gemAt;
+    simTick=s.simTick; simNow=s.simNow; gPer=s.gPer; _gDue=s._gDue; _gAt=s._gAt|0; phaseAt=s.phaseAt; gemAt=s.gemAt;
     deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt;
     _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10;

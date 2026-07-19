@@ -37,8 +37,15 @@ runTest('SMOKE-NET', `
     if(phase!=='playing') throw 'classic game did not reach playing with net.js loaded';
     gameSteer(0, GDIRS.ArrowUp);
     if(_netInputs.length!==1||_netInputs[0][1]!==0) throw 'input log did not record the steer';
-    gameBoostStart(0, GDIRS.ArrowUp, true); gameBoostEnd(0);
-    if(_netInputs.length!==3||_netInputs[1][1]!==4||_netInputs[2][1]!==8) throw 'input log boost codes wrong';
+    // Boost transitions log at their real ENGAGE/END (issued by the arming stage
+    // beside the sim, once the aimed direction is live), not at the keypress.
+    gameBoostStart(0, GDIRS.ArrowUp, true);
+    for(let i=0;i<200 && _netInputs.length<2;i++) update();
+    if(_netInputs.length!==2||_netInputs[1][1]!==4) throw 'engage not logged: '+JSON.stringify(_netInputs);
+    if(!boosting) throw 'instant boost did not engage';
+    gameBoostEnd(0);
+    for(let i=0;i<8 && _netInputs.length<3;i++) update();
+    if(_netInputs.length!==3||_netInputs[2][1]!==8) throw 'input log boost codes wrong';
     inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
     log('classic play ok: unaffected, seed + tick-stamped input log recorded');
 
@@ -118,11 +125,17 @@ runTest('SMOKE-NET', `
     update();
     gameSteer(1, GDIRS.ArrowUp);   // local P2 keys are dead in an online game
     if(sent.length!==w0+1) throw 'local P2 input must be swallowed online';
-    // Boost too: same path, and it is the one that actually showed the coupling.
-    gameBoostStart(0, GDIRS.ArrowUp);
-    if(!players[0].boostDir) throw 'own boost must engage AT ONCE, not wait for a tick';
+    // Boost: ARMING is immediate and device-local (nothing rides the wire for it);
+    // the arming stage issues the real engage once the aim is live + grace has
+    // passed, and THAT transition is what reaches the sim and the peer.
+    for(let i=0;i<300 && players[0].dirQueue.length;i++){ netTickPre(); update(); }   // queued turns consume first: arming aligns against the LIVE dir
+    gameBoostStart(0, { x:players[0].dir.x, y:players[0].dir.y }, true);
+    for(let i=0;i<300 && !players[0].boosting;i++){ netTickPre(); update(); }
+    if(!players[0].boosting) throw 'armed boost never engaged';
+    if(!sent.some(x=>/"k":"bs"/.test(x))) throw 'the engage transition did not cross the wire';
     gameBoostEnd(0);
-    if(players[0].boostDir) throw 'own boost end must apply at once too';
+    netTickPre(); update();
+    if(players[0].boosting) throw 'boost end must land within a tick';
     // ONE DATAGRAM OR NOTHING. Past the path MTU, SCTP fragments the message and losing
     // any fragment loses all of it -- on a channel that never retransmits, a fragmented
     // packet is one that mostly does not arrive. Measure the WORST case of each type we

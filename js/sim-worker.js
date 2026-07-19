@@ -62,6 +62,10 @@ self._rbRollback = function(toTick){
     if(r && (!_dcRewTo || toTick < _dcRewTo)) _dcRewTo = toTick;
     return r;
 };
+// Online, the arming stage's real transitions go through the input path (wire + log);
+// local 1:1 / classic keep the default straight-to-sim issue.
+const _armIssueSim = simArmIssue;
+self.simArmIssue = (p, kind, d) => { if (_dcOn) netLocalInput(kind, 0, d, true); else _armIssueSim(p, kind, d); };
 // The shared-clock tick target (net.js netTickTarget's worker twin, same 600-tick
 // origin sanity window). null = steer nowhere, free-run at 60Hz.
 function _dcTarget(){
@@ -131,7 +135,7 @@ function _step() {
         const d = tgt === null ? 0 : tgt - simTick;
         if (tgt !== null && Math.abs(d) <= 120 && ran < MAX_CATCHUP) {
             if (d > 1) { netTickPre(); update(); ran++; }
-            else if (d < -1 && (++_dcHold & 31) === 0) _acc = Math.max(-TICK_MS, _acc - TICK_MS);
+            else if (d <= -1 && (++_dcHold & 31) === 0) _acc = Math.max(-TICK_MS, _acc - TICK_MS);   // ahead by even one: drain it (behind-by-one is the floored target's natural phase)
         }
         if (simEvents.length) drainSimEvents();
     }

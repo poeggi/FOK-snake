@@ -198,6 +198,9 @@ function drainSimEvents(){
             case 'coin':     addFOKoins(e.n); break;
             case 'ach':      unlockAch(e.id); break;
             case 'bars':     renderBarsOffscreen(); break;
+            case 'blog':     // classic boost transition: replay-log it at its authored tick
+                if(typeof netLogBoost === 'function'){ if(e.k === 'bs') netLogBoost(e.d, e.tk); else netLogBoostEnd(e.tk); }
+                break;
             case 'lvlreset': fireworks=[]; _crushEffects=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
             case 'showhud':  showHUD(e.v); break;
             case 'gameover':
@@ -754,7 +757,11 @@ function loop(rafNow) {
                 // simTick at a standstill until wall time reaches it, input piling up in
                 // dirQueue with nothing to step it. A correction that can zero the tick
                 // rate is not a correction. This one converges at ~90% speed.
-                else if(_d < -1 && (++_clkHold & 7) === 0) _fbAcc = Math.max(-TICK_MS, _fbAcc - TICK_MS);
+                // AHEAD by even one: drain it. Behind-by-one is the natural resting
+                // phase of a floored target; ahead is pure accumulator drift, and a
+                // client idling a tick ahead reads every peer input late -- the
+                // needless-rollback source.
+                else if(_d <= -1 && (++_clkHold & 7) === 0) _fbAcc = Math.max(-TICK_MS, _fbAcc - TICK_MS);
             }
             if(simEvents.length) drainSimEvents();
             if(dlg){

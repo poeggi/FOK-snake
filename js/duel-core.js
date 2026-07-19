@@ -114,7 +114,7 @@ function _rbReset(){
 // page load, so two devices carry different bases and it can never match. `bars`
 // itself is here, which is the actual state; the ticker says nothing extra.
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
-    'gPer','_gDue','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
+    'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
     '_powerMode','_powerModeAt','_barMoveTick','players','duelWinner','_duelX10',
     '_speedRound','_rngState'];
 // Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
@@ -129,7 +129,7 @@ const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow'
 // KEEP IN SYNC with simApplyDuel (sim.js), which writes exactly this set back on a
 // rollback restore.
 function _rbDuelSnap(){
-    return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue,
+    return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue, _gAt,
              phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
              powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
              players, duelWinner, _duelX10, _speedRound, _rngState };
@@ -592,15 +592,19 @@ function _netPeerInput(m){
             // this live effect) and replays from the log, so it lands exactly once either way.
             let live = false;
             if(cmd.t === 'dir')           live = !_rbPeerSteppedSince(oP, tk);
-            else if(cmd.t === 'boost')    live = !cmd.now && (simTick - tk) < BOOST_GRACE_TICKS;
-            else if(cmd.t === 'boostend') live = !_rbPeerSteppedSince(oP, tk);
+            // Boost transitions are GAME-TICK granular: the boosting flag is only read
+            // at accrual boundaries, so a flip authored after the last one (_gAt) has
+            // changed nothing yet on either sim -- apply live, bit-identical.
+            else if(cmd.t === 'boost' || cmd.t === 'boostend') live = tk > _gAt;
+            // A live apply corrects the present but not the recorded past: with a hash
+            // boundary between the authored tick and now, the boundary's ring snapshot
+            // would disagree with the sender's -- a false DESYNC. Rewind instead; the
+            // re-sim re-records the ring, keeping the hashed history consistent.
+            if(live && ((tk >> 6) !== (simTick >> 6) || ((simTick & 63) === 0 && tk < simTick))) live = false;
             if(live){
                 simCommand(cmd);
-                // The sender applied it at its simTick (= tk-1; it stamps tk = simTick+1), and
-                // both the rollback resim and netTickPre apply it at tk-1 too. Anchor there.
-                if(cmd.t === 'boost') players[oP].boostSince = tk - 1;
                 _rbDbg.live++;
-            } else if(tk < earliest) earliest = tk;   // ran through its step / already engaged: rewind
+            } else if(tk < earliest) earliest = tk;   // crossed a step / accrual boundary: rewind
         } else {
             // Arrived AHEAD of its tick: just logged above, netTickPre applies it on time. This
             // is the best case (the behind-client sees the ahead-client's inputs like this) --
@@ -610,6 +614,14 @@ function _netPeerInput(m){
     }
     if(earliest !== Infinity) _rbRollback(earliest);
 }
+// In-process ONLINE home: the arming stage's real transitions go through the input
+// path (wire + log). Local 1:1 and classic keep the straight-to-sim default; the
+// worker home installs its own wrapper over this one (sim-worker.js).
+{ const _armSim = simArmIssue;
+  simArmIssue = (p, kind, d) => {
+      if(netGameActive() && !(typeof netWorkerDuelOn === 'function' && netWorkerDuelOn())) netLocalInput(kind, 0, d, true);
+      else _armSim(p, kind, d);
+  }; }
 // Local input during an online duel. It is applied IMMEDIATELY -- exactly like
 // single player -- and also logged for the tick it belongs to, so a rollback
 // re-simulation reproduces it.

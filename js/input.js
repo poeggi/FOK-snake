@@ -424,16 +424,11 @@ function gameSteer(p, d){
     if(typeof netLogDir === 'function') netLogDir(d);          // classic: replay material for score submits
     _wsend({t:'dir', p, dir:d});
 }
-function gameBoostStart(p, d, now){
-    if(typeof netLocalInput === 'function' && netLocalInput('bs', p, d, now)) return;
-    if(typeof netLogBoost === 'function') netLogBoost(d);
-    _wsend({t:'boost', p, dir:d, now:!!now});
-}
-function gameBoostEnd(p){
-    if(typeof netLocalInput === 'function' && netLocalInput('be', p)) return;
-    if(typeof netLogBoostEnd === 'function') netLogBoostEnd();
-    _wsend({t:'boostend', p});
-}
+// Boost input ARMS (device-local, rides to whichever home runs the sim); the real
+// engage/end transitions are issued by simArmTick there -- those are what reach the
+// sim, the wire and the replay log. Nothing here is a transition itself.
+function gameBoostStart(p, d, now){ _wsend({ t:'arm', p, dir:{ x:d.x, y:d.y }, now:!!now }); }
+function gameBoostEnd(p){ _wsend({ t:'arm', p, dir:null }); }
 // ================================================================
 // ROUTER
 // ================================================================

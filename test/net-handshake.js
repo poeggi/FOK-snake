@@ -627,14 +627,14 @@ try {
     const A = mk(A_ID), B = mk(B_ID);
     A.__duelStart(0xBEEF, 'host', 45000);
     B.__duelStart(0xBEEF, 'peer', 3000);
-    A.__tick(60); B.__tick(60);
+    A.__tick(70); B.__tick(70);        // inside one 64-tick hash block: a straddled boundary forces a rewind by design
     A.__drain(); B.__drain();
     A.__steer({x:0,y:-1});
     const p = A.__drain().filter(x => JSON.parse(x).t === 'in');
     B.__tick(8);                       // AHEAD by fewer than a step period: dir still queued
     p.forEach(x => B.__recv(x));
     if(B.__rbDbg().rb) throw new Error('B rewound for a dir that was still pending (should apply live)');
-    A.__tick(60); B.__tick(52);        // both to tick 120
+    A.__tick(50); B.__tick(42);        // both to tick 120
     if(A.__simTick() !== B.__simTick()) throw new Error('drove the two sims to different tick counts: test bug');
     if(A.__hashNow() !== B.__hashNow())
       throw new Error('the two clients diverged: a live-applied dir must match the rollback result');
@@ -643,22 +643,24 @@ try {
   // A grace-delayed boost (keyboard/dpad) that lands within its grace window has not
   // engaged on either sim yet, so it applies LIVE (no rewind) -- boostSince anchored to its
   // real tick -- and both worlds stay identical. This is why boost no longer costs rollbacks.
-  check('a late grace boost still within its grace applies live and converges', () => {
+  check('a boost engages via the arming stage, crosses as a real transition, converges', () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__duelStart(0xBEEF, 'host', 45000);
     B.__duelStart(0xBEEF, 'peer', 3000);
     A.__tick(120); B.__tick(120);      // snakes moving
     A.__drain(); B.__drain();
-    A.__boost({x:1,y:0});              // arm a boost (grace-delayed); it will not engage for 12t
+    A.__steer({x:0,y:-1});
+    A.__tick(30);                      // the turn is consumed: the live dir is known
+    A.__boost({x:0,y:-1});             // ARMS only (device-local); the stage authors the REAL engage after grace
+    A.__tick(30);
     const p = A.__drain().filter(x => JSON.parse(x).t === 'in');
-    B.__tick(6);                       // AHEAD by fewer than BOOST_GRACE_TICKS: boost not engaged
+    if(!p.some(x => /"k":"bs"/.test(x))) throw new Error('no engage transition on the wire');
+    B.__tick(60);                      // both at 180
     p.forEach(x => B.__recv(x));
-    if(B.__rbDbg().rb) throw new Error('B rewound for a boost that had not engaged (should apply live)');
-    if(!B.__rbDbg().live) throw new Error('B did not live-apply the boost');
-    A.__tick(60); B.__tick(54);        // both to tick 180
+    A.__tick(60); B.__tick(60);        // both to 240: late transitions settle in (live or rewound, per accrual)
     if(A.__simTick() !== B.__simTick()) throw new Error('drove the two sims to different tick counts: test bug');
     if(A.__hashNow() !== B.__hashNow())
-      throw new Error('the two clients diverged: a live-applied boost must match the rollback result');
+      throw new Error('the two clients diverged: a boost transition must replay identically');
   });
 
   // The other half: a dir that arrives AFTER the step it belonged to (the peer already

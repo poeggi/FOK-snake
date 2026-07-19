@@ -1732,10 +1732,13 @@ function _netTeardown(){
 let _netSeed = 0, _netInputs = [];
 function _netDirCode(d){ return d.y < 0 ? 0 : d.x > 0 ? 1 : d.y > 0 ? 2 : 3; }
 function netNoteGameStart(seed){ _netSeed = seed>>>0; _netInputs = []; }
-function _netLog(code){ if(inGame && !players && _netInputs.length < 20000) _netInputs.push([simTick|0, code]); }
+// tk (optional) pins the authored tick: boost transitions are issued beside the sim
+// (worker home included) and arrive here via a tick-stamped event, while the mirror's
+// simTick lags a frame behind.
+function _netLog(code, tk){ if(inGame && !players && _netInputs.length < 20000) _netInputs.push([(tk == null ? simTick : tk)|0, code]); }
 function netLogDir(d){ _netLog(_netDirCode(d)); }
-function netLogBoost(d){ _netLog(4 + _netDirCode(d)); }
-function netLogBoostEnd(){ _netLog(8); }
+function netLogBoost(d, tk){ _netLog(4 + _netDirCode(d), tk); }
+function netLogBoostEnd(tk){ _netLog(8, tk); }
 function netSubmitScore(name, sc, lvl){
     if(!_netOk() || !(sc > 0)) return;
     _netPost('/api/scores.php', {
