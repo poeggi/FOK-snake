@@ -110,7 +110,8 @@ function _post() {
         // different performance.now() origins).
         msg.duel = { ev: _dcEvents.splice(0), rew: _dcRewTo, rb: _rbDbg,
                      inRx: _netDbg.inRx, inTx: _netDbg.inTx, inLog: _netDbg.inLog, ptk: _netDbg.peerTkOfs,
-                     warnAgo: performance.now() - _rbWarnAt, msg: _duelMsg, msgW: _duelMsgAt ? performance.now() - _duelMsgAt : -1 };
+                     warnAgo: performance.now() - _rbWarnAt, dsyFor: _rbBadSince ? Date.now() - _rbBadSince : 0,
+                     msg: _duelMsg, msgW: _duelMsgAt ? performance.now() - _duelMsgAt : -1 };
         _dcRewTo = 0;
     }
     postMessage(msg);
@@ -182,7 +183,6 @@ onmessage = (e) => {
             const p = m.m;
             if (p.t === 'in'){ _netDbg.hbRx++; _netPeerInput(p); }
             else if (p.t === 'h')   _rbCheckHash(p);
-            else if (p.t === 'hfr') _rbFieldHashReq(p);
             else if (p.t === 'st')  _rbCheckState(p);
             else if (p.t === 'rs')  _rbApplyResync(p);
             break;

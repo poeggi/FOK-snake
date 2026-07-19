@@ -1348,6 +1348,10 @@ function _netLiveStart(){
         const s = _netSess; if(!s || !s.game) return;
         const nowMs = performance.now();
         if(!s.pathAt || nowMs - s.pathAt > 2000){ s.pathAt = nowMs; _netPathStat(s); }   // refresh the ICE-path readout ~0.5Hz
+        // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
+        // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
+        const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
+        if(inGame && _dsyFor > RB_RECONNECT_TIMEOUT_MS){ _netSessionEnd('DESYNC - MATCH ENDED'); return; }
         // The idle keepalive carries the recent input log, so it doubles as repair:
         // a lost LAST input would otherwise sit unfixed until the player pressed
         // something else. An empty log is just an alive check, as before.
@@ -1589,14 +1593,12 @@ function _netHandleMsg(txt){
         case 'in': _netDbg.hbRx++;   // both ends apply the other's input
             if(_netSess){ if(_netWD()) _wDuelSend({ t:'peerPkt', m }); else _netPeerInput(m); }
             break;
-        case 'h':    // divergence check / field-hash request / state recovery / full
-        case 'hfr':  // resync: the core's packets -- routed to wherever the core runs
-        case 'st':   // (sim worker or in-process)
+        case 'h':    // divergence check / state recovery / full resync: the core's
+        case 'st':   // packets -- routed to wherever the core runs (worker or in-process)
         case 'rs':
             if(_netSess && inGame){
                 if(_netWD()) _wDuelSend({ t:'peerPkt', m });
                 else if(m.t === 'h') _rbCheckHash(m);
-                else if(m.t === 'hfr') _rbFieldHashReq(m);
                 else if(m.t === 'st') _rbCheckState(m);
                 else _rbApplyResync(m);
             }

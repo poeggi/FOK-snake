@@ -980,6 +980,7 @@ function applyWorkerFrame(){
         if(d.inLog) _netDbg.inLog = d.inLog;
         _netDbg.peerTkOfs = d.ptk || 0;
         if(typeof d.warnAgo === 'number') _rbWarnAt = performance.now() - d.warnAgo;   // age-based: clocks differ
+        _netDbg.dsyFor = d.dsyFor|0;   // unhealed-desync age, for the escalation deadline
         if(d.msg && d.msg !== _duelMsg){ _duelMsg = d.msg; _duelMsgAt = _msgNow(); _uiDirty = true; }
     }
 }
