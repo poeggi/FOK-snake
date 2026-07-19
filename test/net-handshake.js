@@ -246,9 +246,15 @@ try {
     // Server drops peer-net into B's mailbox: A's real IPv6, same family.
     B.__deliver({ from:'server', to:B_ID, type:'peer-net',
       payload: JSON.stringify({ peer:A_ID, ip:'2001:db8::a', family:6, self_ip:'2001:db8::b', self_family:6 }) });
-    // A's mDNS host candidate arrives.
+    // A's mDNS host candidate arrives in the SAME drained batch as the offer, i.e.
+    // while B's setRemoteDescription is still resolving. A real pc REJECTS
+    // addIceCandidate before the remote description is set (and delivery is one-shot,
+    // so a rejected candidate is lost for good): it must be PARKED now and flushed the
+    // moment the description settles -- never fed to the pc early.
     B.__deliver({ from:A_ID, to:B_ID, type:'ice',
       payload: JSON.stringify({ candidate:'candidate:1 1 udp 2113937151 9f3a-4b.local 51234 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 }) });
+    if(B.__iceAdded().length) throw new Error('candidates must be parked until the remote description settles');
+    await flush();                    // B's setRemoteDescription resolves -> the parked candidates flush
     const added = B.__iceAdded();
     if(!added.some(c=>/\.local /.test(c.candidate||''))) throw new Error('the original mDNS candidate was not added');
     const deob = added.find(c=>/ 2001:db8::a 51234 typ host/.test(c.candidate||''));

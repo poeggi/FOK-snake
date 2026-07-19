@@ -254,10 +254,18 @@ async function _netTimeSync(force, budgetMs){
 //   anc = this device's clock offset vs the server (mr = min-rtt, a = age); PTS
 //   rests on it, so a wrong anc puts us out of step with the peer.
 //   P<i>[R] = my index, R=relay; ep = epoch; tgt = clock-driven tick target
-//   ptk = peer-tick (sub-tick, ~0 = aligned); pts live lag / avg. delta = peer one-way pts-delta (latest, then avg + min/max)
+//   ptk = peer-tick (sub-tick, ~0 = aligned); pts live/avg = peer one-way pts-delta (latest, then avg + min/max)
 //   rb = rollbacks/resim-ticks, mx = deepest; live = inputs applied with NO rewind
 //   dsy = desync, hok = hash-ok; in = input records rx/tx; pkt = ALL packets rx/tx
 //   path = ICE pair (host=LAN, srflx=hairpin)
+// A PTS as UTC time-of-day (hh:mm:ss.t): the shared server clock is unix ms, so the
+// same PTS renders identically on every device regardless of its timezone.
+function _netHms(pts){
+    const t = Math.floor(pts/100) % 864000;   // tenths within the UTC day
+    const s = Math.floor(t/10);
+    const p2 = n => (n<10?'0':'')+n;
+    return p2(Math.floor(s/3600)) + ':' + p2(Math.floor(s/60)%60) + ':' + p2(s%60) + '.' + (t%10);
+}
 function netDebugQuad(){
     const d = _netDbg, N = [], T = [], S = [];
     T.push('pts ' + simTick + ' ' + (simNow/1000).toFixed(1) + 's');
@@ -266,10 +274,10 @@ function netDebugQuad(){
         ? ('anc -- ' + (d.srvOfs ? '(hello ' + Math.round(d.srvOfs) + ')' : 'unsynced'))
         : ('anc ' + (_netSync.ofs>=0?'+':'') + Math.round(_netSync.ofs) + ' mr' + Math.round(_netSync.rtt) +
            ' a' + ((_netSync.at ? (Date.now()-_netSync.at) : 0)/1000).toFixed(0) + 's'));
-    // wall = the PTS our LOCAL wall clock currently equals (Date.now()+anc). Two synced
-    // devices read the same value; it is the shared time the tick target is derived from.
+    // wall = the PTS our LOCAL wall clock currently equals (Date.now()+anc), as UTC
+    // hh:mm:ss.t. Two synced devices show the SAME string -- that is the whole readout.
     const _wp = netPts();
-    T.push('wall ' + (_wp==null ? '-- unsynced' : _wp + ' ' + (_wp/1000).toFixed(1) + 's'));
+    T.push('wall ' + (_wp==null ? '-- unsynced' : _netHms(_wp)));
     N.push('rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
@@ -286,7 +294,7 @@ function netDebugQuad(){
         // tgt = the tick the wall PTS says we should be at; d = tgt-simTick, i.e. how far
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
         T.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
-        T.push('pts live lag ' + Math.round(d.lag) + (d.lagN ? '  avg. delta ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
+        T.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
         S.push('rb ' + _rbDbg.rb + '/' + _rbDbg.resim + ' mx' + _rbDbg.maxRew + '  live ' + _rbDbg.live);
         S.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk + ' fix ' + (_rbDbg.fix|0));
         if(d.inLog.length) N.push('< ' + d.inLog.join(' '));
@@ -892,16 +900,21 @@ function _netOnSignal(sig){
                         _netSess.peerProfile = _netClampProfile(d.profile);
                         _netNameSeen(from, _netSess.peerProfile.name);
                     }
-                    if(_netSess.pc && d.sdp) _netSess.pc.setRemoteDescription(d.sdp).catch(()=>{});
+                    if(_netSess.pc && d.sdp){
+                        const s = _netSess;
+                        s.pc.setRemoteDescription(d.sdp)
+                            .then(()=>{ if(_netSess === s){ s.rdOk = true; _netIceFlush(s); } })
+                            .catch(()=>{});
+                    }
                 }
                 break;
             }
             case 'ice':
                 if(_netSess && _netSess.peer === from && _netSess.pc){
                     const cand = _netJson(pl);
-                    try{ _netSess.pc.addIceCandidate(cand).catch(()=>{}); }catch(e){}
+                    _netIceAdd(_netSess, cand);   // parked until the remote description settles
                     const extra = _netDeobfuscateCand(cand, _netPeerNet[from]);   // mDNS -> real IPv6, probed in parallel
-                    if(extra){ try{ _netSess.pc.addIceCandidate(extra).catch(()=>{}); _netDbg.iceDeob = (_netDbg.iceDeob|0)+1; }catch(e){} }
+                    if(extra){ _netIceAdd(_netSess, extra); _netDbg.iceDeob = (_netDbg.iceDeob|0)+1; }
                 }
                 break;
             case 'peer-net': {
@@ -986,8 +999,27 @@ function _netDeobfuscateCand(cand, pn){
     parts[3] = String((parseInt(parts[3],10)||0) + 1);   // outrank the mDNS twin: this real IP is tried FIRST (the .local one only resolves on a shared LAN)
     return { candidate: parts.join(' '), sdpMid: cand.sdpMid, sdpMLineIndex: cand.sdpMLineIndex, usernameFragment: cand.usernameFragment };
 }
+// Remote ICE candidates can arrive in the SAME drained batch as the offer/answer they
+// belong to (the mailbox delivers oldest-first), i.e. while setRemoteDescription is
+// still resolving -- and addIceCandidate before the remote description is set rejects
+// with InvalidStateError, which the soft-fail catch turns into a SILENT drop. Delivery
+// is one-shot, so a candidate lost there is lost for good: the connect then leans on
+// later-arriving candidates and prflx discovery, which is exactly the intermittent
+// "P2P sometimes never comes up" failure. So: park candidates until the description
+// has settled (s.rdOk, set by the paths that await it), then flush them in order.
+function _netIceAdd(s, cand){
+    if(!s || !s.pc) return;
+    if(!s.rdOk){ s.iceQ.push(cand); return; }
+    try{ s.pc.addIceCandidate(cand).catch(()=>{}); }catch(e){}
+}
+function _netIceFlush(s){
+    if(!s || !s.pc || !s.iceQ.length) return;
+    const q = s.iceQ; s.iceQ = [];
+    for(const c of q){ try{ s.pc.addIceCandidate(c).catch(()=>{}); }catch(e){} }
+}
 function _netMkSess(peer, role){
     return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
+             rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false,
@@ -1111,6 +1143,7 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     _netTimeSync();   // in parallel with the ICE handshake: synced by the time sched arrives
     try {
         await pc.setRemoteDescription(d.sdp);
+        if(_netSess && _netSess.pc === pc){ _netSess.rdOk = true; _netIceFlush(_netSess); }
         const an = await pc.createAnswer();
         await pc.setLocalDescription(an);
         _netSignal(peer, 'answer', JSON.stringify({ sdp:pc.localDescription, profile:_netProfile(), v:_swVersion }));
@@ -1308,6 +1341,7 @@ function _netRtcRebuild(s){
     try{ if(s.dc){ s.dc.onopen=s.dc.onmessage=s.dc.onclose=null; s.dc.close(); } }catch(e){}
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null;
+    s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
     const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
     s.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignal(s.peer, 'ice', JSON.stringify(e.candidate)); };
@@ -1343,6 +1377,7 @@ async function _netRtcReanswer(from, d){
     pc.ondatachannel = e => _netWire(e.channel);
     try {
         await pc.setRemoteDescription(d.sdp);
+        if(s.pc === pc){ s.rdOk = true; _netIceFlush(s); }
         const an = await pc.createAnswer();
         await pc.setLocalDescription(an);
         _netSignal(from, 'answer', JSON.stringify({ sdp:pc.localDescription, rc:1, v:_swVersion }));
