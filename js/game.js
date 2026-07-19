@@ -671,7 +671,7 @@ const _GAME_SCREEN = { d:()=>drawGameBoard(simNow), hud:true };   // playing/dyi
 const _DUEL_SCREEN = { d:()=>drawDuelBoard(simNow), hud:true };   // a duel in a shared game phase (dying/levelDone) draws the duel board, not the single-snake one
 function loop(rafNow) {
     requestAnimationFrame(loop);
-    // Worker run-state reconcile: while an IN-PROCESS online duel runs (cfg.duelInMain), pause
+    // Worker run-state reconcile: while an IN-PROCESS online duel runs (cfg.singleThreaded), pause
     // the worker so its idle menu-frame posts stop contending with main -- a clean A/B; resume
     // it any other time. Cheap idempotent check; only acts on the transition.
     if(_worker){
@@ -850,12 +850,12 @@ function beginOnlineDuel(seed, hosting){
     // the 8s desync match-end on the fresh match.
     _pendingSnap = null; _pendingEvents.length = 0; _pendingDuel = null;
     _netDbg.dsyFor = 0;
-    // Same duel-core, two homes: the WORKER (default) or IN-PROCESS on main. cfg.duelInMain
+    // Same duel-core, two homes: the WORKER (default) or IN-PROCESS on main. cfg.singleThreaded
     // forces the in-process home even when a worker exists -- an A/B for latency/jitter, since
     // the worker home pays a postMessage hand-over per packet and ~1-2 frames of local-input
     // latency, while in-process applies input instantly (loop() reconciles the worker's run
     // state so it is paused during an in-process duel, for a clean measurement).
-    if(_worker && !cfg.duelInMain){
+    if(_worker && !cfg.singleThreaded){
         // Worker-hosted duel: sim + rollback run in sim-worker (duel-core there). One
         // message carries everything the core needs; a rematch/level start simply
         // sends it again with the fresh seed/startPts.
