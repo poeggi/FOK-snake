@@ -928,17 +928,23 @@ function _netOnSignal(sig){
                 break;
             case 'offer': {
                 const od = _netJson(pl);
-                if(od.rc && _netSess && _netSess.peer === from && _netSess.game){ _netRtcReanswer(from, od); break; }   // reconnect: rebuild the transport, keep the match
+                if(od.rc){
+                    // A reconnect offer only makes sense against a live game with this peer.
+                    // Arriving after the match ended (a late one-shot in the mailbox), it must
+                    // NOT fall through to _netRtcAnswer and spin up a phantom one-sided duel.
+                    if(_netSess && _netSess.peer === from && _netSess.game) _netRtcReanswer(from, od);
+                    break;
+                }
                 if(od.sdp) _netRtcAnswer(from, od); else _netRelayAnswer(from, od);   // no sdp = relay mode
                 break;
             }
             case 'answer': {
-                _netHs.offerTo = null; _netHs.offerPayload = null;   // answered: stop re-sending
                 const d = _netJson(pl);
                 // NOT gated on _netSess.pc: a relay session never builds one, so
                 // that gate dropped the answer's profile and version on the whole
                 // default path -- quick match then had no peerProfile at all.
                 if(_netSess && _netSess.peer === from){
+                    _netHs.offerTo = null; _netHs.offerPayload = null;   // OUR peer answered: stop re-sending (a stale answer from a past peer must NOT kill a current offer's retry)
                     if(!_netVerOk(d.v)){
                         _netTeardown();
                         _netLb.msg = 'VERSION MISMATCH - BOTH PLEASE RELOAD'; _uiDirty = true;
@@ -1755,6 +1761,10 @@ function _netSessionEnd(msg, remoteBye){
     const s = _netSess; if(!s) return;
     const wasGame = s.game;
     if(!remoteBye && s.peer) _netSignal(s.peer, 'bye', '');
+    // Clear the handshake too (as netEndSession/_netUnload do): a mid-game reconnect
+    // leaves _netHs.offerTo latched, and without this the now-out-of-game _netHsTick
+    // would resume re-sending stale offers to the departed peer + show 'NO RESPONSE'.
+    _netHsClear();
     _netTeardown();
     if(wasGame && inGame){   // only while the online duel is actually still on screen
         inGame = false; _wsend({ t:'phase', phase:'menu' });
@@ -1775,6 +1785,7 @@ function _netTeardown(){
     if(s.relayAbort){ try{ s.relayAbort.abort(); }catch(e){} s.relayAbort = null; }   // close the held relay socket now
     try{ if(s.dc){ s.dc.onopen=s.dc.onmessage=s.dc.onclose=null; s.dc.close(); } }catch(e){}
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
+    s.dc = null; s.pc = null; s.rdOk = false; s.iceQ = [];   // a deferred ICE-holdback timer then sees s.pc !== its captured pc and skips
 }
 
 // ---- global highscores ----

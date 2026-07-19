@@ -123,7 +123,11 @@ function _post() {
                      inRx: _netDbg.inRx, inTx: _netDbg.inTx, inLog: _netDbg.inLog, ptk: _netDbg.peerTkOfs,
                      warnAgo: performance.now() - _rbWarnAt, dsyFor: _rbBadSince ? Date.now() - _rbBadSince : 0,
                      psetN: _dcSnapN, psetAgo: _dcSnapAt ? performance.now() - _dcSnapAt : -1,
-                     msg: _duelMsg, msgW: _duelMsgAt ? performance.now() - _duelMsgAt : -1 };
+                     msg: _duelMsg };
+        // ONE-SHOT: a duel message is an event, not a state. Clearing it after posting
+        // stops a set-once worker message (e.g. DESYNC) from re-asserting every frame and
+        // clobbering a main-authored message (RECONNECTING/RECONNECTED); main owns display duration.
+        _duelMsg = '';
         _dcRewTo = 0;
     }
     postMessage(msg);

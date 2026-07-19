@@ -815,11 +815,16 @@ function beginOnlineDuel(seed, hosting){
     _musicHoldUntil = performance.now() + 1500;
     showHUD(true);
     _sfxQ.length = 0; _fxQ.length = 0;            // queued against the OLD tick counter: startDuel rewinds it to 0
+    // Drop any frame still pending from the menu/previous match: applying it for one frame
+    // would flash the old screen, and a stale duel-extras `dsyFor` could instantly re-fire
+    // the 8s desync match-end on the fresh match.
+    _pendingSnap = null; _pendingEvents.length = 0; _pendingDuel = null;
+    _netDbg.dsyFor = 0;
     if(_worker){
         // Worker-hosted duel: sim + rollback run in sim-worker (duel-core there). One
         // message carries everything the core needs; a rematch/level start simply
         // sends it again with the fresh seed/startPts.
-        _wDuel = true; _pendingDuel = null;
+        _wDuel = true;
         _worker.postMessage({ t:'duelStartNet', seed:seed>>>0,
             x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10,
             my: hosting ? 0 : 1,
@@ -874,7 +879,11 @@ function _initWorker(){
                 if(d.ev.length) p.ev.push.apply(p.ev, d.ev);
                 if(d.rew && (!p.rew || d.rew < p.rew)) p.rew = d.rew;
                 p.rb = d.rb; p.inRx = d.inRx; p.inTx = d.inTx; p.inLog = d.inLog;
-                p.ptk = d.ptk; p.warnAgo = d.warnAgo; p.msg = d.msg;
+                // All of these are latest-wins ages/counters -- dsyFor drives the desync
+                // match-end deadline, so a coalesced batch must keep the FRESHEST, not the
+                // first-in-batch (a stale nonzero dsyFor would delay or misfire the kill).
+                p.ptk = d.ptk; p.warnAgo = d.warnAgo; p.dsyFor = d.dsyFor; p.psetN = d.psetN; p.psetAgo = d.psetAgo;
+                if(d.msg) p.msg = d.msg;   // never let a later empty frame erase a real message
             } else _pendingDuel = d;
         }
     };
