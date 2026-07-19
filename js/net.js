@@ -63,12 +63,17 @@ const NET_KEEPALIVE_MS = 300;
 // How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
 // a hash mismatch) before the warning clears.
 const NET_WARN_FLASH_MS = 3000;
+// How long a pending invite (sent, received, or accepting) lingers before it goes stale.
+// The server drops undelivered signals at 30s; we give up a touch sooner so the UI resolves
+// to NO ANSWER / clears the dialog while the peer could, in theory, still collect it.
+const NET_INVITE_STALE_MS = 24000;
 // Silence ladder (wall-clock ms, derived from the 16-tick heartbeat -- something should
 // arrive every ~267ms). Wall-clock, NOT ticks: a suspended tab freezes simTick too, so only
 // real elapsed time reveals the gap on the side that was asleep.
 const RB_WARN_MS = Math.round(32 * TICK_MS);          // ~533ms (2 missed beats) -> CONNECTION LOST warning
 const RB_RECONNECT_MS = Math.round(128 * TICK_MS);    // ~2133ms (8 missed) -> rebuild the p2p link, keep the match
-const RB_RECONNECT_TIMEOUT_MS = 8000;                 // the rebuild never recovered -> end the match
+const RB_RECONNECT_TIMEOUT_MS = 8000;                 // desync repairs never converged -> end the match
+const RB_DEAD_MS = 4000;                              // total silence (p2p or relay), no packet in -> link dead, tear down
 // NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
 // enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a
@@ -327,7 +332,7 @@ function netDebugQuad(){
         if(d.inLog.length) N.push('< ' + d.inLog.join(' '));
     } else {
         N.push('online ' + _netCounts.online + '  playing ' + _netCounts.playing);
-        if(_netLb.invite && Date.now()-(_netLb.invite.at||0) < 30000) N.push('INVITE FROM ' + String(_netLb.invite.from).slice(0,4) + (_netLb.invite.relay?' (relay)':''));
+        if(_netLb.invite && Date.now()-(_netLb.invite.at||0) < NET_INVITE_STALE_MS) N.push('INVITE FROM ' + String(_netLb.invite.from).slice(0,4) + (_netLb.invite.relay?' (relay)':''));
         if(_netHs.sent) N.push('INVITED ' + String(_netHs.sent).slice(0,4) + ' - waiting');
         if(_netHs.accepting) N.push('ACCEPTED ' + String(_netHs.accepting).slice(0,4) + ' - awaiting offer');
         if(_netHs.offerTo) N.push('OFFERED ' + String(_netHs.offerTo).slice(0,4) + ' x' + _netHs.offerTries);
@@ -466,11 +471,11 @@ async function _netHello(){
     const r = await _netPost('/api/hello.php', body);
     _netHelloBusy = false;
     if(r){ _netDbg.rtt = performance.now() - t0; if(r.now) _netDbg.srvOfs = r.now + _netDbg.rtt/2 - Date.now(); }   // now = server PTS in ms
-    // Undelivered signals expire server-side after 30s: both a sent invite (we get
-    // no answer) and a received invite dialog (the sender's is long gone) go stale.
-    if(_netHs.sent && Date.now() - _netHs.sentAt > 30000){ _netHs.sent = null; _netLb.msg = 'NO ANSWER'; _uiDirty = true; }
-    if(_netLb.invite && Date.now() - (_netLb.invite.at||0) > 30000){ _netLb.invite = null; _uiDirty = true; }
-    if(_netHs.accepting && Date.now() - _netHs.acceptingAt > 30000){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
+    // Undelivered signals expire server-side after 30s; we bail a bit sooner
+    // (NET_INVITE_STALE_MS): a sent invite -> NO ANSWER, a received dialog clears.
+    if(_netHs.sent && Date.now() - _netHs.sentAt > NET_INVITE_STALE_MS){ _netHs.sent = null; _netLb.msg = 'NO ANSWER'; _uiDirty = true; }
+    if(_netLb.invite && Date.now() - (_netLb.invite.at||0) > NET_INVITE_STALE_MS){ _netLb.invite = null; _uiDirty = true; }
+    if(_netHs.accepting && Date.now() - _netHs.acceptingAt > NET_INVITE_STALE_MS){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
     _netSrvErr = false;
     const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
@@ -792,8 +797,9 @@ function _netWD(){ return typeof netWorkerDuelOn === 'function' && netWorkerDuel
 // Push a fresh clock anchor to the worker's core: its tick target derives from ofs +
 // startPts exactly like netTickTarget does here, so every adoption must reach it.
 function _netClockPush(){
-    if(_netWD() && _netSync.ofs != null)
-        _wDuelSend({ t:'duelClock', ofs:_netSync.ofs, startPts:(_netSess && _netSess.startPts) || null });
+    if(_netSync.ofs == null) return;
+    if(_netWD()) _wDuelSend({ t:'duelClock', ofs:_netSync.ofs, startPts:(_netSess && _netSess.startPts) || null });
+    else if(inGame && _netSess && _netSess.game && typeof _fbSeedPhase === 'function') _fbSeedPhase();   // in-process: the grid moved, re-set the phase
 }
 
 // ---- invites ----
@@ -1122,12 +1128,12 @@ function _netRtcInit(peer, role){
         const s = _netSess;
         if(!s || s.pc !== pc || s.relay) return;   // relay mode: the RTC attempt no longer owns the session
         if(pc.connectionState === 'failed' || pc.connectionState === 'closed'){
-            if(!s.game) _netRelayStart(s);              // P2P never came up: fall back NOW (earlier than the 5s timer)
+            if(!s.game) _netRelayStart(s);              // P2P never came up: fall back NOW (earlier than the 6s timer)
             else if(!s.reconnectAt) _netReconnect(s);   // an established game lost its channel: rebuild it, do NOT end
         }
     };
-    // P2P gets 5 seconds; then the match falls back to the server relay.
-    if(_netTimers) _netSess.connT = setTimeout(()=>{ if(_netSess && _netSess.pc === pc && !_netSess.game) _netRelayStart(_netSess); }, 5000);
+    // P2P gets 6 seconds; then the match falls back to the server relay.
+    if(_netTimers) _netSess.connT = setTimeout(()=>{ if(_netSess && _netSess.pc === pc && !_netSess.game) _netRelayStart(_netSess); }, 6000);
     return pc;
 }
 // Relay-mode handshake (no-P2P bit set): no RTCPeerConnection at all -- the
@@ -1369,7 +1375,7 @@ function _netPathStat(s){
         _netDbg.path = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob + '  p2p-rtt ' + rtt;
     }).catch(()=>{});
 }
-// In-game liveness: the DataChannel is the session -- ping when idle, 3s silence = dead.
+// In-game liveness: the DataChannel is the session -- ping when idle, 4s silence = dead.
 function _netLiveStart(){
     if(!_netTimers) return;
     _netSess.liveT = setInterval(()=>{
@@ -1403,13 +1409,13 @@ function _netLiveStart(){
         const silent = nowW - s.lastRecvWall;
         if(s.relay){
             if(nowMs < s.relayGraceUntil) return;                       // relay just engaged: let the peer catch up
-            if(silent > 3000) _netSessionEnd('CONNECTION LOST');        // relay has no transport to rebuild -> a long silence ends it
+            if(silent > RB_DEAD_MS) _netSessionEnd('CONNECTION LOST');  // relay has no transport to rebuild -> a long silence ends it
             return;
         }
         // p2p ladder: WARN (netDuelWarn) -> RECONNECT (rebuild the link) -> hard KILL if it never recovers.
         if(silent > RB_RECONNECT_MS){
             if(!s.reconnectAt) _netReconnect(s);
-            else if(nowW - s.reconnectAt > RB_RECONNECT_TIMEOUT_MS) _netSessionEnd('CONNECTION LOST');
+            else if(silent > RB_DEAD_MS) _netSessionEnd('CONNECTION LOST');   // total silence past the cap -> give up (reconnect had RB_RECONNECT_MS..RB_DEAD_MS to rebuild)
         } else if(s.reconnectAt && silent < RB_WARN_MS){
             _netReconnectDone(s);   // packets flowing again -- recovered
         }

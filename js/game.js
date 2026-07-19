@@ -92,7 +92,14 @@ function updateSplashExit() {
         _wsend({ t:'phase', phase:'menu' });   // sync the worker: it owns phaseAt
     }
 }
-let _clkSnapArm = true;   // phase snap is one-shot per excursion (see loop): armed while in place
+// Set the in-process tick phase to the shared grid (mid-window firing), only on an
+// anchor change -- the file:// fallback's twin of sim-worker _dcSeedPhase.
+function _fbSeedPhase(){
+    const _ft = (typeof netTickTargetF === 'function') ? netTickTargetF() : null;
+    if(_ft === null) return;
+    _fbAcc = Math.max(-TICK_MS, Math.min(TICK_MS, (_ft - simTick - 0.5) * TICK_MS));
+    _netDbg.psetN = (_netDbg.psetN|0) + 1; _netDbg.psetAt = performance.now();
+}
 let _lastRAF = 0;                           // last RAF timestamp (worst-frame FPS recorder)
 let pauseReadyAt = 0;                       // pause input debounce gate
 let achPage = 0;
@@ -730,49 +737,15 @@ function loop(rafNow) {
             _fbAcc+=fb;
             while(_fbAcc>=TICK_MS && ran<MAX_CATCHUP){ _fbAcc-=TICK_MS; if(typeof netTickPre==='function') netTickPre(); update(); ran++; }
             if(ran>=MAX_CATCHUP) _fbAcc=0;
-            // The shared clock STEERS this, it does not gate it. Gating on it -- ticking
-            // only while simTick < target -- meant the sim stopped dead the instant the
-            // target was not ahead of us: READY/GO frozen, input piling up unapplied, the
-            // game dead for seconds at every duel start. A clock that can stop the game is
-            // not a clock, it is a switch. Single player never had this because its worker
-            // ticks regardless.
-            // So: nudge by at most ONE tick per frame toward the target. Behind -> one
-            // extra tick; ahead -> hold the accumulator back a tick. Drift is corrected
-            // within a frame or two and the sim NEVER stops.
-            // BOUNDED. Holding the accumulator back every frame cancels the accumulation
-            // exactly, which is the gate again wearing a different hat -- it stalled the
-            // sim just as dead. So only correct drift we could plausibly have EARNED
-            // (a couple of seconds); a bigger gap means the origin is wrong, and chasing
-            // a wrong origin is how the game ends up frozen waiting for a moment that
-            // never comes. Run free instead: drifting from the peer is recoverable
-            // (rollback), a dead game is not.
+            // The shared clock STEERS this, it does not gate it (gating stalled the game at
+            // every start). Gross INTEGER tick lag is closed by one extra tick per frame
+            // toward the target; the sub-tick PHASE is SET on an anchor change (see the
+            // beginOnlineDuel seed + _fbSeedPhase), never polled -- the phase measure sweeps
+            // a full unit each tick, so a poll would fire every frame. A gap over ~2s means
+            // a wrong origin; run free (rollback recovers drift, a dead game does not).
             const _tgt = (typeof netTickTarget==='function') ? netTickTarget() : null;
             const _d = _tgt === null ? 0 : _tgt - simTick;
-            if(_tgt !== null && Math.abs(_d) <= 120 && ran < MAX_CATCHUP){
-                if(_d > 1){ if(typeof netTickPre==='function') netTickPre(); update(); }   // behind: one extra tick
-                // AHEAD: hold a tick back, but only every 8th frame. Doing it EVERY frame
-                // takes back exactly what the frame just added -- the sim does not slow
-                // down, it STOPS, for as long as we are ahead. That is what made the game
-                // dead for seconds after the start: startPts a moment in the future pins
-                // simTick at a standstill until wall time reaches it, input piling up in
-                // dirQueue with nothing to step it. A correction that can zero the tick
-                // rate is not a correction. This one converges at ~90% speed.
-                // Phase is EVENT-SET, never steered (see sim-worker.js): a displaced
-                // phase (anchor re-base, clamped stall, truncation) snaps back in one
-                // step; the quarter-tick threshold ignores ordinary frame jitter.
-                // One-shot per excursion, as a bounded += delta (see sim-worker.js): a
-                // frozen shared clock can never stall frame-time ticking.
-                else {
-                    const _ft = (typeof netTickTargetF === 'function') ? netTickTargetF() : null;
-                    if(_ft !== null){
-                        let _e = _ft - simTick - 0.5;
-                        if(_e > 1) _e = 1; else if(_e < -1) _e = -1;
-                        if(_e > 0.25 || _e < -0.25){ if(_clkSnapArm){ _clkSnapArm = false; _fbAcc += _e * TICK_MS;
-                            _netDbg.psetN = (_netDbg.psetN|0) + 1; _netDbg.psetAt = performance.now(); } }
-                        else _clkSnapArm = true;
-                    }
-                }
-            }
+            if(_tgt !== null && _d > 1 && _d <= 120 && ran < MAX_CATCHUP){ if(typeof netTickPre==='function') netTickPre(); update(); }   // behind: one extra tick
             if(simEvents.length) drainSimEvents();
             if(dlg){
                 prevPhase = phase;   // the game behind the dialog may have evolved (death, level change)
@@ -857,16 +830,8 @@ function beginOnlineDuel(seed, hosting){
     _fbAcc = 0;                                   // fresh in-process tick accumulator
     _wsend({ t:'startDuel', seed:seed>>>0, x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10 });   // routes to the LOCAL sim on both ends
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
-    // Phase is SET at start (see sim-worker duelStartNet): seed the accumulator so
-    // ticks fire mid-window on the shared grid from tick 0.
-    _clkSnapArm = true; _netDbg.psetN = 0; _netDbg.psetAt = 0;
-    if(typeof netTickTargetF === 'function'){
-        const _ft0 = netTickTargetF();
-        if(_ft0 !== null){
-            _fbAcc = Math.max(-TICK_MS, Math.min(TICK_MS, (_ft0 - simTick - 0.5) * TICK_MS));
-            _netDbg.psetN = 1; _netDbg.psetAt = performance.now();   // the start seed IS the first set
-        }
-    }
+    _netDbg.psetN = 0; _netDbg.psetAt = 0;
+    _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
 }
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
