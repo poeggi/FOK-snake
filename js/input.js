@@ -136,7 +136,7 @@ const UI_INPUT = {
             else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
             else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
             else if(duelSel===4){
-                if(cfg.offline || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
+                if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='lobby'; netLobbyEnter(); }
             }
             else this.back();   // BACK row (like drawSettings)
@@ -242,8 +242,8 @@ const UI_INPUT = {
                 _debugEntered = !!(_cats()[settingsCat] && _cats()[settingsCat].label==='DEBUGGING');
             } else {
                 const it=list[settingsSel];
-                if(it.act) it.act();
-                saveCfg();
+                if(it.dis && it.dis()){ Snd.sfxPlay('fail',cfg.music); }   // forced by context (file:// / no Worker): locked
+                else { if(it.act) it.act(); saveCfg(); }
             }
         },
         back(){

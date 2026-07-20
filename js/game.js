@@ -412,7 +412,7 @@ function updateNetDebugOverlay(rafNow){
     if(!online){
         const _synced = (typeof netPts === 'function') && netPts() != null;
         const _mseek = (typeof netMenuSeekSec === 'function') ? netMenuSeekSec() : 0;
-        time += '\nsync ' + (_synced ? 'ok mseek ' + _mseek.toFixed(2) + 's' : (cfg.offline ? 'offline' : '...'));
+        time += '\nsync ' + (_synced ? 'ok mseek ' + _mseek.toFixed(2) + 's' : (netOffline() ? 'offline' : '...'));
     }
     // Music drift vs the shared clock (read-only probe): + leads, - lags. Two side-by-side
     // clients should both read near 0; a long-up client trending away is the DAC-drift cause.
@@ -675,7 +675,7 @@ function loop(rafNow) {
     // the worker so its idle menu-frame posts stop contending with main -- a clean A/B; resume
     // it any other time. Cheap idempotent check; only acts on the transition.
     if(_worker){
-        const wantRun = !(inGame && typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn());
+        const wantRun = _useWorker();   // paused whenever the sim runs on main (single-threaded)
         if(wantRun !== _workerRunning){
             _worker.postMessage({ t:'run', on:wantRun });
             _workerRunning = wantRun;
@@ -732,7 +732,7 @@ function loop(rafNow) {
     // in-process with the classic fixed-timestep accumulator. Input already reaches it via
     // _wsend's simCommand fallback, so this is the only missing piece. Pause freezes
     // ticking exactly like the worker's stopped clock does.
-    if(!_worker || (typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn())){
+    if(!_useWorker()){
         // Mirror the worker's clock semantics exactly: stopped while paused (including
         // paused behind the quit dialog), running otherwise. The quit dialog must not stop
         // the game -- in worker mode the WORKER's phase stays 'playing' behind the main
@@ -829,7 +829,7 @@ function _wsend(m){
     // synchronous access): commands go straight to it, not to the worker (which
     // idles on its menu phase until the session ends).
     if(inGame && typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn() && typeof simCommand==='function'){ simCommand(m); return; }
-    if(_worker) _worker.postMessage(m); else if(typeof simCommand==='function') simCommand(m);
+    if(_useWorker()) _worker.postMessage(m); else if(typeof simCommand==='function') simCommand(m);
 }
 function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x10: !!cfg.x10 }; }
 function beginGame(){
@@ -854,12 +854,11 @@ function beginOnlineDuel(seed, hosting){
     // the 8s desync match-end on the fresh match.
     _pendingSnap = null; _pendingEvents.length = 0; _pendingDuel = null;
     _netDbg.dsyFor = 0;
-    // Same duel-core, two homes: the WORKER (default) or IN-PROCESS on main. cfg.singleThreaded
-    // forces the in-process home even when a worker exists -- an A/B for latency/jitter, since
-    // the worker home pays a postMessage hand-over per packet and ~1-2 frames of local-input
-    // latency, while in-process applies input instantly (loop() reconciles the worker's run
-    // state so it is paused during an in-process duel, for a clean measurement).
-    if(_worker && !cfg.singleThreaded){
+    // Same duel-core, two homes: the WORKER or IN-PROCESS on main (see _useWorker). Single
+    // threaded (cfg.singleThreaded, or file://, or no Worker) runs the whole app in-process --
+    // instant local input, no postMessage hand-over per packet. loop() pauses the worker while
+    // single-threaded so it never contends with main.
+    if(_useWorker()){
         // Worker-hosted duel: sim + rollback run in sim-worker (duel-core there). One
         // message carries everything the core needs; a rematch/level start simply
         // sends it again with the fresh seed/startPts.
@@ -935,6 +934,16 @@ let _pendingSnap = null, _pendingEvents = [];
 // main keeps transport (net.js), input capture and render. These helpers are the
 // main-side seam net.js and duel-core call through (typeof-guarded there).
 let _wDuel = false, _pendingDuel = null;
+// ---- one place that decides "single threaded" (sim on MAIN, no worker) ----
+// file:// forbids Worker construction, so it is single-threaded by nature. Rather than
+// keep that as a separate hidden path, it just FORCES the two config options: an install
+// run from file:// (or with no Worker at all) reports singleThreaded + offline as ON,
+// their menu entries grey out, and the STORED cfg is never mutated (masked at read only).
+function _runFromFile(){ return typeof location !== 'undefined' && location.protocol === 'file:'; }
+function netSingleThread(){ return !!cfg.singleThreaded || _runFromFile() || !_worker; }
+// The single gate for USING the worker: false => the whole app (menus, classic, local,
+// duel) runs the sim in-process on main, byte-identical to the no-Worker fallback.
+function _useWorker(){ return !!_worker && !netSingleThread(); }
 function netWorkerDuelOn(){ return !!(_worker && _wDuel); }
 function _wDuelSend(m){ if(_worker) _worker.postMessage(m); }
 function _wDuelEnd(){ if(_wDuel){ _wDuel = false; _pendingDuel = null; if(_worker) _worker.postMessage({ t:'duelEndNet' }); } }
@@ -951,7 +960,8 @@ function _applyDuelEvents(list){
 }
 let _fbAcc = 0;   // fixed-timestep accumulator for the no-worker in-process fallback
 let _lastWorkerFrameAt = 0, _stallLogged = false, _workerFrames = 0, _workerRunning = true;   // _initWorker sends run:true
-// Kill a worker that never became functional and let loop()'s !_worker path take over.
+// Kill a worker that never became functional: nulling _worker makes netSingleThread() true, so
+// _useWorker() is false everywhere and the in-process sim takes over (same as file:// / no Worker).
 function _demoteWorker(){
     console.error('sim worker unusable -- falling back to the in-process sim');
     // A worker dying mid-online-duel takes the whole sim + rollback state with it; the
@@ -993,7 +1003,7 @@ function _unpackSnap(snap){
 }
 function applyWorkerFrame(){
     if(!_pendingSnap) return;
-    if(typeof netGameActive === 'function' && netGameActive() && !netWorkerDuelOn()){   // online in-process fallback: that sim owns the state
+    if(!_useWorker()){   // single-threaded (incl. in-process duel): main's own sim owns the state, discard worker frames
         _pendingSnap = null; _pendingEvents.length = 0; return;
     }
     _unpackSnap(_pendingSnap);

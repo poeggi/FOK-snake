@@ -35,7 +35,7 @@ var _netApiNewer = false;   // server MAJOR is newer -> online features disable 
 var _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
 var _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
 function netStatusNotice(){
-    if(cfg.offline) return 'OFFLINE MODE (SETTINGS > NETWORK)';
+    if(netOffline()) return 'OFFLINE MODE (SETTINGS > NETWORK)';
     if(_netApiNewer) return 'GAME UPDATE REQUIRED - PLEASE RELOAD';
     if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
     if(_netSrvErr) return 'SERVER UNREACHABLE - RETRYING';
@@ -49,7 +49,11 @@ function netUpdateNotice(){
     if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
     return null;
 }
-function _netOk(){ return !cfg.offline && !_netApiNewer && typeof fetch === 'function'; }
+// EFFECTIVE offline: the stored toggle, OR forced by a file:// install (null origin -- the
+// server is unreachable anyway, so mask it rather than fail every call). Masked at read; the
+// stored cfg.offline is never mutated, so a local install keeps its saved preference.
+function netOffline(){ return !!cfg.offline || (typeof _runFromFile === 'function' && _runFromFile()); }
+function _netOk(){ return !netOffline() && !_netApiNewer && typeof fetch === 'function'; }
 const _netTimers = (typeof setInterval === 'function' && typeof clearInterval === 'function');
 // How far a peer's PTS may exceed ours before we call it bogus. We check against
 // our ESTIMATE of the server clock (a few ms of sync error) over a jittery link,
@@ -297,7 +301,7 @@ function _netHms(pts){
 function netDebugQuad(){
     const d = _netDbg, N = [], T = [], S = [];
     T.push('pts ' + simTick + ' ' + (simNow/1000).toFixed(1) + 's');
-    if(cfg.offline){ N.push('offline'); return { net: N.join('\n'), time: T.join('\n'), sim: '' }; }
+    if(netOffline()){ N.push('offline'); return { net: N.join('\n'), time: T.join('\n'), sim: '' }; }
     T.push((_netSync.ofs == null)
         ? ('anc -- ' + (d.srvOfs ? '(hello ' + Math.round(d.srvOfs) + ')' : 'unsynced'))
         : ('anc ' + (_netSync.ofs>=0?'+':'') + Math.round(_netSync.ofs) + ' mr' + Math.round(_netSync.rtt) +
@@ -416,7 +420,7 @@ function netMusicSeekSec(){
 // is synced, then they converge -- the game.js menu-music gate waits briefly for the sync.
 function netMenuSeekSec(){ const p = netPts(); return p != null ? p/1000 : 0; }
 function netDebugInfo(){
-    return { base:NET_BASE, offline:!!cfg.offline, rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
+    return { base:NET_BASE, offline:netOffline(), rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
              pts:simTick, peerTickOfs:_netDbg.peerTkOfs, rollbacks:_rbDbg.rb, resimTicks:_rbDbg.resim, maxRewindTicks:_rbDbg.maxRew,
              inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, fixes:_rbDbg.fix|0, epoch:_netSess?_netSess.epoch:null,
              inRx:_netDbg.inRx, inTx:_netDbg.inTx, lastPeerInputs:_netDbg.inLog.slice(),
@@ -451,7 +455,7 @@ function _netNameSeen(id, name){
 function netFriendName(id){ return _netFriendNames[id] || null; }
 let _netHelloBusy = false;
 async function _netHello(){
-    if(_netHelloBusy || cfg.offline || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
+    if(_netHelloBusy || netOffline() || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
     _netHelloBusy = true;
     const body = { id: getPlayerId() };
     { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }

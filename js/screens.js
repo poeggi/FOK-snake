@@ -14,9 +14,9 @@ const _menuCanvas=document.createElement('canvas'); _menuCanvas.width=CW; _menuC
 const _menuCtx=_menuCanvas.getContext('2d');
 let _mc={sel:-1,ver:'',diff:'',glow:null};
 _glowGuard(_menuCtx);
-function menuItem(text,y,sel,c=ctx) {
-    c.globalAlpha=sel?1:0.78;
-    ctg(sel?('> '+text+' <'):text,CW/2,y,sel?'#7fff7f':'#cccccc',FONT.MENU,sel?GLOW.TEXT:GLOW.FAINT,c);
+function menuItem(text,y,sel,c=ctx,dim) {
+    c.globalAlpha=dim?0.32:(sel?1:0.78);
+    ctg(sel?('> '+text+' <'):text,CW/2,y,dim?'#6a6a6a':(sel?'#7fff7f':'#cccccc'),FONT.MENU,dim?GLOW.FAINT:(sel?GLOW.TEXT:GLOW.FAINT),c);
     c.globalAlpha=1;
 }
 // The ONE in-menu status toaster. Every menu message (matchmaking, invites, cloud backup /
@@ -303,11 +303,13 @@ const SETTINGS_CATS = [
           act:()=>{cfg.disableGlow=!cfg.disableGlow;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'DEFER DRAW: '+(cfg.deferDraw?'ON':'OFF'),
           act:()=>{cfg.deferDraw=!cfg.deferDraw;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'FORCE SINGLE THREADED: '+(cfg.singleThreaded?'ON':'OFF'),   // duel sim on main, not the worker; applies at the NEXT duel start
+        { lbl:()=>'FORCE SINGLE THREADED: '+(netSingleThread()?'ON':'OFF'),   // whole app sim on main; applies at the NEXT game/duel start
+          dis:()=>_runFromFile()||!_worker,   // forced (greyed) with no Worker or on file://
           act:()=>{cfg.singleThreaded=!cfg.singleThreaded;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'NETWORK', items:[
-        { lbl:()=>'STRICTLY OFFLINE: '+(cfg.offline?'ON':'OFF'),
+        { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
+          dis:()=>_runFromFile(),   // file:// has a null origin: the server is unreachable, so offline is forced (greyed)
           act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline&&typeof netOfflineClear==='function')netOfflineClear();} },
         { lbl:()=>'RELAY ONLY (NO P2P): '+(cfg.noP2P?'ON':'OFF'),
           act:()=>{cfg.noP2P=!cfg.noP2P;Snd.sfxPlay('select',cfg.music);} },
@@ -358,7 +360,7 @@ function drawSettings() {
     ctg(title,CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const list=_settingsList();
     const startY=90, rowH=28;   // one empty line below the headline before the first entry
-    list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel));
+    list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel, ctx, inCat && it.dis && it.dis()));
     menuItem('BACK', CH-52, settingsSel===list.length);   // BACK aligned toward the bottom
     if(inCat){
         const it=list[settingsSel];
@@ -413,7 +415,7 @@ function drawScores() {
     ctg('HIGH SCORES',CW/2,28,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     _drawScoreTabs();
     if(scoresTab===1){
-        if(cfg.offline){
+        if(netOffline()){
             ct('GLOBAL SCORES',CW/2,CH/2-14,'#ffd24a',FONT.MENU);
             ct('DISABLED IN OFFLINE MODE (SETTINGS > NETWORK)',CW/2,CH/2+12,'#aaa',FONT.HINT);
         } else {
@@ -1050,7 +1052,7 @@ function drawDuelMenu() {
         {t:'MY ID',       en:true},
         {t:'ADD FRIEND',  en:true},
         {t:'FRIENDS',     en:true},
-        {t:'PLAY ONLINE', en:!cfg.offline, note:cfg.offline?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
+        {t:'PLAY ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
     ];
     items.forEach((it,i)=>{
         const y=startY+i*rowH, sel=duelSel===i;
