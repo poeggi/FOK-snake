@@ -303,7 +303,7 @@ const SETTINGS_CATS = [
           act:()=>{cfg.disableGlow=!cfg.disableGlow;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'DEFER DRAW: '+(cfg.deferDraw?'ON':'OFF'),
           act:()=>{cfg.deferDraw=!cfg.deferDraw;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'SINGLE THREADED: '+(cfg.singleThreaded?'ON':'OFF'),   // duel sim on main, not the worker; applies at the NEXT duel start
+        { lbl:()=>'FORCE SINGLE THREADED: '+(cfg.singleThreaded?'ON':'OFF'),   // duel sim on main, not the worker; applies at the NEXT duel start
           act:()=>{cfg.singleThreaded=!cfg.singleThreaded;Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'NETWORK', items:[
