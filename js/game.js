@@ -326,6 +326,10 @@ function _flashDbgSnapBtn(){
     if(_dbgSnapBtnT) clearTimeout(_dbgSnapBtnT);
     _dbgSnapBtnT = setTimeout(()=>{ if(_dbgSnapBtn){ _dbgSnapBtn.classList.remove('snapped'); _dbgSnapBtn.textContent = 'SNAP'; } }, 900);
 }
+// TODO(compat): ES2017 async/await in a CORE file (game.js) -- a pre-2017 engine throws a
+// SyntaxError parsing the WHOLE file, so the game does not boot at all on a ~10-year-old phone.
+// The only ES2017 syntax in game.js. FIX (decide later, see storage.js cloudBackup): move this
+// debug-upload into the isolated online-tier file so game.js stays ES2015 and parses everywhere.
 async function sendDebugSnapshot(){
     if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=simNow; return; }
     if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }

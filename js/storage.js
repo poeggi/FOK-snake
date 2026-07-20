@@ -285,6 +285,14 @@ function backupStats() {
 }
 // Cloud backup: POST the whole config to the vault. First time mints a token (store it in
 // both stores + cookie); later backups present it. Payload is opaque to the server.
+// TODO(compat): async/await is ES2017. This is a CORE file (loadCfg/getScores run at boot),
+// so a pre-2017 engine (a ~10-year-old phone that never updated its browser) throws a
+// SyntaxError parsing the WHOLE file -> single-player black-screens. Regressed in v2.2.0
+// (cloud config). This + the other 3 async fns below/in game.js are the only ES2017 syntax
+// in core. FIX (decide later): ISOLATE these into an optional online-tier file (like net.js,
+// which is already async and which single-player survives failing to parse) -- preferred, a
+// verbatim move, no logic risk; OR rewrite to .then() chains (touches working, under-tested
+// network code). Until then, old engines cannot run the game at all.
 async function cloudBackup(silent) {
     if(typeof _netOk!=='function' || !_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; } return false; }
     if(!silent){ _dataMsg='CLOUD BACKUP...'; _dataMsgAt=simNow; }
@@ -314,6 +322,7 @@ async function cloudBackup(silent) {
 // Daily automatic cloud backup (opt-in via cfg.autoCloud). Called on a timer; the 24h throttle
 // lives here, so callers can fire it freely. Silent -- no menu feedback line for the auto path.
 const AUTOCLOUD_KEY='fok-snake-autocloud-at';
+// TODO(compat): ES2017 async/await in a CORE file -- breaks old-engine parsing (see cloudBackup).
 async function _maybeAutoCloudBackup(){
     if(!cfg.autoCloud || typeof _netOk!=='function' || !_netOk()) return;
     let at=0; try{ at=parseInt(localStorage.getItem(AUTOCLOUD_KEY)||'0',10)||0; }catch(e){}
@@ -322,6 +331,7 @@ async function _maybeAutoCloudBackup(){
 }
 // Cloud restore: GET the vault with id + token, apply it. Needs the token (from the cookie/
 // localStorage, or a prior file restore) -- id alone cannot read someone else's backup.
+// TODO(compat): ES2017 async/await in a CORE file -- breaks old-engine parsing (see cloudBackup).
 async function cloudRestore() {
     if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
     const tok=getCloudToken();
