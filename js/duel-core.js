@@ -669,11 +669,23 @@ function netLocalInput(kind, p, d, now){
         // authored for S) and drop what the sim would drop -- pressing the aim you
         // already have, a reverse, or past the 3-deep queue. A dropped press never
         // reaches the log or the wire, so both sims see identical silence.
-        const pend = (_rbLog.get(S) || []).filter(c => c.t === 'dir' && c.p === myP);
-        const last = pend.length ? pend[pend.length - 1].dir
-                   : (P.dirQueue.length ? P.dirQueue[P.dirQueue.length - 1] : P.dir);
+        // Allocation-free: this runs PER KEYPRESS (once per steer), so the old
+        // `(_rbLog.get(S)||[]).filter(...)` allocated an array + closure on every press --
+        // GC pressure that hurts most exactly when the player is mashing keys. Scan the log
+        // in place instead: count this player's pending dirs at S and keep the last one.
+        // TODO(perf): keyboard-spam still spikes INBOUND pts on Chromium single-thread (10-20ms,
+        // Firefox stays single-digit). Not this filter alone -- a scheduler sim did not reproduce
+        // it; leading suspects are GC pauses on MAIN (single-thread runs the spam sim/rollback/
+        // JSON.stringify + rollback clones there, competing with dc.onmessage; V8 vs SpiderMonkey
+        // GC explains the browser gap) and the wiggly-snake draw cost. DEFERRED: A/B via WORKER
+        // mode (offloads the spam work off main) + DISABLE GLOW; possible fix: buffer keydowns and
+        // drain once per frame (fewer main-thread tasks, one batched send).
+        const log = _rbLog.get(S);
+        let pendCount = 0, lastDir = null;
+        if(log) for(let i = 0; i < log.length; i++){ const c = log[i]; if(c.t === 'dir' && c.p === myP){ pendCount++; lastDir = c.dir; } }
+        const last = lastDir || (P.dirQueue.length ? P.dirQueue[P.dirQueue.length - 1] : P.dir);
         if((d.x === last.x && d.y === last.y) || (d.x === -last.x && d.y === -last.y)
-           || P.dirQueue.length + pend.length >= 3) return true;
+           || P.dirQueue.length + pendCount >= 3) return true;
         _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x,y:d.y} });   // netTickPre applies it AT S, both here and peer-side
         const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y}, n:0 };
         _rbSentPrune(); _rbSent.push(drec);
