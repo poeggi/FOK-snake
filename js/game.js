@@ -676,7 +676,11 @@ function loop(rafNow) {
     // it any other time. Cheap idempotent check; only acts on the transition.
     if(_worker){
         const wantRun = !(inGame && typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn());
-        if(wantRun !== _workerRunning){ _worker.postMessage({ t:'run', on:wantRun }); _workerRunning = wantRun; }
+        if(wantRun !== _workerRunning){
+            _worker.postMessage({ t:'run', on:wantRun });
+            _workerRunning = wantRun;
+            if(wantRun) _lastWorkerFrameAt = performance.now();   // resuming: give the worker 3s to post before the stall watchdog judges it
+        }
     }
     // Optional 30 FPS cap: skip whole frames (the sim ticks on in the worker regardless,
     // so gameplay speed is unchanged -- only the draw rate drops).
@@ -1025,7 +1029,9 @@ function applyWorkerFrame(){
 // If frames stop arriving anywhere else, the sim thread is dead/stalled -- say so instead
 // of silently freezing, so it is debuggable in the field.
 function checkWorkerStall(now){
-    if(!_worker || phase==='paused' || phase==='duelPaused' || phase==='quitConfirm') { _stallLogged=false; return; }
+    // !_workerRunning: the worker is paused ON PURPOSE (an in-process/force-single-threaded
+    // duel), so its silence is expected -- do NOT flag a false SIM STALL.
+    if(!_worker || !_workerRunning || phase==='paused' || phase==='duelPaused' || phase==='quitConfirm') { _stallLogged=false; return; }
     if(_lastWorkerFrameAt && now-_lastWorkerFrameAt > 3000){
         // Never delivered a single frame -> the worker is dead (silently blocked script
         // load etc.): demote to the in-process sim rather than stalling forever.
