@@ -88,7 +88,7 @@ const RB_DEAD_MS = 4000;                              // total silence (p2p or r
 // the counter (CONG in the overlay) being nonzero is itself a finding.
 const NET_SEND_CONG = 4 * NET_PKT_MAX;
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-var _netDbg = { rtt:-1, relayRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
+var _netDbg = { rtt:-1, relayRtt:-1, relayDrop:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
 var _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
@@ -140,6 +140,9 @@ async function _netSignal(to, type, payload){
         // at once, or every subsequent signal is rejected the same way. Only for that
         // reason -- 'invalid pts' is a malformed value, which no re-sync can fix.
         if(res.status === 400 && /future/.test(res.err)) _netTimeSync(true);
+        // 429 = the PEER's mailbox is full, not silence. The offer ladder gives up after
+        // 3 tries with 'NO RESPONSE', which points at the wrong player.
+        else if(res.status === 429 && _netHs.sent === to) _netLb.msg = 'PLAYER BUSY - TRY LATER';
     }
     return res;
 }
@@ -540,7 +543,7 @@ let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // signal exists (~150ms), or with 204 after `wait` seconds of real silence. The
 // main menu keeps the cheap 10s short-poll (no held worker when merely idling).
 //
-// wait is capped server-side at 8. HTTP gives one response per request, so the
+// wait is capped server-side at 9. HTTP gives one response per request, so the
 // request necessarily ends there -- the underlying TCP/TLS socket is NOT torn
 // down, keep-alive reuses it for the next one. Re-arming happens the moment a
 // response lands (below) rather than on the next tick, so exactly one request is
@@ -551,7 +554,7 @@ async function _netPollOnce(){
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=8' : ''), _netPollAbort ? _netPollAbort.signal : undefined);
+    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=9' : ''), _netPollAbort ? _netPollAbort.signal : undefined);
     _netPollBusy = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
     // Straight back in, no gap. Only on a SUCCESSFUL reply: a failure (or an abort
@@ -649,10 +652,18 @@ function _netFrOkSave(){ try{ localStorage.setItem('fok-snake-friend-ok', JSON.s
 function _netFrOkMark(id){ if(!_netFrOk[id]){ _netFrOk[id]=1; _netFrOkSave(); } }
 function _netFrOkClear(id){ if(_netFrOk[id]){ delete _netFrOk[id]; _netFrOkSave(); } }
 const _netFrRequested = {};   // id -> last attempt ms (time-based retry, NOT a permanent latch)
+let _netFrBannedUntil = 0;    // 429 seen: quiet for a minute, then let a user-driven request re-check
+function netFriendBanned(){ return Date.now() < _netFrBannedUntil; }
+// _netPostRes, not _netPost: friend.php answers 429 for the 1h request ban, and the
+// status-blind variant made that indistinguishable from a blip -- the UI then sat on
+// 'NOT FRIENDS YET - RETRY IN A MOMENT' for an hour of a condition that will not clear.
 function _netFriendApi(action, peer){
     const body = { id: getPlayerId(), action };
     if(peer) body.peer = peer;
-    return _netPost('/api/friend.php', body);
+    return _netPostRes('/api/friend.php', body).then(res => {
+        if(res.status === 429) _netFrBannedUntil = Date.now() + 60000;   // re-checked, not trusted: one minute of quiet, then try again
+        return res.json;
+    });
 }
 // The QR-success treatment for friendship events: jingle + confetti + the text
 // on whichever social screen is (or gets) opened.
@@ -670,7 +681,7 @@ function _netFrCelebrate(text){
 function netFriendRequest(id){
     // Retry after 30s: a request lost to a blip must not block the friendship
     // (and therefore every future invite, which is friendship-gated) forever.
-    if(!_netOk() || _netFrOk[id]) return null;
+    if(!_netOk() || _netFrOk[id] || netFriendBanned()) return null;
     if(_netFrRequested[id] && Date.now() - _netFrRequested[id] < 30000) return null;
     _netFrRequested[id] = Date.now();
     const p = _netFriendApi('request', id);
@@ -843,7 +854,7 @@ async function _netInviteSend(to){
         _netFrOkClear(to);
         delete _netFrRequested[to];
         netFriendRequest(to);
-        _netLb.msg = 'NOT FRIENDS YET - RETRY IN A MOMENT';
+        _netLb.msg = netFriendBanned() ? 'TOO MANY FRIEND REQUESTS - TRY LATER' : 'NOT FRIENDS YET - RETRY IN A MOMENT';
     }
     else if(res.status === 503) _netLb.msg = 'SERVER FULL - TRY LATER';
     else if(res.status === 400 && /future/.test(res.err)) _netLb.msg = 'CLOCK RE-SYNCED - TRY AGAIN';
@@ -939,7 +950,11 @@ function _netOnSignal(sig){
                     if(_netSess && _netSess.peer === from && _netSess.game) _netRtcReanswer(from, od);
                     break;
                 }
-                if(od.sdp) _netRtcAnswer(from, od); else _netRelayAnswer(from, od);   // no sdp = relay mode
+                // Relay when EITHER side wants it -- the same rule the invite path applies
+                // (_netInviteAnswer). Quick match has no invite to carry the bit, so an
+                // offerer without the setting sends a normal sdp offer; routing on that
+                // alone silently ignored OUR relay setting and played full P2P.
+                if(od.sdp && !cfg.noP2P) _netRtcAnswer(from, od); else _netRelayAnswer(from, od);
                 break;
             }
             case 'answer': {
@@ -959,7 +974,13 @@ function _netOnSignal(sig){
                         _netSess.peerProfile = _netClampProfile(d.profile);
                         _netNameSeen(from, _netSess.peerProfile.name);
                     }
-                    if(_netSess.pc && d.sdp){
+                    if(d.relay && _netSess.pc && !_netSess.game){
+                        // They answered in relay mode (their setting, not ours). Switch
+                        // this attempt over at once rather than letting the pc time out.
+                        _netRelayStart(_netSess);
+                        _netLb.msg = 'RELAY MODE - CONNECTING...';   // nothing failed here: their choice
+                    }
+                    else if(_netSess.pc && d.sdp){
                         const s = _netSess;
                         s.pc.setRemoteDescription(d.sdp)
                             .then(()=>{ if(_netSess === s){ s.rdOk = true; _netIceFlush(s); } })
@@ -1186,13 +1207,16 @@ function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer 
     if(_netSess && _netSess.peer === peer){
         // Duplicate offer: the host re-sent because our answer was lost. Re-answer
         // and KEEP the session -- tearing it down would restart the whole connect.
-        _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion }));
+        _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion, relay:true }));
         return;
     }
     if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
     _netHs.accepting = null;
     _netTimeSync();
-    _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion }));
+    // `relay:true` tells an offerer that DID build a peer connection to come over now.
+    // Without it, it waits out the full 6s P2P timer before falling back to the mode
+    // we already committed to -- 6s of dead air on every mixed-setting pairing.
+    _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion, relay:true }));
     _netRelaySessionStart(peer, 'peer', d.seed, d.x10, _netClampProfile(d.profile));
 }
 async function _netRtcOffer(peer, peerProfile){   // we invited / we are the quick-match offerer: we make the seed
@@ -1332,12 +1356,27 @@ async function _netRelaySend(s, o){
     if(!_netOk()) return;
     try {
         const _t0 = performance.now();
+        // The ENVELOPE pts is backdated like every other PTS we send: the server
+        // rejects a future one outright (zero tolerance), and stamping it raw made
+        // an asymmetric-link clock bias 400 every packet of the match -- silently,
+        // since nothing below looked at the status. The payload keeps the true pts,
+        // so the peer's lag math is untouched.
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o), pts:o.pts }) });
+            body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
+                                   pts: o.pts != null ? o.pts - 50 : undefined }) });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
         if(r.status === 503) _netSessionEnd('SERVER FULL - TRY LATER');   // capped: honest busy, end the attempt
-        else if(r.status === 429) { /* relay backlog full: drop this packet, the next correction supersedes it */ }
+        else if(r.status === 400 || r.status === 429){
+            // 429 is EITHER the 128/s rate block (30s) or a full peer backlog; 400 is
+            // almost always our clock. All three used to look like a healthy send and
+            // surfaced 4s later as CONNECTION LOST, blaming the network.
+            let j = null; try{ j = await r.json(); }catch(e){}
+            const err = (j && j.error) ? String(j.error) : '';
+            _netDbg.relayDrop = (_netDbg.relayDrop|0) + 1;
+            _netSigLog('! relay ' + r.status + (err ? ' ' + err : ''));
+            if(r.status === 400 && /future/.test(err)) _netTimeSync(true);
+        }
     } catch(e){}
 }
 async function _netRelayLoop(s){
@@ -1346,7 +1385,7 @@ async function _netRelayLoop(s){
         // Abortable: without this the held socket lingers up to 8s after a teardown
         // (leaving a match, or unload), long after we stopped caring about it.
         s.relayAbort = (typeof AbortController === 'function') ? new AbortController() : null;
-        const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=8',
+        const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=9',
                                 s.relayAbort ? s.relayAbort.signal : undefined);
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;

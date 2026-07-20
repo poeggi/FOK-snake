@@ -808,8 +808,12 @@ function loop(rafNow) {
     }
     _loopMs[_loopMsN++ % _loopMs.length] = performance.now() - _taskT0;
 }
+// _uiDirty is cleared only when a draw actually ran. Under DEFER DRAW `skip` was
+// decided back in the rAF, so a net callback dirtying the screen in between would
+// otherwise have its repaint swallowed: skipped here, yet the flag cleared anyway.
 function _doDraw(s, skip, now){
-    if(!skip){ s.d(); showHUD(s.hud); drawAchPopups(now); }
+    if(skip) return;
+    s.d(); showHUD(s.hud); drawAchPopups(now);
     _uiDirty = false;
 }
 // The yield channel for deferred draws: a MessageChannel task dispatches with ~0 delay and

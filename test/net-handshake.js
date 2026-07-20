@@ -35,14 +35,19 @@ const HOOKS = (myId) => `
     this.close = ()=>{};
   };
   // friend.php: records the request order so a test can prove the invite waited.
+  // Stubbed at the _netPostRes layer, not _netPost: the friend path reads the STATUS
+  // (429 = request ban), and _netPost is just its .json, so this covers both.
   globalThis.__calls = [];
   globalThis.__frState = 'accepted';
-  _netPost = async (path, body)=>{
+  globalThis.__frStatus = 200;
+  _netPostRes = async (path, body)=>{
     __calls.push((body && body.action) ? 'friend:' + body.action : path);
-    if(/friend\.php/.test(path)) return { ok:true, state:__frState };
-    return null;
+    if(/friend\.php/.test(path))
+      return { status:__frStatus, json: __frStatus === 200 ? { ok:true, state:__frState } : null, err:'' };
+    return { status:200, json:null, err:'' };
   };
-  globalThis.__setFrState = (s)=>{ __frState = s; };
+  globalThis.__setFrState  = (s)=>{ __frState = s; };
+  globalThis.__setFrStatus = (n)=>{ __frStatus = n|0; };
   _netGet  = async ()=>null;
   _netTimeSync = async ()=>{};
   // start.php is stubbed for the handshake tests, but the RESTART tests need the real
@@ -153,7 +158,7 @@ const HOOKS = (myId) => `
   globalThis.__unload    = ()=>{ _netUnload(); };
   // Quick match: match.php hands over a stranger id and a role, with NO profile
   // (unlike an invite, whose accept payload carries one).
-  globalThis.__qmOffer   = (to)=>{ cfg.noP2P ? _netRelayOffer(to) : _netRtcOffer(to); };
+  globalThis.__qmOffer   = (to)=> cfg.noP2P ? _netRelayOffer(to) : _netRtcOffer(to);   // returns the offer promise: the p2p path is async
   globalThis.__ageOffer  = (ms)=>{ _netHs.offeredAt -= ms; };
   globalThis.__state = ()=>({
     sess: _netSess ? { peer:_netSess.peer, role:_netSess.role, relay:!!_netSess.relay,
@@ -330,6 +335,26 @@ try {
     if(!as.sess || !as.sess.relay) throw new Error('A must honour the peer relay demand');
     if(!bs.sess || !bs.sess.relay) throw new Error('B must be in relay');
     if(as.sess.seed !== bs.sess.seed) throw new Error('seed mismatch in mixed mode');
+  });
+
+  // Quick match has no invite to carry the relay bit, so the answerer's own setting is
+  // the only thing that can force relay -- it used to be ignored entirely and the pair
+  // played p2p against the acceptor's wishes. Same EITHER-side rule as the invite path.
+  await acheck('mixed quick match: a relay-only answerer forces relay on a p2p offerer', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(false);   // match.php made A the offerer; A wants p2p, so it sends an sdp offer
+    B.__setRelay(true);    // B demands relay
+    await A.__qmOffer(B_ID);   // the p2p offer awaits createOffer/setLocalDescription
+    const t1 = pump(A, B);
+    if(!t1.includes('offer')) throw new Error('A must send an offer, got ' + t1);
+    const ans = B.__out.find(s => s.type === 'answer');
+    if(!ans) throw new Error('B sent no answer');
+    if(!JSON.parse(ans.payload).relay) throw new Error('B must declare relay in the answer');
+    pump(B, A);
+    const as = A.__state(), bs = B.__state();
+    if(!bs.sess || !bs.sess.relay) throw new Error('B must honour its OWN relay setting');
+    if(!as.sess || !as.sess.relay) throw new Error('A must switch to relay on the relay answer');
+    if(as.sess.seed !== bs.sess.seed) throw new Error('seed mismatch in mixed quick match');
   });
 
   // ---------------------------------------------------------------- decline
@@ -552,6 +577,24 @@ try {
     await A.__invite(B_ID);
     if(A.__isFrOk(B_ID)) throw new Error('a 403 left the stale friendship belief in place: invites stay broken forever');
     if(!/FRIENDS/.test(A.__state().msg)) throw new Error('no friendship message, msg was: ' + A.__state().msg);
+  });
+
+  // friend.php answers 429 for the 1h request ban. Read through the status-blind
+  // _netPost it was indistinguishable from a blip, so the UI promised a retry that
+  // could not succeed for an hour, and kept asking on every invite.
+  await acheck('429 friend ban: the user is told, and we stop asking', async () => {
+    const A = mk(A_ID);
+    A.__setRelay(true); A.__useRealFr();
+    A.__setSigFail(403);                  // the invite is refused: not friends
+    A.__setFrStatus(429);                 // ...and the friend request is banned
+    await A.__invite(B_ID);
+    if(/RETRY IN A MOMENT/.test(A.__state().msg))
+      throw new Error('a banned request still promised an imminent retry: ' + A.__state().msg);
+    if(!/TRY LATER/.test(A.__state().msg)) throw new Error('the ban was not surfaced, msg was: ' + A.__state().msg);
+    const before = A.__calls.filter(c => c === 'friend:request').length;
+    await A.__invite(B_ID);               // a second attempt must not re-ask while banned
+    const after = A.__calls.filter(c => c === 'friend:request').length;
+    if(after > before) throw new Error('kept asking during the ban: ' + before + ' -> ' + after);
   });
 
   // The reported symptom: "I send an invite, it does not go out. I wait, send
