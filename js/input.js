@@ -626,6 +626,9 @@ canvas.addEventListener('pointerup', e => {
 });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
+// Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
+// stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
+const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 canvas.addEventListener('touchstart',e=>{
@@ -653,13 +656,19 @@ canvas.addEventListener('touchmove',e=>{
     const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
     if(ang>=dzLo&&ang<=dzHi) return;
     const key=ang<dzLo?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
-    // first or reverse: SWIPE_1 (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention)
-    const thresh=(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
+    // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
+    // one-gesture handling below, so every menu scrolls by the same rule -- no per-screen tuning.
+    const inMenu=!_inPlay()&&phase!=='credits';
+    // first or reverse: SWIPE_1 (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention).
+    // Menu UP/DOWN overrides that with its own longer two-tier distances; the in-play path is untouched.
+    const isMenuV=inMenu&&(key==='ArrowUp'||key==='ArrowDown');
+    const thresh=isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
+        :(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
     if(dist<thresh) return;
-    // Menu (not playing/credits): a LEFT/RIGHT swipe is one full gesture -- remember it and
-    // fire a single key on touchend (no repeat while dragging). UP/DOWN falls through and
-    // fires live, immediately, as before. _swipeBase is left un-reset so the gesture holds.
-    if(!_inPlay()&&phase!=='credits'&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
+    // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
+    // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
+    // _swipeBase is left un-reset so the gesture holds.
+    if(inMenu&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
     _swipedThisTouch=true; handleKey(key,null);
     if(_inPlay()){
         const d=GDIRS[key];

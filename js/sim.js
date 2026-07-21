@@ -10,7 +10,7 @@ function startLen(lvl) {
 }
 
 function _lvlGper(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
-let boostDir=null, boostSince=0, boosting=false;   // boostSince is a simTick stamp
+let boostDir=null, boosting=false;
 let _gAt=0;   // engine tick of the last accrual boundary: a boost flip authored after it has changed nothing yet
 const BOOST_GRACE_TICKS=12;   // ~200ms hold before boost engages (was 10/167ms: a tap could trip it)
 function clearBoost(){boostDir=null;boosting=false;}
@@ -112,7 +112,7 @@ const DUEL_LEN = 3, DUEL_MIN_LEN = 2;
 function _mkDuelPlayer(x0, y0, dx) {
     return { snake: Array.from({length:DUEL_LEN},(_,i)=>({x:(x0-dx*i+COLS)%COLS, y:y0})),
              dir: {x:dx, y:0}, dirQueue: [],
-             boostDir: null, boostSince: 0, boosting: false, stepAccum: 0,
+             boostDir: null, boosting: false, stepAccum: 0,
              score: 0, lives: START_LIVES, alive: true, slowUntil: 0 };
 }
 // (Re)build the current duel level: fresh symmetric spawns (lives + scores kept),
@@ -160,7 +160,7 @@ function _duelBeginLevel() {
 function startDuel(seed, x10) {
     // Tick zero. simTick free-runs from page load, so without this two online
     // clients would start a duel with wildly different counters -- and every piece
-    // of state stamped from simNow (phaseAt, gemAt, spawnAt, boostSince...) would
+    // of state stamped from simNow (phaseAt, gemAt, spawnAt...) would
     // differ by that offset forever. The duel IS the shared timeline: both clients
     // begin it at the same server-issued start_pts, so both begin it at tick 0.
     simTick = 0; simNow = 0;
@@ -678,7 +678,7 @@ function simSnapshot(){
         heart, heartAt, heartIsEarly, _earlyHeartUsed, _earlyHeartTrigger, _earlyHeartCount,
         powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
         timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
-        perfectCount, luckyCount, boostDir, boostSince, boosting, gemOptimal, gemSteps,
+        perfectCount, luckyCount, boostDir, boosting, gemOptimal, gemSteps,
         players, duelWinner, _duelX10, _speedRound, _rngState,
     };
 }
@@ -706,8 +706,8 @@ function simCommand(m){
         }
         case 'boost':
             // A 'boost' command IS the engage (real transition, authored by the owner).
-            if(players){ const P=players[m.p||0]; if(P&&P.alive){ P.boostDir=m.dir; P.boostSince=simTick; P.boosting=true; } break; }
-            boostDir=m.dir; boostSince=simTick; boosting=true; break;
+            if(players){ const P=players[m.p||0]; if(P&&P.alive){ P.boostDir=m.dir; P.boosting=true; } break; }
+            boostDir=m.dir; boosting=true; break;
         case 'arm':   // device-local arming passthrough (never logged/replayed; see simArm)
             simArm(m.p||0, m.dir, m.now); break;
         case 'boostend':
@@ -745,7 +745,7 @@ function simApply(s){
     heart=s.heart; heartAt=s.heartAt; heartIsEarly=s.heartIsEarly; _earlyHeartUsed=s._earlyHeartUsed; _earlyHeartTrigger=s._earlyHeartTrigger; _earlyHeartCount=s._earlyHeartCount;
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt; _barMoveTick=s._barMoveTick;
     timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
-    perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boostSince=s.boostSince; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
+    perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
     players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }
 // ---- Local boost arming (DEVICE-local: never in the snapshot or the hash) ----

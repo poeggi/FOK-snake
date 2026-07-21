@@ -46,7 +46,6 @@ const HOOKS = (myId) => `
       return { status:__frStatus, json: __frStatus === 200 ? { ok:true, state:__frState } : null, err:'' };
     return { status:200, json:null, err:'' };
   };
-  globalThis.__setFrState  = (s)=>{ __frState = s; };
   globalThis.__setFrStatus = (n)=>{ __frStatus = n|0; };
   _netGet  = async ()=>null;
   _netTimeSync = async ()=>{};
@@ -111,7 +110,6 @@ const HOOKS = (myId) => `
   globalThis.__tick = (n)=>{ for(let i=0;i<n;i++){ netTickPre(); update(); } };
   globalThis.__steer = (d)=>{ gameSteer(0, d); };
   globalThis.__boost = (d)=>{ gameBoostStart(0, d); };   // grace-delayed (keyboard-style, now=false)
-  globalThis.__boostEnd = ()=>{ gameBoostEnd(0); };
   globalThis.__recv = (txt)=>{ _netHandleMsg(txt); };
   globalThis.__drain = ()=>{ const o = __wire.splice(0); return o; };
   globalThis.__rbDbg = ()=> Object.assign({}, _rbDbg);
@@ -122,18 +120,6 @@ const HOOKS = (myId) => `
   globalThis.__history = ()=>{ score=8123; lives=2; snake=[{x:3,y:4}]; dir={x:1,y:0}; heart={x:9,y:9};
                               _earlyHeartTrigger=17; perfectCount=5; _shimmerThreshold=91234; };
   globalThis.__desync = ()=>{ players[1].snake[0].x = (players[1].snake[0].x + 3) % COLS; };
-  // HEAVY corruption of our copy of the PEER (index 1), as if we mispredicted it through a long
-  // dropout: a wholly different, longer snake far away, a stale (behind) gem count, wrong RNG.
-  globalThis.__corruptPeer = ()=>{
-    players[1].snake = Array.from({length:11},(_,i)=>({x:(2+i)%COLS, y:16}));
-    gemsDone = Math.max(0, (gemsDone|0) - 4);
-    _rngState = ((_rngState ^ 0x9e3779b9) >>> 0) || 1;
-  };
-  globalThis.__peerSnakeLen = ()=> players ? players[1].snake.length : -1;
-  globalThis.__RB = ()=> ({ ring:RB_RING, settle:RB_SETTLE, future:RB_FUTURE });
-  globalThis.__level = ()=> level;
-  globalThis.__snakeLen = (i)=> players ? players[i].snake.length : -1;
-  globalThis.__fullState = ()=> JSON.stringify(_rbFullState(simSnapshot(), simTick));   // the host's authoritative resync packet
   globalThis.__hashFields = ()=> _rbHashFields(simSnapshot());
   globalThis.__field = (k)=> JSON.stringify(simSnapshot()[k]);
   // Corrupt STRUCTURAL state (not our own snake): wrong level, a wrong view of the peer's snake,
@@ -173,6 +159,15 @@ const HOOKS = (myId) => `
   globalThis.__pendingN   = ()=> (_netSess && _netSess.relayPending) ? _netSess.relayPending.n : null;
   globalThis.__fetchCount = ()=> __fetchN;
   globalThis.__relayOnReply = (r)=> _netRelayOnReply(_netSess, r);   // API 3.3 gone-handling, without running the poll loop
+  // Post-suspend hard-snap probes: put the clock target gap ticks ahead of simTick.
+  globalThis.__breakSetup = (gap)=>{
+    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true;
+    _netSync = { ofs:0, rtt:1, at:Date.now() };
+    inGame = true; simTick = 1000;
+    _netSess.startPts = netPts() - (simTick + gap) * TICK_MS;
+  };
+  globalThis.__breakRecover = ()=> _netBreakRecover(_netSess);
+  globalThis.__tickGap = ()=> Math.abs(Math.floor((netPts() - _netSess.startPts) / TICK_MS) - simTick);
   // 'store full, resend' on the FIRST POST, then 200: proves the refused input is re-slotted
   // and resent, not dropped. A resolving fetch (unlike the never-resolving coalesce stub).
   globalThis.__relayFullThenOk = ()=>{
@@ -734,8 +729,8 @@ try {
   });
 
   // A grace-delayed boost (keyboard/dpad) that lands within its grace window has not
-  // engaged on either sim yet, so it applies LIVE (no rewind) -- boostSince anchored to its
-  // real tick -- and both worlds stay identical. This is why boost no longer costs rollbacks.
+  // engaged on either sim yet, so it applies LIVE (no rewind) -- and both worlds stay
+  // identical. This is why boost no longer costs rollbacks.
   check('a boost engages via the arming stage, crosses as a real transition, converges', () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__duelStart(0xBEEF, 'host', 45000);
@@ -1003,6 +998,21 @@ try {
     // seq must still advance.
     B.__deliver2([{ seq:5, payload:JSON.stringify({ t:'pi' }) }, { seq:6, payload:JSON.stringify({ t:'pi' }) }]);
     if(B.__relaySeq() !== 6) throw new Error('stale seq must dedup and a fresh one must advance, got ' + B.__relaySeq());
+  });
+
+  // Post-suspend hard-snap: a sim frozen >600 ticks behind the shared clock (a long device/tab
+  // suspend) can never catch up, and relay keeps feeding data on wake so the silence timeout never
+  // ends it -- without a re-anchor it hangs in a permanent false CONNECTION LOST. Re-anchor
+  // startPts to the sim's real position so the tick target snaps back to simTick; a small,
+  // catch-up-able gap must NOT fire (that is the normal ladder's job).
+  check('post-suspend hard-snap: a sim far behind the clock re-anchors; a small gap does not', () => {
+    const A = mk(A_ID);
+    A.__breakSetup(5000);
+    if(A.__tickGap() < 600) throw new Error('setup: expected a >600-tick break, got ' + A.__tickGap());
+    if(!A.__breakRecover()) throw new Error('a >600-tick break must re-anchor');
+    if(A.__tickGap() > 1) throw new Error('after re-anchor the target must equal simTick, gap=' + A.__tickGap());
+    A.__breakSetup(120);
+    if(A.__breakRecover()) throw new Error('a small gap (120t) must NOT re-anchor -- the catch-up ladder handles it');
   });
 
   console.log(results.join('\n'));

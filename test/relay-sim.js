@@ -46,7 +46,6 @@ const HOOKS = (id) => `
   globalThis.__tick1 = ()=>{ netTickPre(); update(); };
   globalThis.__warn = ()=> netDuelWarn();
   globalThis.__alive = ()=> !!_netSess;
-  globalThis.__msg = ()=> (typeof _duelMsg==='string'? _duelMsg : '');
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__rbDbg = ()=> Object.assign({}, _rbDbg);
   globalThis.__steer = (d)=>{ gameSteer(0, d); };

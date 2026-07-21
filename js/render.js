@@ -39,8 +39,8 @@ function _drawHearts(cv, c2, n, color) {
 function updateHUD() {
     const mode = players ? 'duel' : 'classic';
     const nms = (typeof netPlayerNames==='function') ? netPlayerNames() : null;   // online: real names
-    const la = mode==='duel' ? ((nms?nms[0].slice(0,10):'P1')+' ') : 'LIVES ';
-    const lb = mode==='duel' ? ((nms?nms[1].slice(0,10):'P2')+' ') : 'SCORE ';
+    const la = mode==='duel' ? ((nms?nms[0].slice(0,MAX_NAME):'P1')+' ') : 'LIVES ';   // MAX_NAME, not 10: a full-length name was losing its tail
+    const lb = mode==='duel' ? ((nms?nms[1].slice(0,MAX_NAME):'P2')+' ') : 'SCORE ';
     if(_hudCache.mode!==mode || _hudCache.la!==la || _hudCache.lb!==lb){
         _hudCache={mode,la,lb,a:-1,b:-1,c:-1,d:-1};
         const d = mode==='duel';
@@ -582,24 +582,10 @@ function drawSnake(flash) {
 // ================================================================
 // ENTITY + OVERLAY DRAWS  (board pickups, ach popups, snake miniatures)
 // ================================================================
-function drawMiniSnake(x, y, colorIdx) {
-    const sc=SNAKE_COLORS[colorIdx||0];
-    for(let k=0;k<5;k++){
-        const frac=1-k/5, l=Math.round(10+frac*38);
-        ctx.fillStyle=k===0?sc.head:`hsl(${sc.h},65%,${l}%)`;
-        if(k===0){ctx.shadowColor=sc.head;ctx.shadowBlur=5;}
-        else ctx.shadowBlur=0;
-        ctx.fillRect(x+k*6,y-3,5,6);
-    }
-    ctx.shadowBlur=0;
-}
-
 function drawScoreHead(cx, cy, colorIdx, si) {
     const sc = SNAKE_COLORS[colorIdx || 0];
-    const scale = 1;
     ctx.save();
-    ctx.translate(cx - Math.round(CS*scale/2), cy - Math.round(CS*scale/2));
-    ctx.scale(scale, scale);
+    ctx.translate(cx - Math.round(CS/2), cy - Math.round(CS/2));
     // Head body
     ctx.fillStyle = sc.head;
     ctx.shadowColor = sc.head; ctx.shadowBlur = 3;

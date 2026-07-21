@@ -470,7 +470,6 @@ function drawScores() {
     ct('L/R:tab   A/ESC:back',CW/2,CH-14,'#888',FONT.HINT);
 }
 
-const _achWrap={};   // per-achievement wrapped desc lines (static text, fixed font)
 function drawAchievements() {
     drawGrid(); drawOvBg(0.92);
     const donated=!!(cfg.shopItems&&cfg.shopItems['donate']);
@@ -506,18 +505,14 @@ function drawAchievements() {
         ctx.fillText(a.name,x+26,y+10);
         ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=got?'#6aaa6a':'#777777';
-        // Descriptions are static strings in a fixed font: wrap once, not per draw.
-        let _wr=_achWrap[a.id];
-        if(!_wr){
-            const _mw=aw-32; let _d1=a.desc,_d2='';
-            if(ctx.measureText(_d1).width>_mw){
-                const _ws=a.desc.split(' '); let _l='';
-                for(const _w of _ws){const _t=_l?_l+' '+_w:_w;if(ctx.measureText(_t).width<=_mw)_l=_t;else{_d2=a.desc.slice(_l.length+1);break;}}_d1=_l;
-            }
-            _achWrap[a.id]=_wr=[_d1,_d2];
+        // Descriptions are static strings in a fixed font; wrap to <=aw-32, max two lines.
+        const _mw=aw-32; let _d1=a.desc,_d2='';
+        if(ctx.measureText(_d1).width>_mw){
+            const _ws=a.desc.split(' '); let _l='';
+            for(const _w of _ws){const _t=_l?_l+' '+_w:_w;if(ctx.measureText(_t).width<=_mw)_l=_t;else{_d2=a.desc.slice(_l.length+1);break;}}_d1=_l;
         }
-        ctx.fillText(_wr[0],x+26,y+28);
-        if(_wr[1]) ctx.fillText(_wr[1],x+26,y+42);
+        ctx.fillText(_d1,x+26,y+28);
+        if(_d2) ctx.fillText(_d2,x+26,y+42);
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;

@@ -1332,7 +1332,7 @@ function _netSend(o, pre){
         // losing ANY fragment loses the whole thing -- on a channel that never
         // retransmits, a fragmented packet is a packet that mostly does not arrive. The
         // budget leaves room for IP+UDP+DTLS+SCTP headers (~70B) under a 1280 floor.
-        if(j.length > NET_PKT_MAX){ _netDbg.oversize = (_netDbg.oversize|0) + 1; _netSigLog('! packet ' + j.length + 'B > budget'); }
+        if(j.length > NET_PKT_MAX) _netSigLog('! packet ' + j.length + 'B > budget');
         // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
         // queue them late. Rare one-shot control messages (sched/rst/start/again/bye)
         // still queue and are repeated below -- for those, late beats never.
@@ -1521,6 +1521,22 @@ function _netPathStat(s){
         _netDbg.path = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob + '  p2p-rtt ' + rtt;
     }).catch(()=>{});
 }
+// TIMELINE BREAK RECOVERY (post-suspend hard-snap): a wall clock >600 ticks past the sim means
+// the sim was FROZEN (a long device/tab suspend) while the clock ran on. It can never catch that
+// up, and relay keeps feeding data on wake so the silence timeout never fires -- leaving a
+// permanent false CONNECTION LOST with no recovery. Re-anchor startPts to where the sim actually
+// is: both peers froze at ~the same tick and share the clock, so both snap to ~the same origin and
+// resume IN SYNC (the frozen span is simply skipped; any few-tick residual is left to the normal
+// rollback/resync). Small gaps self-heal via the catch-up ladder and never reach the >600 guard.
+function _netBreakRecover(s){
+    if(!inGame || !s || !s.startPts) return false;
+    const p = netPts();
+    if(p == null || Math.abs(Math.floor((p - s.startPts) / TICK_MS) - simTick) <= 600) return false;
+    s.startPts = p - simTick * TICK_MS;   // origin := the sim's real position on the shared clock
+    _netClockPush();                      // main + worker core must both re-anchor
+    _netSigLog('! timeline break -> re-anchored (suspend recovery)');
+    return true;
+}
 // In-game liveness: the DataChannel is the session -- ping when idle, 4s silence = dead.
 function _netLiveStart(){
     if(!_netTimers) return;
@@ -1532,6 +1548,7 @@ function _netLiveStart(){
         // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
         const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
         if(inGame && _dsyFor > RB_RECONNECT_TIMEOUT_MS){ _netSessionEnd('DESYNC - MATCH ENDED'); return; }
+        _netBreakRecover(s);   // post-suspend hard-snap: re-anchor a sim frozen far behind the clock
         // The idle keepalive carries the recent input log, so it doubles as repair:
         // a lost LAST input would otherwise sit unfixed until the player pressed
         // something else. An empty log is just an alive check, as before.

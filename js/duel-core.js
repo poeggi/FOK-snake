@@ -291,7 +291,7 @@ const RB_RESYNC_BURST = 4;
 var _rbResyncSend = 0;       // full-resync sends still owed (host only)
 function _rbPackPlayer(p){
     const s = []; for(const c of p.snake) s.push(c.x, c.y);
-    return { s, d:p.dir, dq:p.dirQueue, bd:p.boostDir, bs:p.boostSince|0, bg:!!p.boosting,
+    return { s, d:p.dir, dq:p.dirQueue, bd:p.boostDir, bg:!!p.boosting,
              sa:p.stepAccum, sc:p.score|0, l:p.lives|0, al:p.alive!==false, su:p.slowUntil|0 };
 }
 // tk MUST be the ring entry's own tick (not the live simTick, which is one behind in netTickPre),
@@ -322,7 +322,7 @@ function _rbApplyResync(m){
     const unpackInto = (pk, into) => {
         const s = []; for(let k = 0; k + 1 < pk.s.length; k += 2) s.push({ x:pk.s[k]|0, y:pk.s[k+1]|0 });
         into.snake = s; into.dir = pk.d; into.dirQueue = pk.dq || []; into.boostDir = pk.bd;
-        into.boostSince = pk.bs|0; into.boosting = !!pk.bg; into.stepAccum = pk.sa;
+        into.boosting = !!pk.bg; into.stepAccum = pk.sa;
         into.score = pk.sc|0; into.lives = pk.l|0; into.alive = pk.al !== false; into.slowUntil = pk.su|0;
     };
     // The FULL authoritative snapshot AT tick T. Lockstep needs both sims byte-identical, so we
@@ -590,8 +590,8 @@ function _netPeerInput(m){
             //    since tk (head unmoved), the queued turn is still pending -> apply live.
             //  - boost start, grace-delayed (keyboard/dpad, cmd.now false): only ARMS the boost;
             //    it does not engage for BOOST_GRACE_TICKS. If it has not had time to engage on
-            //    either sim, it has changed nothing yet -> apply live, anchoring boostSince to
-            //    the REAL tick (the log replays at tk, so a later rewind stays consistent).
+            //    either sim, it has changed nothing yet -> apply live (the log replays at tk,
+            //    so a later rewind stays consistent).
             //  - boost end: matters only if a boosted step already ran since tk (head moved).
             // Applied live AND logged: a later rewind past tk restores the snapshot (dropping
             // this live effect) and replays from the log, so it lands exactly once either way.
@@ -608,11 +608,6 @@ function _netPeerInput(m){
             if(live && ((tk >> 6) !== (simTick >> 6) || ((simTick & 63) === 0 && tk < simTick))) live = false;
             if(live){
                 simCommand(cmd);
-                // simCommand stamps boostSince = the current simTick; every OTHER path
-                // (author, on-time, rollback replay) runs it at tk-1, so a LATE live apply
-                // must re-anchor there. boostSince rides the hashed players blob -- a wrong
-                // value here is a permanent players desync that 'st' cannot heal.
-                if(cmd.t === 'boost') players[oP].boostSince = tk - 1;
                 _rbDbg.live++;
             } else if(tk < earliest) earliest = tk;   // crossed a step / accrual boundary: rewind
         } else {

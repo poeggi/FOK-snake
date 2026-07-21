@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.4.1';
+const APP_VERSION = 'v2.4.2';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
