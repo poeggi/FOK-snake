@@ -66,5 +66,12 @@ sed -i "s|const CACHE = 'snake-[^']*';|const CACHE = '${NEW_VER}';|" "$SW"
 awk -v assets="const ASSETS = [${ASSETS}];" \
     '/^const ASSETS = \[/{print assets; next} {print}' "$SW" > "${SW}.tmp" && mv "${SW}.tmp" "$SW"
 
+# Mirror the version into the bundled APP_VERSION constant (assets.js) so the running code --
+# not the lagging service-worker cache name -- is what the UI displays. Kept in lockstep here.
+if [ -f js/assets.js ]; then
+    sed -i "s|^const APP_VERSION = '[^']*';|const APP_VERSION = '${NEW_VER#snake-}';|" js/assets.js
+    git add js/assets.js
+fi
+
 git add "$SW"
 printf "[pre-commit] SW cache -> %s\n" "$NEW_VER"

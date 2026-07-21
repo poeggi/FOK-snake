@@ -1160,21 +1160,18 @@ requestAnimationFrame(_relayout);
 if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_relayout);
 window.addEventListener('load', _relayout);
 
-let _swVersion = '?';
-if ('caches' in window) {
+// The version of the CODE that is actually running -- stamped into APP_VERSION (assets.js)
+// by the pre-commit hook alongside sw.js, so a page shows the fresh number the instant its
+// fresh JS loads, whatever service worker is active. The old cache-name read LAGGED: it
+// reported the ACTIVE worker's cache, which stays on the previous version until the new
+// worker installs and claims -- so a hard-reloaded page read stale even though the
+// network-first fetch had already served current code. Cache name kept only as a fallback.
+let _swVersion = (typeof APP_VERSION === 'string' && APP_VERSION) ? APP_VERSION : '?';
+if (_swVersion === '?' && 'caches' in window) {
     caches.keys().then(keys => {
         const k = keys.find(k => k.startsWith('snake-'));
         if (k) _swVersion = k.replace('snake-', '');
     }).catch(() => {});
-}
-// The cache name above does not exist on a first visit (the SW has not installed
-// yet), so read the version straight from sw.js -- network-first serves the code
-// actually running -- as a fallback so it shows immediately instead of '?'.
-if (typeof fetch === 'function') {
-    fetch('./sw.js', { cache: 'no-store' })
-        .then(r => r.text())
-        .then(t => { const m = t.match(/\/\/ version snake-(v[0-9.]+)/); if (m && _swVersion === '?') _swVersion = m[1]; })
-        .catch(() => {});
 }
 
 if ('serviceWorker' in navigator) {
