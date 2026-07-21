@@ -440,8 +440,8 @@ function drawScores() {
                     ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
                     const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
                     ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
-                    ctx.textAlign='right'; ctx.fillText(String(s.score|0), 348, y);
-                    ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level|0}`, 360, y);
+                    ctx.textAlign='right'; ctx.fillText(String(s.score|0), 334, y);
+                    ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level|0}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
                     ctx.textAlign='left';  ctx.fillText(String(s.date||'--.--.--').slice(0,8), 418, y);
                     drawScoreHead(568, y, (s.color|0)%SNAKE_COLORS.length, (s.shopItems&&typeof s.shopItems==='object')?s.shopItems:{});
                 });
@@ -460,8 +460,8 @@ function drawScores() {
             ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
             const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
             ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
-            ctx.textAlign='right'; ctx.fillText(String(s.score), 348, y);
-            ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level}`, 360, y);
+            ctx.textAlign='right'; ctx.fillText(String(s.score), 334, y);
+            ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
             ctx.textAlign='left';  ctx.fillText(s.date||'--.--.--', 418, y);
             drawScoreHead(568, y, s.color||0, s.shopItems||{});
         });

@@ -20,7 +20,7 @@ const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
 // number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
 // additive. Returns the major integer, or null if unparseable.
-const NET_API_BUILT_MINOR = 2;   // built against 3.2 (3.1 peer-net hint + 3.2 relay POST pull/piggyback)
+const NET_API_BUILT_MINOR = 3;   // built against 3.3 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal)
 function _netApiMajor(a){
     if(typeof a === 'number') return Math.floor(a);
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
@@ -1472,6 +1472,17 @@ function _netRelaySend(s, o){
     if(_netIsCtl(o.t)){ _netRelayCtl(s, o); return; }                   // reliable: retry with backoff
     _netRelayPost(s, o);                                               // pi/h/st/rs: low-rate, self-healing, send once
 }
+// Act on one relay GET reply. `gone` (API 3.3) is the server telling us the pairing was torn
+// down (the peer sent a bye/decline): relay has no DataChannel-close, so without this the peer
+// sat in the game until its own liveness timeout -- exactly the reported bug. Treat it like an
+// in-band bye (remoteBye: the server already knows, no need to say it back). Otherwise deliver
+// any messages through the shared exactly-once dedup.
+function _netRelayOnReply(s, r){
+    if(!r) return false;
+    if(r.gone){ _netSessionEnd('OPPONENT LEFT', true); return true; }
+    _netRelayDeliver(s, r.messages);
+    return false;
+}
 async function _netRelayLoop(s){
     while(_netSess === s && s.game && s.relay){
         if(!_netOk()) return;
@@ -1483,7 +1494,7 @@ async function _netRelayLoop(s){
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;
         if(!r && _netTimers) await new Promise(res => setTimeout(res, 1000));   // transport error: back off
-        if(r) _netRelayDeliver(s, r.messages);   // same exactly-once dedup as the POST-pull path
+        if(_netRelayOnReply(s, r)) return;   // 'gone' ended the session -> stop polling
     }
 }
 // Read the SELECTED ICE candidate pair so we KNOW the real path: host = direct LAN (~1ms),

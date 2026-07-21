@@ -172,6 +172,7 @@ const HOOKS = (myId) => `
   globalThis.__relaySend  = (o)=>{ _netRelaySend(_netSess, o); };
   globalThis.__pendingN   = ()=> (_netSess && _netSess.relayPending) ? _netSess.relayPending.n : null;
   globalThis.__fetchCount = ()=> __fetchN;
+  globalThis.__relayOnReply = (r)=> _netRelayOnReply(_netSess, r);   // API 3.3 gone-handling, without running the poll loop
   // 'store full, resend' on the FIRST POST, then 200: proves the refused input is re-slotted
   // and resent, not dropped. A resolving fetch (unlike the never-resolving coalesce stub).
   globalThis.__relayFullThenOk = ()=>{
@@ -960,6 +961,17 @@ try {
     B.__relaySend({ t:'in', n:3 });
     if(B.__fetchCount() !== 1) throw new Error('expected exactly one in-flight POST, got ' + B.__fetchCount());
     if(B.__pendingN() !== 3) throw new Error('the latest `in` must win the coalesce slot, got ' + B.__pendingN());
+  });
+
+  // API 3.3 'gone': relay has no DataChannel-close, so when the peer leaves (bye/decline) the
+  // server marks the pairing torn down and the held GET answers {gone:true}. The client must end
+  // the session at once instead of sitting in the game until its own liveness timeout.
+  check('relay gone (API 3.3): a torn-down pairing on the GET ends the session immediately', () => {
+    const B = mk(B_ID);
+    B.__relaySetup();
+    if(!B.__state().sess) throw new Error('setup: expected a relay session');
+    B.__relayOnReply({ ok:true, gone:true });
+    if(B.__state().sess) throw new Error('a gone reply must end the relay session (no waiting on the liveness timeout)');
   });
 
   // The APCu hub answers 429 "store full, resend" when its shared memory is momentarily full:

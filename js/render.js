@@ -631,7 +631,8 @@ function drawScoreHead(cx, cy, colorIdx, si) {
 
 function drawAchPopups(now) {
     confetti=confetti.filter(c=>{
-        c.life++; c.x+=c.vx; c.y+=c.vy; c.vy+=0.05; c.rot+=c.vrot;
+        c.life++;
+        if(!_simpleGfx()){ c.x+=c.vx; c.y+=c.vy; c.vy+=0.05; c.rot+=c.vrot; }   // SIMPLE: hold the scatter static, no per-frame physics
         if(c.life>=c.maxLife||c.y>CH+20) return false;
         const a=c.life<15?c.life/15:c.life>c.maxLife-25?1-(c.life-(c.maxLife-25))/25:1;
         ctx.save(); ctx.globalAlpha=a; ctx.translate(c.x,c.y); ctx.rotate(c.rot);
@@ -768,6 +769,17 @@ function drawPixelIcon(x, y, icon, cs) {
 let confetti = [];
 
 function spawnConfetti() {
+    if(_simpleGfx()){
+        // SIMPLE graphics: no animated particle burst (60 falling/spinning pieces updated every
+        // frame). A cheap STATIC scatter instead -- a dozen motionless pieces spread over the
+        // board that just hold and fade (the draw loop skips the per-frame physics for them).
+        for(let i=0;i<14;i++){
+            confetti.push({ x: CW*0.15+Math.random()*CW*0.7, y: CH*0.12+Math.random()*CH*0.4,
+                vx:0, vy:0, rot:(i%4)*0.5, vrot:0, w:6, h:4,
+                color: CONFETTI_COLS[i%CONFETTI_COLS.length], life:0, maxLife:70 });
+        }
+        return;
+    }
     for(let i=0;i<60;i++){
         confetti.push({
             x: CW*0.65+Math.random()*CW*0.35,

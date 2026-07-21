@@ -132,6 +132,14 @@ function resetSettings() {
     const d = defaultCfg(), keep = { shopItems:1, wornItems:1, boxPity:1, shopOpens:1, debug:1, x10:1, cfgVer:1 };
     for(const k in d) if(!keep[k]) cfg[k] = d[k];
     saveCfg();
+    // Re-apply the reset preferences to the LIVE app -- writing cfg alone leaves everything with
+    // a live side-effect on its PRE-reset state. The reported bug: audio resets to ON in cfg, but
+    // the engine stays muted and the speaker button keeps its 'muted' look. Same re-apply the
+    // restore path (_applyRestoredConfig) does.
+    applyHandedness();
+    Snd.musicSetVolume(cfg.volume==null?1:cfg.volume); Snd.sfxSetVolume(cfg.sfxVol==null?0.5:cfg.sfxVol);
+    if(cfg.music){ Snd.audioResume(); Snd.musicUnmute('mute'); } else Snd.musicMute('mute');
+    updateMuteBtn();
 }
 
 // ================================================================

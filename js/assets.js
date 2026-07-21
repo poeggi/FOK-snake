@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.4.1';
+const APP_VERSION = 'v2.4.0';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -53,25 +53,6 @@ const ANNOUNCEMENT = { id:'v2.0.0', pages:[
         '',
         '1:1 menu > PLAY ONLINE',
         'Bring a friend.' ] },
-    { headline:'MYSTERY BOXES ARRIVE!', lines:[
-        'NEW IN v1.5:',
-        'MYSTERY BOXES in the shop!',
-        '4 tiers: Common to Legendary',
-        'Win exclusive BOX GEAR',
-        'Dupes auto-sell for FOKoins',
-        '',
-        'The ADMIN BOX: 1 in 750 visits',
-        '',
-        'Good luck - it is a lottery!' ] },
-    { headline:'WE ARE BEEFING THINGS UP!', lines:[
-        'NEW IN v1.2:',
-        'Time Crystal in levels 6+',
-        'Shop page 2 - 5 new items',
-        'Smileys in your name',
-        'Snappier touch controls',
-        '',
-        'MULTIPLAYER coming soon.',
-        'Stay tuned!' ] },
 ] };
 // Minecraft-style title splash lines; one is picked at random each load.
 // Keep them short and ASCII so they fit the tilted, pulsing draw.
