@@ -545,6 +545,12 @@ document.addEventListener('keydown', e=>{
     // boundary, forces a rollback that changes nothing. Menus keep their repeats.
     if(e.repeat&&(phase==='playing'||phase==='duel'||phase==='duelReady')){ e.preventDefault(); return; }
     if(phase==='splash'&&!_splashExiting) _splashKeyHeld = true;
+    // A TV remote's OK/Select arrives here as a native Enter (a mobile OS-keyboard return goes
+    // through the focused name field, not this listener). On a remote there is no separate
+    // keyboard, so in name entry OK should ACT like the on-screen OK button -- place the current
+    // character and advance to the next -- with SUBMIT reserved for the RETURN glyph in the dial
+    // (and the START button). A real keyboard (pointer:fine) keeps Enter = submit.
+    if(phase==='nameEntry' && e.key==='Enter' && !_hasKeyboard){ e.preventDefault(); handleKey('NameAdd',null); return; }
     handleKey(e.key,()=>e.preventDefault());
     if(!e.repeat&&(phase==='playing'||phase==='duel')){
         const d=GDIRS[e.key];
