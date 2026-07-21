@@ -539,8 +539,9 @@ function _netHsTick(){
 }
 let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // Hold the connection OPEN on every matchmaking screen (1:1 menu, lobby, friends,
-// MY ID) and during a handshake: a long-poll the server answers the instant a
-// signal exists (~20ms server check + network), or with 204 after `wait` seconds of real silence. The
+// MY ID) and during a handshake: a long-poll -- the server HOLDS the request and
+// re-checks the mailbox every ~20ms (a server-side poll, NOT a push), answering as
+// soon as a signal lands or with 204 after `wait` seconds of real silence. The
 // main menu keeps the cheap 10s short-poll (no held worker when merely idling).
 //
 // wait is capped server-side at 9. HTTP gives one response per request, so the
@@ -1352,10 +1353,13 @@ function _netSend(o, pre){
 // snake stays instant (prediction), corrections just arrive slower. The user
 // sees why: a short message now and a RELAY MODE tag on the board.
 function netRelayActive(){ return !!(_netSess && _netSess.game && _netSess.relay); }
-// TODO(netcode): RELAY MODE IS UNUSABLE (Kai-verified). The HTTP relay.php fallback delivers
-// ~200-400ms one-way, so lockstep churns and it is not actually playable. It is a stopgap. Proper
-// fix: TURN/coturn on the fok-server box (see the iceServers TODO in _netRtcInit); relay.php should
-// be REPLACED/REMOVED once TURN is proven. Do not treat relay as a real path.
+// TODO(netcode, long-term): replace this HTTP relay with TURN (coturn) as the p2p-failed
+// path. A coturn entry in iceServers keeps the IDENTICAL DataChannel (same unreliable-
+// unordered netcode, one forwarding hop) and retires relay.php entirely. This is infra,
+// not logic: coturn needs a host with open UDP, which the shared webhost cannot provide
+// (see the iceServers TODO in _netRtcInit). ACCEPTED as long-term; until then this relay
+// IS the real fallback path -- its floor is ~RTT plus a few ms server-side, but verify on
+// live devices before trusting it for play.
 function _netRelayStart(s){
     if(_netSess !== s || s.game) return;
     s.relay = true;
@@ -1374,10 +1378,11 @@ function _netRelayStart(s){
     _netRelayLoop(s);
     _netRequestStart(s);
 }
-// One relay POST. Returns true when the message is off our hands (a clean send, or a 503
-// that ended the session); false on a droppable failure the caller may retry.
+// One relay POST. Returns 'ok' when the message is off our hands (a clean send, or a 503
+// that ended the session), 'resend' when the hub REFUSED it and asks for a retry (store
+// full), or 'drop' on a self-healing failure (back-off 429s, a 400 clock, transport error).
 async function _netRelayPost(s, o){
-    if(!_netOk()) return false;
+    if(!_netOk()) return 'drop';
     try {
         const _t0 = performance.now();
         // The ENVELOPE pts is backdated like every other PTS we send: the server
@@ -1390,20 +1395,24 @@ async function _netRelayPost(s, o){
                                    pts: o.pts != null ? o.pts - 50 : undefined }) });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
-        if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return true; }   // capped: honest busy, end the attempt
+        if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return 'ok'; }   // capped: honest busy, end the attempt
         if(r.status === 400 || r.status === 429){
-            // 429 = the per-second rate block or a full peer backlog; 400 is almost always
-            // our clock. All three used to look like a healthy send and surfaced 4s later as
-            // CONNECTION LOST, blaming the network.
+            // 429 = the per-second rate block, a full peer backlog, or a momentarily-full hub
+            // store; 400 is almost always our clock. All used to look like a healthy send and
+            // surfaced 4s later as CONNECTION LOST, blaming the network.
             let j = null; try{ j = await r.json(); }catch(e){}
             const err = (j && j.error) ? String(j.error) : '';
             _netDbg.relayDrop = (_netDbg.relayDrop|0) + 1;
             _netSigLog('! relay ' + r.status + (err ? ' ' + err : ''));
             if(r.status === 400 && /future/.test(err)) _netTimeSync(true);
-            return false;
+            // 'store full' = the hub's shared memory was momentarily full and REFUSED the
+            // message (not delivered), so the server asks us to resend -- a dropped input is
+            // exactly what desyncs relay into the burst. The other 429s (rate limit, backlog
+            // full) mean back OFF, and a 400 is our clock: those self-heal via the next packet.
+            return (r.status === 429 && /store full/.test(err)) ? 'resend' : 'drop';
         }
-        return true;
-    } catch(e){ return false; }
+        return 'ok';
+    } catch(e){ return 'drop'; }
 }
 // Drain the coalesce slot: keep ONE POST in flight, always sending the freshest pending
 // input packet. A local steer POSTs an `in` immediately, so on a 200-400ms relay RTT a key
@@ -1415,18 +1424,26 @@ async function _netRelayPump(s){
     s.relayBusy = true;
     while(_netSess === s && s.game && s.relay && s.relayPending){
         const o = s.relayPending; s.relayPending = null;
-        await _netRelayPost(s, o);
+        const code = await _netRelayPost(s, o);
+        // 'store full' REFUSED the input (not delivered); dropping it is what desyncs relay
+        // into the burst, so re-slot for a resend -- UNLESS a newer `in` already took the slot
+        // (it carries the same redundant log, so it supersedes). Pace it so a persistently full
+        // hub is not hot-looped; in real play the next tick's `in` supersedes it anyway.
+        if(code === 'resend' && !s.relayPending){
+            s.relayPending = o;
+            if(typeof setTimeout === 'function') await new Promise(res => setTimeout(res, 20));
+        }
     }
     s.relayBusy = false;
 }
 // A one-shot control transition, retried with backoff so a single lost POST cannot hang a
-// phase change. A clean send and a 503 (session ended) both stop it; a 400/429/transport
-// error retries. The receiver dedups (epoch / idempotent), so a duplicate that DID land is
-// harmless.
+// phase change. 'ok' (a clean send, or a 503 that ended the session) stops it; 'resend' (hub
+// store full) and 'drop' both retry. The receiver dedups (epoch / idempotent), so a duplicate
+// that DID land is harmless.
 async function _netRelayCtl(s, o){
     for(let i = 0; i < 3; i++){
         if(_netSess !== s || !s.game || !s.relay) return;
-        if(await _netRelayPost(s, o)) return;
+        if((await _netRelayPost(s, o)) === 'ok') return;
         if(typeof setTimeout === 'function') await new Promise(res => setTimeout(res, 120 * (i + 1)));
     }
 }

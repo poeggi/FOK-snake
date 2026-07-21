@@ -172,6 +172,15 @@ const HOOKS = (myId) => `
   globalThis.__relaySend  = (o)=>{ _netRelaySend(_netSess, o); };
   globalThis.__pendingN   = ()=> (_netSess && _netSess.relayPending) ? _netSess.relayPending.n : null;
   globalThis.__fetchCount = ()=> __fetchN;
+  // 'store full, resend' on the FIRST POST, then 200: proves the refused input is re-slotted
+  // and resent, not dropped. A resolving fetch (unlike the never-resolving coalesce stub).
+  globalThis.__relayFullThenOk = ()=>{
+    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true; _netSess.relay = true;
+    _netSync = { ofs:0, rtt:1, at:Date.now() }; __fetchN = 0;
+    globalThis.fetch = async ()=>{ __fetchN++; return (__fetchN === 1)
+      ? { status:429, json: async ()=>({ ok:false, error:'relay store full, resend' }) }
+      : { status:200, json: async ()=>({ ok:true }) }; };
+  };
   // Unload: sendBeacon is the only send that survives page teardown, so capture it.
   globalThis.__beacons = [];
   globalThis.Blob = function(parts, opts){ this.parts = parts; this.type = opts && opts.type; };
@@ -938,6 +947,19 @@ try {
     B.__relaySend({ t:'in', n:3 });
     if(B.__fetchCount() !== 1) throw new Error('expected exactly one in-flight POST, got ' + B.__fetchCount());
     if(B.__pendingN() !== 3) throw new Error('the latest `in` must win the coalesce slot, got ' + B.__pendingN());
+  });
+
+  // The APCu hub answers 429 "store full, resend" when its shared memory is momentarily full:
+  // the input was REFUSED, not delivered, and a dropped input is exactly what desyncs relay
+  // into the burst. So the pump must re-slot and resend it -- NOT drop it like the back-off
+  // 429s (rate limit / backlog full), which would hot-loop against a "slow down".
+  await acheck('relay store-full 429 resends the refused input instead of dropping it', async () => {
+    const B = mk(B_ID);
+    B.__relayFullThenOk();
+    B.__relaySend({ t:'in', n:7 });
+    await new Promise(r => setTimeout(r, 40));   // let the 20ms-paced resend fire
+    if(B.__fetchCount() < 2) throw new Error('the refused input was not resent, fetches=' + B.__fetchCount());
+    if(B.__pendingN() !== null) throw new Error('after a successful resend the slot must be empty, got ' + B.__pendingN());
   });
 
   console.log(results.join('\n'));
