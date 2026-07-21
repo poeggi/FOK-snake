@@ -97,17 +97,19 @@ runTest('SMOKE-INPUT', `
     if(getFriends().includes('00ff00dd')) throw 'scan hit outside the entry screen must be ignored';
     log('scanner hit path ok (lock message + submit)');
 
-    // Viewfinder tap toggles the camera; taps elsewhere do not touch it.
+    // Viewfinder tap CYCLES the camera on-x1 -> on-x2 -> off -> on-x1; taps elsewhere do not touch it.
     duelSel=2; press('Enter');
-    _scanState='live'; _scanVideo=null;   // pretend the camera runs (no stream in the harness)
-    if(_scanTapAt(50,50)) throw 'tap outside the viewfinder must not toggle';
+    _scanState='live'; _scanVideo=null; _scanZoom=1;   // pretend the camera runs at x1 (no stream in the harness)
+    if(_scanTapAt(50,50)) throw 'tap outside the viewfinder must not cycle';
     if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'viewfinder tap not registered';
-    if(_scanState!=='off'||!_scanManualOff) throw 'tap did not switch the camera off';
+    if(_scanState!=='live'||_scanZoom!==2) throw 'first tap must zoom to x2, staying live';
     if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'second viewfinder tap not registered';
-    if(_scanManualOff) throw 'tap did not switch the camera back on';
+    if(_scanState!=='off'||!_scanManualOff) throw 'second tap must switch the camera off';
+    if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'third viewfinder tap not registered';
+    if(_scanManualOff||_scanZoom!==1) throw 'third tap must switch the camera back on at x1';
     press('Escape');   // cancel out (empty field)
     if(_scanManualOff!==false||phase!=='duelMenu') throw 'leave must reset the manual-off state';
-    log('viewfinder tap toggle ok');
+    log('viewfinder tap cycle ok (x1 -> x2 -> off -> x1)');
 
     // SETTINGS > USER: opens the shared dialog in user mode; submit persists the name.
     localStorage.removeItem('lastSName');

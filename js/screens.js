@@ -830,7 +830,7 @@ function _drawScanPanel(){
     scanTick();
     ctx.strokeStyle='#2a5a2a'; ctx.lineWidth=2; rr(vx-4,vy-4,vs+8,vs+8,4); ctx.stroke();
     if(_scanState==='live'&&_scanVideo&&_scanVideo.videoWidth){
-        const vw=_scanVideo.videoWidth,vh=_scanVideo.videoHeight,s=Math.min(vw,vh)*0.7;
+        const vw=_scanVideo.videoWidth,vh=_scanVideo.videoHeight,s=Math.min(vw,vh)*0.7/_scanZoom;   // /zoom: show a smaller centre crop, magnified
         try{ ctx.drawImage(_scanVideo,(vw-s)/2,(vh-s)/2,s,s,vx,vy,vs,vs); }catch(e){}
         ct('POINT AT FRIEND QR',vx+vs/2,vy+vs+14,'#4a7a4a',FONT.HINT);
     } else if(_scanState==='starting'){

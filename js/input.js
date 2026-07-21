@@ -610,6 +610,9 @@ if(typeof window !== 'undefined' && window.addEventListener){
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
+    // A camera-viewfinder click cycles the camera (on pointerup) -- it must NOT also add a
+    // character to the friend ID. This guard was missing, so clicking the camera advanced the ID.
+    if (phase === 'nameEntry' && entryMode === 'friend' && _scanInVF(e.clientX, e.clientY)) return;
     // A pointer click (mouse / TV remote) acts as OK: start on splash, add-a-letter
     // in name entry, confirm/select in every other menu. Not during gameplay.
     if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
@@ -829,10 +832,12 @@ nameInp.addEventListener('keydown', e => {
 let _scanStream=null, _scanVideo=null, _scanState='off';   // off|starting|live|denied
 let _scanOk='', _scanOkAt=0;   // successful read: shown briefly before the auto-submit
 let _scanManualOff=false;      // user tapped the viewfinder to switch the camera off
+let _scanZoom=1;               // viewfinder + decode digital zoom (1 or 2); tap cycles x1 -> x2 -> off
 let _scanBusy=false, _scanCv=null, _scanCtx=null, _scanFrame=0;
 const _scanDetector=(()=>{ try{ return ('BarcodeDetector' in window)?new BarcodeDetector({formats:['qr_code']}):null; }catch(e){ return null; } })();
 function scanStart(){
     if(_scanState==='starting'||_scanState==='live') return;   // 'denied' may retry on a fresh gesture
+    _scanZoom=1;   // every fresh start opens at x1
     _scanState='starting';
     try{
         navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false}).then(s=>{
@@ -857,20 +862,29 @@ function scanTick(){
         _scanDetector.detect(_scanVideo).then(rs=>{ _scanBusy=false; for(const r of rs||[]) _scanHit(r.rawValue); }).catch(()=>{ _scanBusy=false; });
         return;
     }
-    const vw=_scanVideo.videoWidth, vh=_scanVideo.videoHeight, s=Math.min(vw,vh)*0.7;
+    const vw=_scanVideo.videoWidth, vh=_scanVideo.videoHeight, s=Math.min(vw,vh)*0.7/_scanZoom;   // /zoom: read a smaller centre crop
     if(!_scanCv){ _scanCv=document.createElement('canvas'); _scanCv.width=464; _scanCv.height=464; _scanCtx=_scanCv.getContext('2d',{willReadFrequently:true}); }
     _scanCtx.drawImage(_scanVideo,(vw-s)/2,(vh-s)/2,s,s,0,0,464,464);
     try{ const hit=qrDecodeImage(_scanCtx.getImageData(0,0,464,464)); if(hit) _scanHit(hit); }catch(e){}
 }
-// Tap/click on the viewfinder toggles the camera (default: on when entering).
-function _scanTapAt(cx,cy){
-    if(_scanOk) return false;   // locked: the submit is already on its way
+// Is this pointer inside the viewfinder rect (a small margin of slop)? Pure hit-test, no
+// side effect -- the pointerdown handler uses it to NOT add a character when the camera is
+// clicked; the actual cycle happens on _scanTapAt (pointerup / touchstart).
+function _scanInVF(cx,cy){
     const r=canvas.getBoundingClientRect();
     if(!r.width||!r.height) return false;
     const x=(cx-r.left)*CW/r.width, y=(cy-r.top)*CH/r.height;
-    if(x<SCAN_VF.x-8||x>SCAN_VF.x+SCAN_VF.s+8||y<SCAN_VF.y-8||y>SCAN_VF.y+SCAN_VF.s+8) return false;
-    if(_scanState==='starting'||_scanState==='live'){ scanStop(); _scanManualOff=true; }
-    else { _scanManualOff=false; scanStart(); }
+    return !(x<SCAN_VF.x-8||x>SCAN_VF.x+SCAN_VF.s+8||y<SCAN_VF.y-8||y>SCAN_VF.y+SCAN_VF.s+8);
+}
+// Tap/click on the viewfinder CYCLES the camera: on-x1 -> on-x2 -> off -> on-x1 ... (default
+// is on-x1 when entering). Returns true when the tap was on the viewfinder (so callers can
+// swallow it and never treat it as a character add).
+function _scanTapAt(cx,cy){
+    if(_scanOk) return false;   // locked: the submit is already on its way
+    if(!_scanInVF(cx,cy)) return false;
+    if(_scanState==='off'||_scanState==='denied'){ _scanZoom=1; _scanManualOff=false; scanStart(); }   // off -> on x1
+    else if(_scanZoom<2){ _scanZoom=2; }                                                                // x1 -> x2 (stays live)
+    else { scanStop(); _scanManualOff=true; }                                                          // x2 -> off
     Snd.sfxPlay('nav',cfg.music); _uiDirty=true;
     return true;
 }
