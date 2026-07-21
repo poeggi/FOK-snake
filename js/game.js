@@ -37,7 +37,7 @@ let _resetKind = 'stats';          // which reset the confirm screen is arming: 
 let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
-const MENU_ITEMS     = ['PLAY', '1:1', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
+const MENU_ITEMS     = ['PLAY', '1VS1', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
 let duelSel = 0;   // 1:1 submenu selection (0 = PLAY LOCAL, 1 = MY ID, 2 = ADD FRIEND, 3 = FRIENDS, 4 = PLAY ONLINE)
 // Local 1:1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
 const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
@@ -484,6 +484,19 @@ function exportFpsLog(){
 // ================================================================
 // Shop/box behaviours (moved from the screens: they mutate coins/cfg, they do not draw).
 function _gearList(){ const si=cfg.shopItems||{}; return BOX_ITEMS.filter(b=>si[b.id]); }
+// Wear/unwear an OWNED wearable item. The SINGLE toggle every shop control path uses -- the
+// tab OK/tap and the SPACE key, on every tab -- so wearing behaves identically whatever the
+// tab or input method, with no per-tab copies. Returns true if it acted (item was an owned
+// wearable); false for an unowned or repeatable item, so the caller can decide (e.g. buy).
+function _shopToggleWear(item){
+    if(!item) return false;
+    const si = cfg.shopItems || (cfg.shopItems = {});
+    if(item.repeatable || !si[item.id]) return false;   // only owned, non-consumable items are wearable
+    const wi = cfg.wornItems || (cfg.wornItems = {});
+    if(wi[item.id]) delete wi[item.id]; else wi[item.id] = true;
+    saveCfg(); Snd.sfxPlay('nav', cfg.music);
+    return true;
+}
 let _boxOpenAt = 0, _boxReward = null;
 // ADMIN box: surfaces on the boxes tab once every ADMIN_BOX_EVERY shop opens, then is
 // consumed for the run once claimed. _boxList() appends it only while available.

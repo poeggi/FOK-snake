@@ -173,17 +173,20 @@ function renderBarsOffscreen() {
     _composeBg();
 }
 
+// SIMPLE graphics mode (cfg.gfxMode 0): in-game items render as STATIC elements -- no spin,
+// no scale-pulse, no colour cycling. STANDARD (1, default) and FABULOUS (2, not built) animate.
+function _simpleGfx(){ return cfg.gfxMode === 0; }
 function drawGem(g,now) {
-    const cx=g.x*CS+CS/2, cy=g.y*CS+CS/2, t=(now-gemAt)/1000;
+    const cx=g.x*CS+CS/2, cy=g.y*CS+CS/2, t=_simpleGfx()?0:(now-gemAt)/1000;
     const tier=g.tier||0;
     if(tier===2){
         // Epic gem: rainbow, sparkles, spawn burst
-        const hue=(now/8)%360;
+        const hue=_simpleGfx()?0:(now/8)%360;
         const r=(CS/2-1)*(1+0.20*Math.sin(t*9));
         ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*5);
-        // Spawn burst rings (1.4s)
+        // Spawn burst rings (1.4s) -- an animation, so SIMPLE mode skips them
         const bAge=now-g.spawnAt;
-        if(bAge<1400){
+        if(bAge<1400 && !_simpleGfx()){
             const bp=bAge/1400;
             [1,2].forEach(n=>{
                 ctx.save();
@@ -674,8 +677,8 @@ function _drawGourangaPending(now) {
     }
 }
 function _drawHeart(now) {
-    if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0) return;
-    const pulse=0.85+0.15*Math.sin((now-heartAt)/220);
+    if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0&&!_simpleGfx()) return;   // the expiry blink is an animation
+    const pulse=_simpleGfx()?1:0.85+0.15*Math.sin((now-heartAt)/220);
     const cx=heart.x*CS+CS/2, cy=heart.y*CS+CS/2;
     const s=pulse*(CS/2-2)/3.5;
     ctx.save(); ctx.translate(cx,cy); ctx.scale(s,s);
@@ -708,10 +711,10 @@ function _drawCrushEffects(now) {
     });
 }
 function _drawPowerPellet(now) {
-    const pulse=0.85+0.15*Math.sin((now-powerPelletAt)/220);
+    const pulse=_simpleGfx()?1:0.85+0.15*Math.sin((now-powerPelletAt)/220);
     const cx=powerPellet.x*CS+CS/2, cy=powerPellet.y*CS+CS/2;
     const w=(CS-3)*pulse, h=(CS*0.56)*pulse, r=h/2;    // capsule (stadium): rounded ends
-    const hue=(now/7)%360;
+    const hue=_simpleGfx()?0:(now/7)%360;
     ctx.save();
     ctx.translate(cx,cy); ctx.rotate(-0.5);            // tilt so it reads as a pill, not a blob
     ctx.shadowColor=`hsl(${hue},100%,70%)`; ctx.shadowBlur=14;
@@ -728,7 +731,7 @@ function _drawPowerPellet(now) {
     ctx.restore();
 }
 function _drawTimeCrystal(now) {
-    const cx=timeCrystal.x*CS+CS/2, cy=timeCrystal.y*CS+CS/2, t=(now-timeCrystalAt)/1000;
+    const cx=timeCrystal.x*CS+CS/2, cy=timeCrystal.y*CS+CS/2, t=_simpleGfx()?0:(now-timeCrystalAt)/1000;
     const r=(CS/2-2)*(1+0.12*Math.sin(t*4));
     ctx.save(); ctx.translate(cx,cy);
     const grd=ctx.createRadialGradient(0,0,0,0,0,r*2.4);

@@ -297,6 +297,11 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
     ]},
     { label:'GRAPHICS', items:[
+        { lbl:()=>'GRAPHICS MODE: '+(cfg.gfxMode===0?'SIMPLE':'STANDARD'),   // SIMPLE = static in-game items (no spin/pulse); STANDARD = today
+          act:()=>{cfg.gfxMode=cfg.gfxMode===0?1:0;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.gfxMode=cfg.gfxMode===0?1:0;} },
+        { lbl:()=>'GRAPHICS MODE: FABULOUS', dis:()=>true,   // greyed: not yet implemented
+          act:()=>{Snd.sfxPlay('fail',cfg.music);} },
         { lbl:()=>'LIMIT 30 FPS: '+(cfg.fps30?'ON':'OFF'),
           act:()=>{cfg.fps30=!cfg.fps30;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'DISABLE GLOW: '+(cfg.disableGlow?'ON':'OFF'),

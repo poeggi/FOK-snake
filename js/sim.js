@@ -42,7 +42,8 @@ let levelBonusCount = 0, epicLevelCount = 0;
 let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
 let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0;
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
-let _barMoveTick=0;   // power-mode bar-drift cadence (blocks flee every 2nd game tick)
+let _barMoveTick=0;   // power-mode bar-drift cadence counter
+const _BAR_MOVE_EVERY=4;   // blocks step once every 4th game tick -- ONE cadence for both modes (half the old rate)
 // DEBUG x10: multiplies every rare-event probability (pellet/crystal/gouranga/gem tiers/
 // respawn heart) by 10 for testing. cfg.x10 is persisted config, read at call time like
 // cfg.diff/cfg.turbo (the worker receives it via the cfg message; like diff, a replay or
@@ -117,11 +118,12 @@ function _mkDuelPlayer(x0, y0, dx) {
 // (Re)build the current duel level: fresh symmetric spawns (lives + scores kept),
 // level-scaled barricades and speed, gems reset, READY/GO. Used for the match start,
 // every level-up, and the level restart after a death.
-// SPEED ROUND: a 1-in-20 level that runs at level 10's pace whatever level it is.
+// SPEED ROUND: a 1-in-10 level that runs at level 10's pace whatever level it is. DUEL ONLY
+// -- set in _duelBeginLevel and NOWHERE else; single-player clears it (see beginLevel).
 // Rolled from the SEEDED rng, so both clients decide it identically without a word
 // crossing the wire -- the same property that lets the whole duel run without an
 // authority. Never on level 1: it is a twist on a level you just earned.
-const _SPEED_ROUND_P = 0.05;
+const _SPEED_ROUND_P = 0.10;
 let _speedRound = false;
 function _duelBeginLevel() {
     // LEVEL_CFG has 10 entries; a duel is endless, so past level 10 it reuses the last
@@ -310,6 +312,7 @@ function _barFragile(x,y) {
 function beginLevel(isRespawn=false) {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
     gPer = lcfg[['easy','normal','hard'][cfg.diff]];
+    _speedRound = false;   // SPEED ROUND is DUEL-ONLY: clear any leftover so single player never runs one
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
     const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
     _levelStartLen = sl;
@@ -579,16 +582,22 @@ function _moveBarsGhost(){
     if(heart) blocked.add(ck(heart));
     if(timeCrystal) blocked.add(ck(timeCrystal));
     if(_gourangaActive) _gourangaLine.forEach(g=>blocked.add(ck(g)));
+    const free=(x,y)=>x>=0&&x<COLS&&y>=0&&y<ROWS&&!blocked.has(x+','+y);
     for(const b of bars){
-        // Each block holds one heading for 1-2s (60-120 engine ticks) so the flight
-        // reads as directed, not jittery; a blocked step bounces into a new heading.
-        // (gd/gdUntil live only sim-side: the render transport strips them.)
-        if(b.gd==null || simTick>=b.gdUntil){ b.gd=ri(4); b.gdUntil=simTick+60+ri(61); }
+        // Each block holds ONE heading for 2-4s so the flight reads as a calm directed glide.
+        // Blocked ahead, it TURNS 90 degrees rather than reversing -- a reversal is exactly what
+        // read as jitter -- and if boxed in on both sides it simply holds this step, which is
+        // calmer than a random jerk. gd/gdUntil live only sim-side (the render transport strips them).
+        if(b.gd==null || simTick>=b.gdUntil){ b.gd=ri(4); b.gdUntil=simTick+120+ri(121); }
         let d=DIRS[b.gd], nx=b.x+d.x, ny=b.y+d.y;
-        if(nx<0||nx>=COLS||ny<0||ny>=ROWS||blocked.has(nx+','+ny)){
-            b.gd=ri(4); b.gdUntil=simTick+60+ri(61);
-            d=DIRS[b.gd]; nx=b.x+d.x; ny=b.y+d.y;
-            if(nx<0||nx>=COLS||ny<0||ny>=ROWS||blocked.has(nx+','+ny)) continue;
+        if(!free(nx,ny)){
+            const perp=b.gd<2?2:0, pick=ri(2);   // horizontal(0,1)<->vertical(2,3): the two 90-degree turns
+            let turned=false;
+            for(const g of [perp+pick, perp+(1-pick)]){
+                const dd=DIRS[g], px=b.x+dd.x, py=b.y+dd.y;
+                if(free(px,py)){ b.gd=g; b.gdUntil=simTick+120+ri(121); nx=px; ny=py; turned=true; break; }
+            }
+            if(!turned) continue;   // boxed in on both turns: hold position
         }
         blocked.delete(ck(b)); b.x=nx; b.y=ny; blocked.add(nx+','+ny);
     }
@@ -608,7 +617,7 @@ function update() {
             _gAt = simTick;   // accrual boundary: boost flips only matter from here on
             _stepAccum += boosting?2:1;
             if(_stepAccum>=2){ _stepAccum-=2; step(now); }
-            if(_powerMode && ++_barMoveTick>=2){ _barMoveTick=0; _moveBarsGhost(); }
+            if(_powerMode && ++_barMoveTick>=_BAR_MOVE_EVERY){ _barMoveTick=0; _moveBarsGhost(); }
         }
     }
     if(heart&&heartIsEarly&&now-heartAt>=EARLY_HEART_TTL){heart=null;heartIsEarly=false;}
@@ -642,7 +651,7 @@ function update() {
             _gDue=gPer;
             _gAt = simTick;   // accrual boundary: boost flips only matter from here on
             for(const P of players){ if(P.alive) P.stepAccum += (P.boosting?2:1)*(now<P.slowUntil?0.5:1); }
-            if(_powerMode && ++_barMoveTick>=2){ _barMoveTick=0; _moveBarsGhost(); }
+            if(_powerMode && ++_barMoveTick>=_BAR_MOVE_EVERY){ _barMoveTick=0; _moveBarsGhost(); }
             duelStep(now);
         }
     }

@@ -115,7 +115,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
                 case 'PLAY':         beginGame(); break;
-                case '1:1':          phase='duelMenu'; duelSel=0; break;
+                case '1VS1':         phase='duelMenu'; duelSel=0; break;
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=0; break;
                 case 'SHOP':         _enterShop(); break;
@@ -294,35 +294,32 @@ const UI_INPUT = {
             else if(key==='ArrowLeft'){ shopPage=(shopPage-1+SHOP_PAGES)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
             else if(key==='ArrowRight'){ shopPage=(shopPage+1)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         },
+        // ONE control path for every tab: a box opens; an OWNED wearable toggles wear/unwear
+        // (via the shared _shopToggleWear); anything else on a shop page is a buy. OK and tap
+        // both land here, so tapping a purchased item wears/unwears it on ANY tab.
         confirm(){
             const onBoxes = shopPage===BOX_PAGE, onGear = shopPage===GEAR_PAGE;
             const items = onBoxes ? _boxList() : onGear ? _gearList() : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
-            if(onBoxes){ const b=_boxList()[shopSel]; if(b) _openBox(b); }
-            else if(onGear){ const item=items[shopSel], wi=cfg.wornItems||(cfg.wornItems={});
-                if(item){ if(wi[item.id]) delete wi[item.id]; else wi[item.id]=true; saveCfg(); Snd.sfxPlay('nav',cfg.music); } }
-            else {
-                const item=items[shopSel];
-                const si=cfg.shopItems||(cfg.shopItems={});
-                if(item&&_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
-                    _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch (e) {}
-                    si[item.id]=true;
-                    if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
-                    saveCfg();
-                    if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full');
-                    triggerPurchaseAnim(); Snd.sfxPlay('perfect',cfg.music);
-                } else if(item&&(_cachedFOKoins<item.price)){ Snd.sfxPlay('fail',cfg.music); }
-            }
+            const item = items[shopSel];
+            if(!item) return;
+            if(onBoxes){ _openBox(item); return; }
+            if(_shopToggleWear(item)) return;   // owned wearable, any tab: wear/unwear
+            if(onGear) return;                  // gear holds only owned wearables -- nothing to buy
+            const si=cfg.shopItems||(cfg.shopItems={});
+            if(_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
+                _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch (e) {}
+                si[item.id]=true;
+                if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
+                saveCfg();
+                if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full');
+                triggerPurchaseAnim(); Snd.sfxPlay('perfect',cfg.music);
+            } else if(_cachedFOKoins<item.price){ Snd.sfxPlay('fail',cfg.music); }
         },
-        space(){
-            const onBoxes = shopPage===BOX_PAGE, onGear = shopPage===GEAR_PAGE;
-            if(onBoxes) return;
-            const items = onGear ? _gearList() : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
-            const item=items[shopSel];
-            const si=cfg.shopItems||{}, wi=cfg.wornItems||(cfg.wornItems={});
-            if(item&&!item.repeatable&&si[item.id]){
-                if(wi[item.id]) delete wi[item.id]; else wi[item.id]=true;
-                saveCfg(); Snd.sfxPlay('nav',cfg.music);
-            } else if(item&&!si[item.id]){ Snd.sfxPlay('fail',cfg.music); }
+        space(){   // wear/unwear via the SAME shared path as OK/tap; an unowned item just buzzes
+            if(shopPage===BOX_PAGE) return;
+            const items = shopPage===GEAR_PAGE ? _gearList() : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
+            const item = items[shopSel];
+            if(!_shopToggleWear(item) && item && !(cfg.shopItems||{})[item.id]) Snd.sfxPlay('fail',cfg.music);
         },
         back: _backToMenu,
     },

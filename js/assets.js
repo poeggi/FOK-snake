@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.4.0';
+const APP_VERSION = 'v2.4.1';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -46,7 +46,7 @@ const ANNOUNCEMENT = { id:'v2.0.0', pages:[
         'no lag, no host, no waiting.' ] },
     { headline:'AND A LITTLE CHAOS', lines:[
         'ALSO IN v2.0:',
-        'SPEED ROUNDS: 1 in 20 levels',
+        'SPEED ROUNDS: 1 in 10 levels',
         'runs at level 10 pace',
         'Power pellet? Eat your rival!',
         'Tail = they slow. Head = gone.',
