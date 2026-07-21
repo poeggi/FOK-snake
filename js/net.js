@@ -540,7 +540,7 @@ function _netHsTick(){
 let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // Hold the connection OPEN on every matchmaking screen (1:1 menu, lobby, friends,
 // MY ID) and during a handshake: a long-poll the server answers the instant a
-// signal exists (~150ms), or with 204 after `wait` seconds of real silence. The
+// signal exists (~20ms server check + network), or with 204 after `wait` seconds of real silence. The
 // main menu keeps the cheap 10s short-poll (no held worker when merely idling).
 //
 // wait is capped server-side at 9. HTTP gives one response per request, so the
@@ -1126,6 +1126,8 @@ function _netMkSess(peer, role){
     return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
+             relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
+             ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false,
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
@@ -1294,6 +1296,25 @@ function _netWire(dc){
     dc.onmessage = e => { if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(String(e.data)); } };
     dc.onclose = () => { const s = _netSess; if(s && s.game && !s.relay && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end
 }
+// A message type that is a one-shot CONTROL transition (a phase change), as opposed to the
+// self-healing input/liveness stream. Control has no redundancy and the peer DEPENDS on it
+// -- a lost `rst` hangs the guest -- so both transports make it reliable: the relay retries
+// (_netRelayCtl), the DataChannel repeats (_netCtlRepeat). The receiver dedups by epoch
+// (rst/sched) or is idempotent (start/again/bye).
+function _netIsCtl(t){ return t === 'sched' || t === 'rst' || t === 'start' || t === 'again' || t === 'bye'; }
+// Repeat a pre-serialized control message twice more over the DataChannel, spaced, to
+// survive the unreliable channel's occasional drop without an ack protocol. Stops early if
+// the session or channel is gone. Same j (its original pts) each time -- a repeat is always
+// in the past, so the receiver's future-gate passes it.
+function _netCtlRepeat(s, j){
+    let n = 0;
+    const rep = () => {
+        if(++n > 2 || _netSess !== s || !s.game || !s.dc || s.dc.readyState !== 'open') return;
+        try{ s.dc.send(j); }catch(e){}
+        if(typeof setTimeout === 'function') setTimeout(rep, 100);
+    };
+    if(typeof setTimeout === 'function') setTimeout(rep, 100);
+}
 // `pre` (optional) is o already serialized -- callers that had to stringify anyway
 // (the st size check) pass it so the packet is not serialized twice.
 function _netSend(o, pre){
@@ -1313,7 +1334,7 @@ function _netSend(o, pre){
         if(j.length > NET_PKT_MAX){ _netDbg.oversize = (_netDbg.oversize|0) + 1; _netSigLog('! packet ' + j.length + 'B > budget'); }
         // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
         // queue them late. Rare one-shot control messages (sched/rst/start/again/bye)
-        // still queue -- for those, late beats never.
+        // still queue and are repeated below -- for those, late beats never.
         if(s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
             _netDbg.congDrop = (_netDbg.congDrop|0) + 1;
             if(!_netDbg.congAt || performance.now() - _netDbg.congAt > 1000){
@@ -1324,6 +1345,7 @@ function _netSend(o, pre){
             return;
         }
         s.dc.send(j); s.lastSent = performance.now();
+        if(_netIsCtl(o.t)) _netCtlRepeat(s, j);   // unreliable channel: repeat the transition a couple of times
     }catch(e){}
 }
 // Fall back to the server relay: same messages, ~200-400ms one-way -- the local
@@ -1352,8 +1374,10 @@ function _netRelayStart(s){
     _netRelayLoop(s);
     _netRequestStart(s);
 }
-async function _netRelaySend(s, o){
-    if(!_netOk()) return;
+// One relay POST. Returns true when the message is off our hands (a clean send, or a 503
+// that ended the session); false on a droppable failure the caller may retry.
+async function _netRelayPost(s, o){
+    if(!_netOk()) return false;
     try {
         const _t0 = performance.now();
         // The ENVELOPE pts is backdated like every other PTS we send: the server
@@ -1366,18 +1390,51 @@ async function _netRelaySend(s, o){
                                    pts: o.pts != null ? o.pts - 50 : undefined }) });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
-        if(r.status === 503) _netSessionEnd('SERVER FULL - TRY LATER');   // capped: honest busy, end the attempt
-        else if(r.status === 400 || r.status === 429){
-            // 429 is EITHER the 128/s rate block (30s) or a full peer backlog; 400 is
-            // almost always our clock. All three used to look like a healthy send and
-            // surfaced 4s later as CONNECTION LOST, blaming the network.
+        if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return true; }   // capped: honest busy, end the attempt
+        if(r.status === 400 || r.status === 429){
+            // 429 = the per-second rate block or a full peer backlog; 400 is almost always
+            // our clock. All three used to look like a healthy send and surfaced 4s later as
+            // CONNECTION LOST, blaming the network.
             let j = null; try{ j = await r.json(); }catch(e){}
             const err = (j && j.error) ? String(j.error) : '';
             _netDbg.relayDrop = (_netDbg.relayDrop|0) + 1;
             _netSigLog('! relay ' + r.status + (err ? ' ' + err : ''));
             if(r.status === 400 && /future/.test(err)) _netTimeSync(true);
+            return false;
         }
-    } catch(e){}
+        return true;
+    } catch(e){ return false; }
+}
+// Drain the coalesce slot: keep ONE POST in flight, always sending the freshest pending
+// input packet. A local steer POSTs an `in` immediately, so on a 200-400ms relay RTT a key
+// burst would otherwise pile up as concurrent fetches (and trip the rate cap). Each `in`
+// carries the whole _rbSent redundant log, so a newer one strictly supersedes an older:
+// dropping the ones between loses nothing, and the send rate self-limits to the round trip.
+async function _netRelayPump(s){
+    if(s.relayBusy) return;
+    s.relayBusy = true;
+    while(_netSess === s && s.game && s.relay && s.relayPending){
+        const o = s.relayPending; s.relayPending = null;
+        await _netRelayPost(s, o);
+    }
+    s.relayBusy = false;
+}
+// A one-shot control transition, retried with backoff so a single lost POST cannot hang a
+// phase change. A clean send and a 503 (session ended) both stop it; a 400/429/transport
+// error retries. The receiver dedups (epoch / idempotent), so a duplicate that DID land is
+// harmless.
+async function _netRelayCtl(s, o){
+    for(let i = 0; i < 3; i++){
+        if(_netSess !== s || !s.game || !s.relay) return;
+        if(await _netRelayPost(s, o)) return;
+        if(typeof setTimeout === 'function') await new Promise(res => setTimeout(res, 120 * (i + 1)));
+    }
+}
+function _netRelaySend(s, o){
+    if(!_netOk()) return;
+    if(o.t === 'in'){ s.relayPending = o; _netRelayPump(s); return; }   // coalesce: latest wins, one in flight
+    if(_netIsCtl(o.t)){ _netRelayCtl(s, o); return; }                   // reliable: retry with backoff
+    _netRelayPost(s, o);                                               // pi/h/st/rs: low-rate, self-healing, send once
 }
 async function _netRelayLoop(s){
     while(_netSess === s && s.game && s.relay){
@@ -1656,18 +1713,25 @@ function _netHandleMsg(txt){
     }
     switch(m.t){
         case 'sched':
-        case 'rst': {   // the match / rematch start moment, issued by the server, relayed by P0
+        case 'rst': {   // the match / rematch / level start moment, issued by the server, relayed by P0
             const s = _netSess;
             if(!s || s.role === 'host' || !s.game) break;
+            const ep = (typeof m.epoch === 'number') ? m.epoch|0 : (s.epoch|0);
+            // Dedup the reliable-control repeats: the sender repeats a start 2-3x (neither
+            // transport guarantees delivery), so act on each epoch exactly once -- a second
+            // copy must not re-trigger beginOnlineDuel and reset a level already running.
+            if(s.ctlEpoch === ep) break;
             if(m.t === 'sched' && inGame) break;
+            // No shared clock, no match: starting on different timelines is exactly
+            // the desync this architecture exists to make impossible. Validate BEFORE
+            // consuming the epoch, so a malformed copy does not block a good repeat.
+            if(typeof m.startPts !== 'number' || netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); break; }
+            s.ctlEpoch = ep;
             s.seed = (m.seed>>>0) || s.seed;
             if(m.x10 !== undefined) s.x10 = !!m.x10;
+            s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch/level moves it
+            s.epoch = ep;              // stay on the pair's epoch line
             const go = () => { if(_netSess === s && s.game) beginOnlineDuel(s.seed, false); };
-            // No shared clock, no match: starting on different timelines is exactly
-            // the desync this architecture exists to make impossible.
-            if(typeof m.startPts !== 'number' || netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); break; }
-            s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch moves it
-            if(typeof m.epoch === 'number') s.epoch = m.epoch|0;   // stay on the pair's epoch line
             const wait = Math.max(0, Math.min(5000, m.startPts - netPts()));
             if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
             break;

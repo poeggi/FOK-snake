@@ -148,6 +148,30 @@ const HOOKS = (myId) => `
       json:{ ok:true, start_pts:netPts()+50, epoch:epoch|0, now:netPts() } });
     await _realReqStart(_netSess, reason);
   };
+  // Reliable-control dedup + relay-coalesce probes. beginOnlineDuel is stubbed to a
+  // counter so a repeated start is OBSERVABLE without running the whole duel setup --
+  // and with it stubbed, inGame never flips, so the dedup that fires is the epoch one
+  // (s.ctlEpoch), not the incidental inGame guard.
+  globalThis.__ctlBegins = 0;
+  globalThis.__ctlSetup = ()=>{
+    _netSess = _netMkSess('ffffffff', 'peer'); _netSess.game = true;   // a guest processes sched/rst
+    _netSync = { ofs:0, rtt:1, at:Date.now() };
+    beginOnlineDuel = ()=>{ __ctlBegins++; };
+  };
+  // startPts just in the past -> the go() runs synchronously (no future wait); no m.pts,
+  // so the receive future-gate is skipped.
+  globalThis.__deliverCtl = (t, epoch)=>{ _netHandleMsg(JSON.stringify({ t, seed:0xBEEF, startPts:netPts()-10, epoch })); };
+  globalThis.__ctlBeginsN = ()=> __ctlBegins;
+  // Relay coalesce: a fetch that never resolves keeps the one POST 'in flight'.
+  globalThis.__fetchN = 0;
+  globalThis.__relaySetup = ()=>{
+    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true; _netSess.relay = true;
+    _netSync = { ofs:0, rtt:1, at:Date.now() };
+    globalThis.fetch = ()=>{ __fetchN++; return { then:()=>({ catch:()=>{} }) }; };
+  };
+  globalThis.__relaySend  = (o)=>{ _netRelaySend(_netSess, o); };
+  globalThis.__pendingN   = ()=> (_netSess && _netSess.relayPending) ? _netSess.relayPending.n : null;
+  globalThis.__fetchCount = ()=> __fetchN;
   // Unload: sendBeacon is the only send that survives page teardown, so capture it.
   globalThis.__beacons = [];
   globalThis.Blob = function(parts, opts){ this.parts = parts; this.type = opts && opts.type; };
@@ -883,6 +907,37 @@ try {
     await A.__reqStart('first', 0);
     const types = A.__drain().map(x => JSON.parse(x).t);
     if(!types.includes('sched')) throw new Error('the first start must still be sched: ' + JSON.stringify(types));
+  });
+
+  // Control transitions (sched/rst) now carry no redundancy of their own AND are repeated
+  // 2-3x by the sender (neither transport guarantees delivery), so the receiver MUST act on
+  // each epoch exactly once. A second copy re-triggering beginOnlineDuel would reset a level
+  // already running -- the very hang/desync the redundancy is meant to prevent.
+  check('a repeated sched/rst is deduped by epoch (reliable-control repeats are idempotent)', () => {
+    const B = mk(B_ID);
+    B.__ctlSetup();
+    B.__deliverCtl('sched', 0);
+    if(B.__ctlBeginsN() !== 1) throw new Error('first sched did not start: ' + B.__ctlBeginsN());
+    B.__deliverCtl('sched', 0);                                   // a repeat of the SAME epoch
+    if(B.__ctlBeginsN() !== 1) throw new Error('a duplicate sched restarted the level: ' + B.__ctlBeginsN());
+    B.__deliverCtl('rst', 1);                                     // a genuine next-epoch start
+    if(B.__ctlBeginsN() !== 2) throw new Error('a new-epoch rst did not start: ' + B.__ctlBeginsN());
+    B.__deliverCtl('rst', 1); B.__deliverCtl('rst', 1);           // and ITS repeats
+    if(B.__ctlBeginsN() !== 2) throw new Error('a duplicate rst restarted a running level: ' + B.__ctlBeginsN());
+  });
+
+  // Relay outbound coalesce: a local steer POSTs an `in` immediately, so on a 200-400ms
+  // relay RTT a key burst would pile up as concurrent fetches (and trip the rate cap).
+  // Each `in` carries the whole redundant log, so newer strictly supersedes older: keep ONE
+  // POST in flight and let the latest win the slot -- nothing is lost, the rate self-limits.
+  check('relay outbound coalesces to one in-flight, latest `in` wins the slot', () => {
+    const B = mk(B_ID);
+    B.__relaySetup();
+    B.__relaySend({ t:'in', n:1 });
+    B.__relaySend({ t:'in', n:2 });
+    B.__relaySend({ t:'in', n:3 });
+    if(B.__fetchCount() !== 1) throw new Error('expected exactly one in-flight POST, got ' + B.__fetchCount());
+    if(B.__pendingN() !== 3) throw new Error('the latest `in` must win the coalesce slot, got ' + B.__pendingN());
   });
 
   console.log(results.join('\n'));

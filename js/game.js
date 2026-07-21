@@ -422,7 +422,7 @@ function updateNetDebugOverlay(rafNow){
     // clients should both read near 0; a long-up client trending away is the DAC-drift cause.
     if(typeof Snd !== 'undefined' && Snd.musicDriftMs){ const _d = Snd.musicDriftMs(); if(_d != null) time += '\naudio drift ' + (_d>=0?'+':'') + _d.toFixed(0) + 'ms'; }
     // Sim/game quadrant: game state (this file's) then the net rollback health (simNet).
-    const sim = ['phase ' + phase, 'worker ' + (_worker?1:0) + ' ingame ' + (inGame?1:0)];
+    const sim = ['phase ' + phase, 'worker ' + (_worker?1:0) + ' ingame ' + (inGame?1:0) + ' defer ' + ((cfg.deferDraw && _drawChan)?1:0)];
     if(simNet) sim.push(simNet);
     const simTxt = sim.join('\n');
     const gfx = _gfxDbgText();
