@@ -181,6 +181,19 @@ const HOOKS = (myId) => `
       ? { status:429, json: async ()=>({ ok:false, error:'relay store full, resend' }) }
       : { status:200, json: async ()=>({ ok:true }) }; };
   };
+  // API 3.2: the POST reply piggybacks the sender's own inbound (pull). Capture the request
+  // body and hand back one message so a test can prove pull was set and the reply consumed.
+  globalThis.__lastBody = null;
+  globalThis.__relayPullResp = ()=>{
+    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true; _netSess.relay = true;
+    _netSync = { ofs:0, rtt:1, at:Date.now() }; __fetchN = 0; __lastBody = null;
+    globalThis.fetch = async (url, opts)=>{ __fetchN++; try{ __lastBody = JSON.parse(opts.body); }catch(e){ __lastBody = null; }
+      return { status:200, json: async ()=>({ ok:true, messages:[{ seq:5, payload:JSON.stringify({ t:'pi' }), age:12 }] }) }; };
+  };
+  globalThis.__lastBodyGet = ()=> __lastBody;
+  globalThis.__relaySeq    = ()=> _netSess ? _netSess.relaySeq : null;
+  globalThis.__relayAge    = ()=> _netDbg.relayAge;
+  globalThis.__deliver2    = (msgs)=>{ _netRelayDeliver(_netSess, msgs); };
   // Unload: sendBeacon is the only send that survives page teardown, so capture it.
   globalThis.__beacons = [];
   globalThis.Blob = function(parts, opts){ this.parts = parts; this.type = opts && opts.type; };
@@ -960,6 +973,24 @@ try {
     await new Promise(r => setTimeout(r, 40));   // let the 20ms-paced resend fire
     if(B.__fetchCount() < 2) throw new Error('the refused input was not resent, fetches=' + B.__fetchCount());
     if(B.__pendingN() !== null) throw new Error('after a successful resend the slot must be empty, got ' + B.__pendingN());
+  });
+
+  // API 3.2 piggyback: a relayed duel POSTs constantly, so it can collect its OWN inbound on
+  // those replies (pull) instead of leaning entirely on the held GET, which stalls if the FPM
+  // pool saturates. The reply is DRAINED, so the POST must consume messages[] -- through the
+  // SAME exactly-once seq dedup as the GET, or a message delivered on both paths double-applies.
+  await acheck('relay POST pull: piggybacked inbound is consumed via the shared dedup (API 3.2)', async () => {
+    const B = mk(B_ID);
+    B.__relayPullResp();
+    B.__relaySend({ t:'in', n:1 });                 // pump -> _netRelayPost with pull -> consumes the reply
+    await new Promise(r => setTimeout(r, 15));
+    if(!B.__lastBodyGet() || B.__lastBodyGet().pull !== true) throw new Error('the POST did not set pull:true');
+    if(B.__relaySeq() !== 5) throw new Error('the piggybacked message was not consumed (relaySeq=' + B.__relaySeq() + ')');
+    if(B.__relayAge() !== 12) throw new Error('the age diagnostic was not recorded');
+    // The SAME seq must dedup no matter which path it arrives on (POST-pull or GET); a fresh
+    // seq must still advance.
+    B.__deliver2([{ seq:5, payload:JSON.stringify({ t:'pi' }) }, { seq:6, payload:JSON.stringify({ t:'pi' }) }]);
+    if(B.__relaySeq() !== 6) throw new Error('stale seq must dedup and a fresh one must advance, got ' + B.__relaySeq());
   });
 
   console.log(results.join('\n'));

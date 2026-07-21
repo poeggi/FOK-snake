@@ -20,7 +20,7 @@ const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
 // number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
 // additive. Returns the major integer, or null if unparseable.
-const NET_API_BUILT_MINOR = 1;   // this client is built against 3.1 (the peer-net hint)
+const NET_API_BUILT_MINOR = 2;   // built against 3.2 (3.1 peer-net hint + 3.2 relay POST pull/piggyback)
 function _netApiMajor(a){
     if(typeof a === 'number') return Math.floor(a);
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
@@ -88,7 +88,7 @@ const RB_DEAD_MS = 4000;                              // total silence (p2p or r
 // the counter (CONG in the overlay) being nonzero is itself a finding.
 const NET_SEND_CONG = 4 * NET_PKT_MAX;
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-var _netDbg = { rtt:-1, relayRtt:-1, relayDrop:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
+var _netDbg = { rtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
 var _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
@@ -1378,6 +1378,19 @@ function _netRelayStart(s){
     _netRelayLoop(s);
     _netRequestStart(s);
 }
+// Deliver a batch of relayed messages exactly once, in seq order. Shared by the held GET and
+// the pull-piggyback POST reply (API 3.2): the server drains each message to whichever of the
+// two arrives first, so both paths MUST run the same seq dedup + recv-mark or they drift.
+function _netRelayDeliver(s, msgs){
+    if(!Array.isArray(msgs)) return;
+    for(const m of msgs){
+        if((m.seq|0) <= s.relaySeq) continue;   // exactly-once, in order
+        s.relaySeq = m.seq|0;
+        if(typeof m.age === 'number') _netDbg.relayAge = m.age|0;   // diag: ms it sat on the server (mailbox wait vs pool-queue delay)
+        _netMarkRecv(s);
+        _netHandleMsg(String(m.payload||''));
+    }
+}
 // One relay POST. Returns 'ok' when the message is off our hands (a clean send, or a 503
 // that ended the session), 'resend' when the hub REFUSED it and asks for a retry (store
 // full), or 'drop' on a self-healing failure (back-off 429s, a 400 clock, transport error).
@@ -1390,9 +1403,12 @@ async function _netRelayPost(s, o){
         // an asymmetric-link clock bias 400 every packet of the match -- silently,
         // since nothing below looked at the status. The payload keeps the true pts,
         // so the peer's lag math is untouched.
+        // pull (API 3.2): piggyback our OWN inbound onto this reply, so receive survives a
+        // saturated FPM pool that stalls the held GET. Harmless on a 3.1 server (ignored),
+        // but the reply is DRAINED, so we MUST consume messages[] below -- which we do.
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
-                                   pts: o.pts != null ? o.pts - 50 : undefined }) });
+                                   pts: o.pts != null ? o.pts - 50 : undefined, pull: true }) });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
         if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return 'ok'; }   // capped: honest busy, end the attempt
@@ -1411,6 +1427,9 @@ async function _netRelayPost(s, o){
             // full) mean back OFF, and a 400 is our clock: those self-heal via the next packet.
             return (r.status === 429 && /store full/.test(err)) ? 'resend' : 'drop';
         }
+        // 2xx: consume any inbound piggybacked on this reply (pull). The server drained it on
+        // return, so this is the ONLY chance to read it -- same dedup as the GET.
+        try{ const j = await r.json(); if(j && j.messages) _netRelayDeliver(s, j.messages); }catch(e){}
         return 'ok';
     } catch(e){ return 'drop'; }
 }
@@ -1464,14 +1483,7 @@ async function _netRelayLoop(s){
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;
         if(!r && _netTimers) await new Promise(res => setTimeout(res, 1000));   // transport error: back off
-        if(r && Array.isArray(r.messages)){
-            for(const m of r.messages){
-                if((m.seq|0) <= s.relaySeq) continue;   // exactly-once, in order
-                s.relaySeq = m.seq|0;
-                _netMarkRecv(s);
-                _netHandleMsg(String(m.payload||''));
-            }
-        }
+        if(r) _netRelayDeliver(s, r.messages);   // same exactly-once dedup as the POST-pull path
     }
 }
 // Read the SELECTED ICE candidate pair so we KNOW the real path: host = direct LAN (~1ms),
