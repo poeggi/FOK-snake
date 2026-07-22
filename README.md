@@ -67,9 +67,13 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - FPS counter
 - Scrolling credits screen
 - Mobile-friendly responsive layout with portrait and landscape support
+- REDUCE MOTION setting (seeded from the OS accessibility preference) that
+  suppresses decorative motion such as the duel near-miss shake
 - Installable PWA (works offline)
 - 1:1 duels, local (one keyboard) and ONLINE: classic level progression for two,
-  power pellets that turn the opponent's snake into food, PLAY AGAIN rematches
+  power pellets that turn the opponent's snake into food, PLAY AGAIN rematches,
+  and a camera shake when the two heads brush past -- heavier, with a sonic
+  boom, when both snakes are boosting through the pass
 - Friend system: 32-bit player ID, friend-link QR code (SHOW MY ID) and an
   in-app camera QR scanner with a dependency-free decoder (ADD FRIEND)
 - Online matchmaking via FOK-server (invite friends with live online status and
@@ -77,7 +81,8 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
   DataChannel, with an HTTP relay fallback when P2P cannot connect. The netcode is
   deterministic lockstep with rollback: both clients run the same inputs-only sim
   off a shared PTS clock, so there is no host and controls feel local on both ends;
-  a periodic authoritative-state exchange heals any divergence
+  a periodic authoritative-state exchange heals any divergence. A RELAY ONLY (NO
+  P2P) setting forces the HTTP relay path for networks where WebRTC never connects
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
 - Config backup / restore -- to a JSON file or to the cloud (kept by id + a secret

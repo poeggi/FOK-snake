@@ -86,6 +86,7 @@ function _sanitizeCfg() {
     cfg.reduceMotion = !!cfg.reduceMotion;   // absent -> defaultCfg() already seeded it from the OS pref
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
+    cfg.noP2P       = !!cfg.noP2P;   // relay-only network toggle
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
     cfg.debug       = (Number.isInteger(cfg.debug) && cfg.debug>=0 && cfg.debug<=3) ? cfg.debug : 0;
@@ -106,6 +107,11 @@ function loadCfg() {
     // really wants the relay can turn it back on in SETTINGS > NETWORK.
     if(!s.cfgVer || s.cfgVer < 3) delete s.noP2P;
     Object.assign(cfg, defaultCfg(), s);
+    // The migrations above key off the STORED version; the live cfg must always carry the
+    // current one. Otherwise a stale stored cfgVer overrides the default here and every
+    // saveCfg re-persists it, so each one-shot migration re-fires on every load (a set
+    // setting silently reverts). Bump this in lockstep whenever a new migration is added.
+    cfg.cfgVer = 3;
     _sanitizeCfg();
 }
 
