@@ -1237,8 +1237,7 @@ function _drawDuelWarn(){
 function drawDuelBoard(now) {
     if(typeof netRelayActive==='function' && netRelayActive())
         ct('RELAY MODE', CW/2, 8, '#ffd24a', FONT.HINT);   // latency self-explains
-    duelNearMiss(now);        // detect a heads-within-1-cell pass and arm the shake (render-only)
-    const _sh=shakeOffset(now);
+    const _sh=shakeOffset(now);   // arming happens sim-side via the 'nearmiss' event (see armNearMiss)
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
     else drawWorld(now);      // background + collectibles + both snakes: the shared layer
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner

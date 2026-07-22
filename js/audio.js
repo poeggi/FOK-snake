@@ -353,6 +353,22 @@ const Snd = (() => {
         if(sNow == null || !(sNow > 0)) return null;
         return (_musicAnchor.seekAbs + (ts.contextTime - _musicAnchor.t0) - sNow) * 1000;
     }
+    // Fixed-seed white noise (mulberry32, like the sim) baked ONCE into a 44100Hz buffer:
+    // bit-identical on every platform/run; shared by 'crash' and 'boom', each reading its head.
+    function _ensureNoise() {
+        if (_noiseBuf) return _noiseBuf;
+        const N = Math.ceil(44100 * 0.7);
+        _noiseBuf = _ctx.createBuffer(1, N, 44100);
+        const data = _noiseBuf.getChannelData(0);
+        let s = 0xC0FFEE | 0;
+        for (let i = 0; i < N; i++) {
+            s = (s + 0x6D2B79F5) | 0;
+            let t = Math.imul(s ^ (s >>> 15), 1 | s);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            data[i] = (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
+        }
+        return _noiseBuf;
+    }
     function sfxPlay(type, on = true, when = null, vol = 1) {
         // on: pass cfg.music to gate playback on the sound-enabled setting.
         // when: absolute AudioContext time to start at (sample-accurate, per the
@@ -400,22 +416,8 @@ const Snd = (() => {
             t(330, now, 0.05, 'sawtooth'); t(196, now + 0.06, 0.12, 'sawtooth');
         } else if (type === 'crash') {
             const dur = 0.22;
-            if (!_noiseBuf) {
-                // Generated once from a FIXED-SEED PRNG (mulberry32, like the sim) into a fixed
-                // 44100Hz buffer: the noise is bit-identical on every platform and run; the
-                // BufferSource resamples to the device rate on playback.
-                _noiseBuf = _ctx.createBuffer(1, Math.ceil(44100 * dur), 44100);
-                const data = _noiseBuf.getChannelData(0);
-                let s = 0xC0FFEE | 0;
-                for (let i = 0; i < data.length; i++) {
-                    s = (s + 0x6D2B79F5) | 0;
-                    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-                    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-                    data[i] = (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
-                }
-            }
             const src = _ctx.createBufferSource();
-            src.buffer = _noiseBuf;
+            src.buffer = _ensureNoise();
             const flt = _ctx.createBiquadFilter();
             flt.type = 'bandpass'; flt.frequency.value = 380; flt.Q.value = 0.6;
             const g = _ctx.createGain();
@@ -426,6 +428,51 @@ const Snd = (() => {
             src.onended = () => { src.disconnect(); flt.disconnect(); g.disconnect(); };
             t(140, now, 0.14, 'sawtooth');
             t(95,  now + 0.055, 0.11, 'sawtooth');
+        } else if (type === 'squeeze') {
+            // Metallic pinch (normal near-miss): a short cluster of INHARMONIC sawtooth partials
+            // bending UP in pitch, each a few cents detuned so they beat -- a stressed-metal "squeee".
+            const dur = 0.20;
+            const bp = _ctx.createBiquadFilter();
+            bp.type = 'bandpass'; bp.frequency.value = 2000; bp.Q.value = 3.5;
+            const g = _ctx.createGain();
+            g.gain.setValueAtTime(0.0001, now);
+            g.gain.exponentialRampToValueAtTime(0.5 * vol, now + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0006, now + dur);
+            bp.connect(g); g.connect(_sfxGain);
+            const oscs = [];
+            for (const [f, dt] of [[523,0],[781,7],[1174,-6],[1893,5]]) {   // inharmonic ratios, cents
+                const o = _ctx.createOscillator();
+                o.type = 'sawtooth'; o.detune.value = dt;
+                o.frequency.setValueAtTime(f, now);
+                o.frequency.exponentialRampToValueAtTime(f * 1.5, now + dur);   // the squeeze bend
+                o.connect(bp); o.start(now); o.stop(now + dur + 0.02); oscs.push(o);
+            }
+            oscs[oscs.length-1].onended = () => { oscs.forEach(o=>o.disconnect()); bp.disconnect(); g.disconnect(); };
+        } else if (type === 'boom') {
+            // Supersonic boom (heavy near-miss, both boosting): a lowpass-swept noise crack over
+            // a deep sine sweeping 120->38Hz plus a sub thump -- two snakes tearing past at boost.
+            const dur = 0.6;
+            const src = _ctx.createBufferSource(); src.buffer = _ensureNoise();
+            const lp = _ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.7;
+            lp.frequency.setValueAtTime(2600, now);
+            lp.frequency.exponentialRampToValueAtTime(180, now + 0.28);
+            const ng = _ctx.createGain();
+            ng.gain.setValueAtTime(0.9 * vol, now);
+            ng.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
+            src.connect(lp); lp.connect(ng); ng.connect(_sfxGain);
+            src.start(now); src.stop(now + 0.36);
+            src.onended = () => { src.disconnect(); lp.disconnect(); ng.disconnect(); };
+            const o = _ctx.createOscillator(); o.type = 'sine';
+            o.frequency.setValueAtTime(120, now);
+            o.frequency.exponentialRampToValueAtTime(38, now + dur);
+            const og = _ctx.createGain();
+            og.gain.setValueAtTime(0.0001, now);
+            og.gain.exponentialRampToValueAtTime(0.9 * vol, now + 0.03);
+            og.gain.exponentialRampToValueAtTime(0.001, now + dur);
+            o.connect(og); og.connect(_sfxGain);
+            o.start(now); o.stop(now + dur + 0.02);
+            o.onended = () => { o.disconnect(); og.disconnect(); };
+            t(70, now, 0.16, 'sine');   // front-loaded sub thump
         }
     }
 

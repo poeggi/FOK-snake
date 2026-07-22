@@ -43,6 +43,7 @@ let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
 let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0;
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
 let _barMoveTick=0;   // power-mode bar-drift cadence counter
+let _nmWasAdjacent=false;   // near-miss edge tracker (presentation-only; see _duelNearMiss)
 const _BAR_MOVE_EVERY=4;   // blocks step once every 4th game tick -- ONE cadence for both modes (half the old rate)
 // DEBUG x10: multiplies every rare-event probability (pellet/crystal/gouranga/gem tiers/
 // respawn heart) by 10 for testing. cfg.x10 is persisted config, read at call time like
@@ -82,6 +83,22 @@ const ri = n => Math.floor(rng() * n);
 // server can replay it headlessly.
 let simEvents = [];
 function emit(e){ simEvents.push(e); }
+
+// NEAR-MISS (duel, presentation-only): emit a cosmetic event on the rising edge of the two
+// heads passing within one cell (wrapped Chebyshev <=1). Judged here in the sim -- every game
+// tick, deterministically -- so the shake never depends on which tick a RAF happens to sample;
+// fast/boost levels advance 2 cells/tick and can skip the single adjacency frame render-side.
+// heavy = both snakes boosting through the pass. _nmWasAdjacent is a re-derived edge tracker,
+// never hashed or snapshotted (see check-snapshot EXCLUDE); a rollback may re-arm it at most once.
+function _duelNearMiss(){
+    if(phase!=='duel' || !players || !players[0].alive || !players[1].alive){ _nmWasAdjacent=false; return; }
+    const a=players[0].snake[0], b=players[1].snake[0];
+    const dx=Math.min((a.x-b.x+COLS)%COLS,(b.x-a.x+COLS)%COLS);
+    const dy=Math.min((a.y-b.y+ROWS)%ROWS,(b.y-a.y+ROWS)%ROWS);
+    const adj=Math.max(dx,dy)<=1;
+    if(adj && !_nmWasAdjacent) emit({t:'nearmiss', heavy: !!(players[0].boosting && players[1].boosting)});
+    _nmWasAdjacent=adj;
+}
 function freeCell(blocked) {
     let p, tries=0;
     do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p)) && ++tries<1000);
@@ -653,6 +670,7 @@ function update() {
             for(const P of players){ if(P.alive) P.stepAccum += (P.boosting?2:1)*(now<P.slowUntil?0.5:1); }
             if(_powerMode && ++_barMoveTick>=_BAR_MOVE_EVERY){ _barMoveTick=0; _moveBarsGhost(); }
             duelStep(now);
+            _duelNearMiss();   // after the step resolves deaths/phase; arms shake+sfx on a heads pass
         }
     }
     // NOTE: the splash->menu transition is presentation/UI, not simulation -- it lives on

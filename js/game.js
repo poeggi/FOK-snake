@@ -156,7 +156,7 @@ if (typeof Snd !== 'undefined' && Snd.setMusicSeekProvider) Snd.setMusicSeekProv
 // drainSimEvents, which re-queues on replay). Uniform delay across modes keeps the
 // feel identical whether or not a peer is connected. Sound is the more intrusive to
 // retract, but a false confetti burst or "+1 UP!" is jarring too.
-const _FX_DEFER = new Set(['sfx', 'bonus', 'crush', 'fw']);   // deferred + rollback-cancellable
+const _FX_DEFER = new Set(['sfx', 'bonus', 'crush', 'fw', 'nearmiss']);   // deferred + rollback-cancellable
 const FX_SETTLE_MS = 1000 / 30;   // 2 ticks, for phase-derived messages (death, duel winner)
 let _sfxQ = [];
 let _fxQ  = [];          // visual effects awaiting their 2-tick delay: { tk, e } (raw sim event)
@@ -192,6 +192,8 @@ function flushFxQ(){
                                   sz:2+Math.random()*4,
                                   col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
                               })) }); break;
+            case 'nearmiss': armNearMiss(e.heavy, simNow);   // shake + coincident sfx, both settled 2 ticks
+                             Snd.sfxPlay(e.heavy?'boom':'squeeze', cfg.music); break;
         }
     }
 }
@@ -203,6 +205,7 @@ function drainSimEvents(){
             case 'sfx':      _sfxQ.push({ tk:simTick, name:e.name }); break;
             case 'bonus':
             case 'fw':
+            case 'nearmiss':
             case 'crush':    _fxQ.push({ tk:simTick, e }); break;   // deferred 2 ticks, cancellable on rollback
             case 'mpause':   Snd.musicMute('pause'); break;
             case 'munpause': Snd.musicUnmute('pause'); break;

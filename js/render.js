@@ -67,25 +67,23 @@ function updateHUD() {
 
 // ================================================================
 // NEAR-MISS JUICE (duel): a screen-shake impulse when the two heads pass within 1 cell.
-// Presentation-only, derived from the converged sim state -- it never touches sim/netcode,
-// so each client shakes off its own copy and it can never desync. Suppressed under SIMPLE
-// gfx or the REDUCE MOTION accessibility toggle (see _reduceMotion).
+// Presentation-only. DETECTION lives in the sim (see _duelNearMiss) -- judged every game tick
+// so it never depends on which tick a RAF happens to sample -- and reaches us as a cosmetic
+// 'nearmiss' event that calls armNearMiss(). The HEAVY variant (both snakes boosting through
+// the pass) shakes harder and longer. Suppressed under SIMPLE gfx or the REDUCE MOTION toggle.
 // ================================================================
-let _nmClose=false, _shakeMag=0, _shakeAt=0;
-const _NM_SHAKE=6, _NM_DECAY=280;   // px impulse, ms decay
-function duelNearMiss(now){
-    if(!players || phase!=='duel' || !players[0].alive || !players[1].alive){ _nmClose=false; return; }
-    const a=players[0].snake[0], b=players[1].snake[0];
-    const dx=Math.min((a.x-b.x+COLS)%COLS,(b.x-a.x+COLS)%COLS);   // wrapped (torus) gap per axis
-    const dy=Math.min((a.y-b.y+ROWS)%ROWS,(b.y-a.y+ROWS)%ROWS);
-    const close=Math.max(dx,dy)<=1;                                // Chebyshev <=1 == adjacent/overlapping
-    if(close && !_nmClose){ _shakeMag=_NM_SHAKE; _shakeAt=now; }   // edge-trigger on ENTERING the danger zone
-    _nmClose=close;
+let _shakeMag=0, _shakeAt=0, _shakeDur=0;
+const _NM_SHAKE=7,  _NM_DECAY=380;    // normal pass: px impulse, ms decay
+const _NM_SHAKE_HEAVY=12, _NM_DECAY_HEAVY=560;   // both boosting: bigger + longer
+function armNearMiss(heavy, now){
+    _shakeMag = heavy ? _NM_SHAKE_HEAVY : _NM_SHAKE;
+    _shakeDur = heavy ? _NM_DECAY_HEAVY : _NM_DECAY;
+    _shakeAt  = now;
 }
 function shakeOffset(now){
     if(_simpleGfx()||_reduceMotion()||_shakeMag<=0) return null;
-    const age=now-_shakeAt; if(age<0||age>=_NM_DECAY){ _shakeMag=0; return null; }
-    const k=_shakeMag*(1-age/_NM_DECAY);                           // linear decay to zero
+    const age=now-_shakeAt; if(age<0||age>=_shakeDur){ _shakeMag=0; return null; }
+    const k=_shakeMag*(1-age/_shakeDur);                           // linear decay to zero
     return { x:Math.round(k*Math.sin(age*0.085)), y:Math.round(k*Math.cos(age*0.13)) };
 }
 
