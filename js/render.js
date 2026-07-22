@@ -66,6 +66,30 @@ function updateHUD() {
 }
 
 // ================================================================
+// NEAR-MISS JUICE (duel): a screen-shake impulse when the two heads pass within 1 cell.
+// Presentation-only, derived from the converged sim state -- it never touches sim/netcode,
+// so each client shakes off its own copy and it can never desync. Suppressed under SIMPLE
+// gfx or the REDUCE MOTION accessibility toggle (see _reduceMotion).
+// ================================================================
+let _nmClose=false, _shakeMag=0, _shakeAt=0;
+const _NM_SHAKE=6, _NM_DECAY=280;   // px impulse, ms decay
+function duelNearMiss(now){
+    if(!players || phase!=='duel' || !players[0].alive || !players[1].alive){ _nmClose=false; return; }
+    const a=players[0].snake[0], b=players[1].snake[0];
+    const dx=Math.min((a.x-b.x+COLS)%COLS,(b.x-a.x+COLS)%COLS);   // wrapped (torus) gap per axis
+    const dy=Math.min((a.y-b.y+ROWS)%ROWS,(b.y-a.y+ROWS)%ROWS);
+    const close=Math.max(dx,dy)<=1;                                // Chebyshev <=1 == adjacent/overlapping
+    if(close && !_nmClose){ _shakeMag=_NM_SHAKE; _shakeAt=now; }   // edge-trigger on ENTERING the danger zone
+    _nmClose=close;
+}
+function shakeOffset(now){
+    if(_simpleGfx()||_reduceMotion()||_shakeMag<=0) return null;
+    const age=now-_shakeAt; if(age<0||age>=_NM_DECAY){ _shakeMag=0; return null; }
+    const k=_shakeMag*(1-age/_NM_DECAY);                           // linear decay to zero
+    return { x:Math.round(k*Math.sin(age*0.085)), y:Math.round(k*Math.cos(age*0.13)) };
+}
+
+// ================================================================
 // DRAW HELPERS
 // ================================================================
 function rr(x,y,w,h,r) {
@@ -176,6 +200,11 @@ function renderBarsOffscreen() {
 // SIMPLE graphics mode (cfg.gfxMode 0): in-game items render as STATIC elements -- no spin,
 // no scale-pulse, no colour cycling. STANDARD (1, default) and FABULOUS (2, not built) animate.
 function _simpleGfx(){ return cfg.gfxMode === 0; }
+// REDUCE MOTION (accessibility): suppress non-essential animated impulses -- the near-miss
+// screen-shake today, other decorative motion as it is added. Orthogonal to SIMPLE gfx (that
+// stills item spin/pulse); this one is about vestibular comfort. Seeded from the OS
+// prefers-reduced-motion the first time, then user-overridable in SETTINGS > GRAPHICS.
+function _reduceMotion(){ return !!cfg.reduceMotion; }
 function drawGem(g,now) {
     const cx=g.x*CS+CS/2, cy=g.y*CS+CS/2, t=_simpleGfx()?0:(now-gemAt)/1000;
     const tier=g.tier||0;

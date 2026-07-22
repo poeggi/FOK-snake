@@ -302,6 +302,8 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.gfxMode=cfg.gfxMode===0?1:0;} },
         { lbl:()=>'GRAPHICS MODE: FABULOUS', dis:()=>true,   // greyed: not yet implemented
           act:()=>{Snd.sfxPlay('fail',cfg.music);} },
+        { lbl:()=>'REDUCE MOTION: '+(cfg.reduceMotion?'ON':'OFF'),   // suppress decorative motion (near-miss shake, future FX)
+          act:()=>{cfg.reduceMotion=!cfg.reduceMotion;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'LIMIT 30 FPS: '+(cfg.fps30?'ON':'OFF'),
           act:()=>{cfg.fps30=!cfg.fps30;Snd.sfxPlay('select',cfg.music);} },
         { lbl:()=>'DISABLE GLOW: '+(cfg.disableGlow?'ON':'OFF'),
@@ -1235,7 +1237,10 @@ function _drawDuelWarn(){
 function drawDuelBoard(now) {
     if(typeof netRelayActive==='function' && netRelayActive())
         ct('RELAY MODE', CW/2, 8, '#ffd24a', FONT.HINT);   // latency self-explains
-    drawWorld(now);           // background + collectibles + both snakes: the shared layer
+    duelNearMiss(now);        // detect a heads-within-1-cell pass and arm the shake (render-only)
+    const _sh=shakeOffset(now);
+    if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
+    else drawWorld(now);      // background + collectibles + both snakes: the shared layer
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
     if(phase==='duelReady') drawReadyGo(now, (typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1', ()=>_drawDuelControls(lk));
     if(phase==='levelDone') drawLevelDoneFx(now);
