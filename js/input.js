@@ -998,6 +998,14 @@ function onBgHide() {
     if (phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicMute('pause'); }
     Snd.audioSuspend();
 }
-function onBgShow() { if (cfg.music) Snd.audioResume(); }
+function onBgShow() {
+    if (cfg.music) Snd.audioResume();
+    // Re-arm the sim-worker watchdog. While hidden, RAF (so loop()) and the worker's own
+    // timers are suspended, so _lastWorkerFrameAt predates the whole background span. The
+    // first loop() after we return would otherwise read that stale gap as >3s and flash a
+    // false SIM STALL before the just-woken worker posts its first frame. Same grace the
+    // worker-resume reconcile in game.js already grants.
+    _lastWorkerFrameAt = performance.now();
+}
 document.addEventListener('visibilitychange', () => { if (document.hidden) onBgHide(); else onBgShow(); });
 window.addEventListener('pagehide', onBgHide);
