@@ -100,7 +100,7 @@ function _netSigLog(line){ _netDbg.sigLog.unshift(line); if(_netDbg.sigLog.lengt
 async function _netPostRes(path, body){
     if(!_netOk()) return { status:0, json:null };
     try {
-        const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), cache:'no-store', priority:'high' });
         _netDbg.lastSrvAt = performance.now();   // a POST always carries data both ways = real communication
         let j = null; try{ j = await r.json(); }catch(e){}   // an error status may carry no JSON at all
         // Keep the server's own reason ({"ok":false,"error":"..."}): guessing it
@@ -112,7 +112,11 @@ async function _netPost(path, body){ return (await _netPostRes(path, body)).json
 async function _netGet(path, signal){
     if(!_netOk()) return null;
     try {
-        const r = await fetch(NET_BASE + path, signal ? { signal } : undefined);
+        // no-store: never let an intermediary cache a held-poll reply; high priority:
+        // these are the match's critical path, ahead of any incidental page fetch.
+        const _opt = { cache:'no-store', priority:'high' };
+        if(signal) _opt.signal = signal;
+        const r = await fetch(NET_BASE + path, _opt);
         // A 204 (held long-poll expiring with nothing to say) IS communication: the
         // request went out and the server answered. Stamping only data-bearing
         // replies made this climb forever on an idle-but-healthy link, which is the
@@ -222,7 +226,7 @@ function _netSyncBreak(){ return phase === 'duelReady' || phase === 'duelOver'; 
 // unreadable (a proxy stripping it, CORS).
 async function _netClockMs(){
     try {
-        const r = await fetch(NET_BASE + '/api/t.txt', { cache:'no-store' });
+        const r = await fetch(NET_BASE + '/api/t.txt', { cache:'no-store', priority:'high' });
         const h = r.headers && r.headers.get && r.headers.get('X-Fok-T');
         const m = h && /t=(\d+)/.exec(h);
         if(m) return Number(m[1]) / 1000;   // the header is MICROseconds; PTS is milliseconds
@@ -1408,7 +1412,8 @@ async function _netRelayPost(s, o){
         // but the reply is DRAINED, so we MUST consume messages[] below -- which we do.
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
-                                   pts: o.pts != null ? o.pts - 50 : undefined, pull: true }) });
+                                   pts: o.pts != null ? o.pts - 50 : undefined, pull: true }),
+            cache:'no-store', priority:'high' });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
         if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return 'ok'; }   // capped: honest busy, end the attempt
