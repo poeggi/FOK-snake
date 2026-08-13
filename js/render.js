@@ -692,17 +692,17 @@ function _drawGourangaPending(now) {
 }
 function _drawHeart(now) {
     if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0&&!_simpleGfx()) return;   // the expiry blink is an animation
-    const pulse=_simpleGfx()?1:0.85+0.15*Math.sin((now-heartAt)/220);
+    // Same HEART_PX pixel art the HUD and README use, so the field 1UP matches them exactly.
+    // Square pixels preserve the art's native 7x6 ratio (no stretch); the pulse scales it whole.
+    const pulse=_simpleGfx()?1:0.9+0.1*Math.sin((now-heartAt)/220);
+    const cols=HEART_PX[0].length, rows=HEART_PX.length;
+    const px=(CS*0.84)/cols, w=px*cols, h=px*rows;
     const cx=heart.x*CS+CS/2, cy=heart.y*CS+CS/2;
-    const s=pulse*(CS/2-2)/3.5;
-    ctx.save(); ctx.translate(cx,cy); ctx.scale(s,s);
-    ctx.shadowColor='#ff4499'; ctx.shadowBlur=10; ctx.fillStyle='#ff2266';
-    ctx.beginPath();
-    ctx.moveTo(0,1); ctx.bezierCurveTo(0,-1,-3.5,-4,-3.5,-2);
-    ctx.bezierCurveTo(-3.5,0.5,0,3.5,0,3.5);
-    ctx.bezierCurveTo(0,3.5,3.5,0.5,3.5,-2);
-    ctx.bezierCurveTo(3.5,-4,0,-1,0,1);
-    ctx.fill(); ctx.restore();
+    ctx.save();
+    ctx.translate(cx,cy); ctx.scale(pulse,pulse); ctx.translate(-w/2,-h/2);
+    ctx.shadowColor='#ff4499'; ctx.shadowBlur=_simpleGfx()?0:10; ctx.fillStyle='#ff2266';
+    HEART_PX.forEach((row,ry)=>row.forEach((v,rx)=>{ if(v) ctx.fillRect(rx*px,ry*px,px+0.4,px+0.4); }));
+    ctx.restore();
 }
 function _drawCrushEffects(now) {
     _crushEffects=_crushEffects.filter(e=>{
