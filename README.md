@@ -11,12 +11,12 @@ Snake FOK Edition uses classic Snake as its starting point, but it is as much a 
 | ![Gem](docs/gem.svg) | **Gem** | The main collectible. 10 per level. Grab in the fewest steps for a x2 score bonus. |
 | ![Lucky Gem](docs/gem-lucky.svg) | **Lucky Gem** | Rare gold gem. Worth 10x or 20x the normal score bonus. |
 | ![Epic Gem](docs/gem-epic.svg) | **Epic Gem** | Extremely rare rainbow gem. Worth 80x or 160x the normal score bonus. |
-| ![Gouranga Gem](docs/gem-gouranga.svg) | **Gouranga Bonus** | Seven orange gems appear in a line -- horizontal, vertical, or diagonal. Collect all seven in sequence for escalating x2, x4, x6 ... score multipliers. Hare Krishna. |
+| ![Gouranga Gem](docs/gem-gouranga.svg) | **Gouranga Bonus** | Seven orange gems appear in a line -- horizontal, vertical, or diagonal. Each eaten gem pays an escalating x2, x4, x6 ... score multiplier; sweep all seven in one near-continuous run (a couple of stray steps are allowed) to land the full GOURANGA bonus. Hare Krishna. |
 | ![Power Pellet](docs/power-pellet.svg) | **Power Pellet** | A Pac-Man nod, from level 2 onward: a two-tone capsule that turns your head into a chomping Pac-Man while it lasts. For 6 seconds all barricades turn fragile AND flee across the board like frightened ghosts -- crash through everything. They blink as the effect fades and freeze wherever they are when it ends. |
 | ![Time Crystal](docs/time-crystal.svg) | **Time Crystal** | Rare icy pickup from level 6 onward (chance rises with the level). Collect it to slow the whole board to level-3 speed for 30 seconds; a field-wide shimmer marks the warp and blinks as it runs out. |
 | ![1UP Heart](docs/heart.svg) | **1UP Heart** | Extra life. Appears once during levels 4-6 and occasionally on respawn in later levels. Blinks before disappearing. Can push you above the starting three lives. |
 | ![Barricade](docs/barricade.svg) | **Barricade** | Solid orange brick. Colliding costs a life. Grows in number each level. |
-| ![Fragile Barricade](docs/barricade-fragile.svg) | **Fragile Barricade** | Crumbling border block. The snake can smash straight through it for +1000 FOKoins and a debris effect. Activated by the Power Pellet. |
+| ![Fragile Barricade](docs/barricade-fragile.svg) | **Fragile Barricade** | Crumbling border block. The snake can smash straight through it for a score reward and a debris effect. Activated by the Power Pellet. |
 
 ## Controls
 
