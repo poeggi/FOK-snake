@@ -6,7 +6,7 @@
 // inline (old) or via drainSimEvents() (new). Run: node test/sim-events.js
 const { runTest } = require('./harness');
 
-const GOLDEN = '77bbd51e:86';   // re-recorded: bonus/fireworks/crush visuals joined sfx on the fixed 2-tick delay queue (same 86 effects, delayed 2 ticks so a rollback can cancel them)
+const GOLDEN = 'c3a78772:80';   // re-recorded: the perfect-level 10k jackpot is score now, not a coin emit (item H) -- 6 perfect levels in this replay dropped their 6 'coin' events (86 -> 80)
 
 const driver = `
 ;(function(){

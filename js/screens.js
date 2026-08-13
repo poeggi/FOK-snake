@@ -965,7 +965,7 @@ function drawLevelDoneFx(now){
             ctx.shadowColor='#ffd700'; ctx.shadowBlur=GLOW.TEXT;
             ct('PERFECT LEVEL!',CW/2,CH/2+2,'#ffd700',FONT.MENU);
             ctx.shadowBlur=0;
-            ct(`+${(level*1000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',FONT.HINT);
+            ct(`+${(level*1000+10000).toLocaleString()} BONUS`,CW/2,CH/2+22,'#ffaa00',FONT.HINT);
             ctx.restore();
         }
     }

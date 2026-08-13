@@ -577,8 +577,7 @@ function step(now) {
             gem=null; score+=level*500;
             if(perfectLevel){
                 levelWasPerfect=true;   // sim-owned: the levelDone screen shows PERFECT! off this
-                score+=level*1000; emit({t:'fw'}); emit({t:'sfx',name:'perfect'});
-                emit({t:'coin',n:10000});
+                score+=level*1000+10000; emit({t:'fw'}); emit({t:'sfx',name:'perfect'});   // the 10k perfect jackpot is score now, not a direct coin (item H); it banks to FOKoins at game over
                 emit({t:'ach',id:'perfect_level'});
                 perfectCount++; if(perfectCount>=3) emit({t:'ach',id:'triple_perf'});
             } else emit({t:'sfx',name:'levelUp'});
