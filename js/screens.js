@@ -257,7 +257,7 @@ function drawMenu(now) {
     ctx.drawImage(_menuCanvas,0,0);           // static layer (one blit)
     drawSplashText(now);                       // animated overlay
     const _upd=(typeof netUpdateNotice==='function')?netUpdateNotice():null;   // server contract ahead of this build
-    if(_upd) ct(_upd, CW/2, 126, _netApiNewer?'#ff6666':'#ffcc44', FONT.HINT);
+    if(_upd) ct(_upd, CW/2, 12, _netApiNewer?'#ff6666':'#ffcc44', FONT.HINT);   // pin to the very top, clear of the title/DEBUG stamp
     if(ANNOUNCEMENT) _drawNewspaperBadge(now, !announceSeen());
 }
 
