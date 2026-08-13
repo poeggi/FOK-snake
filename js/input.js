@@ -85,6 +85,10 @@ function _submitName(){
     try{localStorage.setItem('lastSName',nameStr);}catch (e){}
     if(typeof netNameChanged==='function') netNameChanged();
     if(entryMode==='user'){ _entryLeave('settings'); Snd.sfxPlay('select',cfg.music); return; }
+    if(_scoreTainted){   // x10 debug run: never touches the local board or the global one (item G)
+        inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; showHUD(false);
+        setTimeout(()=>nameInp.blur(),10); Snd.sfxPlay('select',cfg.music); return;
+    }
     addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
     if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level);   // global board (no-op in offline mode)
     inGame=false; _wsend({t:'phase',phase:'menu'});   // leave the gameplay session; main owns phase again
@@ -392,6 +396,7 @@ const UI_INPUT = {
         // directly (no-op while empty); OK/tap keeps the dial semantics via add().
         confirm(){ _submitName(); },
         add(){
+            if(_scoreTainted && entryMode==='score'){ _submitName(); return; }   // no name to place on a debug run
             if(_entryChars()[nameCharIdx]==='\r'){ _submitName(); }
             else { _placeName(); if(nameCursorPos<_entryMax()-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
         },

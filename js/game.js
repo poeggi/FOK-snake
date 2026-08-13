@@ -104,6 +104,9 @@ let _lastRAF = 0;                           // last RAF timestamp (worst-frame F
 let pauseReadyAt = 0;                       // pause input debounce gate
 let achPage = 0;
 let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
+// A run played with x10 (debug rare-event odds) is never ranked: the flag is
+// latched at game start so it survives regardless of later setting access.
+let _scoreTainted = false;
 // What the name-entry dialog edits: 'score' (game-over high score), 'user' (SETTINGS >
 // USER player name), 'friend' (1:1 ADD FRIEND: 8 hex digits + live camera scan).
 let entryMode = 'score';
@@ -859,6 +862,7 @@ function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x
 function beginGame(){
     if(typeof netEndSession==='function') netEndSession();   // a lingering online session must never eat the local game's frames
     inGame = true; Snd.musicFadeOut(0.5);   // menu music fades out; READY/GO runs silent
+    _scoreTainted = !!cfg.x10;   // latch debug-odds taint before the first frame (item G)
     const seed = (Math.random()*0x100000000)>>>0;   // main-made so the score submission can carry it
     if(typeof netNoteGameStart === 'function') netNoteGameStart(seed);
     _wsend({ t:'start', seed, bestScore:bestScore() });

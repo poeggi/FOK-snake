@@ -755,6 +755,11 @@ function drawNameEntry(now) {
         const isWin=nameReason==='win';
         ctg(isWin?'YOU WIN!':'GAME OVER',CW/2,36,isWin?'#ffd700':'#ff5555',FONT.JUMBO, GLOW.BIG);
         ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,76,'#aaa',FONT.HINT);
+        if(_scoreTainted){   // x10 debug run: no name entry, just an acknowledgement (item G)
+            ct('x10 DEBUG RUN - NOT RANKED',CW/2,110,'#ff8844',FONT.HINT);
+            ct('A / START: CONTINUE',CW/2,CH-10,'#888',FONT.HINT);
+            return;
+        }
         ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     } else {
         drawGrid(); drawOvBg(0.92);
