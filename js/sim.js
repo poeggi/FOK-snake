@@ -362,7 +362,13 @@ function beginLevel(isRespawn=false) {
             const nk=ck({x:nx,y:ny});
             if(!blocked.has(nk)){
                 blocked.add(nk);
-                bars.push({x:nx,y:ny,paired:true,fragile:b.fragile});
+                // A pair is one unit sharing one fragility. Any unit touching the outer
+                // edge ring must be crushable, so OR in the extension cell's own edge
+                // status instead of blindly inheriting the (possibly inner, solid) base.
+                const onEdge = nx===0||nx===COLS-1||ny===0||ny===ROWS-1;
+                const pairFragile = b.fragile || onEdge;
+                b.fragile = pairFragile;
+                bars.push({x:nx,y:ny,paired:true,fragile:pairFragile});
                 b.pairEnd={x:nx,y:ny}; break;
             }
         }
