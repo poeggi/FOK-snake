@@ -761,9 +761,14 @@ function drawNameEntry(now) {
         ctg(entryMode==='friend'?'ADD FRIEND':'YOUR NAME',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
         ct(entryMode==='friend'?'FRIEND ID (8 HEX DIGITS):':'ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     }
-    const sw=30,sh=40,gap=5,totalW=max*(sw+gap)-gap,sx0=Math.floor(CW/2-totalW/2),sy=122;
+    const isFriend=entryMode==='friend';
+    const sw=30,sh=40,gap=5,dashW=isFriend?18:0;                 // friend id shows as XXXX-XXXX
+    const totalW=max*(sw+gap)-gap+dashW,sx0=Math.floor(CW/2-totalW/2),sy=122;
+    if(isFriend){   // dash between the two 4-digit quads so the mask matches fmtFriendId / SHOW MY ID
+        ct('-',sx0+3*(sw+gap)+sw+(gap+dashW)/2,sy+sh/2,'#4a7a4a',FONT.MENU);
+    }
     for(let i=0;i<max;i++){
-        const sx=sx0+i*(sw+gap),act=i===nameCursorPos,has=i<nameStr.length&&!act;
+        const sx=sx0+i*(sw+gap)+(isFriend&&i>=4?dashW:0),act=i===nameCursorPos,has=i<nameStr.length&&!act;
         ctx.fillStyle=act?'#142014':'#0d0d18'; ctx.strokeStyle=act?'#7fff7f':'#2a2a3a'; ctx.lineWidth=act?1.5:1;
         rr(sx,sy,sw,sh,3); ctx.fill(); ctx.stroke();
         const flashing=has&&i===_nameFlashPos&&now-_nameFlashAt<350;
