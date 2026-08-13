@@ -426,7 +426,9 @@ function _pathDist(start, goal) {
 function spawnGem() {
     if(!_gourangaActive && level>=2 && (gemsDone===1||gemsDone===2)){
         _tryGouranga(new Set(snake.concat(bars).map(ck)));
-        if(_gourangaActive) return;
+        // Gouranga is the only collectible while active: drop any lingering gem (the one
+        // just eaten still sits in `gem` here) so it can't be re-collected on the board.
+        if(_gourangaActive){ gem=null; return; }
     }
     gem=freeCell(new Set(snake.concat(bars).map(ck)));
     const rv=rng();
