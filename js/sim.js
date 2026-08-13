@@ -501,7 +501,7 @@ function step(now) {
                 const secCk=primBar&&primBar.pairEnd?ck(primBar.pairEnd):null;
                 emit({t:'crush', x:hitBar.x, y:hitBar.y});
                 bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk)); _barsV++;
-                const barReward=level*100; emit({t:'coin',n:barReward}); emit({t:'bonus',label:'+'+barReward+' FK!'});
+                score+=level*100;   // a crush scores like a gem; FOKoins follow from the run score at game over (item H)
                 emit({t:'sfx',name:'crash'});
                 if(!_powerMode) emit({t:'bars'});
             } else { die(now); return; }
