@@ -39,7 +39,11 @@ let gPer, _gDue = 0, _stepAccum = 0, phaseAt = 0, gemAt, deathMsg;
 let spawnAt = 0, levelDoneWaiting = false;
 let perfectLevel = true, levelWasPerfect = false;
 let levelBonusCount = 0, epicLevelCount = 0;
-let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set();
+let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set(), _gourangaSteps=0;
+// The GOURANGA payoff (achievement + fanfare) only fires on a near-continuous sweep of
+// the 7-gem line: 6 straight moves plus 2 blocks of detour slack. A detoured completion
+// still scores the same escalating bonuses but ends as an ordinary run (item B).
+const GOURANGA_MAX_MOVES = (7 - 1) + 2;
 let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0;
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
 let _barMoveTick=0;   // power-mode bar-drift cadence counter
@@ -189,7 +193,7 @@ function startDuel(seed, x10) {
     _gAt = 0;
     heart = null; heartAt = 0; heartIsEarly = false; _earlyHeartUsed = false; _earlyHeartTrigger = -1; _earlyHeartCount = 0;
     timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;
-    _gourangaLine = []; _gourangaActive = false; _gourangaEaten = new Set();
+    _gourangaLine = []; _gourangaActive = false; _gourangaEaten = new Set(); _gourangaSteps = 0;
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
     _duelX10 = !!x10;
     level = 1; duelWinner = -1;
@@ -338,7 +342,7 @@ function beginLevel(isRespawn=false) {
     phase='levelReady'; _gDue=0; _stepAccum=0; phaseAt=simNow;
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; levelBonusCount=0; epicLevelCount=0;
-    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set();
+    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set(); _gourangaSteps=0;
     heart=null; heartAt=0; heartIsEarly=false;
     powerPellet=null; _powerMode=false;
     timeCrystal=null; _slowMode=false;
@@ -517,6 +521,7 @@ function step(now) {
     const anyAte=ate||ateGourangaIdx>=0;
     if(!protect && (anyAte?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now);return;}
     if(!anyAte) gemSteps++;
+    if(_gourangaActive && _gourangaEaten.size>0) _gourangaSteps++;   // count every move once the sweep has begun
     snake.unshift(head);
     if(anyAte){
         gemsDone++;
@@ -528,8 +533,12 @@ function step(now) {
             if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'});
             if(_gourangaEaten.size>=7){
                 _gourangaActive=false;
-                emit({t:'ach',id:'gouranga'});
-                emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'});
+                if(_gourangaSteps<=GOURANGA_MAX_MOVES){   // clean end-to-end sweep: full GOURANGA payoff
+                    emit({t:'ach',id:'gouranga'});
+                    emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'});
+                } else {                                  // detoured completion: ordinary finish, no award
+                    emit({t:'bonus',label:`x${bonusMult} BONUS!`}); emit({t:'sfx',name:'eat'});
+                }
             } else {
                 emit({t:'bonus',label:`x${bonusMult} BONUS!`});
                 emit({t:'sfx',name:'eat'});
@@ -700,7 +709,7 @@ function simSnapshot(){
         snake, dir, dirQueue, gem, gemsDone, bars, _barsV, simTick, simNow,
         gPer, _gDue, _gAt, _stepAccum, phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
         perfectLevel, levelWasPerfect, levelBonusCount, epicLevelCount,
-        _gourangaLine, _gourangaActive, _gourangaEaten,
+        _gourangaLine, _gourangaActive, _gourangaEaten, _gourangaSteps,
         heart, heartAt, heartIsEarly, _earlyHeartUsed, _earlyHeartTrigger, _earlyHeartCount,
         powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
         timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
@@ -767,7 +776,7 @@ function simApply(s){
     snake=s.snake; dir=s.dir; dirQueue=s.dirQueue; gem=s.gem; gemsDone=s.gemsDone; bars=s.bars; _barsV=s._barsV; simTick=s.simTick; simNow=s.simNow;
     gPer=s.gPer; _gDue=s._gDue; _gAt=s._gAt|0; _stepAccum=s._stepAccum; phaseAt=s.phaseAt; gemAt=s.gemAt; deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
     perfectLevel=s.perfectLevel; levelWasPerfect=s.levelWasPerfect; levelBonusCount=s.levelBonusCount; epicLevelCount=s.epicLevelCount;
-    _gourangaLine=s._gourangaLine; _gourangaActive=s._gourangaActive; _gourangaEaten=s._gourangaEaten;
+    _gourangaLine=s._gourangaLine; _gourangaActive=s._gourangaActive; _gourangaEaten=s._gourangaEaten; _gourangaSteps=s._gourangaSteps;
     heart=s.heart; heartAt=s.heartAt; heartIsEarly=s.heartIsEarly; _earlyHeartUsed=s._earlyHeartUsed; _earlyHeartTrigger=s._earlyHeartTrigger; _earlyHeartCount=s._earlyHeartCount;
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt; _barMoveTick=s._barMoveTick;
     timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
