@@ -6,7 +6,7 @@
 // inline (old) or via drainSimEvents() (new). Run: node test/sim-events.js
 const { runTest } = require('./harness');
 
-const GOLDEN = 'c3a78772:80';   // re-recorded: the perfect-level 10k jackpot is score now, not a coin emit (item H) -- 6 perfect levels in this replay dropped their 6 'coin' events (86 -> 80)
+const GOLDEN = 'c3a78772:80';   // ordered side-effect signature of the 12000-tick replay (perfect levels bank via score, so they emit no coin)
 
 const driver = `
 ;(function(){

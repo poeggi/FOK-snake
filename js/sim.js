@@ -42,7 +42,7 @@ let levelBonusCount = 0, epicLevelCount = 0;
 let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set(), _gourangaSteps=0;
 // The GOURANGA payoff (achievement + fanfare) only fires on a near-continuous sweep of
 // the 7-gem line: 6 straight moves plus 2 blocks of detour slack. A detoured completion
-// still scores the same escalating bonuses but ends as an ordinary run (item B).
+// still scores the same escalating bonuses but ends as an ordinary run.
 const GOURANGA_MAX_MOVES = (7 - 1) + 2;
 let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0;
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
@@ -501,7 +501,7 @@ function step(now) {
                 const secCk=primBar&&primBar.pairEnd?ck(primBar.pairEnd):null;
                 emit({t:'crush', x:hitBar.x, y:hitBar.y});
                 bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk)); _barsV++;
-                score+=level*100;   // a crush scores like a gem; FOKoins follow from the run score at game over (item H)
+                score+=level*100;   // a crush scores like a gem; FOKoins follow from the run score at game over
                 emit({t:'sfx',name:'crash'});
                 if(!_powerMode) emit({t:'bars'});
             } else { die(now); return; }
@@ -577,7 +577,7 @@ function step(now) {
             gem=null; score+=level*500;
             if(perfectLevel){
                 levelWasPerfect=true;   // sim-owned: the levelDone screen shows PERFECT! off this
-                score+=level*1000+10000; emit({t:'fw'}); emit({t:'sfx',name:'perfect'});   // the 10k perfect jackpot is score now, not a direct coin (item H); it banks to FOKoins at game over
+                score+=level*1000+10000; emit({t:'fw'}); emit({t:'sfx',name:'perfect'});   // the 10k perfect jackpot is score; it banks to FOKoins at game over
                 emit({t:'ach',id:'perfect_level'});
                 perfectCount++; if(perfectCount>=3) emit({t:'ach',id:'triple_perf'});
             } else emit({t:'sfx',name:'levelUp'});

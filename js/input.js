@@ -85,17 +85,19 @@ function _submitName(){
     try{localStorage.setItem('lastSName',nameStr);}catch (e){}
     if(typeof netNameChanged==='function') netNameChanged();
     if(entryMode==='user'){ _entryLeave('settings'); Snd.sfxPlay('select',cfg.music); return; }
-    if(_scoreTainted){   // x10 debug run: never touches the local board or the global one (item G)
+    if(_scoreTainted){   // x10 debug run: never touches the local board or the global one
         inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; showHUD(false);
         setTimeout(()=>nameInp.blur(),10); Snd.sfxPlay('select',cfg.music); return;
     }
     addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
-    if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level);   // global board (no-op in offline mode)
+    if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level,nameReason==='win');   // global board (no-op in offline mode)
     inGame=false; _wsend({t:'phase',phase:'menu'});   // leave the gameplay session; main owns phase again
     _scoreboardCache=getScores();scoresTab=0;phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
 }
 function _nameDelete(){
-    if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;if(nameCursorPos<nameStr.length){const ci=NAME_CHARS.indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;}Snd.sfxPlay('nav',cfg.music);}
+    // _syncDial re-homes the dial on the ACTIVE char set (hex digits in friend mode,
+    // the name alphabet otherwise), so the highlighted slot always previews a real glyph.
+    if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;_syncDial();Snd.sfxPlay('nav',cfg.music);}
 }
 function _duelExit(){
     if(typeof netEndSession === 'function') netEndSession();
@@ -401,10 +403,12 @@ const UI_INPUT = {
             else { _placeName(); if(nameCursorPos<_entryMax()-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
         },
         back(key){
-            // Delete one character. Only a real ESC on an EMPTY field cancels out of the
-            // menu-opened modes -- held/repeated Backspace must never fall through and
-            // exit (score mode has no cancel at all: a run always ends in a submit).
-            if(key!=='Backspace' && entryMode!=='score' && nameStr.length===0){ _entryLeave(entryMode==='friend'?'duelMenu':'settings'); Snd.sfxPlay('nav',cfg.music); }
+            // Backspace always deletes a character. ESC is BACK on the friend screen
+            // (leave ADD FRIEND at any time); in the name/user modes it cancels only on
+            // an EMPTY field, so a held Backspace never falls through and exits. Score
+            // mode has no cancel at all: a run always ends in a submit.
+            if(key!=='Backspace' && entryMode==='friend'){ _entryLeave('duelMenu'); Snd.sfxPlay('nav',cfg.music); return; }
+            if(key!=='Backspace' && entryMode!=='score' && nameStr.length===0){ _entryLeave('settings'); Snd.sfxPlay('nav',cfg.music); }
             else _nameDelete();
         },
         text(key){

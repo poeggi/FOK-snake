@@ -862,7 +862,7 @@ function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x
 function beginGame(){
     if(typeof netEndSession==='function') netEndSession();   // a lingering online session must never eat the local game's frames
     inGame = true; Snd.musicFadeOut(0.5);   // menu music fades out; READY/GO runs silent
-    _scoreTainted = !!cfg.x10;   // latch debug-odds taint before the first frame (item G)
+    _scoreTainted = !!cfg.x10;   // latch debug-odds taint before the first frame
     const seed = (Math.random()*0x100000000)>>>0;   // main-made so the score submission can carry it
     if(typeof netNoteGameStart === 'function') netNoteGameStart(seed);
     _wsend({ t:'start', seed, bestScore:bestScore() });

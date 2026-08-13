@@ -20,7 +20,7 @@ const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
 // number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
 // additive. Returns the major integer, or null if unparseable.
-const NET_API_BUILT_MINOR = 3;   // built against 3.3 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal)
+const NET_API_BUILT_MINOR = 4;   // built against 3.4 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag; per-player stats.php available, not yet consumed)
 function _netApiMajor(a){
     if(typeof a === 'number') return Math.floor(a);
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
@@ -1971,13 +1971,14 @@ function _netLog(code, tk){ if(inGame && !players && _netInputs.length < 20000) 
 function netLogDir(d){ _netLog(_netDirCode(d)); }
 function netLogBoost(d, tk){ _netLog(4 + _netDirCode(d), tk); }
 function netLogBoostEnd(tk){ _netLog(8, tk); }
-function netSubmitScore(name, sc, lvl){
+function netSubmitScore(name, sc, lvl, completed){
     if(!_netOk() || !(sc > 0)) return;
     _netPost('/api/scores.php', {
         id: getPlayerId(), name: String(name).slice(0,MAX_NAME),
         score: sc|0, level: Math.max(1, lvl|0),
         diff: cfg.diff|0, color: cfg.snakeColor|0, shopItems: cfg.wornItems||{},
         seed: _netSeed, inputs: _netInputs,
+        completed: !!completed,   // the run CLEARED level 10 (a win), not merely reached it
         pts: netPts() != null ? netPts() - 50 : undefined,   // the game-over moment on the PTS clock
     }).then(r => { if(r){ _netScores = null; _netScoresAt = 0; } });   // bust the cache: the tab shows the fresh board
 }

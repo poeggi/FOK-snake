@@ -76,12 +76,14 @@ runTest('SMOKE-INPUT', `
     if(entryMode!=='score') throw 'entryMode not reset after friend submit';
     if(!getFriends().includes('00ff00bb')) throw 'scanned/typed friend not stored';
     if(_duelMsg.indexOf('FRIEND ADDED')!==0) throw 'missing FRIEND ADDED confirmation';
-    // Short/invalid code: submit refuses; ESC on the emptied field cancels out.
+    // Short/invalid code: submit refuses. Backspace deletes a digit; ESC is BACK --
+    // one press leaves ADD FRIEND even with a digit still in the field.
     duelSel=2; press('Enter'); press('a'); press('Enter');
     if(phase!=='nameEntry') throw 'short friend code must not submit';
-    press('Escape'); press('Escape');
-    if(phase!=='duelMenu'||entryMode!=='score') throw 'ESC on empty friend field must cancel';
-    log('friend add flow ok (hex filter, submit, cancel)');
+    press('Backspace'); if(nameStr!=='') throw 'Backspace must delete a friend digit';
+    press('a'); press('Escape');
+    if(phase!=='duelMenu'||entryMode!=='score') throw 'ESC must leave ADD FRIEND (back)';
+    log('friend add flow ok (hex filter, submit, back)');
 
     // A verified scanner hit locks first (field filled, success shown), then submits.
     duelSel=2; press('Enter');

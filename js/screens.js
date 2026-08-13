@@ -755,7 +755,7 @@ function drawNameEntry(now) {
         const isWin=nameReason==='win';
         ctg(isWin?'YOU WIN!':'GAME OVER',CW/2,36,isWin?'#ffd700':'#ff5555',FONT.JUMBO, GLOW.BIG);
         ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,76,'#aaa',FONT.HINT);
-        if(_scoreTainted){   // x10 debug run: no name entry, just an acknowledgement (item G)
+        if(_scoreTainted){   // x10 debug run: no name entry, just an acknowledgement
             ct('x10 DEBUG RUN - NOT RANKED',CW/2,110,'#ff8844',FONT.HINT);
             ct('A / START: CONTINUE',CW/2,CH-10,'#888',FONT.HINT);
             return;
@@ -819,7 +819,8 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
     if(entryMode==='friend') _drawScanPanel();
-    ct('UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,CH-10,'#888',FONT.HINT);
+    ct(isFriend?'UP/DN:letter  L/R:move  A:place  BKSP:del  ESC:back'
+              :'UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,CH-10,'#888',FONT.HINT);
 }
 // Camera viewfinder (ADD FRIEND, right side): live preview while scanning; a
 // verified read auto-fills and submits (see the QR SCANNER source in input.js).
