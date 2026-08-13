@@ -1105,7 +1105,7 @@ function drawLobby(){
     const rowH=26;
     // QUICK MATCH leads and is the default selection (sel 0): the common case is "just
     // find me a game". Friends follow it; BACK stays at the bottom.
-    menuItem(_netLb.seeking?'SEEKING... (A: CANCEL)':'QUICK MATCH', 84, _netLb.sel===0);
+    menuItem('QUICK MATCH', 84, _netLb.sel===0);   // label stays put; seeking shows as a status line below
     const startY=84+rowH;
     fr.forEach((id,i)=>{
         const on=_netFriendsOnline[id]===true;
@@ -1121,7 +1121,8 @@ function drawLobby(){
     menuItem('BACK', CH-52, _netLb.sel===fr.length+1);   // BACK toward the bottom, like drawSettings
     // Connecting feedback: one dot grows every 200ms while something is pending.
     const dots='.'.repeat(1+Math.floor(((typeof performance!=='undefined')?performance.now():0)/200)%5);
-    if(_netLb.msg) drawStatus(_netLb.msg.replace(/\.\.\.$/,dots));
+    if(_netLb.seeking) drawStatus('SEEKING A MATCH'+dots+'  (A: CANCEL)');
+    else if(_netLb.msg) drawStatus(_netLb.msg.replace(/\.\.\.$/,dots));
     else if(_netHs.sent) drawStatus('INVITED '+fmtFriendId(_netHs.sent)+' - WAITING'+dots);
     if(_netLb.invite){
         // Incoming invite: full-screen modal on a SOLID background (a transparent
