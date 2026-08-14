@@ -634,7 +634,7 @@ canvas.addEventListener('pointerup', e => {
     if (phase === 'splash') { triggerSplashExit(); }
 });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=32, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
@@ -645,7 +645,7 @@ const _TOUCH_SENS_F=[1.4,1.0,0.65];
 function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1):1; }
 // Anti-spiral touch guard: three quick same-way 90-degree turns in one gesture curl the head
 // straight onto the body -- the classic fat-finger death. So the THIRD (and any further)
-// same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 32px) than a free
+// same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 48px) than a free
 // 90-degree turn (SWIPE_N, 24px); a lighter flick in that band is ignored and the snake holds
 // its heading, but swipe past the guard and the turn still commits. A turn the other way or a
 // pause resets the run, so a spiral you actually mean is still yours to make. Gesture-only: it
