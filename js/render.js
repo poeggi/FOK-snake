@@ -719,26 +719,36 @@ function _drawGourangaPending(now) {
 }
 // Same HEART_PX pixel art the HUD and README use, so every 1UP on the field matches them
 // exactly. Square pixels preserve the art's native 7x6 ratio (no stretch); the pulse scales
-// it whole. Shared by the contested centre heart and the level-finisher gem-as-heart hint.
-function _drawHeartAt(gx, gy, since, now) {
+// it whole. `span` is the target width in px; callers pick full-cell or a small badge.
+function _paintHeartPx(cx, cy, span, since, now) {
     const pulse=_simpleGfx()?1:0.9+0.1*Math.sin((now-since)/220);
     const cols=HEART_PX[0].length, rows=HEART_PX.length;
-    const px=(CS*0.84)/cols, w=px*cols, h=px*rows;
-    const cx=gx*CS+CS/2, cy=gy*CS+CS/2;
+    const px=span/cols, w=px*cols, h=px*rows;
     ctx.save();
     ctx.translate(cx,cy); ctx.scale(pulse,pulse); ctx.translate(-w/2,-h/2);
     ctx.shadowColor='#ff4499'; ctx.shadowBlur=_simpleGfx()?0:10; ctx.fillStyle='#ff2266';
     HEART_PX.forEach((row,ry)=>row.forEach((v,rx)=>{ if(v) ctx.fillRect(rx*px,ry*px,px+0.4,px+0.4); }));
     ctx.restore();
 }
+// The contested centre heart: full-cell 1UP art at the heart's own cell.
 function _drawHeart(now) {
     if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0&&!_simpleGfx()) return;   // the expiry blink is an animation
-    _drawHeartAt(heart.x, heart.y, heartAt, now);
+    _paintHeartPx(heart.x*CS+CS/2, heart.y*CS+CS/2, CS*0.84, heartAt, now);
+}
+// A small heart badge riding the finisher gem's upper-right on a dark disc. The gem still reads
+// as a gem (drawn underneath by drawGem) but is clearly MARKED as the one that gives a heart
+// back -- an overlay, not a replacement.
+function _drawGemHeartMark(now) {
+    const cx=gem.x*CS+CS*0.74, cy=gem.y*CS+CS*0.28, r=CS*0.30;
+    ctx.save();
+    ctx.fillStyle='rgba(8,5,12,0.72)'; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    _paintHeartPx(cx, cy, CS*0.48, gemAt, now);
 }
 // The level-finisher gem (the one that pushes gemsDone to GEMS_PER_LEVEL) hands its eater a
-// heart back, but only if that eater is still under the 3-heart cap. Show it AS a heart only
-// when that heart-back would actually apply to the viewer: online, that is our own snake; on a
-// shared hotseat screen, it is real as long as EITHER player can still gain it. Duel-only.
+// heart back, but only if that eater is still under the 3-heart cap. Mark it only when that
+// heart-back would actually apply to the viewer: online, that is our own snake; on a shared
+// hotseat screen, it is real as long as EITHER player can still gain it. Duel-only.
 function _gemIsFinisherHeart() {
     if(!players || gemsDone !== GEMS_PER_LEVEL-1) return false;
     if(typeof netGameActive==='function' && netGameActive()){

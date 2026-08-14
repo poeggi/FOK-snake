@@ -949,7 +949,7 @@ function drawWorld(now) {
         ctx.save(); ctx.globalAlpha=a; ctx.fillStyle='#2a80c0'; ctx.fillRect(0,0,CW,CH); ctx.restore();
     }
     if(_gourangaActive) _drawGourangaPending(now);
-    if(gem){ if(_gemIsFinisherHeart()) _drawHeartAt(gem.x, gem.y, gemAt, now); else drawGem(gem,now); }
+    if(gem){ drawGem(gem,now); if(_gemIsFinisherHeart()) _drawGemHeartMark(now); }
     if(powerPellet) _drawPowerPellet(now);
     if(timeCrystal) _drawTimeCrystal(now);
     if(heart) _drawHeart(now);
