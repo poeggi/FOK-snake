@@ -403,7 +403,10 @@ function _gfxDbgText(){
     ];
     const st = _loopMsStats();
     if(st) more.push('loop ' + st.p50.toFixed(1) + '/' + st.p95.toFixed(1) + '/' + st.mx.toFixed(1) + 'ms p50/95/mx');
-    return { main: [vLine, usedLine, fpsLine], more };
+    // FPS only at level 3: the on-screen FPS box already shows it, and at level 2 this corner
+    // should stay a tight two lines that can't overlay that readout.
+    more.push(fpsLine);
+    return { main: [vLine, usedLine], more };
 }
 // Compose one corner's text. Level 2 shows only the (<=3) essentials; level 3 adds the
 // extras, placed AWAY from the screen corner -- below the essentials on the top docks,
@@ -453,8 +456,8 @@ function updateNetDebugOverlay(rafNow){
     const simTxt = _dbgCornerText(simMain,    simQ.more,  false, lvl);
     if(net    !== _dbgTxt.tl){ _dbgTxt.tl = net;    _dbgCorner.tl.textContent = net; }
     if(time   !== _dbgTxt.tr){ _dbgTxt.tr = time;   _dbgCorner.tr.textContent = time; }
-    if(gfx    !== _dbgTxt.bl){ _dbgTxt.bl = gfx;    _dbgCorner.bl.textContent = gfx; }
-    if(simTxt !== _dbgTxt.br){ _dbgTxt.br = simTxt; _dbgCorner.br.textContent = simTxt; }
+    if(simTxt !== _dbgTxt.bl){ _dbgTxt.bl = simTxt; _dbgCorner.bl.textContent = simTxt; }
+    if(gfx    !== _dbgTxt.br){ _dbgTxt.br = gfx;    _dbgCorner.br.textContent = gfx; }
 }
 
 // ---- Worst-Frame Recorder (DEBUGGING). Passive: reuses loop()'s frame time; per frame it
@@ -827,7 +830,13 @@ function loop(rafNow) {
     if(phase!==_lastPhase){
         _uiDirty=true;
         if(phase==='duelOver') quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
-        if(phase==='menu' && typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
+        if(phase==='menu'){
+            if(typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
+            // Leaving 1:1 to the main menu: some exit paths (e.g. duelMenu Back) drop straight
+            // to 'menu' without tearing down the duel HUD, so its names/hearts linger. Clear the
+            // duel players through the sim (ownership-safe) and hide the HUD so it can't stay up.
+            if(players){ _wsend({t:'phase',phase:'menu'}); showHUD(false); }
+        }
         _lastPhase=phase;
     }
     const s = SCREENS[phase] || (players ? _DUEL_SCREEN : _GAME_SCREEN);   // shared game phases (dying/levelDone) pick the board by snake count

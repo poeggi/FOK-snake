@@ -86,7 +86,7 @@ body.cursor-hidden #c { cursor: none; }
 .util-hidden { display: none; }
 .debug-overlay { position: fixed; z-index: 99999; background: #000d; color: #0f0;
     font: 11px monospace; padding: 3px; white-space: pre; pointer-events: none; max-width: 49vw; }
-/* Four corner docks (DEBUG LEVEL 2+): TL=network, TR=timing, BL=graphics, BR=sim/game. */
+/* Four corner docks (DEBUG LEVEL 2+): TL=network, TR=timing, BL=sim/game, BR=graphics. */
 .dbg-tl { top: 0; left: 0;  text-align: left; }
 .dbg-tr { top: 0; right: 0; text-align: right; }
 /* Level 3: clickable snapshot-capture button, centred along the top edge. */
@@ -153,9 +153,13 @@ body.cursor-hidden #c { cursor: none; }
     body.lefty #fps-el { right: auto; left: 0; }
     /* Single column, label above value. Cell order = DOM order (P1 lives topmost);
        in duel the P2-lives cell is pushed to the bottom, per design. */
-    #hud { width: auto; grid-template-columns: 1fr; gap: 8px; justify-items: start; margin-top: auto; margin-bottom: auto; }
-    .hud-cell { flex-direction: column; align-items: flex-start; gap: 2px; }
+    #hud { width: 100%; grid-template-columns: 1fr; gap: 8px; justify-items: start; margin-top: auto; margin-bottom: auto; }
+    .hud-cell { flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; min-width: 0; }
     #hud-b, #hud-d { justify-self: start; }
+    /* Duel names run up to MAX_NAME chars in a wide pixel font. Clamp the label to the panel
+       width (ellipsis) so a long name can't widen its cell and shove the hearts canvas off the
+       left edge -- #side-info's overflow:hidden was clipping them out of view. */
+    #hud-a-l, #hud-b-l { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     body[data-phase^="duel"] #hud-b { order: 9; }
     /* Right controls panel -- ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
     #gamepad {

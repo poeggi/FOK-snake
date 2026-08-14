@@ -446,12 +446,16 @@ function drawAccessoryLasereyes(hx, hy, d) {
     });
     ctx.restore();
 }
-function drawAccessoryGoldchain(hx, hy) {
-    ctx.save(); ctx.shadowColor='#ffd700'; ctx.shadowBlur=5;
+function drawAccessoryGoldchain(hx, hy, facing={x:1,y:0}) {
+    ctx.save();
+    ctx.translate(hx+9,hy+9); ctx.rotate(Math.atan2(facing.y,facing.x));
+    // Hangs around the neck: an arc across the BACK of the head (opposite the eyes), so it
+    // always trails the facing direction instead of sitting below or to one side of it.
+    ctx.shadowColor='#ffd700'; ctx.shadowBlur=5;
     ctx.strokeStyle='#ffd700'; ctx.lineWidth=1.6;
-    ctx.beginPath(); ctx.moveTo(hx+2,hy+12); ctx.quadraticCurveTo(hx+9,hy+21,hx+16,hy+12); ctx.stroke();
-    ctx.fillStyle='#fff2a0'; ctx.fillRect(hx+7,hy+16,4,4);          // pendant
-    ctx.fillStyle='#b8860b'; ctx.fillRect(hx+8,hy+17,2,2);
+    ctx.beginPath(); ctx.moveTo(-2,-7); ctx.quadraticCurveTo(-9,0,-2,7); ctx.stroke();
+    ctx.fillStyle='#fff2a0'; ctx.fillRect(-9,-2,4,4);          // pendant, at the back
+    ctx.fillStyle='#b8860b'; ctx.fillRect(-8,-1,2,2);
     ctx.restore();
 }
 
@@ -556,7 +560,7 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer) {
                 ctx.shadowColor='#7fff7f'; ctx.shadowBlur=5;
                 ctx.fillRect(mx-1,my-1,3,3); ctx.restore();
             }
-            if(si.goldchain) drawAccessoryGoldchain(x,y);
+            if(si.goldchain) drawAccessoryGoldchain(x,y,eyeDir);
             if(si.necktie)   drawAccessoryNecktie(x,y,eyeDir);
             if(si.bow)       drawAccessoryBow(x,y,eyeDir);
             if(si.shades)    drawAccessoryShades(x,y,eyeDir);
