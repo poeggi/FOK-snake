@@ -1094,7 +1094,7 @@ function drawTurnDebug(){
         ctx.globalAlpha=a; ctx.fillStyle=col;
         ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
         const arrow={ArrowUp:'U',ArrowDown:'D',ArrowLeft:'L',ArrowRight:'R'}[m.key]||'?';
-        let txt=arrow+' '+m.dist;
+        let txt=arrow+(m.dist>=0?' '+m.dist:'');   // touch shows swipe px; keyboard/other (dist -1) just the direction
         if(m.run>=1) txt+=' x'+m.run;   // always show the run so a skipped turn (x2 -> x4) is obvious
         if(m.held) txt+=' HOLD>'+m.thresh;
         const w=ctx.measureText(txt).width;

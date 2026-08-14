@@ -522,14 +522,15 @@ function handleKey(key, pde) {
         if(d){
             if(pde)pde();
             gameSteer(0, d);   // the worker applies the same steering guard
+            _dbgSteerLog(0, d);
         }
     }
     else if(phase==='duel'||phase==='duelReady'){
         // P0 = arrows, P2 = WASD. Both enter the sim as player-indexed commands -- the
         // exact boundary a remote peer will feed later (their input arrives as p:1).
         const d0=GDIRS[key];
-        if(d0){ if(pde)pde(); gameSteer(0, d0); }
-        else { const d1=WASD[key.toLowerCase&&key.toLowerCase()]; if(d1){ if(pde)pde(); gameSteer(1, d1); } }
+        if(d0){ if(pde)pde(); gameSteer(0, d0); _dbgSteerLog(0, d0); }
+        else { const d1=WASD[key.toLowerCase&&key.toLowerCase()]; if(d1){ if(pde)pde(); gameSteer(1, d1); _dbgSteerLog(1, d1); } }
     }
 }
 // ================================================================
@@ -652,7 +653,7 @@ function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=nul
 // reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
 // pause has cleared it, the snake's own heading (dir) seeds the first turn -- single player only,
 // since a duel's heading is players[i].dir, not this global.
-let _turnSense=0, _turnRun=0, _dbgLastSense=0;
+let _turnSense=0, _turnRun=0;
 function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;
     if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
@@ -661,7 +662,6 @@ function _spiralHold(key, dist, sf){
         :(typeof dir!=='undefined'?dir:null);
     const kd=GDIRS[key];
     const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
-    _dbgLastSense=sense;   // DEBUG L3: lets the commit-side trace log only real turns, not straight/boost re-swipes
     if(sense===0) return false;
     if(sense===_turnSense && _turnRun>=2 && dist<SWIPE_GUARD*sf) return true;   // hold the third same-way turn until the swipe clears the guard
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
@@ -692,8 +692,30 @@ function _dbgTurnLog(cell, key, dist, run, held, thresh){
         last.cx=cell.x; last.cy=cell.y; last.dist=Math.round(dist); last.run=run; last.held=held; last.thresh=Math.round(thresh); last.at=now;
         return;
     }
-    _dbgTurns.push({ cx:cell.x, cy:cell.y, key, dist:Math.round(dist), run, held, thresh:Math.round(thresh), at:now });
+    _dbgTurns.push({ cx:cell.x, cy:cell.y, key, dist:dist<0?-1:Math.round(dist), run, held, thresh:Math.round(thresh), at:now });
     while(_dbgTurns.length>16) _dbgTurns.shift();
+}
+// DEBUG L3 (ANY input): a real 90-degree turn from any source -- keyboard, TV remote, dpad or
+// touch -- drops the same on-board marker, so the trace is no longer touch-only. handleKey
+// calls this at each steer; touch fills _dbgTurnCtx first with its gesture distance/run/guard,
+// other sources leave it null (the marker then shows just the direction, dist -1). The current
+// heading is read from the snake itself (head vs neck) so it needs no separate dir mirror.
+let _dbgTurnCtx=null;
+function _stepDir(a,b){ let dx=b.x-a.x, dy=b.y-a.y; if(dx>1)dx=-1; else if(dx<-1)dx=1; if(dy>1)dy=-1; else if(dy<-1)dy=1; return {x:dx,y:dy}; }   // unit heading, toroidal wrap unfolded
+function _dbgDirKey(d){ return d.y<0?'ArrowUp':d.y>0?'ArrowDown':d.x<0?'ArrowLeft':'ArrowRight'; }
+function _dbgSteerLog(p, d){
+    if((cfg.debug|0)<3){ _dbgTurnCtx=null; return; }
+    let sn;
+    if(typeof players!=='undefined' && players){ const i=_armIndex(p); sn=(i>=0&&players[i])?players[i].snake:null; }
+    else sn=(typeof snake!=='undefined')?snake:null;
+    if(sn && sn[0] && sn.length>=2){
+        const cur=_stepDir(sn[1],sn[0]);
+        if(Math.sign(cur.x*d.y-cur.y*d.x)!==0){   // a real 90-degree turn (straight/reverse cross to 0)
+            const c=_dbgTurnCtx;
+            _dbgTurnLog(sn[0], _dbgDirKey(d), c?c.dist:-1, c?c.run:0, false, c?c.thresh:0);
+        }
+    }
+    _dbgTurnCtx=null;
 }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
@@ -737,9 +759,10 @@ canvas.addEventListener('touchmove',e=>{
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
     if(inMenu&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
-    _swipedThisTouch=true; handleKey(key,null);
+    _swipedThisTouch=true;
+    if(_inPlay()) _dbgTurnCtx={dist, run:_turnRun, thresh};   // DEBUG L3: hand this gesture's distance/run/guard to the shared steer logger (fires inside handleKey)
+    handleKey(key,null);
     if(_inPlay()){
-        if(_dbgLastSense!==0) _dbgTurnLog(_myHeadCell(),key,dist,_turnRun,false,thresh);   // DEBUG L3: mark the committed turn (real 90-degree turns only)
         const d=GDIRS[key];
         if(d){
             // clearBoost() writes the classic globals directly, which does nothing for a
