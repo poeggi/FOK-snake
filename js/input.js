@@ -634,7 +634,7 @@ canvas.addEventListener('pointerup', e => {
     if (phase === 'splash') { triggerSplashExit(); }
 });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=32, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
@@ -644,24 +644,25 @@ const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
 const _TOUCH_SENS_F=[1.4,1.0,0.65];
 function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1):1; }
 // Anti-spiral touch guard: three quick same-way 90-degree turns in one gesture curl the head
-// straight onto the body -- the classic fat-finger death. This defuses the THIRD such turn
-// (the snake holds its heading); two same-way turns, a turn the other way, or a pause all
-// reset the run, so a deliberate loop into yourself is still yours to make. Gesture-only: it
-// reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once
-// a pause has cleared it, the snake's own heading (dir) seeds the first turn -- single player
-// only, since a duel's heading is players[i].dir, not this global.
+// straight onto the body -- the classic fat-finger death. So the THIRD (and any further)
+// same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 32px) than a free
+// 90-degree turn (SWIPE_N, 24px); a lighter flick in that band is ignored and the snake holds
+// its heading, but swipe past the guard and the turn still commits. A turn the other way or a
+// pause resets the run, so a spiral you actually mean is still yours to make. Gesture-only: it
+// reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
+// pause has cleared it, the snake's own heading (dir) seeds the first turn -- single player only,
+// since a duel's heading is players[i].dir, not this global.
 let _turnSense=0, _turnRun=0;
-function _spiralBlocked(key){
+function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;
     if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
     const prev=_swipeLastDir?GDIRS[_swipeLastDir]
         :(typeof players!=='undefined'&&players)?null
         :(typeof dir!=='undefined'?dir:null);
     const kd=GDIRS[key];
-    if(!prev||!kd) return false;
-    const sense=Math.sign(prev.x*kd.y-prev.y*kd.x);   // +1/-1 for a 90-degree turn, 0 for straight/reverse
+    const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
     if(sense===0) return false;
-    if(sense===_turnSense && _turnRun>=2) return true;   // the third same-way turn in a row: drop it
+    if(sense===_turnSense && _turnRun>=2 && dist<SWIPE_GUARD*sf) return true;   // hold the third same-way turn until the swipe clears the guard
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
     return false;
 }
@@ -702,7 +703,7 @@ canvas.addEventListener('touchmove',e=>{
     const thresh=isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
         :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N)*sf;
     if(dist<thresh) return;
-    if(_spiralBlocked(key)) return;   // defuse a fast three-in-a-row same-way spiral before it commits
+    if(_spiralHold(key,dist,sf)) return;   // a third same-way turn in a row (a spiral) must clear the longer guard distance
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
