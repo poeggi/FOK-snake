@@ -1057,13 +1057,17 @@ function drawTurnDebug(){
         ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
         const arrow={ArrowUp:'U',ArrowDown:'D',ArrowLeft:'L',ArrowRight:'R'}[m.key]||'?';
         let txt=arrow+' '+m.dist;
-        if(m.run>=2) txt+=' x'+m.run;
+        if(m.run>=1) txt+=' x'+m.run;   // always show the run so a skipped turn (x2 -> x4) is obvious
         if(m.held) txt+=' HOLD>'+m.thresh;
         const w=ctx.measureText(txt).width;
-        let lx=px+6, ly=py-8;
-        if(lx+w>CW-2) lx=px-6-w;        // keep the label on the board
-        if(ly<7) ly=py+11;
-        ctx.globalAlpha=a*0.55; ctx.fillStyle='#000'; ctx.fillRect(lx-2,ly-6,w+4,12);
+        // Spiral turns land on adjacent cells; fan the labels across a few lanes and draw a
+        // leader back to the dot so neighbours never overprint and hide each other.
+        let lx=px+10, ly=py+((k%4)-1.5)*12;
+        if(lx+w>CW-2) lx=px-10-w;
+        ly=Math.max(7,Math.min(CH-7,ly));
+        ctx.globalAlpha=a*0.5; ctx.strokeStyle=col; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(lx<px?lx+w:lx,ly); ctx.stroke();
+        ctx.globalAlpha=a*0.6; ctx.fillStyle='#000'; ctx.fillRect(lx-2,ly-6,w+4,12);
         ctx.globalAlpha=a; ctx.fillStyle=col; ctx.fillText(txt,lx,ly);
     }
     ctx.restore();

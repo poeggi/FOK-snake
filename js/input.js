@@ -683,9 +683,11 @@ function _dbgTurnLog(cell, key, dist, run, held, thresh){
     if((cfg.debug|0)<3 || !cell) return;
     const now=performance.now();
     const last=_dbgTurns.length?_dbgTurns[_dbgTurns.length-1]:null;
-    // A held turn fires on every touchmove sample and then commits: fold that whole stream
-    // (same key, moments apart) into one live marker instead of a row of duplicates.
-    if(last && last.key===key && now-last.at<450){
+    // A held turn fires on every touchmove sample and then commits: fold that stream (its held
+    // samples + the final commit) into one live marker. Only an as-yet-uncommitted marker
+    // (last.held) absorbs; once a turn commits it is SEALED, so a later same-key turn can never
+    // overwrite it -- every distinct turn keeps its own marker (a dropped one would hide a spiral).
+    if(last && last.held && last.key===key && now-last.at<450){
         last.cx=cell.x; last.cy=cell.y; last.dist=Math.round(dist); last.run=run; last.held=held; last.thresh=Math.round(thresh); last.at=now;
         return;
     }
