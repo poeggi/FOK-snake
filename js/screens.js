@@ -1034,6 +1034,39 @@ function drawGameBoard(now) {
     }
     // HUD sync is done once per frame in loop() (after applyWorkerFrame makes the globals
     // current); drawDuelBoard relies on that too, so a second call here was pure duplication.
+    if((cfg.debug|0)>=3) drawTurnDebug();
+}
+
+// DEBUG LEVEL 3 overlay: fading per-turn markers dropped by the touch handler (_dbgTurns),
+// each pinned to the board cell where the turn happened. Shows the swipe distance, the same-way
+// run count (x2/x3...), and HOLD>NN when the anti-spiral guard blocked the turn -- so a spiral
+// can be read back off the board for a few seconds after the fact. Render-only; never the sim.
+function drawTurnDebug(){
+    if(typeof _dbgTurns==='undefined' || !_dbgTurns.length) return;
+    const nowMs=performance.now(), TTL=3500;
+    ctx.save();
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='8px "Press Start 2P"';
+    for(let k=0;k<_dbgTurns.length;k++){
+        const m=_dbgTurns[k], age=nowMs-m.at;
+        if(age>TTL) continue;
+        const a=Math.max(0,1-age/TTL);
+        const px=m.cx*CS+CS/2, py=m.cy*CS+CS/2;
+        const col=m.held?'#ff5050':(m.run>=3?'#ffd24a':'#40c8ff');   // red held, gold spiral turn, blue normal
+        ctx.globalAlpha=a; ctx.fillStyle=col;
+        ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+        const arrow={ArrowUp:'U',ArrowDown:'D',ArrowLeft:'L',ArrowRight:'R'}[m.key]||'?';
+        let txt=arrow+' '+m.dist;
+        if(m.run>=2) txt+=' x'+m.run;
+        if(m.held) txt+=' HOLD>'+m.thresh;
+        const w=ctx.measureText(txt).width;
+        let lx=px+6, ly=py-8;
+        if(lx+w>CW-2) lx=px-6-w;        // keep the label on the board
+        if(ly<7) ly=py+11;
+        ctx.globalAlpha=a*0.55; ctx.fillStyle='#000'; ctx.fillRect(lx-2,ly-6,w+4,12);
+        ctx.globalAlpha=a; ctx.fillStyle=col; ctx.fillText(txt,lx,ly);
+    }
+    ctx.restore();
 }
 
 // The ONE confirmation-dialog renderer: draw the live screen behind, frost it to black glass,
@@ -1297,6 +1330,7 @@ function drawDuelBoard(now) {
         if(typeof netWaitingAgain==='function' && netWaitingAgain())
             ct('WAITING FOR OPPONENT...', CW/2, CH/2+64, '#ffd700', FONT.HINT);
     }
+    if((cfg.debug|0)>=3) drawTurnDebug();
     _drawDuelWarn();   // last: it must sit over the board, not under it
 }
 function drawResetConfirm() {

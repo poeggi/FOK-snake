@@ -666,6 +666,32 @@ function _spiralHold(key, dist, sf){
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
     return false;
 }
+// DEBUG LEVEL 3 turn trace: our snake's head cell (single-player global, or our own duel
+// index), and a small ring of fading markers dropped where each touch turn commits -- and
+// where the anti-spiral guard holds one -- so a spiral can be replayed by eye on the board.
+// Pure render aid, guarded off below level 3; it never feeds the sim.
+function _myHeadCell(){
+    if(typeof players!=='undefined' && players){
+        const i=(typeof netGameActive==='function'&&netGameActive())?netMyIndex():0;
+        const P=players[i]||players[0];
+        return (P&&P.snake&&P.snake[0])||null;
+    }
+    return (typeof snake!=='undefined'&&snake&&snake[0])||null;
+}
+const _dbgTurns=[];
+function _dbgTurnLog(cell, key, dist, run, held, thresh){
+    if((cfg.debug|0)<3 || !cell) return;
+    const now=performance.now();
+    const last=_dbgTurns.length?_dbgTurns[_dbgTurns.length-1]:null;
+    // A held turn fires on every touchmove sample and then commits: fold that whole stream
+    // (same key, moments apart) into one live marker instead of a row of duplicates.
+    if(last && last.key===key && now-last.at<450){
+        last.cx=cell.x; last.cy=cell.y; last.dist=Math.round(dist); last.run=run; last.held=held; last.thresh=Math.round(thresh); last.at=now;
+        return;
+    }
+    _dbgTurns.push({ cx:cell.x, cy:cell.y, key, dist:Math.round(dist), run, held, thresh:Math.round(thresh), at:now });
+    while(_dbgTurns.length>16) _dbgTurns.shift();
+}
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 canvas.addEventListener('touchstart',e=>{
@@ -703,13 +729,14 @@ canvas.addEventListener('touchmove',e=>{
     const thresh=isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
         :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N)*sf;
     if(dist<thresh) return;
-    if(_spiralHold(key,dist,sf)) return;   // a third same-way turn in a row (a spiral) must clear the longer guard distance
+    if(_spiralHold(key,dist,sf)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,SWIPE_GUARD*sf); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
     if(inMenu&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
     _swipedThisTouch=true; handleKey(key,null);
     if(_inPlay()){
+        _dbgTurnLog(_myHeadCell(),key,dist,_turnRun,false,thresh);   // DEBUG L3: mark the committed turn at the head cell
         const d=GDIRS[key];
         if(d){
             // clearBoost() writes the classic globals directly, which does nothing for a
