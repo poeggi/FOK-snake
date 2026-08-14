@@ -274,14 +274,20 @@ function _menuSnakeStep(){
 }
 function _drawMenuSnake(now){
     if(cfg.gfxMode!==1 || _reduceMotion()) return;
+    // Step off the real frame clock (performance.now), NOT the passed simNow: startDuel resets
+    // simNow to 0 at tick zero, so after a 1:1 the menu clock is SMALLER than the value captured
+    // before the match. now-_mSnakeAt then goes negative, the >2000 catch-up guard (positive gaps
+    // only) never fires, and the step loop stalls until simNow crawls back -- the wanderer freezes.
+    // Wall-clock is monotonic, so it keeps gliding across a duel (same fix as the splash tagline).
+    const t = (typeof performance!=='undefined' && performance.now) ? performance.now() : now;
     if(!_mSnake){
         _mSnake={dir:{x:1,y:0}, len:11, body:[{x:6,y:10}]};
         for(let i=1;i<_mSnake.len;i++) _mSnake.body.push({x:(6-i+COLS)%COLS,y:10});
-        _mSnakeAt=now;
+        _mSnakeAt=t;
     }
     const STEP=150;   // ms per cell -- a calm glide
-    if(now-_mSnakeAt>2000) _mSnakeAt=now-STEP;   // bound catch-up after a long gap away from the menu
-    while(now-_mSnakeAt>=STEP){ _menuSnakeStep(); _mSnakeAt+=STEP; }
+    if(t-_mSnakeAt>2000) _mSnakeAt=t-STEP;   // bound catch-up after a long gap away from the menu
+    while(t-_mSnakeAt>=STEP){ _menuSnakeStep(); _mSnakeAt+=STEP; }
     const sc=SNAKE_COLORS[_mSnakeCol]||SNAKE_COLORS[0];
     const body=`hsl(${sc.h},65%,30%)`;   // same hue/sat as the real snake body, one dim mid shade
     ctx.save();
