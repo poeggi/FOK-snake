@@ -32,12 +32,13 @@ function addFOKoins(n) {
     if(_cachedFOKoins >= 1000000) unlockAch('fokoins_1m');
     if(_cachedFOKoins >= 5000000) unlockAch('fokoins_100k');
 }
-function addScore(name, sc, lvl) {
+function addScore(name, sc, lvl, won) {
     const s = getScores();
     const now = new Date();
     const p2 = n => ('0' + n).slice(-2);   // ES5 pad: padStart is ES2017, absent on old smart-TV engines (this runs at game over)
     const date = p2(now.getDate()) + '.' + p2(now.getMonth()+1) + '.' + String(now.getFullYear()).slice(-2);
-    s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl,
+    // won: the run CLEARED level 10 (a finish), not merely reached it. The board stars it.
+    s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl, won:!!won,
              diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });
     s.sort((a, b) => b.score - a.score);
     try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch (e) {}
@@ -60,7 +61,7 @@ function _prefersReducedMotion() {
 }
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, reduceMotion:_prefersReducedMotion(),
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, reduceMotion:_prefersReducedMotion(),
              autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
@@ -77,6 +78,8 @@ function _sanitizeCfg() {
     cfg.music       = cfg.music !== false;
     cfg.turbo       = cfg.turbo !== false;
     cfg.touchSelect = !!cfg.touchSelect;
+    cfg.touchSens   = idx(cfg.touchSens, 3, 1);   // 0 LOW / 1 MED (default) / 2 HIGH swipe sensitivity
+    cfg.keepAwake   = cfg.keepAwake !== false;    // hold a screen wake lock during active play
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
     cfg.disableGlow = !!cfg.disableGlow;

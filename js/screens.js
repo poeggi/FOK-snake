@@ -288,6 +288,9 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.handed=r?1:0;applyHandedness();} },
         { lbl:()=>'TOUCH AUTOSELECT: '+(cfg.touchSelect?'ON':'OFF'),
           act:()=>{cfg.touchSelect=!cfg.touchSelect;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; menus keep their own fixed feel
+          act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
     ]},
     { label:'GAME', items:[
         { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
@@ -295,6 +298,8 @@ const SETTINGS_CATS = [
         { lbl:()=>'SNAKE COLOR: '+SNAKE_COLORS[cfg.snakeColor||0].name, preview:'color',
           act:()=>{cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
+        { lbl:()=>'KEEP SCREEN AWAKE: '+(cfg.keepAwake!==false?'ON':'OFF'),   // hold a wake lock during play so the display never dims mid-run
+          act:()=>{cfg.keepAwake=cfg.keepAwake===false?true:false;Snd.sfxPlay('select',cfg.music);if(typeof wakeReconcile==='function')wakeReconcile();} },
     ]},
     { label:'GRAPHICS', items:[
         { lbl:()=>'GRAPHICS MODE: '+(cfg.gfxMode===0?'SIMPLE':'STANDARD'),   // SIMPLE = static in-game items (no spin/pulse); STANDARD = today
@@ -417,6 +422,20 @@ function _drawScoreTabs(){
         ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', FONT.HINT);
     }
 }
+// A gold star in the left margin of a board row: this run finished (cleared level 10),
+// as opposed to one that only reached its level before dying.
+function drawWinStar(cx, cy, r){
+    ctx.save();
+    ctx.beginPath();
+    for(let i=0;i<10;i++){
+        const a=-Math.PI/2 + i*Math.PI/5, rad=(i%2)?r*0.42:r;
+        const px=cx+Math.cos(a)*rad, py=cy+Math.sin(a)*rad;
+        if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    ctx.fillStyle='#ffd700'; ctx.shadowColor='#ffd700'; ctx.shadowBlur=6; ctx.fill();
+    ctx.restore();
+}
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
     ctg('HIGH SCORES',CW/2,28,'#7fff7f',FONT.TITLE, GLOW.TITLE);
@@ -442,6 +461,7 @@ function drawScores() {
                     ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
                     const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
                     ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
+                    if(s.completed) drawWinStar(11,y,6);
                     ctx.textAlign='right'; ctx.fillText(String(s.score|0), 334, y);
                     ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level|0}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
                     ctx.textAlign='left';  ctx.fillText(String(s.date||'--.--.--').slice(0,8), 418, y);
@@ -462,6 +482,7 @@ function drawScores() {
             ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
             const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
             ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
+            if(s.won) drawWinStar(11,y,6);
             ctx.textAlign='right'; ctx.fillText(String(s.score), 334, y);
             ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
             ctx.textAlign='left';  ctx.fillText(s.date||'--.--.--', 418, y);

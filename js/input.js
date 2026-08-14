@@ -89,7 +89,7 @@ function _submitName(){
         inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; showHUD(false);
         setTimeout(()=>nameInp.blur(),10); Snd.sfxPlay('select',cfg.music); return;
     }
-    addScore(nameStr,score,level);Snd.sfxPlay('select',cfg.music);
+    addScore(nameStr,score,level,nameReason==='win');Snd.sfxPlay('select',cfg.music);
     if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level,nameReason==='win');   // global board (no-op in offline mode)
     inGame=false; _wsend({t:'phase',phase:'menu'});   // leave the gameplay session; main owns phase again
     _scoreboardCache=getScores();scoresTab=0;phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
@@ -638,6 +638,11 @@ const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
+// Touch steering sensitivity (settings > CONTROLS): scales the IN-PLAY swipe distances only.
+// A higher setting shortens the travel a swipe needs, so the snake turns sooner. Menu scrolling
+// keeps its own fixed MENU_SWIPE_* distances, so this never makes the menus feel twitchy.
+const _TOUCH_SENS_F=[1.4,1.0,0.65];
+function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1):1; }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 canvas.addEventListener('touchstart',e=>{
@@ -658,7 +663,8 @@ canvas.addEventListener('touchmove',e=>{
     if(!_swipeLastMovePos||Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y)>=5){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
     const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
     const dist=Math.hypot(dx,dy);
-    if(dist<SWIPE_1) return;
+    const sf=_touchSensF();
+    if(dist<SWIPE_1*sf) return;
     const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
     const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
     const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
@@ -672,7 +678,7 @@ canvas.addEventListener('touchmove',e=>{
     // Menu UP/DOWN overrides that with its own longer two-tier distances; the in-play path is untouched.
     const isMenuV=inMenu&&(key==='ArrowUp'||key==='ArrowDown');
     const thresh=isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
-        :(!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N;
+        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N)*sf;
     if(dist<thresh) return;
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
@@ -1015,6 +1021,28 @@ function onBgShow() {
     // false SIM STALL before the just-woken worker posts its first frame. Same grace the
     // worker-resume reconcile in game.js already grants.
     _lastWorkerFrameAt = performance.now();
+    wakeReconcile();   // the OS drops the wake lock while hidden; take it again if we are back in play
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) onBgHide(); else onBgShow(); });
 window.addEventListener('pagehide', onBgHide);
+
+// Screen wake lock: keep the display lit during active play (opt-out via GAME > KEEP SCREEN AWAKE).
+// The lock auto-releases when the tab hides, so state is reconciled on return (onBgShow) and on a
+// slow timer instead of being threaded through every phase transition. No Wake Lock API -> inert.
+let _wakeLock=null, _wakePending=false;
+function wakeReconcile(){
+    if(typeof navigator==='undefined' || !navigator.wakeLock) return;
+    const want = cfg.keepAwake!==false && _inPlay() && !document.hidden;
+    if(want && !_wakeLock && !_wakePending){
+        _wakePending=true;
+        navigator.wakeLock.request('screen').then(l=>{
+            _wakePending=false; _wakeLock=l;
+            l.addEventListener('release',()=>{ _wakeLock=null; });
+            wakeReconcile();   // play may have ended while the request was in flight -- re-check, release if so
+        }).catch(()=>{ _wakePending=false; _wakeLock=null; });
+    } else if(!want && _wakeLock){
+        try{ _wakeLock.release(); }catch(e){}
+        _wakeLock=null;
+    }
+}
+if(typeof navigator!=='undefined' && navigator.wakeLock){ setInterval(wakeReconcile, 4000); }
