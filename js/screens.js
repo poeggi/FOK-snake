@@ -249,12 +249,50 @@ function _composeMenu(diffLine){
     c.fillText('UP/DN:nav  A:ok  START:quick', CW/2, CH-8);
     c.restore();
 }
+// Decorative idle wanderer behind the menu: a dim, low-alpha snake meandering a
+// seeded pseudo-random walk across the board grid. Pure presentation -- no gems,
+// no collisions, no AI, and it never touches the sim or its rng (its own LCG).
+// STANDARD gfx only, and suppressed under reduced-motion.
+let _mSnake=null, _mSnakeAt=0, _mSnakeSeed=0x9e3779b9;
+function _mRand(){ _mSnakeSeed=(Math.imul(_mSnakeSeed,1664525)+1013904223)>>>0; return _mSnakeSeed/0x100000000; }
+const _M_DIRS=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+function _menuSnakeStep(){
+    const s=_mSnake;
+    if(_mRand()<0.22){   // occasional turn (never a reverse, never straight-on)
+        const opts=_M_DIRS.filter(d=>!(d.x===s.dir.x&&d.y===s.dir.y)&&!(d.x===-s.dir.x&&d.y===-s.dir.y));
+        s.dir=opts[Math.floor(_mRand()*opts.length)]||s.dir;
+    }
+    const h=s.body[0];
+    s.body.unshift({x:(h.x+s.dir.x+COLS)%COLS, y:(h.y+s.dir.y+ROWS)%ROWS});
+    while(s.body.length>s.len) s.body.pop();
+}
+function _drawMenuSnake(now){
+    if(cfg.gfxMode!==1 || _reduceMotion()) return;
+    if(!_mSnake){
+        _mSnake={dir:{x:1,y:0}, len:11, body:[{x:6,y:10}]};
+        for(let i=1;i<_mSnake.len;i++) _mSnake.body.push({x:(6-i+COLS)%COLS,y:10});
+        _mSnakeAt=now;
+    }
+    const STEP=150;   // ms per cell -- a calm glide
+    if(now-_mSnakeAt>2000) _mSnakeAt=now-STEP;   // bound catch-up after a long gap away from the menu
+    while(now-_mSnakeAt>=STEP){ _menuSnakeStep(); _mSnakeAt+=STEP; }
+    ctx.save();
+    ctx.globalAlpha=0.12;
+    const p=CS*0.72, off=(CS-p)/2;
+    for(let i=0;i<_mSnake.body.length;i++){
+        const c=_mSnake.body[i];
+        ctx.fillStyle=i===0?'#7fff7f':'#3f8f5f';
+        ctx.fillRect(c.x*CS+off, c.y*CS+off, p, p);
+    }
+    ctx.restore();
+}
 function drawMenu(now) {
     const diffLine=`DIFF:${DIFF[cfg.diff].label}  AUDIO:${cfg.music?'ON':'OFF'}  STYLE:${cfg.musicStyle===0?'NEW':'CLASSIC'}`;
     if(menuSel!==_mc.sel || _swVersion!==_mc.ver || diffLine!==_mc.diff || cfg.disableGlow!==_mc.glow){
         _composeMenu(diffLine); _mc.sel=menuSel; _mc.ver=_swVersion; _mc.diff=diffLine; _mc.glow=cfg.disableGlow;
     }
     ctx.drawImage(_menuCanvas,0,0);           // static layer (one blit)
+    _drawMenuSnake(now);                       // decorative ambient wanderer (under the title)
     drawSplashText(now);                       // animated overlay
     const _upd=(typeof netUpdateNotice==='function')?netUpdateNotice():null;   // server contract ahead of this build
     if(_upd) ct(_upd, CW/2, 12, _netApiNewer?'#ff6666':'#ffcc44', FONT.HINT);   // pin to the very top, clear of the title/DEBUG stamp

@@ -17,7 +17,7 @@ function clearBoost(){boostDir=null;boosting=false;}
 
 // Sim timing constants (ticks -> ms via T from assets.js). Declared HERE so the sim is
 // self-contained: a Web Worker can load assets.js + sim.js without game.js.
-const _POWER_DUR=T(360);        // 6s power mode
+const _POWER_DUR=T(540);        // 9s power mode
 const EARLY_HEART_TTL=T(600);   // 10s early-heart lifespan
 const SPAWN_PROTECT=T(60);      // 1s post-spawn collision immunity
 const _SLOW_DUR=T(1800);        // 30s time-warp slow
@@ -174,6 +174,7 @@ function _duelBeginLevel() {
     }
     _barsV++;
     powerPellet = null; _powerMode = false;
+    heart = null; heartAt = 0;   // the contested heart never survives a level rebuild/respawn
     _duelSpawnGem();
     _gDue = 0; spawnAt = 0; levelDoneWaiting = false; phase = 'duelReady'; phaseAt = simNow;
     emit({t:'lvlreset'}); emit({t:'bars'});
@@ -202,14 +203,40 @@ function startDuel(seed, x10) {
     _duelBeginLevel();
     emit({t:'munpause'}); emit({t:'showhud',v:true});
 }
+// A contested-heart cell as close to board center as is free: neutral ground both snakes
+// can reach. Scanned center-outward in a fixed order (no rng), so it never moves the shared
+// PRNG stream and both clients pick the identical cell.
+function _duelHeartCell(blocked) {
+    const cx = Math.floor(COLS/2), cy = Math.floor(ROWS/2);
+    for (let r = 0; r < Math.max(COLS, ROWS); r++) {
+        for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // walk each square ring once
+            const c = { x:(cx+dx+COLS)%COLS, y:(cy+dy+ROWS)%ROWS };
+            if (!blocked.has(ck(c))) return c;
+        }
+    }
+    return null;
+}
 function _duelSpawnGem() {
-    gem = freeCell(new Set(players[0].snake.concat(players[1].snake, bars).map(ck)));
+    const gB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
+    if (heart) gB.add(ck(heart));   // a heart may still be on the board from an earlier gem this level
+    gem = freeCell(gB);
     gem.tier = 0; gemAt = gem.spawnAt = simNow;
     // Power pellet: same rare roll as classic (per gem spawn, level 2+, X10-scaled).
     if (!powerPellet && !_powerMode && rng() < 0.002 * _X10() && level >= 2) {
         const ppB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
-        ppB.add(ck(gem));
+        ppB.add(ck(gem)); if (heart) ppB.add(ck(heart));
         powerPellet = freeCell(ppB); powerPelletAt = simNow;
+    }
+    // Contested heart: one life-back on neutral ground, rolled per gem spawn but only when it
+    // can matter (someone below the cap) and never stacked on another heart. The lives/heart
+    // gates are all synced state so both clients take the same branch and consume the rng in
+    // lockstep; the cell is chosen without rng (see _duelHeartCell).
+    if (!heart && level >= 2 && players.some(p => p.lives < START_LIVES) && rng() < 0.015 * _X10()) {
+        const hB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
+        hB.add(ck(gem)); if (powerPellet) hB.add(ck(powerPellet));
+        const hc = _duelHeartCell(hB);
+        if (hc) { heart = hc; heartAt = simNow; }
     }
 }
 // One duel game tick: both due snakes move SIMULTANEOUSLY (heads computed first, then
@@ -287,6 +314,10 @@ function duelStep(now) {
         if (powerPellet && ck(powerPellet) === ck(moves[i])) {
             powerPellet = null; _powerMode = true; _powerModeAt = now; _barMoveTick = 0;
             P.score += level * 200; emit({t:'bonus',label:'POWER UP!'});
+        }
+        if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
+            heart = null;
+            if (P.lives < START_LIVES) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); }
         }
         if (eater < 0 && gem && ck(gem) === ck(moves[i])) {
             eater = i;
@@ -442,7 +473,8 @@ function spawnGem() {
     }
     gem=freeCell(new Set(snake.concat(bars).map(ck)));
     const rv=rng();
-    gem.tier = rv<0.0005*_X10() ? 2 : rv<0.0105*_X10() ? 1 : 0;
+    const rareMult=[1,1,2][cfg.diff]||1;   // hard doubles the epic/lucky odds; easy/normal unchanged
+    gem.tier = rv<0.0005*_X10()*rareMult ? 2 : rv<0.0105*_X10()*rareMult ? 1 : 0;
     if(gem.tier===2) emit({t:'sfx',name:'epic_spawn'});
     else if(gem.tier===1) emit({t:'sfx',name:'lucky_spawn'});
     gemAt=gem.spawnAt=simNow;
@@ -490,7 +522,7 @@ function step(now) {
     const head={x:(snake[0].x+dir.x+COLS)%COLS,y:(snake[0].y+dir.y+ROWS)%ROWS};
     const hk=ck(head);
     const protect = now - spawnAt < SPAWN_PROTECT;
-    if(_powerMode && now-_powerModeAt>=_POWER_DUR){ _powerMode=false; emit({t:'bars'}); }
+    if(_powerMode && now-_powerModeAt>=_POWER_DUR){ _powerMode=false; gemSteps=0; emit({t:'bars'}); }   // power ends: re-grant the fewest-steps budget so the detour it caused is free
     if(!protect){
         const hitBar=bars.find(b=>ck(b)===hk);
         if(hitBar){
@@ -832,6 +864,7 @@ function simApplyDuel(s){
     simTick=s.simTick; simNow=s.simNow; gPer=s.gPer; _gDue=s._gDue; _gAt=s._gAt|0; phaseAt=s.phaseAt; gemAt=s.gemAt;
     deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt;
+    heart=s.heart; heartAt=s.heartAt;
     _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10;
     _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }

@@ -121,7 +121,7 @@ function _rbReset(){
 // itself is here, which is the actual state; the ticker says nothing extra.
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
     'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
-    '_powerMode','_powerModeAt','_barMoveTick','players','duelWinner','_duelX10',
+    '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner','_duelX10',
     '_speedRound','_rngState'];
 // Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
 // duel tick still touches (_barsV is the bars change-ticker the renderer watches;
@@ -137,7 +137,7 @@ const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow'
 function _rbDuelSnap(){
     return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue, _gAt,
              phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
-             powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
+             powerPellet, powerPelletAt, _powerMode, _powerModeAt, heart, heartAt, _barMoveTick,
              players, duelWinner, _duelX10, _speedRound, _rngState };
 }
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
@@ -263,7 +263,8 @@ function _rbSendState(t, sn){
     const cells = [];
     for(const c of me.snake) cells.push(c.x, c.y);   // flat [x0,y0,x1,y1,...]: compact on the wire
     const o = { t:'st', tk:_rbToWire(t), i:mi, s:cells, gd:sn.gemsDone|0, gem:sn.gem, rng:sn._rngState,
-                pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:sn._powerMode, pma:sn._powerModeAt };
+                pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:sn._powerMode, pma:sn._powerModeAt,
+                hb:sn.heart, hba:sn.heartAt };
     const pts = netPts();
     if(pts != null) o.pts = pts;   // stamped HERE so the size check sees the final packet and the string can be reused
     // A very long snake can push the state past the one-datagram cap; skip it this second
@@ -279,7 +280,7 @@ function _rbCellsSane(flat){ return Array.isArray(flat) && flat.length <= 2 * CO
 function _rbCheckState(m){
     if(typeof m.tk !== 'number' || typeof m.i !== 'number' || !_rbCellsSane(m.s)) return;
     _rbStateQ.push({ tk:_rbFromWire(m.tk), i:m.i|0, s:m.s, gd:m.gd|0, gem:m.gem, rng:m.rng,
-                     pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma });
+                     pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma, hb:m.hb, hba:m.hba });
     if(_rbStateQ.length > 8) _rbStateQ.shift();
 }
 // ---- FULL RESYNC: the whole duel state, from the HOST (P0) as authority, for a divergence too
@@ -308,6 +309,7 @@ function _rbFullState(sn, tk){
         gp:sn.gPer, gdue:sn._gDue, pha:sn.phaseAt, spa:sn.spawnAt, ldw:!!sn.levelDoneWaiting,
         rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, x10:!!sn._duelX10,
         pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
+        hb:sn.heart, hba:sn.heartAt,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
 }
 function _rbApplyResync(m){
@@ -334,6 +336,7 @@ function _rbApplyResync(m){
     snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
+    snap.heart = m.hb; snap.heartAt = m.hba;
     unpackInto(m.p0, snap.players[0]); unpackInto(m.p1, snap.players[1]);
     snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;   // ring convention: entry tk=T holds the state at simTick T-1
     // Apply it at T through the SAME path a normal correction uses: drop it into the ring entry
@@ -379,6 +382,7 @@ function _rbStateSettle(){
                 e.snap.gemsDone = q.gd; e.snap.gem = q.gem; e.snap._rngState = q.rng;
                 e.snap.powerPellet = q.pp; e.snap.powerPelletAt = q.ppa;
                 e.snap._powerMode = q.pm; e.snap._powerModeAt = q.pma;
+                e.snap.heart = q.hb; e.snap.heartAt = q.hba;
                 changed = true;
             }
             if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i); _rbRollback(q.tk); }
