@@ -643,6 +643,28 @@ const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
 // keeps its own fixed MENU_SWIPE_* distances, so this never makes the menus feel twitchy.
 const _TOUCH_SENS_F=[1.4,1.0,0.65];
 function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1):1; }
+// Anti-spiral touch guard: three quick same-way 90-degree turns in one gesture curl the head
+// straight onto the body -- the classic fat-finger death. This defuses the THIRD such turn
+// (the snake holds its heading); two same-way turns, a turn the other way, or a pause all
+// reset the run, so a deliberate loop into yourself is still yours to make. Gesture-only: it
+// reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once
+// a pause has cleared it, the snake's own heading (dir) seeds the first turn -- single player
+// only, since a duel's heading is players[i].dir, not this global.
+let _turnSense=0, _turnRun=0;
+function _spiralBlocked(key){
+    if(!_inPlay()) return false;
+    if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
+    const prev=_swipeLastDir?GDIRS[_swipeLastDir]
+        :(typeof players!=='undefined'&&players)?null
+        :(typeof dir!=='undefined'?dir:null);
+    const kd=GDIRS[key];
+    if(!prev||!kd) return false;
+    const sense=Math.sign(prev.x*kd.y-prev.y*kd.x);   // +1/-1 for a 90-degree turn, 0 for straight/reverse
+    if(sense===0) return false;
+    if(sense===_turnSense && _turnRun>=2) return true;   // the third same-way turn in a row: drop it
+    _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
+    return false;
+}
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 canvas.addEventListener('touchstart',e=>{
@@ -680,6 +702,7 @@ canvas.addEventListener('touchmove',e=>{
     const thresh=isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
         :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N)*sf;
     if(dist<thresh) return;
+    if(_spiralBlocked(key)) return;   // defuse a fast three-in-a-row same-way spiral before it commits
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
