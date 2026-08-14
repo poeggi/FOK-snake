@@ -650,21 +650,49 @@ function drawScoreHead(cx, cy, colorIdx, si) {
 }
 
 // Compact device-category glyph (pc/mobile/tv/console) for the global score rows and the
-// duel ready splash. Monochrome in `color` on a dark overlay, ~12px, CENTRED on (cx,cy);
-// no glow. An unknown/absent platform draws nothing (the server nulls unrecognized tags).
+// duel ready splash. Built from a uniform coarse pixel grid -- the same blocky convention
+// as HEART_PX and drawPixelIcon(cs=2) -- so the badges read as game sprites instead of thin
+// vector glyphs. '#' paints in `color`, 'o' is the dark screen/inset, '.' is empty. CENTRED
+// on (cx,cy); no glow. An unknown/absent platform draws nothing (the server nulls bad tags).
+const _PLAT_PX = {
+    pc: ['#######',        // CRT monitor on a stand + base
+         '#ooooo#',
+         '#ooooo#',
+         '#ooooo#',
+         '#######',
+         '..###..',
+         '.#####.'],
+    tv: ['#######',        // widescreen on two splayed legs
+         '#ooooo#',
+         '#ooooo#',
+         '#ooooo#',
+         '#######',
+         '.#...#.'],
+    mobile: ['#####',      // upright phone with a home button
+             '#ooo#',
+             '#ooo#',
+             '#ooo#',
+             '#ooo#',
+             '##o##'],
+    console: ['.#####.',   // gamepad: two control dots + two grips
+              '#o###o#',
+              '#######',
+              '##...##'],
+};
 function drawPlatformIcon(cx, cy, plat, color) {
-    if(!plat) return;
+    const grid = _PLAT_PX[plat]; if(!grid) return;
     const col = color || '#9fb4c4', ink = '#0b1622';   // ink = the dark screen/inset
-    const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(Math.round(cx + x), Math.round(cy + y), w, h); };
+    const s = 2, cols = grid[0].length, rows = grid.length;
+    const ox = Math.round(cx - cols*s/2), oy = Math.round(cy - rows*s/2);
     ctx.save();
-    if(plat === 'mobile') {            // upright phone
-        R(-3,-6,6,12,col); R(-2,-5,4,8,ink); R(-1,4,2,1,ink);
-    } else if(plat === 'tv') {         // widescreen on legs
-        R(-6,-5,12,8,col); R(-5,-4,10,6,ink); R(-4,3,2,2,col); R(2,3,2,2,col);
-    } else if(plat === 'console') {    // gamepad
-        R(-6,-2,12,6,col); R(-6,-1,2,4,col); R(4,-1,2,4,col); R(-3,-1,2,2,ink); R(1,0,2,2,ink);
-    } else {                           // pc: monitor + stand + base
-        R(-5,-6,10,8,col); R(-4,-5,8,6,ink); R(-1,2,2,2,col); R(-3,4,6,1,col);
+    for(let ry=0; ry<rows; ry++){
+        const line = grid[ry];
+        for(let rx=0; rx<cols; rx++){
+            const ch = line[rx];
+            if(ch === '.') continue;
+            ctx.fillStyle = ch === '#' ? col : ink;
+            ctx.fillRect(ox+rx*s, oy+ry*s, s, s);
+        }
     }
     ctx.restore();
 }
