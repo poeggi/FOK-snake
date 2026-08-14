@@ -808,6 +808,7 @@ function loop(rafNow) {
     if(phase!==_lastPhase){
         _uiDirty=true;
         if(phase==='duelOver') quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
+        if(phase==='menu' && typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
         _lastPhase=phase;
     }
     const s = SCREENS[phase] || (players ? _DUEL_SCREEN : _GAME_SCREEN);   // shared game phases (dying/levelDone) pick the board by snake count

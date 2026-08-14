@@ -508,7 +508,10 @@ function spawnGem() {
         timeCrystal=freeCell(tcB); timeCrystalAt=simNow;
     }
     if(!_earlyHeartUsed&&level>=4&&level<=6){
-        if(_earlyHeartCount===_earlyHeartTrigger&&!heart){
+        // Drop the one early heart at the trigger-th L4-6 gem. If a heart is already on the
+        // board that gem, do NOT burn the trigger: >= keeps retrying on each later gem until a
+        // slot is free, so the single early heart can never be silently skipped for the game.
+        if(_earlyHeartCount>=_earlyHeartTrigger&&!heart){
             const hB=new Set(snake.concat(bars).map(ck)); hB.add(ck(gem));
             if(powerPellet) hB.add(ck(powerPellet));
             heart=freeCell(hB); heartAt=simNow; heartIsEarly=true; _earlyHeartUsed=true;

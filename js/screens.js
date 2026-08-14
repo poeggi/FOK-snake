@@ -253,8 +253,11 @@ function _composeMenu(diffLine){
 // seeded pseudo-random walk across the board grid. Pure presentation -- no gems,
 // no collisions, no AI, and it never touches the sim or its rng (its own LCG).
 // STANDARD gfx only, and suppressed under reduced-motion.
-let _mSnake=null, _mSnakeAt=0, _mSnakeSeed=0x9e3779b9;
+let _mSnake=null, _mSnakeAt=0, _mSnakeSeed=0x9e3779b9, _mSnakeCol=0;
 function _mRand(){ _mSnakeSeed=(Math.imul(_mSnakeSeed,1664525)+1013904223)>>>0; return _mSnakeSeed/0x100000000; }
+// Re-roll the wanderer's colour on each main-menu entry (called from the loop's phase-change
+// hook). Any of the real snake colours, so the menu looks different every time you return to it.
+function _menuSnakeEnter(){ _mSnakeCol=Math.floor(Math.random()*SNAKE_COLORS.length); }
 const _M_DIRS=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
 function _menuSnakeStep(){
     const s=_mSnake;
@@ -276,12 +279,14 @@ function _drawMenuSnake(now){
     const STEP=150;   // ms per cell -- a calm glide
     if(now-_mSnakeAt>2000) _mSnakeAt=now-STEP;   // bound catch-up after a long gap away from the menu
     while(now-_mSnakeAt>=STEP){ _menuSnakeStep(); _mSnakeAt+=STEP; }
+    const sc=SNAKE_COLORS[_mSnakeCol]||SNAKE_COLORS[0];
+    const body=`hsl(${sc.h},65%,30%)`;   // same hue/sat as the real snake body, one dim mid shade
     ctx.save();
     ctx.globalAlpha=0.12;
     const p=CS*0.72, off=(CS-p)/2;
     for(let i=0;i<_mSnake.body.length;i++){
         const c=_mSnake.body[i];
-        ctx.fillStyle=i===0?'#7fff7f':'#3f8f5f';
+        ctx.fillStyle=i===0?sc.head:body;
         ctx.fillRect(c.x*CS+off, c.y*CS+off, p, p);
     }
     ctx.restore();
