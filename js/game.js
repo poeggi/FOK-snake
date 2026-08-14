@@ -354,7 +354,7 @@ async function sendDebugSnapshot(){
     finally { _dbgSending=false; }
     _dataMsgAt=simNow; _uiDirty=true;
 }
-// Level-3 clickable SNAP button (top-right, HTML so it is excluded from the screenshot).
+// Level-3 clickable SNAP button (top-centre, HTML so it is excluded from the screenshot).
 let _dbgSnapBtn = null;
 function _updateDbgSnapBtn(){
     const on = (cfg.debug||0) >= 3;
@@ -393,13 +393,25 @@ function _loopMsStats(){
 function _mkDbgCorner(cls){ const el = document.createElement('div'); el.className = 'debug-overlay ' + cls; document.body.appendChild(el); return el; }
 function _gfxDbgText(){
     const L = _layoutDbg;
-    return 'v' + _swVersion + ' dbg' + (cfg.debug||0) + ' dpr' + (window.devicePixelRatio||1) + ' [' + (L.mode||'?') + ']' +
-        '\nscr ' + screen.width + 'x' + screen.height + ' ' + ((window.innerWidth>window.innerHeight)?'land':'port') +
-        '\nvp ' + Math.round(L.vpW||0) + 'x' + Math.round(L.vpH||0) +
-        '\nused ' + Math.round(L.wW||0) + 'x' + Math.round(L.wH||0) + ' m' + (L.m||0) + ' s' + (L.scale||0).toFixed(2) +
-        '\ncv ' + Math.round(L.cw||0) + 'x' + Math.round(L.ch||0) + ' nat ' + canvas.width + 'x' + canvas.height +
-        '\n' + ((fpsEl && fpsEl.textContent) || '-- FPS') +
-        (function(){ const st = _loopMsStats(); return st ? '\nloop ' + st.p50.toFixed(1) + '/' + st.p95.toFixed(1) + '/' + st.mx.toFixed(1) + 'ms p50/95/mx' : ''; })();
+    const vLine   = 'v' + _swVersion + ' dbg' + (cfg.debug||0) + ' dpr' + (window.devicePixelRatio||1) + ' [' + (L.mode||'?') + ']';
+    const usedLine= 'used ' + Math.round(L.wW||0) + 'x' + Math.round(L.wH||0) + ' m' + (L.m||0) + ' s' + (L.scale||0).toFixed(2);
+    const fpsLine = (fpsEl && fpsEl.textContent) || '-- FPS';
+    const more = [
+        'scr ' + screen.width + 'x' + screen.height + ' ' + ((window.innerWidth>window.innerHeight)?'land':'port'),
+        'vp ' + Math.round(L.vpW||0) + 'x' + Math.round(L.vpH||0),
+        'cv ' + Math.round(L.cw||0) + 'x' + Math.round(L.ch||0) + ' nat ' + canvas.width + 'x' + canvas.height,
+    ];
+    const st = _loopMsStats();
+    if(st) more.push('loop ' + st.p50.toFixed(1) + '/' + st.p95.toFixed(1) + '/' + st.mx.toFixed(1) + 'ms p50/95/mx');
+    return { main: [vLine, usedLine, fpsLine], more };
+}
+// Compose one corner's text. Level 2 shows only the (<=3) essentials; level 3 adds the
+// extras, placed AWAY from the screen corner -- below the essentials on the top docks,
+// above them on the bottom docks -- so the key lines stay pinned to the corner.
+function _dbgCornerText(main, more, top, lvl){
+    if(lvl < 3) return main.slice(0, 3).join('\n');
+    if(!more.length) return main.join('\n');
+    return (top ? main.concat(more) : more.concat(main)).join('\n');
 }
 function updateNetDebugOverlay(rafNow){
     const on = (cfg.debug||0) >= 2;
@@ -415,23 +427,30 @@ function updateNetDebugOverlay(rafNow){
     // is meaningless, so timing shows the sim clock -- simTick free-runs from page load and
     // the worker owns it, so a frozen counter is a stalled worker. mseek lets two clients
     // verify menu-music sync on-device (same audio style => same seek, mod the loop length).
+    const lvl = cfg.debug || 0;
     const online = typeof netGameActive === 'function' && netGameActive();
-    let net, time, simNet;
-    if(typeof netDebugQuad === 'function'){ const q = netDebugQuad(); net = q.net; time = q.time; simNet = q.sim; }
-    else { net = 'net: not loaded'; time = 'pts ' + simTick; simNet = ''; }
+    let netQ, timeQ, simQ;
+    if(typeof netDebugQuad === 'function'){ const q = netDebugQuad(); netQ = q.net; timeQ = q.time; simQ = q.sim; }
+    else { netQ = { main:['net: not loaded'], more:[] }; timeQ = { main:['pts ' + simTick], more:[] }; simQ = { main:[], more:[] }; }
     if(!online){
+        const _off = (typeof netOffline === 'function') && netOffline();
         const _synced = (typeof netPts === 'function') && netPts() != null;
         const _mseek = (typeof netMenuSeekSec === 'function') ? netMenuSeekSec() : 0;
-        time += '\nsync ' + (_synced ? 'ok mseek ' + _mseek.toFixed(2) + 's' : (netOffline() ? 'offline' : '...'));
+        // Offline the sync line is the only clock signal, so it is essential; when merely
+        // online-in-lobby the anc/wall lines already carry it, so sync drops to the extras.
+        (_off ? timeQ.main : timeQ.more).push('sync ' + (_synced ? 'ok mseek ' + _mseek.toFixed(2) + 's' : (_off ? 'offline' : '...')));
     }
     // Music drift vs the shared clock (read-only probe): + leads, - lags. Two side-by-side
     // clients should both read near 0; a long-up client trending away is the DAC-drift cause.
-    if(typeof Snd !== 'undefined' && Snd.musicDriftMs){ const _d = Snd.musicDriftMs(); if(_d != null) time += '\naudio drift ' + (_d>=0?'+':'') + _d.toFixed(0) + 'ms'; }
-    // Sim/game quadrant: game state (this file's) then the net rollback health (simNet).
-    const sim = ['phase ' + phase, 'worker ' + (_worker?1:0) + ' ingame ' + (inGame?1:0) + ' defer ' + ((cfg.deferDraw && _drawChan)?1:0)];
-    if(simNet) sim.push(simNet);
-    const simTxt = sim.join('\n');
-    const gfx = _gfxDbgText();
+    if(typeof Snd !== 'undefined' && Snd.musicDriftMs){ const _d = Snd.musicDriftMs(); if(_d != null) timeQ.more.push('audio drift ' + (_d>=0?'+':'') + _d.toFixed(0) + 'ms'); }
+    // Sim/game quadrant (bottom dock): game state (this file's) + the net rollback essentials
+    // (simQ.main), with the desync counters (simQ.more) stacked above only at level 3.
+    const simMain = ['phase ' + phase, 'worker ' + (_worker?1:0) + ' ingame ' + (inGame?1:0) + ' defer ' + ((cfg.deferDraw && _drawChan)?1:0)].concat(simQ.main);
+    const gfxQ = _gfxDbgText();
+    const net    = _dbgCornerText(netQ.main,  netQ.more,  true,  lvl);
+    const time   = _dbgCornerText(timeQ.main, timeQ.more, true,  lvl);
+    const gfx    = _dbgCornerText(gfxQ.main,  gfxQ.more,  false, lvl);
+    const simTxt = _dbgCornerText(simMain,    simQ.more,  false, lvl);
     if(net    !== _dbgTxt.tl){ _dbgTxt.tl = net;    _dbgCorner.tl.textContent = net; }
     if(time   !== _dbgTxt.tr){ _dbgTxt.tr = time;   _dbgCorner.tr.textContent = time; }
     if(gfx    !== _dbgTxt.bl){ _dbgTxt.bl = gfx;    _dbgCorner.bl.textContent = gfx; }

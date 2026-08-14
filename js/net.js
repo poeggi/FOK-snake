@@ -305,48 +305,51 @@ function _netHms(pts){
     const p2 = n => (n<10?'0':'')+n;
     return p2(Math.floor(s/3600)) + ':' + p2(Math.floor(s/60)%60) + ':' + p2(s%60) + '.' + (t%10);
 }
+// Each quadrant returns { main, more }: main = the <=3 lines the Level-2 dock shows,
+// more = the extra lines that appear only at Level 3. The overlay stacks `more` away
+// from the screen corner so the essentials stay pinned to it.
 function netDebugQuad(){
-    const d = _netDbg, N = [], T = [], S = [];
-    T.push('pts ' + simTick + ' ' + (simNow/1000).toFixed(1) + 's');
-    if(netOffline()){ N.push('offline'); return { net: N.join('\n'), time: T.join('\n'), sim: '' }; }
-    T.push((_netSync.ofs == null)
+    const d = _netDbg, Nm = [], Nx = [], Tm = [], Tx = [], Sm = [], Sx = [];
+    Tm.push('pts ' + simTick + ' ' + (simNow/1000).toFixed(1) + 's');
+    if(netOffline()){ Nm.push('offline'); return { net:{main:Nm,more:Nx}, time:{main:Tm,more:Tx}, sim:{main:Sm,more:Sx} }; }
+    Tm.push((_netSync.ofs == null)
         ? ('anc -- ' + (d.srvOfs ? '(hello ' + Math.round(d.srvOfs) + ')' : 'unsynced'))
         : ('anc ' + (_netSync.ofs>=0?'+':'') + Math.round(_netSync.ofs) + ' mr' + Math.round(_netSync.rtt) +
            ' a' + ((_netSync.at ? (Date.now()-_netSync.at) : 0)/1000).toFixed(0) + 's'));
     // wall = the PTS our LOCAL wall clock currently equals (Date.now()+anc), as UTC
     // hh:mm:ss.t. Two synced devices show the SAME string -- that is the whole readout.
     const _wp = netPts();
-    T.push('wall ' + (_wp==null ? '-- unsynced' : _netHms(_wp)));
-    N.push('rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
+    Tm.push('wall ' + (_wp==null ? '-- unsynced' : _netHms(_wp)));
+    Nm.push('rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
-        N.push('P' + netMyIndex() + (_netSess.relay?'R':'') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
+        Nx.push('P' + netMyIndex() + (_netSess.relay?'R':'') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
         // WHO + HOW we are connected to the other side. Name from their profile; IP/family from
         // the server's peer-net hint (present on BOTH sides -- offerer and accepter alike).
         const _pn = _netPeerNet[_netSess.peer];
         const _pnm = (_netSess.peerProfile && _netSess.peerProfile.name) || ('#' + String(_netSess.peer).slice(0,4));
         // The peer's IP gets its OWN line: a full IPv6 next to the name overflows the quadrant.
-        N.push('vs ' + _pnm + '  ' + (_netSess.relay ? 'relay' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam : 'p2p') : 'p2p (no ip hint)'));
-        if(!_netSess.relay && _pn && _pn.ip) N.push(_pn.ip);
-        N.push(d.path || 'path ?');
-        N.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
-        N.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : ''));
+        Nm.push('vs ' + _pnm + '  ' + (_netSess.relay ? 'relay' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam : 'p2p') : 'p2p (no ip hint)'));
+        if(!_netSess.relay && _pn && _pn.ip) Nx.push(_pn.ip);
+        Nx.push(d.path || 'path ?');
+        Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
+        Nm.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : ''));
         // tgt = the tick the wall PTS says we should be at; d = tgt-simTick, i.e. how far
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
-        T.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
-        T.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
+        Tx.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
+        Tx.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
         // pset = phase sets this match (the start seed counts as the first) + how long
         // ago the last one fired. A healthy match reads "1x" with the age growing.
-        T.push('pset ' + (d.psetN|0) + 'x' + (d.psetAt ? ' ' + ((performance.now() - d.psetAt)/1000).toFixed(0) + 's ago' : ''));
-        S.push('rb ' + _rbDbg.rb + '/' + _rbDbg.resim + ' mx' + _rbDbg.maxRew + '  live ' + _rbDbg.live);
-        S.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk + ' fix ' + (_rbDbg.fix|0));
-        if(d.inLog.length) N.push('< ' + d.inLog.join(' '));
+        Tx.push('pset ' + (d.psetN|0) + 'x' + (d.psetAt ? ' ' + ((performance.now() - d.psetAt)/1000).toFixed(0) + 's ago' : ''));
+        Sm.push('rb ' + _rbDbg.rb + '/' + _rbDbg.resim + ' mx' + _rbDbg.maxRew + '  live ' + _rbDbg.live);
+        Sx.push('dsy ' + _rbDbg.desync + ' hok ' + _rbDbg.hashOk + ' fix ' + (_rbDbg.fix|0));
+        if(d.inLog.length) Nx.push('< ' + d.inLog.join(' '));
     } else {
-        N.push('online ' + _netCounts.online + '  playing ' + _netCounts.playing);
-        if(_netLb.invite && Date.now()-(_netLb.invite.at||0) < NET_INVITE_STALE_MS) N.push('INVITE FROM ' + String(_netLb.invite.from).slice(0,4) + (_netLb.invite.relay?' (relay)':''));
-        if(_netHs.sent) N.push('INVITED ' + String(_netHs.sent).slice(0,4) + ' - waiting');
-        if(_netHs.accepting) N.push('ACCEPTED ' + String(_netHs.accepting).slice(0,4) + ' - awaiting offer');
-        if(_netHs.offerTo) N.push('OFFERED ' + String(_netHs.offerTo).slice(0,4) + ' x' + _netHs.offerTries);
+        Nm.push('online ' + _netCounts.online + '  playing ' + _netCounts.playing);
+        if(_netLb.invite && Date.now()-(_netLb.invite.at||0) < NET_INVITE_STALE_MS) Nm.push('INVITE FROM ' + String(_netLb.invite.from).slice(0,4) + (_netLb.invite.relay?' (relay)':''));
+        if(_netHs.sent) Nm.push('INVITED ' + String(_netHs.sent).slice(0,4) + ' - waiting');
+        if(_netHs.accepting) Nm.push('ACCEPTED ' + String(_netHs.accepting).slice(0,4) + ' - awaiting offer');
+        if(_netHs.offerTo) Nm.push('OFFERED ' + String(_netHs.offerTo).slice(0,4) + ' x' + _netHs.offerTries);
     }
     // Two different facts, because one cannot answer for the other: whether a
     // connection is OPEN right now, and how long since the last completed exchange.
@@ -359,10 +362,10 @@ function netDebugQuad(){
         const conn = _netDbg.pollAt
             ? (_netDbg.pollHeld ? 'HELD ' : 'REQ ') + fmt(performance.now() - _netDbg.pollAt)
             : 'idle';
-        N.push('srv ' + conn + ' | data ' + fmt(performance.now() - d.lastSrvAt) + ' ago');
+        Nx.push('srv ' + conn + ' | data ' + fmt(performance.now() - d.lastSrvAt) + ' ago');
     }
-    for(const e of _netDbg.sigLog.slice(-3)) N.push(e);   // last few only -- ICE floods it mid-game
-    return { net: N.join('\n'), time: T.join('\n'), sim: S.join('\n') };
+    for(const e of _netDbg.sigLog.slice(-3)) Nx.push(e);   // last few only -- ICE floods it mid-game
+    return { net:{main:Nm,more:Nx}, time:{main:Tm,more:Tx}, sim:{main:Sm,more:Sx} };
 }
 function netFriendE2E(id){
     const theirs = _netFriendsLat ? _netFriendsLat[id] : null;
