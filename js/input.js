@@ -652,7 +652,7 @@ function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=nul
 // reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
 // pause has cleared it, the snake's own heading (dir) seeds the first turn -- single player only,
 // since a duel's heading is players[i].dir, not this global.
-let _turnSense=0, _turnRun=0;
+let _turnSense=0, _turnRun=0, _dbgLastSense=0;
 function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;
     if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
@@ -661,6 +661,7 @@ function _spiralHold(key, dist, sf){
         :(typeof dir!=='undefined'?dir:null);
     const kd=GDIRS[key];
     const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
+    _dbgLastSense=sense;   // DEBUG L3: lets the commit-side trace log only real turns, not straight/boost re-swipes
     if(sense===0) return false;
     if(sense===_turnSense && _turnRun>=2 && dist<SWIPE_GUARD*sf) return true;   // hold the third same-way turn until the swipe clears the guard
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
@@ -738,7 +739,7 @@ canvas.addEventListener('touchmove',e=>{
     if(inMenu&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
     _swipedThisTouch=true; handleKey(key,null);
     if(_inPlay()){
-        _dbgTurnLog(_myHeadCell(),key,dist,_turnRun,false,thresh);   // DEBUG L3: mark the committed turn at the head cell
+        if(_dbgLastSense!==0) _dbgTurnLog(_myHeadCell(),key,dist,_turnRun,false,thresh);   // DEBUG L3: mark the committed turn (real 90-degree turns only)
         const d=GDIRS[key];
         if(d){
             // clearBoost() writes the classic globals directly, which does nothing for a
