@@ -717,19 +717,35 @@ function _drawGourangaPending(now) {
         ctx.restore();
     }
 }
-function _drawHeart(now) {
-    if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0&&!_simpleGfx()) return;   // the expiry blink is an animation
-    // Same HEART_PX pixel art the HUD and README use, so the field 1UP matches them exactly.
-    // Square pixels preserve the art's native 7x6 ratio (no stretch); the pulse scales it whole.
-    const pulse=_simpleGfx()?1:0.9+0.1*Math.sin((now-heartAt)/220);
+// Same HEART_PX pixel art the HUD and README use, so every 1UP on the field matches them
+// exactly. Square pixels preserve the art's native 7x6 ratio (no stretch); the pulse scales
+// it whole. Shared by the contested centre heart and the level-finisher gem-as-heart hint.
+function _drawHeartAt(gx, gy, since, now) {
+    const pulse=_simpleGfx()?1:0.9+0.1*Math.sin((now-since)/220);
     const cols=HEART_PX[0].length, rows=HEART_PX.length;
     const px=(CS*0.84)/cols, w=px*cols, h=px*rows;
-    const cx=heart.x*CS+CS/2, cy=heart.y*CS+CS/2;
+    const cx=gx*CS+CS/2, cy=gy*CS+CS/2;
     ctx.save();
     ctx.translate(cx,cy); ctx.scale(pulse,pulse); ctx.translate(-w/2,-h/2);
     ctx.shadowColor='#ff4499'; ctx.shadowBlur=_simpleGfx()?0:10; ctx.fillStyle='#ff2266';
     HEART_PX.forEach((row,ry)=>row.forEach((v,rx)=>{ if(v) ctx.fillRect(rx*px,ry*px,px+0.4,px+0.4); }));
     ctx.restore();
+}
+function _drawHeart(now) {
+    if(heartIsEarly&&now-heartAt>8500&&Math.floor(now/180)%2===0&&!_simpleGfx()) return;   // the expiry blink is an animation
+    _drawHeartAt(heart.x, heart.y, heartAt, now);
+}
+// The level-finisher gem (the one that pushes gemsDone to GEMS_PER_LEVEL) hands its eater a
+// heart back, but only if that eater is still under the 3-heart cap. Show it AS a heart only
+// when that heart-back would actually apply to the viewer: online, that is our own snake; on a
+// shared hotseat screen, it is real as long as EITHER player can still gain it. Duel-only.
+function _gemIsFinisherHeart() {
+    if(!players || gemsDone !== GEMS_PER_LEVEL-1) return false;
+    if(typeof netGameActive==='function' && netGameActive()){
+        const me=(typeof netMyIndex==='function') ? netMyIndex() : 0;
+        return !!(players[me] && players[me].lives < START_LIVES);
+    }
+    return players.some(p=>p.lives < START_LIVES);
 }
 function _drawCrushEffects(now) {
     _crushEffects=_crushEffects.filter(e=>{
