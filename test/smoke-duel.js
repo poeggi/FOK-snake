@@ -48,7 +48,7 @@ runTest('SMOKE-DUEL', `
     if(phase!=='duelReady') throw 'duel: first head-on should restart the level, got '+phase;
     if(players[0].lives!==2||players[1].lives!==2) throw 'duel: head-on did not cost both a heart';
     if(level!==1||gemsDone!==0) throw 'duel: death restart must keep the level and reset gems';
-    updateHUD();                                  // duel HUD path (P1/P2 hearts + shared gems/level)
+    inGame=true; updateHUD(); inGame=false;       // duel HUD path (P1/P2 hearts + shared gems/level); inGame gates duel content
 
     // Level progression + the heart-back twist: P0 eats the 10th gem.
     bars=[]; gemsDone=9; phase='duel'; spawnAt=-999999;

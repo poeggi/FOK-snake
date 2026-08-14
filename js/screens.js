@@ -64,7 +64,7 @@ function drawSplash(now) {
         // Coin snaps into slot over 80ms then disappears below clip rect
         if (exitMs < 80) {
             showCoin = true;
-            coinY = (slotY - 14) + 28 * (exitMs / 80);
+            coinY = (slotY - 7) + 28 * (exitMs / 80);   // from the 1/4-sunk rest, snap the rest of the way in
             scaleX = 1; spinAngle = 0; coinClipped = true;
         }
         // Sparks: fire at 40ms, fade over 420ms
@@ -78,14 +78,15 @@ function drawSplash(now) {
         const dropProgress = Math.min(Math.max(dropT, 0), DROP) / DROP;
         spinAngle = dropProgress * 1.5 * Math.PI * 2;
         scaleX = Math.max(0.08, Math.abs(Math.cos(spinAngle)));
-        // The idle loop only DROPS the coin; it comes to rest ON the slot. The real
-        // insert (snap-in + spark burst) happens exclusively on the button press --
-        // see the _splashExiting branch above.
+        // The idle loop only DROPS the coin; it comes to rest a QUARTER-sunk into the slot
+        // (clipped at the mouth). The real insert (snap-in + spark burst) happens exclusively
+        // on the button press -- see the _splashExiting branch above.
         if (t >= T_DROP) {
             showCoin = true;
+            coinClipped = true;   // hide the quarter that has entered the slot mouth (clip at slotY)
             coinY = dropT < DROP
-                ? startY + (slotY - startY - 14) * Math.pow(dropT / DROP, 5)
-                : slotY - 14;   // resting, waiting for the press
+                ? startY + (slotY - startY - 7) * Math.pow(dropT / DROP, 5)
+                : slotY - 7;   // resting 1/4 inserted, waiting for the press
         }
     }
 
@@ -221,7 +222,9 @@ function drawSplashText(now) {
     // frame, so it stalls one frame then jumps the next -> visible stutter. Wall-clock is
     // continuous and matches the display cadence, so the pulse is fluent.
     const t = (typeof performance!=='undefined' && performance.now) ? performance.now() : now;
-    const s = 1 + 0.04*(1+Math.sin(t/300));   // slow, gentle 1.0..1.08 breathing (pure sine: no cusp, no jump)
+    // Slow, gentle 1.0..1.08 breathing (pure sine: no cusp, no jump) -- held still under
+    // reduced motion, which asks for no idle scaling/wobble on decorative text.
+    const s = _reduceMotion() ? 1 : 1 + 0.04*(1+Math.sin(t/300));
     ctx.scale(s, s);
     ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='#3a2a00'; ctx.fillText(txt, 1.5, 1.5);   // retro drop shadow
@@ -509,6 +512,7 @@ function drawScores() {
                     ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level|0}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
                     ctx.textAlign='left';  ctx.fillText(String(s.date||'--.--.--').slice(0,8), 418, y);
                     drawScoreHead(568, y, (s.color|0)%SNAKE_COLORS.length, (s.shopItems&&typeof s.shopItems==='object')?s.shopItems:{});
+                    if(s.platform) drawPlatformIcon(588, y, s.platform, '#8fa6b8');   // device the run was played on
                 });
                 ctx.textAlign='center';
             }
@@ -1003,6 +1007,20 @@ function _drawDuelControls(lk){
     }
     ctx.restore();
 }
+// On the online duel ready splash, show each player's device category as a small badge
+// tinted to that snake's head colour, flanking a "VS". Local 1:1 (both snakes on one
+// device) has no platforms to compare, so it draws nothing. A peer on an older client
+// sends no platform -> that side is blank; you still see your own.
+function _drawDuelPlatforms(lk){
+    if(typeof netDuelPlatforms!=='function') return;
+    const pl=netDuelPlatforms(); if(!pl) return;
+    const y=CH/2+62;
+    ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='#888'; ctx.fillText('VS', CW/2, y);
+    if(pl[0]) drawPlatformIcon(CW/2-34, y, pl[0], SNAKE_COLORS[lk.c0].head);
+    if(pl[1]) drawPlatformIcon(CW/2+34, y, pl[1], SNAKE_COLORS[lk.c1].head);
+    ctx.restore();
+}
 // The pre-round "TITLE / subhead ... GO!" splash, shared by solo levelReady and duel
 // duelReady: same timing (READY_DUR, then the GO! fade-in) and geometry for both. Only the
 // title and the secondary headline differ, so the caller passes the title and a subhead fn.
@@ -1354,7 +1372,7 @@ function drawDuelBoard(now) {
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
     else drawWorld(now);      // background + collectibles + both snakes: the shared layer
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
-    if(phase==='duelReady') drawReadyGo(now, (typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1', ()=>_drawDuelControls(lk));
+    if(phase==='duelReady') drawReadyGo(now, (typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1', ()=>{ _drawDuelControls(lk); _drawDuelPlatforms(lk); });
     if(phase==='levelDone') drawLevelDoneFx(now);
     if(phase==='dying') drawDeathFx(now);
     if(phase==='duelPaused'){

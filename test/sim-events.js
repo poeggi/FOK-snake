@@ -40,6 +40,7 @@ const driver = `
       if(want) handleKey(want, ()=>{});
     }
     _splashLeftAt=-1e9; _splashKeyHeld=false; simTick=0; simNow=0;
+    inGame=true;   // side effects here fire during an ACTIVE game -- the HUD-raise is honoured (see the showhud gate in drainSimEvents)
     startGame(0x1234ABCD);
     for(let i=0;i<12000;i++){
       if(phase==='playing') steer();

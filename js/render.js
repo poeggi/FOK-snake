@@ -37,7 +37,10 @@ function _drawHearts(cv, c2, n, color) {
 // P2 hearts (replacing SCORE, per design) / P1 score / P2 score, hearts in each
 // player's snake colour. Cells keep their positions; only what they SHOW changes.
 function updateHUD() {
-    const mode = players ? 'duel' : 'classic';
+    // Duel content only while a game/duel session is actually live: the main-thread `players`
+    // MIRROR can linger after leaving a 1:1 (the worker may be paused and never post a clearing
+    // frame), and a stale mirror must not paint duel names onto the menu HUD.
+    const mode = (players && inGame) ? 'duel' : 'classic';
     const nms = (typeof netPlayerNames==='function') ? netPlayerNames() : null;   // online: real names
     const la = mode==='duel' ? ((nms?nms[0].slice(0,MAX_NAME):'P1')+' ') : 'LIVES ';   // MAX_NAME, not 10: a full-length name was losing its tail
     const lb = mode==='duel' ? ((nms?nms[1].slice(0,MAX_NAME):'P2')+' ') : 'SCORE ';
@@ -642,6 +645,26 @@ function drawScoreHead(cx, cy, colorIdx, si) {
         if(si.crown)    drawAccessoryCrown(0, 0);
         if(si.admincrown)drawAccessoryAdmincrown(0, 0);
         if(si.halo)     drawAccessoryHalo(0, 0);
+    }
+    ctx.restore();
+}
+
+// Compact device-category glyph (pc/mobile/tv/console) for the global score rows and the
+// duel ready splash. Monochrome in `color` on a dark overlay, ~12px, CENTRED on (cx,cy);
+// no glow. An unknown/absent platform draws nothing (the server nulls unrecognized tags).
+function drawPlatformIcon(cx, cy, plat, color) {
+    if(!plat) return;
+    const col = color || '#9fb4c4', ink = '#0b1622';   // ink = the dark screen/inset
+    const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(Math.round(cx + x), Math.round(cy + y), w, h); };
+    ctx.save();
+    if(plat === 'mobile') {            // upright phone
+        R(-3,-6,6,12,col); R(-2,-5,4,8,ink); R(-1,4,2,1,ink);
+    } else if(plat === 'tv') {         // widescreen on legs
+        R(-6,-5,12,8,col); R(-5,-4,10,6,ink); R(-4,3,2,2,col); R(2,3,2,2,col);
+    } else if(plat === 'console') {    // gamepad
+        R(-6,-2,12,6,col); R(-6,-1,2,4,col); R(4,-1,2,4,col); R(-3,-1,2,2,ink); R(1,0,2,2,ink);
+    } else {                           // pc: monitor + stand + base
+        R(-5,-6,10,8,col); R(-4,-5,8,6,ink); R(-1,2,2,2,col); R(-3,4,6,1,col);
     }
     ctx.restore();
 }

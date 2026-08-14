@@ -20,7 +20,7 @@ const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
 // number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
 // additive. Returns the major integer, or null if unparseable.
-const NET_API_BUILT_MINOR = 4;   // built against 3.4 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag; per-player stats.php available, not yet consumed)
+const NET_API_BUILT_MINOR = 4;   // built against 3.4 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag + `platform` tag on scores/profile; per-player stats.php available, not yet consumed)
 function _netApiMajor(a){
     if(typeof a === 'number') return Math.floor(a);
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
@@ -183,14 +183,38 @@ function _netMyName(){
 // Name entry wrote lastSName: drop the cache so the next read sees it (the TTL alone
 // only covers writes that bypass the game, e.g. a cloud-backup restore).
 function netNameChanged(){ _netMyNameC.at = 0; }
+// Device CATEGORY (API 3.4 'platform' tag): one of pc/mobile/tv/console, best-effort
+// from the UA plus touch/pointer/screen. Cached -- the answer is fixed for the tab. It
+// is deliberately coarse and never authoritative: the server whitelists these four and
+// stores anything else as null, so a wrong or unknown guess just shows no badge.
+var _platformC = null;
+function _detectPlatform(){
+    if(_platformC) return _platformC;
+    let ua = ''; try { ua = (navigator.userAgent || '').toLowerCase(); } catch(e){}
+    let p;
+    if(/playstation|xbox|nintendo/.test(ua)) p = 'console';
+    else if(/smart-?tv|googletv|android ?tv|appletv|crkey|tizen|web ?os|hbbtv|netcast|bravia|\baft[a-z]*\b|\btv\b/.test(ua)) p = 'tv';
+    else {
+        let touch = false, coarse = false, small = false;
+        try { touch = (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window); } catch(e){}
+        try { coarse = !!(window.matchMedia && matchMedia('(pointer:coarse)').matches); } catch(e){}
+        try { small = Math.min(screen.width || 9999, screen.height || 9999) < 900; } catch(e){}
+        // iPadOS reports a desktop UA, so /ipad/ alone misses it -- the touch+coarse+small
+        // combination catches phones and tablets that the UA string hides.
+        if(/android|iphone|ipad|ipod|iemobile|blackberry|mobile|tablet|silk|kindle/.test(ua) || (touch && coarse && small)) p = 'mobile';
+        else p = 'pc';
+    }
+    _platformC = p; return p;
+}
 function _netProfile(){
-    return { name:(_netMyName()||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{} };
+    return { name:(_netMyName()||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{}, platform:_detectPlatform() };
 }
 function _netClampProfile(p){
     p = (p && typeof p === 'object') ? p : {};
     return { name: String(p.name||'???').slice(0,MAX_NAME),
              color: Math.abs(p.color|0) % SNAKE_COLORS.length,
-             shopItems: (p.shopItems && typeof p.shopItems === 'object') ? p.shopItems : {} };
+             shopItems: (p.shopItems && typeof p.shopItems === 'object') ? p.shopItems : {},
+             platform: (typeof p.platform === 'string') ? p.platform.slice(0,12) : null };
 }
 
 // ---- PTS clock sync (API: time synchronization). The server clock in unix
@@ -379,6 +403,16 @@ function netPlayerNames(){
     if(!netGameActive()) return null;
     const mine = (_netMyName() || 'YOU').slice(0, MAX_NAME);
     const peer = (_netSess.peerProfile && _netSess.peerProfile.name) || netFriendName(_netSess.peer) || fmtFriendId(_netSess.peer);
+    return netHosting() ? [mine, peer] : [peer, mine];
+}
+// The two players' device categories in PLAYER order (P0 = host, P1 = joiner), for the
+// duel ready splash. Mine from _detectPlatform(); the peer's from its exchanged profile
+// (null if an older client sent none -- that side just shows no badge). null = offline.
+function netDuelPlatforms(){
+    if(!netGameActive()) return null;
+    const mine = _detectPlatform();
+    const pp = _netSess.peerProfile || {};
+    const peer = (typeof pp.platform === 'string') ? pp.platform : null;
     return netHosting() ? [mine, peer] : [peer, mine];
 }
 // The two duel snakes' LOOKS in PLAYER order (P0 = host, P1 = joiner). Each side
@@ -1980,6 +2014,7 @@ function netSubmitScore(name, sc, lvl, completed){
         id: getPlayerId(), name: String(name).slice(0,MAX_NAME),
         score: sc|0, level: Math.max(1, lvl|0),
         diff: cfg.diff|0, color: cfg.snakeColor|0, shopItems: cfg.wornItems||{},
+        platform: _detectPlatform(),   // device category (pc/mobile/tv/console) for the global board
         seed: _netSeed, inputs: _netInputs,
         completed: !!completed,   // the run CLEARED level 10 (a win), not merely reached it
         pts: netPts() != null ? netPts() - 50 : undefined,   // the game-over moment on the PTS clock

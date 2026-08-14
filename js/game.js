@@ -220,7 +220,8 @@ function drainSimEvents(){
                 if(typeof netLogBoost === 'function'){ if(e.k === 'bs') netLogBoost(e.d, e.tk); else netLogBoostEnd(e.tk); }
                 break;
             case 'lvlreset': fireworks=[]; _crushEffects=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
-            case 'showhud':  showHUD(e.v); break;
+            case 'showhud':  if(e.v && !inGame) break;   // a stale worker "show" (e.g. a late level-reset frame) must never raise the HUD on a menu; hides always honoured
+                             showHUD(e.v); break;
             case 'gameover':
                 entryMode = 'score';
                 nameReason = e.reason || 'over';   // 'win' when set by the level-10 clear, else death
@@ -833,9 +834,15 @@ function loop(rafNow) {
         if(phase==='menu'){
             if(typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
             // Leaving 1:1 to the main menu: some exit paths (e.g. duelMenu Back) drop straight
-            // to 'menu' without tearing down the duel HUD, so its names/hearts linger. Clear the
-            // duel players through the sim (ownership-safe) and hide the HUD so it can't stay up.
-            if(players){ _wsend({t:'phase',phase:'menu'}); showHUD(false); }
+            // to 'menu' without tearing down the duel HUD, so its names/hearts linger. _wsend
+            // reaches only the worker (which may already be paused at menu and never post a
+            // clearing frame), so ALSO clear the main-thread `players` MIRROR here via simCommand
+            // -- ownership-safe (a sim command, not a bare write) -- and hide the HUD.
+            if(players){
+                _wsend({t:'phase',phase:'menu'});                                          // reset the worker's own duel state
+                if(typeof simCommand==='function') simCommand({t:'phase',phase:'menu'});   // clear the MAIN mirror: players=null
+                showHUD(false);
+            }
         }
         _lastPhase=phase;
     }

@@ -545,11 +545,48 @@ runTest('SMOKE-NET', `
     fakeSess('host'); _netSess.peerProfile={name:'BUDDY',color:1,shopItems:{}};
     const pn=netPlayerNames();
     if(pn[0]!=='KAI'||pn[1]!=='BUDDY') throw 'player names wrong: '+JSON.stringify(pn);
-    updateHUD();   // labels adopt the names without error
+    inGame=true; updateHUD(); inGame=false;   // labels adopt the names without error (inGame gates duel content)
     phase='duelOver'; duelWinner=1; drawDuelBoard(simNow);   // banner: BUDDY WINS!
     _netTeardown(); inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
     localStorage.removeItem('lastSName');
     log('in-game names ok: HUD labels + winner banner');
+
+    // ---- HUD clears on leaving a 1:1 (regression): a stale players mirror must not paint duel names on a menu ----
+    simTick=0; simNow=0; startDuel(0xBEEF); bars=[];
+    inGame=true; updateHUD();
+    if(_hudAL.textContent==='LIVES ') throw 'in a live duel the HUD must show a name, not LIVES';
+    inGame=false; phase='menu'; updateHUD();   // left to the menu (mirror may still be set); HUD must revert to classic
+    if(_hudAL.textContent!=='LIVES ') throw 'HUD stuck in duel mode on the menu: '+_hudAL.textContent;
+    _wsend({t:'phase',phase:'menu'});          // harness has no worker -> simCommand clears the mirror
+    log('hud clears on menu: duel content needs a live session, not just a stale players mirror');
+
+    // ---- platform tag (API 3.4): device category on the global board + duel profile ----
+    // Best-effort detect (server whitelists pc/mobile/tv/console, nulls anything else),
+    // so it must always yield one of the four and ride both the score submit and the
+    // exchanged duel profile. A peer that sends none is a null badge, never invented.
+    const _PLATS=['pc','mobile','tv','console'];
+    if(_PLATS.indexOf(_detectPlatform())<0) throw 'platform must be one of pc/mobile/tv/console, got '+_detectPlatform();
+    if(_netProfile().platform!==_detectPlatform()) throw 'the exchanged profile must carry the detected platform';
+    if(_netClampProfile({platform:'tv'}).platform!=='tv') throw 'clamp must keep a string platform';
+    if(_netClampProfile({platform:42}).platform!==null) throw 'clamp must null a non-string platform';
+    if(_netClampProfile({}).platform!==null) throw 'clamp must null a missing platform';
+    let _scoreBody=null; const _oPost2=_netPost, _oFetch2=globalThis.fetch;
+    globalThis.fetch=()=>({ then:()=>({ catch:()=>{} }) });
+    _netPost=async(path,body)=>{ if(path.indexOf('scores')>=0) _scoreBody=body; return null; };
+    cfg.offline=false; _netApiNewer=false;
+    netSubmitScore('KAI', 500, 3, false);
+    if(!_scoreBody || _PLATS.indexOf(_scoreBody.platform)<0) throw 'score submit must tag a valid platform: '+(_scoreBody&&_scoreBody.platform);
+    _netPost=_oPost2; globalThis.fetch=_oFetch2;
+    simTick=0; simNow=0; startDuel(0xF00D); bars=[];
+    fakeSess('host'); _netSess.peerProfile={name:'BUD',color:1,shopItems:{},platform:'mobile'};
+    const _dp=netDuelPlatforms();
+    if(!_dp||_dp[0]!==_detectPlatform()||_dp[1]!=='mobile') throw 'duel platforms wrong (host order): '+JSON.stringify(_dp);
+    phase='duelReady'; phaseAt=simNow; drawDuelBoard(simNow);   // the ready-splash badges render
+    _netSess.peerProfile={name:'BUD',color:1,shopItems:{}};      // an older peer sends no platform
+    if(netDuelPlatforms()[1]!==null) throw 'a peer without a platform must be null, not invented';
+    drawDuelBoard(simNow);                                       // one blank side still renders
+    _netTeardown(); inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
+    log('platform tag ok: detect->one of four, profile + score wire, clamp whitelist, duel host/joiner order');
 
     // ---- FRIENDS screen: rows merge server + local, accept/remove flows ----
     simNow=100000; simTick=6000; _splashLeftAt=-1e9;   // past the post-splash input guard again
