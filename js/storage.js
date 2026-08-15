@@ -12,6 +12,27 @@
 const HS_KEY = 'fok-snake-hs';
 const FK_KEY = 'fok-snake-coins';
 const CFG_KEY = 'fok-snake-cfg';
+// Deferred persistence: localStorage.setItem is synchronous and disk-backed, so writing on a
+// gameplay frame can stall the main thread (and thus input latency) for the flush. The
+// in-memory values (_cachedFOKoins, achUnlocked) are authoritative during a session, so the
+// on-disk copy only has to be current by the time the tab is backgrounded or closed. Coalesce
+// writes by key, flush when the main thread is idle, and force a flush on pagehide/hidden so a
+// pending write never dies with the tab.
+const _lsPending = new Map();
+let _lsFlushScheduled = false;
+function _lsFlush() {
+    _lsFlushScheduled = false;
+    for (const [k, v] of _lsPending) { try { localStorage.setItem(k, v); } catch (e) {} }
+    _lsPending.clear();
+}
+function saveLater(key, value) {
+    _lsPending.set(key, value);
+    if (_lsFlushScheduled) return;
+    _lsFlushScheduled = true;
+    (typeof requestIdleCallback === 'function' ? requestIdleCallback : (fn) => setTimeout(fn, 0))(_lsFlush);
+}
+try { addEventListener('pagehide', _lsFlush); } catch (e) {}
+try { document.addEventListener('visibilitychange', () => { if (document.hidden) _lsFlush(); }); } catch (e) {}
 function getScores() {
     try {
         const raw = localStorage.getItem(HS_KEY);
@@ -26,7 +47,7 @@ function getFOKoins() { return parseInt(localStorage.getItem(FK_KEY) || '0', 10)
 let _cachedFOKoins = getFOKoins();
 function addFOKoins(n) {
     _cachedFOKoins += n;
-    try { localStorage.setItem(FK_KEY, String(_cachedFOKoins)); } catch (e) {}
+    saveLater(FK_KEY, String(_cachedFOKoins));
     if(_cachedFOKoins >= 5000)    unlockAch('fokoins_1k');
     if(_cachedFOKoins >= 100000)  unlockAch('fokoins_10k');
     if(_cachedFOKoins >= 1000000) unlockAch('fokoins_1m');
@@ -122,7 +143,7 @@ const ACH_KEY = 'fok-snake-ach';
 let achUnlocked = {};
 let achPopups = [];   // {id, at}
 function loadAch() { try { achUnlocked = JSON.parse(localStorage.getItem(ACH_KEY) || '{}'); } catch (e) {} }
-function saveAch() { try { localStorage.setItem(ACH_KEY, JSON.stringify(achUnlocked)); } catch (e) {} }
+function saveAch() { saveLater(ACH_KEY, JSON.stringify(achUnlocked)); }
 function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch (e){ return true; } }
 function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch (e){} }
 const EASY_ACHS = new Set(['first_gem','level1','level5','fokoins_1k','fokoins_10k','fokoins_1m']);
@@ -138,7 +159,7 @@ loadAch();
 
 function resetStats() {
     const keys = [HS_KEY, FK_KEY, ACH_KEY, 'lastSName'];
-    keys.forEach(k=>{ try { localStorage.removeItem(k); } catch (e) {} });
+    keys.forEach(k=>{ _lsPending.delete(k); try { localStorage.removeItem(k); } catch (e) {} });
     _cachedFOKoins = 0;
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
     cfg.shopItems = {}; cfg.wornItems = null; saveCfg();   // NOTE: cfg.debug (+ other settings) intentionally preserved
