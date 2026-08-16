@@ -12,12 +12,9 @@
 const HS_KEY = 'fok-snake-hs';
 const FK_KEY = 'fok-snake-coins';
 const CFG_KEY = 'fok-snake-cfg';
-// Deferred persistence: localStorage.setItem is synchronous and disk-backed, so writing on a
-// gameplay frame can stall the main thread (and thus input latency) for the flush. The
-// in-memory values (_cachedFOKoins, achUnlocked) are authoritative during a session, so the
-// on-disk copy only has to be current by the time the tab is backgrounded or closed. Coalesce
-// writes by key, flush when the main thread is idle, and force a flush on pagehide/hidden so a
-// pending write never dies with the tab.
+// localStorage.setItem is synchronous and disk-backed, so writing it on a gameplay frame can
+// stall the main thread. The in-memory values are authoritative in-session, so the on-disk copy
+// only has to be current by the time the tab is hidden or closed.
 const _lsPending = new Map();
 let _lsFlushScheduled = false;
 function _lsFlush() {

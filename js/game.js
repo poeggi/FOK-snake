@@ -1253,17 +1253,13 @@ if ('serviceWorker' in navigator) {
         let _reloading = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (_reloading || !wasControlled) return;
-            // Auto-reload ONLY from the splash: a reload there merely re-shows the splash, so it
-            // can never yank the player out of the menu, a run, or an online handshake. A worker
-            // can activate while off-splash (a load-time update that lands late, iOS re-activation,
-            // another tab); when it does we skip the reload and let the update apply on the next
-            // cold start, where the new worker already controls the page from its first byte.
+            // Only auto-reload from the splash, so a late-activating worker can't yank the player
+            // out of a menu or run. Off-splash the update applies on the next cold start, where
+            // the new worker already controls the page from its first byte.
             if (!_updSafe.has(phase) || inGame) return;
-            // Even splash-only, a worker that re-activates on every load would reload the splash
-            // endlessly (iOS: navigator.onLine reads true on a captive/dead-uplink wifi, so the
-            // update check keeps running with no real connectivity). Persist the last auto-reload
-            // time and refuse to reload again within the window, so a burst yields one reload.
-            // sessionStorage clears on a real cold start, so a genuine update still lands.
+            // On iOS navigator.onLine reads true on a captive/dead-uplink wifi, so a worker that
+            // re-activates each load could reload the splash forever. sessionStorage (cleared on a
+            // real cold start) rate-limits the auto-reload without blocking a genuine update.
             try {
                 if (Date.now() - (+sessionStorage.getItem('swReloadAt') || 0) < 30000) return;
                 sessionStorage.setItem('swReloadAt', String(Date.now()));
