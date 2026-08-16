@@ -587,7 +587,7 @@ function step(now) {
             if(!bonus && tier===0) perfectLevel=false;
             const bonusMult=(levelBonusCount+1)*2;
             const mult=tier===2?80:tier===1?10:1;
-            const diffMult=(cfg.diff===2&&level>=2)?2:1;
+            const diffMult=cfg.diff===2?2:1;
             score+=bonus?base*bonusMult*mult*diffMult:base*mult*diffMult;
             if(tier===2){
                 emit({t:'bonus',label:bonus?`EPIC x${80*bonusMult}!`:'EPIC x80!'});
