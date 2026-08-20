@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.4.42';
+const APP_VERSION = 'v2.4.43';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -89,12 +89,12 @@ const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs a
 const LEVEL_CFG = [
     { easy:7, normal:6, hard:5, bars:0  },
     { easy:7, normal:6, hard:5, bars:2  },
-    { easy:7, normal:6, hard:4, bars:4  },
+    { easy:7, normal:6, hard:5, bars:4  },
     { easy:6, normal:5, hard:4, bars:6  },
-    { easy:6, normal:5, hard:3, bars:8  },
-    { easy:6, normal:5, hard:3, bars:10 },
+    { easy:6, normal:5, hard:4, bars:8  },
+    { easy:6, normal:5, hard:4, bars:10 },
     { easy:5, normal:4, hard:3, bars:12 },
-    { easy:5, normal:4, hard:2, bars:14 },
+    { easy:5, normal:4, hard:3, bars:14 },
     { easy:4, normal:3, hard:2, bars:16 },
     { easy:4, normal:3, hard:2, bars:18 },
 ];
