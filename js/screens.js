@@ -146,9 +146,8 @@ function drawSplash(now) {
         ctx.font = `${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline = 'bottom';
         ctx.textAlign = 'left'; ctx.fillStyle = '#4a7a4a';   // version bottom-left, same spot/style as the menu
         ctx.fillText(_swVersion, 10, CH - 8);
-        ctx.textAlign = 'center'; ctx.fillStyle = '#888';
-        ctx.fillText('ENTER:go  TAP:go  CLICK:go', CW/2, CH - 8);
         ctx.restore();
+        ct('ENTER:go  TAP:go  CLICK:go', CW/2, HINT_Y, '#888', FONT.HINT);
     }
 }
 
@@ -210,7 +209,7 @@ function drawNews(now) {
     _drawNewspaperPage(now);
     ctx.restore();
     if(t>=1){ const multi=ANNOUNCEMENT&&ANNOUNCEMENT.pages&&ANNOUNCEMENT.pages.length>1;
-        ct(multi?'L/R:page   A/ESC:back':'A:back  ESC:back', CW/2, CH-12, '#888', FONT.HINT); }
+        ct(multi?'L/R:page   A/ESC:back':'A:back  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT); }
 }
 function drawSplashText(now) {
     const txt = (cfg.debug>0) ? 'DEBUG MODE' : _splashText;   // banner doubles as the debug-on indicator
@@ -459,7 +458,7 @@ function drawSettings() {
         }
     }
     const hint=inCat?'UP/DN:nav  L/R:change  A:select  ESC:back':'UP/DN:nav  A:open  ESC:back';
-    ct(hint,CW/2,CH-10,'#888',FONT.HINT);
+    ct(hint,CW/2,HINT_Y,'#888',FONT.HINT);
 }
 
 function _drawScoreTabs(){
@@ -525,7 +524,7 @@ function drawScores() {
                 ctx.textAlign='center';
             }
         }
-        ct('L/R:tab   A/ESC:back',CW/2,CH-14,'#888',FONT.HINT);
+        ct('L/R:tab   A/ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
         return;
     }
     const scores=_scoreboardCache||[];
@@ -545,7 +544,7 @@ function drawScores() {
         });
         ctx.textAlign='center';
     }
-    ct('L/R:tab   A/ESC:back',CW/2,CH-14,'#888',FONT.HINT);
+    ct('L/R:tab   A/ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
 }
 
 function drawAchievements() {
@@ -596,7 +595,7 @@ function drawAchievements() {
     const total=list.filter(a=>achUnlocked[a.id]).length;
     ctg(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',FONT.HINT, GLOW.FAINT);
     const hint='A:back';
-    ct(hint,CW/2,CH-10,'#888',FONT.HINT);
+    ct(hint,CW/2,HINT_Y,'#888',FONT.HINT);
 }
 
 function _drawBoxIcon(x,y,box,s){
@@ -751,7 +750,7 @@ function drawShop() {
     ctx.shadowBlur=0;
     ct(shopPage===BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back'
        : shopPage===GEAR_PAGE ? 'UP/DN:nav  L/R:tab  A/||:wear  ESC:back'
-       : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,CH-12,'#888',FONT.HINT);
+       : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
     // Purchase particles
     const now=simNow;
     purchaseParticles=purchaseParticles.filter(p=>{
@@ -816,7 +815,7 @@ function drawCredits() {
     ctx.restore();
     creditsScroll -= creditsSpeed;
     if (creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
-    ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, CH-12, '#888', FONT.HINT);
+    ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 
 function drawNameEntry(now) {
@@ -833,7 +832,7 @@ function drawNameEntry(now) {
         ct(`SCORE: ${score}   LEVEL: ${level}`,CW/2,76,'#aaa',FONT.HINT);
         if(_scoreTainted){   // x10 debug run: no name entry, just an acknowledgement
             ct('x10 DEBUG RUN - NOT RANKED',CW/2,110,'#ff8844',FONT.HINT);
-            ct('A / START: CONTINUE',CW/2,CH-10,'#888',FONT.HINT);
+            ct('A / START: CONTINUE',CW/2,HINT_Y,'#888',FONT.HINT);
             return;
         }
         ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
@@ -896,7 +895,7 @@ function drawNameEntry(now) {
     }
     if(entryMode==='friend') _drawScanPanel();
     ct(isFriend?'UP/DN:letter  L/R:move  A:place  BKSP:del  ESC:back'
-              :'UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,CH-10,'#888',FONT.HINT);
+              :'UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,HINT_Y,'#888',FONT.HINT);
 }
 // Camera viewfinder (ADD FRIEND, right side): live preview while scanning; a
 // verified read auto-fills and submits (see the QR SCANNER source in input.js).
@@ -1183,7 +1182,7 @@ function drawQuitConfirm() {
 // ================================================================
 function drawDuelMenu() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
-    // at y=24 with glow 16, items from startY=90 in rowH steps, #888 hint at CH-14.
+    // at y=24 with glow 16, items from startY=90 in rowH steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
     ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const startY=90, rowH=28;
@@ -1202,7 +1201,7 @@ function drawDuelMenu() {
     menuItem('BACK', CH-52, duelSel===items.length);   // BACK toward the bottom, like drawSettings
     if(items[duelSel] && items[duelSel].note) ct(items[duelSel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
     if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
-    ct('UP/DN:nav  A:ok  ESC:back', CW/2, CH-14, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // MY ID: this player's identity + the friend-link QR (moved here from SETTINGS).
 function drawFriendId() {
@@ -1221,7 +1220,7 @@ function drawFriendId() {
         if(q.m[r][c]) ctx.fillRect(qx+(quiet+c)*mod, qy+(quiet+r)*mod, mod, mod);
     if(_netFr.msg) ct(_netFr.msg, CW/2, qy+card+12, '#ffd700', FONT.HINT);   // e.g. X ADDED YOU AS A FRIEND (see _netFrCelebrate)
     else ct('SCAN TO ADD ME AS A FRIEND', CW/2, qy+card+12, '#4a7a4a', FONT.HINT);
-    ct('A/ESC:back', CW/2, CH-10, '#888', FONT.HINT);
+    ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // ONLINE 1:1 lobby: quick match, friends with online status, incoming invites.
 // All state lives in net.js (_netLb / _netCounts / _netFriendsOnline).
@@ -1274,10 +1273,10 @@ function drawLobby(){
         ctx.globalAlpha=s1?1:0.35; ctx.shadowColor='#ff5555'; ctx.shadowBlur=s1?12:1;
         ct(s1?'> NO <':'  NO   ', CW/2+80, CH/2+28, '#ff5555', FONT.MENU);
         ctx.restore();
-        ct('L/R:choose  A:ok  ESC:decline', CW/2, CH-14, '#888', FONT.HINT);
+        ct('L/R:choose  A:ok  ESC:decline', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    ct('UP/DN:nav  A:ok  ESC:back', CW/2, CH-14, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 
 // Friend-row name column: right-aligned so it ends left of the centered ID;
@@ -1337,10 +1336,10 @@ function drawFriends(){
         ctx.globalAlpha=s1?1:0.35; ctx.shadowColor='#ff5555'; ctx.shadowBlur=s1?12:1;
         ct(s1?'> NO <':'  NO   ', CW/2+80, CH/2+28, '#ff5555', FONT.MENU);
         ctx.restore();
-        ct('L/R:choose  A:ok  ESC:cancel', CW/2, CH-14, '#888', FONT.HINT);
+        ct('L/R:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    ct('UP/DN:nav  A:ok  ESC:back', CW/2, CH-14, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 
 // Invite landing (iOS Safari only, see the boot hash parse): the scanned friend code
@@ -1358,7 +1357,7 @@ function drawInvite() {
     menuItem('COPY CODE', 272, inviteSel===0);
     menuItem('CONTINUE', 300, inviteSel===1);
     if(_inviteMsg && simNow-_inviteMsgAt<1600) ct(_inviteMsg, CW/2, 330, '#ffd700', FONT.HINT);
-    ct('UP/DN:nav  A:ok', CW/2, CH-14, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:ok', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The other side is not reaching us: either nothing has arrived for a second, or
 // what arrives is unusable (refused inputs, a hash that disagrees). Both mean the

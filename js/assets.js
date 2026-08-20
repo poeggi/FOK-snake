@@ -4,10 +4,11 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.4.44';
+const APP_VERSION = 'v2.4.45';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
+const HINT_Y = CH - 14;   // shared bottom Y for every keyboard-hint line (ct(), baseline middle)
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 // Fixed-timestep simulation clock. The whole game advances in integer sim-ticks;
 // everything time-based is expressed in ticks, not wall-clock milliseconds, so the
