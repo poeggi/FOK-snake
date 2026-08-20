@@ -592,7 +592,7 @@ function drawAchievements() {
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
-    ctg(`${total} / ${list.length} UNLOCKED`,CW/2,CH-26,'#6aaa6a',FONT.HINT, GLOW.FAINT);
+    ctg(`${total} / ${list.length} UNLOCKED`,CW/2,CH-30,'#6aaa6a',FONT.HINT, GLOW.FAINT);
     const hint='A:back';
     ct(hint,CW/2,HINT_Y,'#888',FONT.HINT);
 }
