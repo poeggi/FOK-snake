@@ -740,7 +740,7 @@ function loop(rafNow) {
     // The fps30 cap returns before counting, so capped mode honestly reads ~30.
     fpsFrames++;
     if(rafNow-fpsLast>=500){ const _live=Math.round(fpsFrames*1000/(rafNow-fpsLast));
-        if(_fpsRec) _fpsRecordAvg(_live,rafNow); else fpsEl.textContent=`${_live} FPS`;   // recording: box shows locked worst, not live
+        if(_fpsRec) _fpsRecordAvg(_live,rafNow); else if(cfg.showFps) fpsEl.textContent=`${_live} FPS`;   // recording: box shows locked worst, not live; off: box keeps the 'FPS' label
         fpsFrames=0; fpsLast=rafNow; }
 
     // Music routing (skip splash/paused/quitConfirm states)

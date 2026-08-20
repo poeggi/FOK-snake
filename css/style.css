@@ -58,7 +58,8 @@ body {
 }
 /* Hidden on the splash screen (JS sets body[data-phase]); shown on every other phase. */
 body[data-phase="splash"] #btn-mute, body[data-phase="splash"] #fps-el { opacity: 0; pointer-events: none; }
-#fps-el { font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; }
+#fps-el { font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px); color: #7aaa7a; background: #111; border: 1px solid #4a4a4a; white-space: nowrap; overflow: hidden; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+#fps-el:hover { border-color: #7fff7f; }
 #btn-mute {
     background: #0d180d; border: 1px solid #3a5a3a;
     cursor: pointer; -webkit-tap-highlight-color: transparent;

@@ -100,7 +100,7 @@ function _sanitizeCfg() {
     cfg.keepAwake   = cfg.keepAwake !== false;    // hold a screen wake lock during active play
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
-    cfg.showFps     = cfg.showFps !== false;   // FPS readout box; tap the box or GAME menu to hide
+    cfg.showFps     = cfg.showFps !== false;   // FPS button shows the live number; off shows just 'FPS'
     cfg.disableGlow = !!cfg.disableGlow;
     cfg.deferDraw   = !!cfg.deferDraw;
     cfg.singleThreaded  = !!cfg.singleThreaded;

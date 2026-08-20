@@ -1040,9 +1040,9 @@ muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();
 // ================================================================
-// SOURCE: FPS BOX (tap hides it; SETTINGS > GAME > SHOW FPS restores)
+// SOURCE: FPS BOX (a button like MUTE: tap toggles the live number; SETTINGS > GAME > SHOW FPS mirrors it)
 // ================================================================
-function applyFpsBox(){ if(fpsEl) fpsEl.style.display = cfg.showFps ? '' : 'none'; }
+function applyFpsBox(){ if(fpsEl && !cfg.showFps) fpsEl.textContent='FPS'; }   // off = static label; the loop writes 'nnn FPS' while on
 function toggleFps(){ cfg.showFps=!cfg.showFps; applyFpsBox(); saveCfg(); Snd.sfxPlay('nav',cfg.music); }
 if(fpsEl){
     fpsEl.addEventListener('click',toggleFps);
