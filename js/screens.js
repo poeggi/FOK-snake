@@ -247,8 +247,7 @@ function _composeMenu(diffLine){
     c.font=`${FONT.HINT}px "Press Start 2P"`; c.textBaseline='bottom'; c.shadowBlur=0;
     c.fillStyle='#4a7a4a'; c.textAlign='left';
     c.fillText(_swVersion, 10, CH-8);
-    c.fillStyle='#888'; c.textAlign='center';
-    c.fillText('UP/DN:nav  A:ok  START:quick', CW/2, CH-8);
+    ct('UP/DN:nav  A:ok  START:quick', CW/2, HINT_Y, '#888', FONT.HINT, c);
     c.restore();
 }
 // Decorative idle wanderer behind the menu: a dim, low-alpha snake meandering a
@@ -1060,8 +1059,7 @@ function drawLevelDoneFx(now){
         }
     }
     if(levelDoneWaiting&&Math.floor(now/520)%2===0){
-        ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-        ctx.fillStyle='#888'; ctx.fillText('A:next  TAP:next',CW/2,CH-8); ctx.restore();
+        ctx.save(); ctx.shadowBlur=0; ct('A:next  TAP:next',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
     }
 }
 function drawDeathFx(now){
@@ -1083,8 +1081,7 @@ function drawGameBoard(now) {
     if(phase==='paused'){
         drawOvBg(0.55);
                 ctg('PAUSED',CW/2,CH/2+10,'#7fff7f',FONT.JUMBO, GLOW.BIG);
-        ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-        ctx.fillStyle='#888'; ctx.fillText('||:resume  ESC:quit',CW/2,CH-8); ctx.restore();
+        ctx.save(); ctx.shadowBlur=0; ct('||:resume  ESC:quit',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
     }
     // Bonus flash (duration and colour vary by tier)
     const bonusAge=now-bonusAt;
@@ -1163,8 +1160,7 @@ function drawConfirmYesNo(title, sel) {
     ctx.shadowColor='#ff5555'; ctx.shadowBlur=sel===1?12:1;
     ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',FONT.MENU);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
-    ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center';
-    ctx.fillStyle='#888'; ctx.fillText('L/R:choose  A:ok  ESC:cancel',CW/2,CH-8); ctx.restore();
+    ctx.save(); ctx.shadowBlur=0; ct('L/R:choose  A:ok  ESC:cancel',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
 }
 function drawQuitConfirm() {
     // LIVE board behind the dialog -- the game keeps running while the player decides
@@ -1386,8 +1382,7 @@ function drawDuelBoard(now) {
         // Identical to the classic paused overlay, incl. the bottom hint.
         drawOvBg(0.55);
                 ctg('PAUSED', CW/2, CH/2+10, '#7fff7f', FONT.JUMBO, GLOW.BIG);
-        ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline='bottom'; ctx.textAlign='center'; ctx.shadowBlur=0;
-        ctx.fillStyle='#888'; ctx.fillText('||:resume  ESC:quit',CW/2,CH-8); ctx.restore();
+        ctx.save(); ctx.shadowBlur=0; ct('||:resume  ESC:quit',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
     }
     if(phase==='duelOver' && now-phaseAt >= FX_SETTLE_MS){   // hold the winner banner 2 ticks, same as the death message: a mispredicted final kill rolled back never flashes "X WINS!"
         // Match over: winner banner + final score, then a PLAY AGAIN? dialog in the
