@@ -788,7 +788,7 @@ function simCommand(m){
             // send 'advance' twice -- without this check that would skip a level.
             if(phase!=='levelDone' || !levelDoneWaiting) break;
             if(players){ if(level<MAX_LEVELS) level++; _duelBeginLevel(); }   // duel is endless: at 10 it re-runs max difficulty
-            else if(level<MAX_LEVELS){ _levelStartLen = cfg.diff===2?snake.length:0; level++; beginLevel(); }
+            else if(level<MAX_LEVELS){ _levelStartLen = cfg.diff===2?Math.max(3,snake.length-2):0; level++; beginLevel(); }   // hard carries length over, minus 2 each level to ease it slightly
             else { phase='nameEntry'; emit({t:'gameover', reason:'win'}); }
             break;
         case 'pause':
