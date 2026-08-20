@@ -21,6 +21,8 @@ body {
     user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none;
     overflow: hidden;
+    /* whole-screen swipes: keep the browser from claiming any of it for scroll/zoom */
+    touch-action: none;
 }
 #hud {
     /* 2x2 grid: cells a b / c d. Classic: LIVES SCORE / GEMS LEVEL. Duel: P1-lives

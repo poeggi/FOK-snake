@@ -100,6 +100,7 @@ function _sanitizeCfg() {
     cfg.keepAwake   = cfg.keepAwake !== false;    // hold a screen wake lock during active play
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
+    cfg.showFps     = cfg.showFps !== false;   // FPS readout box; tap the box or GAME menu to hide
     cfg.disableGlow = !!cfg.disableGlow;
     cfg.deferDraw   = !!cfg.deferDraw;
     cfg.singleThreaded  = !!cfg.singleThreaded;
@@ -174,7 +175,7 @@ function resetSettings() {
     applyHandedness();
     Snd.musicSetVolume(cfg.volume==null?1:cfg.volume); Snd.sfxSetVolume(cfg.sfxVol==null?0.5:cfg.sfxVol);
     if(cfg.music){ Snd.audioResume(); Snd.musicUnmute('mute'); } else Snd.musicMute('mute');
-    updateMuteBtn();
+    updateMuteBtn(); if(typeof applyFpsBox==='function')applyFpsBox();
 }
 
 // ================================================================
@@ -314,7 +315,7 @@ function _applyRestoredConfig(d){
     if(d.tok) setCloudToken(d.tok);                            // and the cloud-restore credential
     _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
     if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
-    applyHandedness(); updateMuteBtn(); _scoreboardCache=null;
+    applyHandedness(); updateMuteBtn(); if(typeof applyFpsBox==='function')applyFpsBox(); _scoreboardCache=null;
     Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
     return true;
 }

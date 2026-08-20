@@ -638,12 +638,12 @@ canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashF
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
-const MENU_SWIPE_1=24, MENU_SWIPE_SAME=64;
-// Touch steering sensitivity (settings > CONTROLS): scales the IN-PLAY swipe distances only.
-// A higher setting shortens the travel a swipe needs, so the snake turns sooner. Menu scrolling
-// keeps its own fixed MENU_SWIPE_* distances, so this never makes the menus feel twitchy.
-const _TOUCH_SENS_F=[1.4,1.0,0.65];
-function _touchSensF(){ return _inPlay()?(_TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1):1; }
+const MENU_SWIPE_1=24, MENU_SWIPE_SAME=48;
+// Touch steering sensitivity (settings > CONTROLS): scales every swipe distance, in-play and in
+// menus alike. A higher setting shortens the travel a swipe needs, so both steering and menu
+// scrolling get twitchier together.
+const _TOUCH_SENS_F=[1.33,1.0,0.66];
+function _touchSensF(){ return _TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1; }
 // Anti-spiral touch guard: three quick same-way 90-degree turns in one gesture curl the head
 // straight onto the body -- the classic fat-finger death. So the THIRD (and any further)
 // same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 48px) than a free
@@ -663,7 +663,7 @@ function _spiralHold(key, dist, sf){
     const kd=GDIRS[key];
     const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
     if(sense===0) return false;
-    if(sense===_turnSense && _turnRun>=2 && dist<SWIPE_GUARD*sf) return true;   // hold the third same-way turn until the swipe clears the guard
+    if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*sf)) return true;   // hold the third same-way turn until the swipe clears the guard
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
     return false;
 }
@@ -719,18 +719,29 @@ function _dbgSteerLog(p, d){
 }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
-canvas.addEventListener('touchstart',e=>{
-    e.preventDefault();
-    if(phase==='nameEntry'){
-        const t0=e.touches[0];
-        if(!(entryMode==='friend' && _scanTapAt(t0.clientX, t0.clientY))) nameInp.focus();
+// Swipes are read on the whole document; a touch starting on a live control (the gamepad cluster,
+// or the MUTE/FPS boxes) is excluded, grown by a margin so a near-miss isn't stolen as a swipe.
+const _MASK_MARGIN=16;
+function _inControlMask(x,y){
+    for(const id of ['gamepad','btn-mute','fps-el']){
+        const el=document.getElementById(id);
+        if(!el) continue;
+        const r=el.getBoundingClientRect();
+        if(r.width===0||r.height===0) continue;   // not laid out -> no mask
+        if(x>=r.left-_MASK_MARGIN && x<=r.right+_MASK_MARGIN && y>=r.top-_MASK_MARGIN && y<=r.bottom+_MASK_MARGIN) return true;
     }
+    return false;
+}
+document.addEventListener('touchstart',e=>{
     const t=e.touches[0];
+    if(!t || _inControlMask(t.clientX,t.clientY)) return;
+    e.preventDefault();
+    if(phase==='nameEntry' && !(entryMode==='friend' && _scanTapAt(t.clientX, t.clientY))) nameInp.focus();
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
 },{passive:false});
-canvas.addEventListener('touchmove',e=>{
-    e.preventDefault();
+document.addEventListener('touchmove',e=>{
     if(!_swipeBase||phase==='splash') return;
+    e.preventDefault();
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     const t=e.touches[0];
@@ -738,7 +749,7 @@ canvas.addEventListener('touchmove',e=>{
     const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
     const dist=Math.hypot(dx,dy);
     const sf=_touchSensF();
-    if(dist<SWIPE_1*sf) return;
+    if(dist<Math.round(SWIPE_1*sf)) return;
     const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
     const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
     const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
@@ -751,10 +762,10 @@ canvas.addEventListener('touchmove',e=>{
     // first or reverse: SWIPE_1 (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention).
     // Menu UP/DOWN overrides that with its own longer two-tier distances; the in-play path is untouched.
     const isMenuV=inMenu&&(key==='ArrowUp'||key==='ArrowDown');
-    const thresh=isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
-        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N)*sf;
+    const thresh=Math.round((isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
+        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N))*sf);
     if(dist<thresh) return;
-    if(_spiralHold(key,dist,sf)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,SWIPE_GUARD*sf); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
+    if(_spiralHold(key,dist,sf)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,Math.round(SWIPE_GUARD*sf)); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
@@ -775,14 +786,15 @@ canvas.addEventListener('touchmove',e=>{
     }
     _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
 },{passive:false});
-canvas.addEventListener('touchend',e=>{
-    e.preventDefault();
+document.addEventListener('touchend',e=>{
     if(phase==='splash'){
         _swipeBase=null; _swipeLastDir=null;
         triggerSplashExit();
         return;
     }
+    // Only a touch we armed runs the cleanup, so a tap on a masked control can't end an active boost.
     if(_swipeBase){
+        e.preventDefault();
         // Menu left/right gesture: fire ONE key now, on finger-up. Otherwise, tap -> select.
         if(!_inPlay()&&phase!=='credits'&&phase!=='nameEntry'&&_menuHDir){
             handleKey(_menuHDir,null);
@@ -791,9 +803,9 @@ canvas.addEventListener('touchend',e=>{
             const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
             if(!_inPlay()&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
         }
+        _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
+        if(_inPlay()){gameBoostEnd(0);}
     }
-    _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
-    if(_inPlay()){gameBoostEnd(0);}
     if(phase==='credits'){creditsSpeed=_creditsNormal;}
 },{passive:false});
 
@@ -1027,6 +1039,16 @@ function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute('mute')
 muteBtn.addEventListener('click',toggleMute);
 muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
 updateMuteBtn();
+// ================================================================
+// SOURCE: FPS BOX (tap hides it; SETTINGS > GAME > SHOW FPS restores)
+// ================================================================
+function applyFpsBox(){ if(fpsEl) fpsEl.style.display = cfg.showFps ? '' : 'none'; }
+function toggleFps(){ cfg.showFps=!cfg.showFps; applyFpsBox(); saveCfg(); Snd.sfxPlay('nav',cfg.music); }
+if(fpsEl){
+    fpsEl.addEventListener('click',toggleFps);
+    fpsEl.addEventListener('touchstart',e=>{e.preventDefault();toggleFps();},{passive:false});
+}
+applyFpsBox();
 // ================================================================
 // SOURCE: SPLASH INPUT + AUDIO UNLOCK + BACKGROUND
 // ================================================================

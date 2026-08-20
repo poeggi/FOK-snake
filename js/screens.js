@@ -340,7 +340,7 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.handed=r?1:0;applyHandedness();} },
         { lbl:()=>'TOUCH AUTOSELECT: '+(cfg.touchSelect?'ON':'OFF'),
           act:()=>{cfg.touchSelect=!cfg.touchSelect;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; menus keep their own fixed feel
+        { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; also scales menu scroll travel
           act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
     ]},
@@ -352,6 +352,8 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
         { lbl:()=>'KEEP SCREEN AWAKE: '+(cfg.keepAwake!==false?'ON':'OFF'),   // hold a wake lock during play so the display never dims mid-run
           act:()=>{cfg.keepAwake=cfg.keepAwake===false?true:false;Snd.sfxPlay('select',cfg.music);if(typeof wakeReconcile==='function')wakeReconcile();} },
+        { lbl:()=>'SHOW FPS: '+(cfg.showFps!==false?'ON':'OFF'),
+          act:()=>{cfg.showFps=cfg.showFps===false?true:false;if(typeof applyFpsBox==='function')applyFpsBox();Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'GRAPHICS', items:[
         { lbl:()=>'GRAPHICS MODE: '+(cfg.gfxMode===0?'SIMPLE':'STANDARD'),   // SIMPLE = static in-game items (no spin/pulse); STANDARD = today
