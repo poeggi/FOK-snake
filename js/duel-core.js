@@ -60,9 +60,9 @@ const RB_REDUNDANCY = 12;
 // 16-tick input heartbeat (~267ms) plus sporadic turns -- sparse enough that an iOS WiFi
 // radio dozes between beats and pays ~150ms wake latency on the NEXT inbound packet
 // (measured: p2p-rtt 166ms, drop 0 lost 0 -- delay, not loss). A tiny bare ping every
-// ~3 ticks (~50ms) keeps each client's OWN radio out of that doze. THE tunable to A/B on
-// a real PC+iOS pair: 3 (~50ms) is the starting point; 2 (~33ms) if 50 still dozes.
-const NET_WARM_EVERY = 3;
+// ~4 ticks (~67ms) keeps each client's OWN radio out of that doze. THE tunable to A/B on
+// a real PC+iOS pair: raise it if the trickle is enough, lower it (~33ms at 2) if it dozes.
+const NET_WARM_EVERY = 4;
 var _rbSent = [];            // recent local inputs, resent for redundancy
 var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0 };
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
