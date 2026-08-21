@@ -125,8 +125,9 @@ runTest('SMOKE-NET', `
     netTickPre();
     if(players[0].dirQueue.length!==qDup) throw 'the live input was applied twice: once now, once by the tick';
     update();
+    const wSwallow=sent.length;    // re-baseline: the tick path emits warm pings between here and the P0 steer
     gameSteer(1, GDIRS.ArrowUp);   // local P2 keys are dead in an online game
-    if(sent.length!==w0+1) throw 'local P2 input must be swallowed online';
+    if(sent.length!==wSwallow) throw 'local P2 input must be swallowed online';
     // Boost: ARMING is immediate and device-local (nothing rides the wire for it);
     // the arming stage issues the real engage once the aim is live + grace has
     // passed, and THAT transition is what reaches the sim and the peer.

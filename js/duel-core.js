@@ -56,6 +56,13 @@ var _rbPeerSeq = -1;         // highest peer sequence applied
 // more than any hand generates inside a round trip, and keeps the worst-case packet
 // (~700 bytes) inside both the 1280-byte datagram budget and the relay's 2KB cap.
 const RB_REDUNDANCY = 12;
+// Radio-warm keepalive cadence, in TICKS. The game's real send cadence in play is the
+// 16-tick input heartbeat (~267ms) plus sporadic turns -- sparse enough that an iOS WiFi
+// radio dozes between beats and pays ~150ms wake latency on the NEXT inbound packet
+// (measured: p2p-rtt 166ms, drop 0 lost 0 -- delay, not loss). A tiny bare ping every
+// ~3 ticks (~50ms) keeps each client's OWN radio out of that doze. THE tunable to A/B on
+// a real PC+iOS pair: 3 (~50ms) is the starting point; 2 (~33ms) if 50 still dozes.
+const NET_WARM_EVERY = 3;
 var _rbSent = [];            // recent local inputs, resent for redundancy
 var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0 };
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
@@ -483,6 +490,12 @@ function netTickPre(){
         // SOMETHING on the wire every 16 ticks for liveness.
         _rbSentPrune();
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+    } else if((t % NET_WARM_EVERY) === 0 && !_replaying){
+        // Radio-warm keepalive (see NET_WARM_EVERY): a bare ~15B ping on the ticks that would
+        // otherwise be silent, so the wire never idles long enough for an iOS radio to doze.
+        // p2p ONLY -- _netSend drops a warm ping on the relay path (HTTP-polled; a ~20Hz ping
+        // there would hammer the server). The 267ms/1Hz sends already keep those ticks awake.
+        _netSend({ t:'pi', w:1 });
     }
     // Full resync burst (host only): ship the whole duel state on consecutive ticks so at least
     // one survives the unreliable, possibly-fragmenting channel. Triggered on a heavy desync or a

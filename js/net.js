@@ -1365,6 +1365,7 @@ function _netSend(o, pre){
     const pts = netPts();
     if(pts != null && o.pts === undefined){ o.pts = pts; pre = undefined; }   // API: every peer message carries the sender's PTS (added after pre was built: re-serialize)
     if(o.t === 'in' || o.t === 'pi') _netDbg.hbTx++;   // input-channel packets sent (incl. idle keepalives)
+    if(o.w && s.relay) return;   // the radio-warm ping is a p2p-only measure: an HTTP-polled relay cannot doze, and 20Hz posts would hammer it
     if(s.relay){ _netRelaySend(s, o); return; }
     if(!s.dc || s.dc.readyState !== 'open') return;
     try{
