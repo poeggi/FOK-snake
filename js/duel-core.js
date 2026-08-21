@@ -51,11 +51,16 @@ var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk
 var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
 var _rbSeq = 0;              // our outgoing input sequence
 var _rbPeerSeq = -1;         // highest peer sequence applied
-// Every packet repeats the recent inputs, so a lost one is repaired by the next
-// without a retransmit (the DataChannel is deliberately unreliable). 12 covers far
-// more than any hand generates inside a round trip, and keeps the worst-case packet
-// (~700 bytes) inside both the 1280-byte datagram budget and the relay's 2KB cap.
-const RB_REDUNDANCY = 12;
+// Every packet repeats the recent inputs, so a lost one is repaired by the next without a
+// retransmit (the DataChannel is deliberately unreliable). 8 covers far more than any hand
+// generates inside a round trip, and keeps the worst-case packet (~500 bytes) well inside both
+// the 1280-byte datagram budget and the relay's 2KB cap.
+const RB_REDUNDANCY = 8;
+// What we ACCEPT from a peer, kept above RB_REDUNDANCY: a peer on an older patch may still emit
+// the legacy 12 (patches interop), so rejecting at 8 would starve a mixed-version duel of the
+// other side's inputs. The guard exists only to refuse the clearly-abusive (a hostile peer could
+// pack tens of thousands into one `l`, each an unbounded _rbLog append + re-sim cost).
+const RB_RX_MAX = 12;
 // Radio-warm keepalive cadence, in TICKS. The game's real send cadence in play is the
 // 16-tick input heartbeat (~267ms) plus sporadic turns -- sparse enough that an iOS WiFi
 // radio dozes between beats and pays ~150ms wake latency on the NEXT inbound packet
@@ -570,9 +575,9 @@ function _rbPeerSteppedSince(pi, tk){
 // deliberately unreliable).
 function _netPeerInput(m){
     if(!netGameActive() || !inGame || !Array.isArray(m.l)) return;
-    // An honest peer sends at most RB_REDUNDANCY records; a hostile one could pack tens of
+    // An honest peer sends at most RB_RX_MAX records; a hostile one could pack tens of
     // thousands into one `l` (each an unbounded _rbLog append + a re-sim cost). Cap it.
-    if(m.l.length > RB_REDUNDANCY){ _rbDbg.drop++; return; }
+    if(m.l.length > RB_RX_MAX){ _rbDbg.drop++; return; }
     // Every packet -- including the idle keepalive -- carries the sender's own tick, so
     // read the offset HERE. Reading it per-record only updated while the peer was
     // actively steering, because a redundant record continues past it: the number then
@@ -603,7 +608,6 @@ function _netPeerInput(m){
         if(r.k === 'dir' && okDir)     cmd = { t:'dir', p:oP, dir:d };
         else if(r.k === 'bs' && okDir) cmd = { t:'boost', p:oP, dir:d, now:!!r.n };
         else if(r.k === 'be')          cmd = { t:'boostend', p:oP };
-        else if(r.k === 'adv')         cmd = { t:'advance' };   // peer started the next level
         if(!cmd){ _rbDbg.drop++; _rbWarnAt = performance.now(); continue; }
         // Beyond the rewind window there is no honest way to honour it: applying it
         // at the wrong tick would desync the two worlds silently. Refuse, visibly.
@@ -703,21 +707,21 @@ function netLocalInput(kind, p, d, now){
         const log = _rbLog.get(S);
         if(log) for(let i = 0; i < log.length; i++){ const c = log[i]; if(c.t === 'dir' && c.p === myP && c.dir.x === d.x && c.dir.y === d.y) return true; }
         _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x, y:d.y} });
-        const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y}, n:0 };
+        const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y} };
         _rbSentPrune(); _rbSent.push(drec);
         if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
         _netDbg.inTx++;
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
         return true;
     }
-    const cmd = kind === 'bs'  ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
-              : kind === 'adv' ? { t:'advance' }   // start the next level -- same command single player sends
-                               : { t:'boostend', p:myP };
+    const cmd = kind === 'bs' ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
+                              : { t:'boostend', p:myP };
     _rbEnsureSnap(tk);   // pin the PRE-input state as tk's rollback point, before we apply it
     cmd._live = true;    // netTickPre must not apply it a second time (a re-sim still does)
     _rbAdd(tk, cmd);
     simCommand(cmd);   // NOW, like single player. The log is for the re-sim, not the delivery.
-    const rec = { q:++_rbSeq, tk:_rbToWire(tk), k:kind, d: d ? {x:d.x, y:d.y} : null, n: now?1:0 };
+    const rec = kind === 'bs' ? { q:++_rbSeq, tk:_rbToWire(tk), k:'bs', d:{x:d.x, y:d.y}, n: now?1:0 }
+                              : { q:++_rbSeq, tk:_rbToWire(tk), k:'be' };   // be carries no dir/now: the receiver reads neither
     _rbSentPrune(); _rbSent.push(rec);
     if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
     _netDbg.inTx++;

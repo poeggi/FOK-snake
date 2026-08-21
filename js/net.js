@@ -1384,8 +1384,15 @@ function _netSend(o, pre){
     if(!s) return;
     const pts = netPts();
     if(pts != null && o.pts === undefined){ o.pts = pts; pre = undefined; }   // API: every peer message carries the sender's PTS (added after pre was built: re-serialize)
+    if(o.w){
+        // The radio-warm ping only needs SOMETHING on the wire within the doze interval, so if
+        // real traffic (a turn, boost or heartbeat) already went out this window the ping is
+        // redundant -- skip it. p2p-only regardless: an HTTP-polled relay cannot doze, and 20Hz
+        // posts would hammer it. Threshold sits one tick under the warm cadence so the idle beat
+        // itself is never suppressed by frame jitter -- only genuinely recent real traffic is.
+        if(s.relay || performance.now() - s.lastSent < (NET_WARM_EVERY - 1) * TICK_MS) return;
+    }
     if(o.t === 'in' || o.t === 'pi') _netDbg.hbTx++;   // input-channel packets sent (incl. idle keepalives)
-    if(o.w && s.relay) return;   // the radio-warm ping is a p2p-only measure: an HTTP-polled relay cannot doze, and 20Hz posts would hammer it
     if(s.relay){ _netRelaySend(s, o); return; }
     if(!s.dc || s.dc.readyState !== 'open') return;
     try{
