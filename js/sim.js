@@ -696,6 +696,7 @@ function update() {
     if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;gPer=_lvlGper(level);}
     if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
         phase='playing'; _gDue=gPer; _stepAccum=0; spawnAt=now; phaseAt=0;
+        simArmRebase();   // a held boost must re-earn its grace this level, never spawn already on
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
         if(players)_duelBeginLevel();                    // duel: out-of-hearts already went to duelOver, so this is always a restart
@@ -709,6 +710,7 @@ function update() {
     if(phase==='duelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
         phase='duel'; _gDue=gPer; spawnAt=now; phaseAt=0;
         players.forEach(P=>{ P.stepAccum=0; });
+        simArmRebase();   // same rule as single player: no respawn (or level) begins mid-boost
     }
     if(phase==='duel'){
         // TODO(netcode): RE-TEST boost-time rollbacks on devices. Root cause found: keyboard
@@ -840,6 +842,15 @@ function simApply(s){
 let _armSlots = [];   // per LOCAL player index: {dir, since, go} | {off:true} | empty
 function simArm(p, d, instant){
     _armSlots[p] = d ? { dir:{ x:d.x, y:d.y }, since:simTick, go:!!instant } : { off:true };
+}
+// A fresh play phase (level start, level-up, or the respawn after a death) must never begin
+// already boosting off a key that was held before GO. Each armed slot keeps a `since` from
+// when the hold began; left alone across a death it predates the respawn, so the grace reads
+// as already satisfied and boost snaps on at spawn. Rebase every armed slot to this tick and
+// drop the instant flag, so a still-held direction re-engages through the normal hold. Called
+// from BOTH the single-player and duel GO transitions so the two modes behave identically.
+function simArmRebase(){
+    for(const a of _armSlots){ if(a && !a.off){ a.since = simTick; a.go = false; } }
 }
 function simArmTick(){
     if(typeof _replaying !== 'undefined' && _replaying) return;   // a re-sim replays the log; it must not author anew
