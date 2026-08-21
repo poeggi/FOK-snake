@@ -1221,19 +1221,35 @@ function _readInsets(){
     p.remove();
     return r;
 }
+// Last confidently-tagged side. When the two insets are equal the notch side can only come
+// from screen.orientation.type, which iOS reports ~0.5s after the rotation -- so cache the side
+// (memory + localStorage across reloads) and apply the trim synchronously on the next rotation
+// instead of waiting for that late signal. Only the first flip after a fresh load can settle.
+let _notchCache = null;
+try { const _s = localStorage.getItem('fok_notch'); if(_s === 'left' || _s === 'right') _notchCache = _s; } catch(_){}
 function _syncSafeArea(){
     _safeIns = _readInsets();
-    const b = document.body; if(!b) return; b.classList.remove('notch-left','notch-right');
-    if(window.innerWidth <= window.innerHeight || (_safeIns.l <= 4 && _safeIns.r <= 4)){ _notchSide = '-'; return; }
+    const b = document.body; if(!b) return;
+    if(window.innerWidth <= window.innerHeight || (_safeIns.l <= 4 && _safeIns.r <= 4)){
+        b.classList.remove('notch-left','notch-right'); _notchSide = '-'; return;
+    }
     let side = null;
     if(Math.abs(_safeIns.l - _safeIns.r) > 8) side = _safeIns.l > _safeIns.r ? 'left' : 'right';   // reported asymmetry wins
-    else { const t = (screen.orientation && screen.orientation.type) || '';                        // symmetric: fall back to orientation
+    else { const t = (typeof screen !== 'undefined' && screen.orientation && screen.orientation.type) || '';
            if(t === 'landscape-primary') side = 'left'; else if(t === 'landscape-secondary') side = 'right'; }
+    if(side && side !== _notchCache){ _notchCache = side; try { localStorage.setItem('fok_notch', side); } catch(_){} }
+    side = side || _notchCache;   // transitional/ambiguous read reuses the last known side -> no shrink-then-grow
+    b.classList.remove('notch-left','notch-right');
     if(side){ b.classList.add(side === 'left' ? 'notch-left' : 'notch-right'); _notchSide = side === 'left' ? 'L' : 'R'; }
     else _notchSide = '?';
 }
-window.addEventListener('resize', () => requestAnimationFrame(() => { _syncSafeArea(); layout(); }));
-window.addEventListener('orientationchange', () => setTimeout(() => { _syncSafeArea(); layout(); }, 120));
+const _reflow = () => { _syncSafeArea(); layout(); };
+window.addEventListener('resize', () => requestAnimationFrame(_reflow));
+// React the moment the orientation actually changes (the precise signal), plus a short burst
+// across the settle window as a backstop. The cached side above already keeps repeat rotations
+// instant; these tighten the first flip after a fresh load.
+window.addEventListener('orientationchange', () => { [0,150,350,600].forEach(ms => setTimeout(_reflow, ms)); });
+if (typeof screen !== 'undefined' && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', _reflow);
 if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
 // Startup can race the web font and the browser's first CSS layout, which occasionally
 // locked a too-small canvas on reload: layout() sets the --fs-* vars it also measures, and
