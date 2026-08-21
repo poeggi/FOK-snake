@@ -15,8 +15,10 @@ body {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 100vh; height: 100dvh; min-height: 100vh; min-height: 100dvh;
     /* Top breathing room for the HUD text (scales with it); canvas bottom margin is
-       handled in layout(). Horizontal stays 0 so the canvas keeps its full width. */
-    padding: var(--pad-top-px, 8px) 0 0; gap: 8px;
+       handled in layout(). Horizontal stays 0 so the canvas keeps its full width. The
+       top inset keeps the HUD clear of the portrait notch once viewport-fit=cover lets
+       the page draw under it (env is 0px on desktop/Android, so no change there). */
+    padding: calc(var(--pad-top-px, 8px) + env(safe-area-inset-top, 0px)) 0 0; gap: 8px;
     font-family: 'Press Start 2P', 'Courier New', monospace; color: #ccc;
     user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none;
@@ -133,14 +135,20 @@ body.cursor-hidden #c { cursor: none; }
     /* Stack from the bottom for thumb reach: #wrap shrink-wraps the (JS-sized) canvas
        instead of flex-growing, so HUD + SND/FPS + canvas + gamepad sit as one cluster that
        justify-content:flex-end pushes to the bottom, leaving the empty space up top. */
-    body { justify-content: flex-end; padding-bottom: 56px; }
+    body { justify-content: flex-end; padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
     #gamepad { margin-top: 16px; }
 }
 @media (pointer: coarse) and (orientation: landscape) {
     /* Edge padding + panel gap scale with the chrome like the side panel does -- a fixed
-       3px reads as zero next to a scaled-up panel on big tablets (phones stay ~3px). */
+       3px reads as zero next to a scaled-up panel on big tablets (phones stay ~3px).
+       The per-side safe-area insets keep the panels off the notch/Dynamic Island: iOS
+       reports a big inset on the notch side and ~0 on the other, and swaps them when the
+       phone is flipped -- so the notch side stays clear while the opposite side goes
+       full-bleed (its previously-dead band reclaimed). The swipe layer is document-wide,
+       so the notch-side padding band stays touchable for steering. */
     body { flex-direction: row; align-items: stretch;
-           padding: 0 calc(3px * var(--ui-scale, 1)); gap: calc(6px * var(--ui-scale, 1)); }
+           padding: env(safe-area-inset-top, 0px) calc(3px * var(--ui-scale, 1) + env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) calc(3px * var(--ui-scale, 1) + env(safe-area-inset-left, 0px));
+           gap: calc(6px * var(--ui-scale, 1)); }
     #wrap { flex: 1 1 0; }   /* landscape fits the canvas into the flex region between panels */
     /* Side info panel -- floats left or right depending on handed setting. Width scales
        with the chrome (--ui-scale): its content (mute/FPS boxes, HUD text) is sized off
