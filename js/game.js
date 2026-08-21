@@ -401,6 +401,7 @@ function _gfxDbgText(){
         'scr ' + screen.width + 'x' + screen.height + ' ' + ((window.innerWidth>window.innerHeight)?'land':'port'),
         'vp ' + Math.round(L.vpW||0) + 'x' + Math.round(L.vpH||0),
         'cv ' + Math.round(L.cw||0) + 'x' + Math.round(L.ch||0) + ' nat ' + canvas.width + 'x' + canvas.height,
+        'sa L'+Math.round(_safeIns.l)+' R'+Math.round(_safeIns.r)+' T'+Math.round(_safeIns.t)+' B'+Math.round(_safeIns.b)+' n:'+_notchSide,
     ];
     const st = _loopMsStats();
     if(st) more.push('loop ' + st.p50.toFixed(1) + '/' + st.p95.toFixed(1) + '/' + st.mx.toFixed(1) + 'ms p50/95/mx');
@@ -1149,6 +1150,7 @@ requestAnimationFrame(syncLandscapePanels);
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
 const _pmq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: portrait)') : { matches:false };
 let _lastCw = -1, _layoutDbg = {};
+let _safeIns = { t:0, r:0, b:0, l:0 }, _notchSide = '-';
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
@@ -1202,8 +1204,36 @@ function layout() {
         root.setProperty('--mute-icon-h', Math.round(16 * scale) + 'px');   // CSS sizes #btn-mute-cv from this
     } catch(_) {}
 }
-window.addEventListener('resize', () => requestAnimationFrame(layout));
-window.addEventListener('orientationchange', () => setTimeout(layout, 120));
+// Safe-area / notch handling for landscape. iOS reserves a large horizontal inset on BOTH
+// edges of a notched phone even though the Dynamic Island obstructs only ONE side, so honoring
+// both letterboxes the board between two ~60px black bands. Read the actual insets, tag the
+// notch side (body.notch-left/right), and let CSS keep that side full while trimming the
+// opposite edge -- a rounded corner only -- to a few px. Side signal: inset asymmetry when the
+// device reports it, else screen orientation; with neither we tag nothing and both stay full.
+function _readInsets(){
+    if(typeof getComputedStyle !== 'function' || !document.body) return { t:0, r:0, b:0, l:0 };
+    const p = document.createElement('div');
+    p.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;'
+        + 'padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.appendChild(p);
+    const cs = getComputedStyle(p);
+    const r = { t:parseFloat(cs.paddingTop)||0, r:parseFloat(cs.paddingRight)||0, b:parseFloat(cs.paddingBottom)||0, l:parseFloat(cs.paddingLeft)||0 };
+    p.remove();
+    return r;
+}
+function _syncSafeArea(){
+    _safeIns = _readInsets();
+    const b = document.body; if(!b) return; b.classList.remove('notch-left','notch-right');
+    if(window.innerWidth <= window.innerHeight || (_safeIns.l <= 4 && _safeIns.r <= 4)){ _notchSide = '-'; return; }
+    let side = null;
+    if(Math.abs(_safeIns.l - _safeIns.r) > 8) side = _safeIns.l > _safeIns.r ? 'left' : 'right';   // reported asymmetry wins
+    else { const t = (screen.orientation && screen.orientation.type) || '';                        // symmetric: fall back to orientation
+           if(t === 'landscape-primary') side = 'left'; else if(t === 'landscape-secondary') side = 'right'; }
+    if(side){ b.classList.add(side === 'left' ? 'notch-left' : 'notch-right'); _notchSide = side === 'left' ? 'L' : 'R'; }
+    else _notchSide = '?';
+}
+window.addEventListener('resize', () => requestAnimationFrame(() => { _syncSafeArea(); layout(); }));
+window.addEventListener('orientationchange', () => setTimeout(() => { _syncSafeArea(); layout(); }, 120));
 if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
 // Startup can race the web font and the browser's first CSS layout, which occasionally
 // locked a too-small canvas on reload: layout() sets the --fs-* vars it also measures, and
@@ -1211,7 +1241,7 @@ if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentEleme
 // once the canvas has a fixed px size). _relayout forces two passes past that guard -- the
 // 2nd pass re-measures the chrome with the vars the 1st set, so the feedback converges.
 // Run it now, once the font is ready, and again on full load.
-function _relayout(){ _lastCw = -1; layout(); _lastCw = -1; layout(); }
+function _relayout(){ _syncSafeArea(); _lastCw = -1; layout(); _lastCw = -1; layout(); }
 requestAnimationFrame(_relayout);
 if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_relayout);
 window.addEventListener('load', _relayout);

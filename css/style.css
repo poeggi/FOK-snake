@@ -96,16 +96,16 @@ body.cursor-hidden #c { cursor: none; }
 .debug-overlay { position: fixed; z-index: 99999; background: #000d; color: #0f0;
     font: 11px monospace; padding: 3px; white-space: pre; pointer-events: none; max-width: 49vw; }
 /* Four corner docks (DEBUG LEVEL 2+): TL=network, TR=timing, BL=sim/game, BR=graphics. */
-.dbg-tl { top: 0; left: 0;  text-align: left; }
-.dbg-tr { top: 0; right: 0; text-align: right; }
+.dbg-tl { top: env(safe-area-inset-top, 0px); left: env(safe-area-inset-left, 0px);  text-align: left; }
+.dbg-tr { top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px); text-align: right; }
 /* Level 3: clickable snapshot-capture button, centred along the top edge. */
-.dbg-snap { position: fixed; z-index: 100000; top: 2px; left: 50%; transform: translateX(-50%); padding: 3px 9px;
+.dbg-snap { position: fixed; z-index: 100000; top: calc(2px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); padding: 3px 9px;
     background: #0a2a0a; color: #7fff7f; border: 1px solid #7fff7f; border-radius: 3px;
     font: bold 11px monospace; cursor: pointer; pointer-events: auto; user-select: none;
     transition: background 0.1s, color 0.1s, box-shadow 0.1s; }
 .dbg-snap.snapped { background: #7fff7f; color: #0a2a0a; box-shadow: 0 0 10px #7fff7f; }
-.dbg-bl { bottom: 0; left: 0;  text-align: left; }
-.dbg-br { bottom: 0; right: 0; text-align: right; }
+.dbg-bl { bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px);  text-align: left; }
+.dbg-br { bottom: env(safe-area-inset-bottom, 0px); right: env(safe-area-inset-right, 0px); text-align: right; }
 #gamepad { display: none; order: 4; }
 #dpad-c { touch-action: none; display: block; border: 1px solid #3a5a3a; border-radius: 6px; overflow: hidden; }
 .sbtn {
@@ -148,8 +148,17 @@ body.cursor-hidden #c { cursor: none; }
        (a bottom inset for the thin home-indicator only shoved everything up). The swipe
        layer is document-wide, so the notch-side padding band stays touchable for steering. */
     body { flex-direction: row; align-items: stretch;
-           padding: 0 calc(3px * var(--ui-scale, 1) + env(safe-area-inset-right, 0px)) 0 calc(3px * var(--ui-scale, 1) + env(safe-area-inset-left, 0px));
+           padding-top: 0; padding-bottom: 0;
+           padding-left:  calc(3px * var(--ui-scale, 1) + env(safe-area-inset-left, 0px));
+           padding-right: calc(3px * var(--ui-scale, 1) + env(safe-area-inset-right, 0px));
            gap: calc(6px * var(--ui-scale, 1)); }
+    /* The Dynamic Island / notch is a pill on ONE landscape edge, but iOS reserves a big inset
+       on BOTH, letterboxing the board between two ~60px black bands. Keep the notch side full
+       (no control may hide under the Island) and trim the opposite edge -- a rounded corner
+       only -- to a few px, handing that width back to #wrap. JS tags the notch side; untagged
+       (symmetric insets + unknown orientation) leaves both full: safe, just no reclaim. */
+    body.notch-left  { padding-right: calc(3px * var(--ui-scale, 1) + min(env(safe-area-inset-right, 0px), 8px)); }
+    body.notch-right { padding-left:  calc(3px * var(--ui-scale, 1) + min(env(safe-area-inset-left, 0px), 8px)); }
     #wrap { flex: 1 1 0; }   /* landscape fits the canvas into the flex region between panels */
     /* Side info panel -- floats left or right depending on handed setting. Width scales
        with the chrome (--ui-scale): its content (mute/FPS boxes, HUD text) is sized off
