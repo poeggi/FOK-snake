@@ -1378,8 +1378,15 @@ function drawDuelBoard(now) {
     const _rTitle=(typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1';
     const _rSub=()=>{ _drawDuelControls(lk); _drawDuelPlatforms(lk); };
     if(phase==='duelReady') drawReadyGo(now, _rTitle, _rSub);
-    // Level-up cover: hold the pre-GO get-ready splash while start_pts is negotiated, so it never lingers on LEVEL COMPLETE.
-    else if(phase==='levelDone' && typeof _lvlCover!=='undefined' && _lvlCover){ drawOvBg(0.72); ctg(_rTitle, CW/2, CH/2-18, '#7fff7f', FONT.TITLE, GLOW.TITLE); _rSub(); }
+    // Level-up cover: hold the pre-GO get-ready splash while start_pts is negotiated, so it never
+    // lingers on LEVEL COMPLETE. Both sides sit on this cover for the whole negotiation (a clock
+    // re-sync + a server round trip), so name it RE-SYNCING -- otherwise the wait looks frozen.
+    else if(phase==='levelDone' && typeof _lvlCover!=='undefined' && _lvlCover){
+        drawOvBg(0.72);
+        ctg(_rTitle, CW/2, CH/2-18, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+        ct('RE-SYNCING' + '.'.repeat(1 + Math.floor(now/350)%3), CW/2, CH/2+12, '#ffd24a', FONT.HINT);
+        _rSub();
+    }
     else if(phase==='levelDone') drawLevelDoneFx(now);
     if(phase==='dying') drawDeathFx(now);
     if(phase==='duelPaused'){

@@ -64,6 +64,13 @@ const NET_PTS_TOL = 250;
 // thing being watched for has to arrive faster than the watcher's patience -- and
 // in-game the 16-tick input heartbeat (~267ms) is the real cadence anyway.
 const NET_KEEPALIVE_MS = 300;
+// Time budget for the clock re-sync at a MID-MATCH re-anchor (level-up / rematch / respawn).
+// The full-quality sweep is 5 samples at a 200ms spread (~800ms) -- too long to sit on the
+// RE-SYNCING cover every level. Bounded, _netTimeSync adopts the best min-RTT sample so far
+// and start.php's `now` gives it a final min-RTT refinement, so the anchor stays clean while
+// the wait roughly halves. THE lever if a level-up still feels slow (lower) or drifts (raise).
+// The FIRST start -- before anyone is watching a clock -- keeps the unbudgeted full sweep.
+const NET_LEVEL_SYNC_MS = 400;
 // How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
 // a hash mismatch) before the warning clears.
 const NET_WARN_FLASH_MS = 3000;
@@ -1712,8 +1719,10 @@ async function _netRtcReanswer(from, d){
 async function _netRequestStart(s, reason){
     if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
     // The contract: a fresh sync ALWAYS precedes a new start PTS. Not "a sync from a
-    // minute ago" -- start.php rejects a pts older than ~2s as stale.
-    await _netTimeSync(true);
+    // minute ago" -- start.php rejects a pts older than ~2s as stale. A mid-match re-anchor
+    // (level-up / rematch / respawn) bounds the sweep so the player is not held on the cover;
+    // the first start keeps the full-quality sweep (see NET_LEVEL_SYNC_MS).
+    await _netTimeSync(true, (reason === 'first' || !reason) ? undefined : NET_LEVEL_SYNC_MS);
     if(_netSess !== s || !s.game) return;
     if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
     const _t0 = performance.now();
