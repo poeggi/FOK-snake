@@ -67,6 +67,10 @@ body[data-phase="splash"] #btn-mute, body[data-phase="splash"] #fps-el { opacity
 #btn-mute canvas { image-rendering: pixelated; display: block; height: var(--mute-icon-h, 16px); width: calc(var(--mute-icon-h, 16px) * 2); }
 #btn-mute:hover { border-color: #7fff7f; }
 #btn-mute.muted { border-color: #5a2a2a; }
+/* Click-only controls: never show a focus ring or a text-selection highlight. Mute also carries
+   tabindex="-1" so Tab skips it; the FPS span was never tab-focusable but its text is drag-selectable. */
+#fps-el, #btn-mute { -webkit-user-select: none; user-select: none; }
+#fps-el:focus, #btn-mute:focus, #fps-el:focus-visible, #btn-mute:focus-visible { outline: none; }
 /* Canvas region: flex:1 takes the space chrome leaves; the canvas is the largest box of
    its native aspect that fits, centred, with a 4px margin. */
 #wrap {
