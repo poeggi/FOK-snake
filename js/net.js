@@ -357,10 +357,6 @@ function netDebugQuad(){
         ? ('anc -- ' + (d.srvOfs ? '(hello ' + Math.round(d.srvOfs) + ')' : 'unsynced'))
         : ('anc ' + (_netSync.ofs>=0?'+':'') + Math.round(_netSync.ofs) + ' mr' + Math.round(_netSync.rtt) +
            ' a' + ((_netSync.at ? (Date.now()-_netSync.at) : 0)/1000).toFixed(0) + 's'));
-    // wall = the PTS our LOCAL wall clock currently equals (Date.now()+anc), as UTC
-    // hh:mm:ss.t. Two synced devices show the SAME string -- that is the whole readout.
-    const _wp = netPts();
-    Tm.push('wall ' + (_wp==null ? '-- unsynced' : _netHms(_wp)));
     Nm.push('srv rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
@@ -376,10 +372,16 @@ function netDebugQuad(){
         Nx.push(d.path || 'path ?');
         Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
         Nm.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : ''));
+        // pts live = the peer's one-way pts-delta (how late their inputs land) -- the number
+        // that predicts rollbacks, so it takes the Level-2 slot the wall clock used to hold.
+        Tm.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
         // tgt = the tick the wall PTS says we should be at; d = tgt-simTick, i.e. how far
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
         Tx.push('tgt ' + (_tgt==null?'--':_tgt + ' d' + (_tgt-simTick>=0?'+':'') + (_tgt-simTick)) + '  ptk ' + d.peerTkOfs.toFixed(2));
-        Tx.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
+        // wall = the PTS our LOCAL wall clock currently equals (Date.now()+anc) as UTC
+        // hh:mm:ss.t; two synced devices show the SAME string -- a sync check, not a
+        // per-tick number, so it rides at Level 3 now.
+        Tx.push('wall ' + (netPts()==null ? '-- unsynced' : _netHms(netPts())));
         // pset = phase sets this match (the start seed counts as the first) + how long
         // ago the last one fired. A healthy match reads "1x" with the age growing.
         Tx.push('pset ' + (d.psetN|0) + 'x' + (d.psetAt ? ' ' + ((performance.now() - d.psetAt)/1000).toFixed(0) + 's ago' : ''));
