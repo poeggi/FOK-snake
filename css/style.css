@@ -141,13 +141,14 @@ body.cursor-hidden #c { cursor: none; }
 @media (pointer: coarse) and (orientation: landscape) {
     /* Edge padding + panel gap scale with the chrome like the side panel does -- a fixed
        3px reads as zero next to a scaled-up panel on big tablets (phones stay ~3px).
-       The per-side safe-area insets keep the panels off the notch/Dynamic Island: iOS
-       reports a big inset on the notch side and ~0 on the other, and swaps them when the
-       phone is flipped -- so the notch side stays clear while the opposite side goes
-       full-bleed (its previously-dead band reclaimed). The swipe layer is document-wide,
-       so the notch-side padding band stays touchable for steering. */
+       Only the LEFT/RIGHT get a safe-area inset -- that is where the notch/Dynamic Island
+       lives in landscape. iOS reports a big inset on the notch side and ~0 on the other,
+       and swaps them when the phone is flipped, so the notch side stays clear while the
+       opposite side goes full-bleed. Top/bottom stay 0 so the panels keep the full height
+       (a bottom inset for the thin home-indicator only shoved everything up). The swipe
+       layer is document-wide, so the notch-side padding band stays touchable for steering. */
     body { flex-direction: row; align-items: stretch;
-           padding: env(safe-area-inset-top, 0px) calc(3px * var(--ui-scale, 1) + env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) calc(3px * var(--ui-scale, 1) + env(safe-area-inset-left, 0px));
+           padding: 0 calc(3px * var(--ui-scale, 1) + env(safe-area-inset-right, 0px)) 0 calc(3px * var(--ui-scale, 1) + env(safe-area-inset-left, 0px));
            gap: calc(6px * var(--ui-scale, 1)); }
     #wrap { flex: 1 1 0; }   /* landscape fits the canvas into the flex region between panels */
     /* Side info panel -- floats left or right depending on handed setting. Width scales
