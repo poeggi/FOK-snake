@@ -64,6 +64,12 @@ const RB_REDUNDANCY = 12;
 // a real PC+iOS pair: raise it if the trickle is enough, lower it (~33ms at 2) if it dozes.
 const NET_WARM_EVERY = 4;
 var _rbSent = [];            // recent local inputs, resent for redundancy
+// A received input that lands AFTER its own tick needs a rollback re-sim (the clone-heavy
+// path). Many packets draining together after a busy frame would each trigger their own --
+// a rollback flood on the single main thread. Instead every _netPeerInput only RECORDS the
+// earliest tick that needs rewinding here; netTickPre does ONE rollback per tick covering
+// them all, so the expensive op is capped at the tick rate no matter the packet rate.
+var _rbRewindTo = Infinity;
 var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0 };
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
 // and it ticks through the menus. So two clients enter a duel with wildly different
@@ -93,6 +99,7 @@ function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
     _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
     _rbResyncSend = 0;
+    _rbRewindTo = Infinity;
     _rbBadSince = 0;
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
@@ -449,6 +456,10 @@ function _rbEnsureSnap(t){
 // a re-simulation reproduces the tick exactly.
 function netTickPre(){
     if(!netGameActive() || !inGame) return;
+    // One rollback per tick, covering every late input that arrived since the last tick
+    // (recorded by _netPeerInput). Done first, while simTick is still the last-completed tick,
+    // so the re-sim corrects history before this tick's snapshot, inputs and hash settle.
+    if(_rbRewindTo !== Infinity){ _rbRollback(_rbRewindTo); _rbRewindTo = Infinity; }
     const t = simTick + 1;                       // update() increments first: this is the tick about to run
     _rbEnsureSnap(t);
     // Our own input was applied the moment it happened (netLocalInput), at exactly this
@@ -640,7 +651,10 @@ function _netPeerInput(m){
             _rbDbg.live++;
         }
     }
-    if(earliest !== Infinity) _rbRollback(earliest);
+    // Do NOT rollback here: record the earliest rewind and let netTickPre do a SINGLE re-sim
+    // covering every packet that arrived this tick. Replaying the full log from the earliest
+    // tick reaches the identical state as N separate rollbacks would, at a fraction of the cost.
+    if(earliest < _rbRewindTo) _rbRewindTo = earliest;
 }
 // In-process ONLINE home: the arming stage's real transitions go through the input
 // path (wire + log). Local 1:1 and classic keep the straight-to-sim default; the

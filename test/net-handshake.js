@@ -815,8 +815,11 @@ try {
     const p = A.__drain().filter(x => JSON.parse(x).t === 'in');
     B.__tick(30);                      // AHEAD past several steps (every 12t): old dir consumed
     p.forEach(x => B.__recv(x));
+    // The rewind is batched: __recv only records the earliest late tick, and B's next netTickPre
+    // does the single rollback (so a burst of packets costs one re-sim). It fires on the tick
+    // below, not on delivery -- hence the rb assertion after B ticks, not before.
+    A.__tick(60); B.__tick(30);        // both to tick 180; B's next netTickPre flushes the rewind
     if(!B.__rbDbg().rb) throw new Error('B did not rewind for an input that missed its step');
-    A.__tick(60); B.__tick(30);        // both to tick 180
     if(A.__simTick() !== B.__simTick()) throw new Error('drove the two sims to different tick counts: test bug');
     if(A.__hashNow() !== B.__hashNow())
       throw new Error('the two clients diverged after a rewind');

@@ -179,6 +179,11 @@ runTest('SMOKE-NET', `
     const before=_rbDbg.rb, lateTick=simTick-5, tickLeft=simTick;
     const qLate=players[1].dirQueue.length;
     _netHandleMsg(JSON.stringify({t:'in',tk:lateTick,l:[{q:50,tk:lateTick,k:'dir',d:{x:0,y:-1}}]}));
+    // The rewind is BATCHED: _netPeerInput only records the earliest late tick; netTickPre does
+    // the single rollback for every packet that landed this tick, so many packets draining
+    // together cost one re-sim, not one each. So it is netTickPre -- not packet arrival -- that
+    // rewinds. It runs before update() advances, so the correction still lands before this tick.
+    netTickPre();
     if(_rbDbg.rb!==before+1) throw 'a late input must trigger exactly one rollback';
     if(simTick!==tickLeft) throw 'the re-simulation must land back on the tick we left';
     if(simTick-_rbRing[_rbRing.length-1].tk>=RB_SNAP_EVERY) throw 'the thinned ring must stay within one snap step of the live tick';
