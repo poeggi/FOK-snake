@@ -590,7 +590,7 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // the finger clearly enters a direction corridor (0-40 deg = horizontal, 50-90 = vertical).
 // In the dead zone the baseline is NOT reset, so displacement keeps accumulating until
 // the angle exits into a real corridor.
-// Move cooldown: if the finger pauses longer than SWIPE_COOLDOWN (40ms) the last
+// Move cooldown: if the finger pauses longer than SWIPE_COOLDOWN (50ms) the last
 // direction is cleared, so the next move uses the first-move threshold and re-moves
 // after a pause feel as responsive as the first direction.
 // ---- Focus-grab clicks: a click whose job is giving this WINDOW focus (two
@@ -635,7 +635,7 @@ canvas.addEventListener('pointerup', e => {
     if (phase === 'splash') { triggerSplashExit(); }
 });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=40;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=48;
@@ -718,7 +718,7 @@ function _dbgSteerLog(p, d){
     _dbgTurnCtx=null;
 }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
-let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
+let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null, _firstMoveAt=0;
 // Swipes are read on the whole document; a touch starting on a live control (the gamepad cluster,
 // or the MUTE/FPS boxes) is excluded, grown by a margin so a near-miss isn't stolen as a swipe.
 const _MASK_MARGIN=16;
@@ -745,7 +745,7 @@ document.addEventListener('touchmove',e=>{
     const now=performance.now();
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     const t=e.touches[0];
-    if(!_swipeLastMovePos||Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y)>=5){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
+    if(!_swipeLastMovePos||Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y)>=6){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
     const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
     const dist=Math.hypot(dx,dy);
     const sf=_touchSensF();
@@ -780,10 +780,15 @@ document.addEventListener('touchmove',e=>{
             // duel snake -- gameBoostEnd routes to the right player in both modes.
             const _mb=_myBoost();
             if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){gameBoostEnd(0);}
-            else if(_swipeLastDir&&key===_swipeLastDir){gameBoostStart(0,d,true);}
+            // A short aggressive same-direction continue right after a heading is first established
+            // is a panic flick, not a boost intent: hold boost off until the finger has stayed on
+            // that heading for BOOST_GATE_MS, so only a sustained slide -- not a fast tap-and-flick
+            // (new touch, or a still finger stabbing off after a pause) -- can engage it.
+            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_firstMoveAt>=BOOST_GATE_MS) gameBoostStart(0,d,true); }
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }
+    if(!_swipeLastDir) _firstMoveAt=now;   // a heading is first established here (new touch, or re-armed after a cooldown pause); the boost gate measures sustain from this instant
     _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
 },{passive:false});
 document.addEventListener('touchend',e=>{
