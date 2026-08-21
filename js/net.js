@@ -103,7 +103,7 @@ const NET_SEND_CONG = 4 * NET_PKT_MAX;
 // by the redundant log, not the transport.
 const NET_DC_OPTS = { negotiated:true, id:0, ordered:false, maxRetransmits:0 };
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-var _netDbg = { rtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
+var _netDbg = { rtt:-1, p2pRtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
 var _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
@@ -328,14 +328,16 @@ async function _netTimeSync(force, budgetMs){
 // Debug overlay split into three corner quadrants (the fourth, graphics, is the
 // caller's -- it owns the layout numbers). N = network/transport (top-left),
 // T = timing/timekeeping (top-right), S = sim/rollback health (bottom-right).
-//   pts = engine tick clock (60/s). rtt/lat = SERVER round-trip / reported latency.
+//   pts = engine tick clock (60/s). srv rtt/lat = round-trip to the SERVER / reported latency.
+//   vs <peer> <v4|v6|relay> = who + how we are connected; p2p <ms> = the DIRECT peer RTT
+//   (from the ICE candidate-pair, NOT the server) -- the number that governs duel lag.
 //   anc = this device's clock offset vs the server (mr = min-rtt, a = age); PTS
 //   rests on it, so a wrong anc puts us out of step with the peer.
 //   P<i>[R] = my index, R=relay; ep = epoch; tgt = clock-driven tick target
 //   ptk = peer-tick (sub-tick, ~0 = aligned); pts live/avg = peer one-way pts-delta (latest, then avg + min/max)
 //   rb = rollbacks/resim-ticks, mx = deepest; live = inputs applied with NO rewind
 //   dsy = desync, hok = hash-ok; in = input records rx/tx; pkt = ALL packets rx/tx
-//   path = ICE pair (host=LAN, srflx=hairpin)
+//   path = ICE pair (host=LAN, srflx=hairpin), also carrying p2p-rtt at level 3
 // A PTS as UTC time-of-day (hh:mm:ss.t): the shared server clock is unix ms, so the
 // same PTS renders identically on every device regardless of its timezone.
 function _netHms(pts){
@@ -359,7 +361,7 @@ function netDebugQuad(){
     // hh:mm:ss.t. Two synced devices show the SAME string -- that is the whole readout.
     const _wp = netPts();
     Tm.push('wall ' + (_wp==null ? '-- unsynced' : _netHms(_wp)));
-    Nm.push('rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
+    Nm.push('srv rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
         Nx.push('P' + netMyIndex() + (_netSess.relay?'R':'') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
@@ -368,7 +370,8 @@ function netDebugQuad(){
         const _pn = _netPeerNet[_netSess.peer];
         const _pnm = (_netSess.peerProfile && _netSess.peerProfile.name) || ('#' + String(_netSess.peer).slice(0,4));
         // The peer's IP gets its OWN line: a full IPv6 next to the name overflows the quadrant.
-        Nm.push('vs ' + _pnm + '  ' + (_netSess.relay ? 'relay' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam : 'p2p') : 'p2p (no ip hint)'));
+        Nm.push('vs ' + _pnm + '  ' + (_netSess.relay ? 'relay' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam : 'p2p') : 'p2p (no ip hint)')
+            + (!_netSess.relay && d.p2pRtt >= 0 ? '  p2p ' + d.p2pRtt + 'ms' : ''));
         if(!_netSess.relay && _pn && _pn.ip) Nx.push(_pn.ip);
         Nx.push(d.path || 'path ?');
         Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
@@ -1559,7 +1562,7 @@ async function _netRelayLoop(s){
 // srflx/prflx = reflexive -- hairpins out through the router/internet even on one LAN, the usual
 // cause of "same-Wifi but 100ms jitter" -- relay = via a TURN server. Plus the true P2P RTT.
 function _netPathStat(s){
-    if(!s || s.relay){ if(s && s.relay) _netDbg.path = 'relay  srv ' + (_netDbg.relayRtt>=0 ? Math.round(_netDbg.relayRtt)+'ms' : '--'); return; }
+    if(!s || s.relay){ if(s && s.relay){ _netDbg.path = 'relay  srv ' + (_netDbg.relayRtt>=0 ? Math.round(_netDbg.relayRtt)+'ms' : '--'); _netDbg.p2pRtt = -1; } return; }
     if(!s.pc || typeof s.pc.getStats !== 'function') return;
     s.pc.getStats().then(st => {
         let pair = null;
@@ -1570,7 +1573,8 @@ function _netPathStat(s){
         const ty = c => (c && c.candidateType) ? c.candidateType : '?';
         const addr = c => (c && (c.address || c.ip)) || '';
         const fam = a => a ? (a.indexOf(':') >= 0 ? 'v6' : 'v4') : '';
-        const rtt = (typeof pair.currentRoundTripTime === 'number') ? Math.round(pair.currentRoundTripTime * 1000) + 'ms' : '?';
+        _netDbg.p2pRtt = (typeof pair.currentRoundTripTime === 'number') ? Math.round(pair.currentRoundTripTime * 1000) : -1;
+        const rtt = _netDbg.p2pRtt >= 0 ? _netDbg.p2pRtt + 'ms' : '?';
         const pn = _netPeerNet[s.peer];
         // 'deob' = the de-obfuscated real IP (grafted from the peer-net hint) is the one that
         // connected, i.e. the direct IPv6 path won past mDNS. Otherwise it is a normal host
