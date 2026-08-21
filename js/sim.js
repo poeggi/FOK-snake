@@ -146,10 +146,14 @@ function _mkDuelPlayer(x0, y0, dx) {
 // authority. Never on level 1: it is a twist on a level you just earned.
 const _SPEED_ROUND_P = 0.10;
 let _speedRound = false;
+// Per-level seed from (gameSeed, level): a level's content is a pure function of the two, so a
+// re-seed here re-anchors both clients identically regardless of prior rng consumption.
+function _duelLevelSeed(base, lvl){ return (((base >>> 0) + Math.imul(lvl >>> 0, 0x9E3779B1)) >>> 0) || 1; }
 function _duelBeginLevel() {
     // LEVEL_CFG has 10 entries; a duel is endless, so past level 10 it reuses the last
     // (hardest) config rather than reading off the end and throwing mid-match.
     const li = Math.min(level, LEVEL_CFG.length) - 1;
+    seedRng(_duelLevelSeed(gameSeed, level));
     _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
     gPer = _speedRound ? LEVEL_CFG[9].normal : LEVEL_CFG[li].normal;
     if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
@@ -790,6 +794,14 @@ function simCommand(m){
             if(players){ if(level<MAX_LEVELS) level++; _duelBeginLevel(); }   // duel is endless: at 10 it re-runs max difficulty
             else if(level<MAX_LEVELS){ _levelStartLen = cfg.diff===2?Math.max(3,snake.length-2):0; level++; beginLevel(); }   // hard carries length over, minus 2 each level to ease it slightly
             else { phase='nameEntry'; emit({t:'gameover', reason:'win'}); }
+            break;
+        case 'startDuelLevel':
+            // Online level-up: re-anchor to the negotiated start_pts and rebuild the next level
+            // from (seed, level). Lives/score carry over inside _duelBeginLevel.
+            if(!players) break;
+            simTick = 0; simNow = 0; _gAt = 0;
+            level = m.level|0 || Math.min(level + 1, MAX_LEVELS);
+            _duelBeginLevel();
             break;
         case 'pause':
             if(phase==='playing') phase='paused';

@@ -363,6 +363,58 @@ runTest('SMOKE-NET', `
     log('in-game restart ok: rides rst (sched is first-start only), epoch adopted');
     log('clock-driven ticking ok: tick follows the shared clock, none without a sync');
 
+    // ---- ONLINE LEVEL-UP: a level boundary is a freshly negotiated start, like a rematch ----
+    // Joiner nudges P0 (epoch-pinned reqlvl); P0 owns the epoch bump + one start per boundary
+    // (lvlPending). rst+lvl carries score/lives to the next level; a plain rst is a full restart.
+    const _oFetchL=globalThis.fetch; globalThis.fetch=()=>({});   // _netOk() must be TRUE or the host start no-ops
+
+    // joiner press: raises the cover, nudges P0, does NOT start locally
+    fakeSess('peer'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
+    sent.length=0; _netSess.epoch=2; _lvlCover=false;
+    netRequestNextLevel();
+    if(!_lvlCover) throw 'the presser must raise the get-ready cover at once';
+    if(_netSess.lvlPending) throw 'a joiner must not start the level itself';
+    { const _rq=JSON.parse(sent[sent.length-1]);
+      if(_rq.t!=='reqlvl' || (_rq.epoch|0)!==2) throw 'joiner must nudge P0 with an epoch-pinned reqlvl'; }
+
+    // host: acts on a matching-epoch reqlvl, ignores a stale one, folds repeats into one start
+    fakeSess('host'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
+    _netSess.epoch=5; _netSess.lvlPending=false; _lvlCover=false;
+    _netHandleMsg(JSON.stringify({t:'reqlvl', epoch:4}));
+    if(_netSess.lvlPending||_lvlCover) throw 'a stale-epoch reqlvl must be ignored';
+    _netHandleMsg(JSON.stringify({t:'reqlvl', epoch:5}));
+    if(!_netSess.lvlPending) throw 'host must open the level on a matching-epoch reqlvl';
+    if((_netSess.epoch|0)!==6) throw 'a level boundary must bump the epoch like a rematch';
+    if(!_lvlCover) throw 'the host cover must rise when it opens the level';
+    _netHandleMsg(JSON.stringify({t:'reqlvl', epoch:6}));   // repeat, same boundary
+    if((_netSess.epoch|0)!==6) throw 'lvlPending must fold a repeat start (no second epoch bump)';
+
+    // joiner receives RST+lvl: next level, score + lives carry over, lands on the get-ready
+    fakeSess('peer'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
+    simTick=0; simNow=0; beginOnlineDuel(0xBEEF, false); bars=[];
+    for(let i=0;i<80;i++){ netTickPre(); update(); }
+    level=1; players[0].score=777; players[0].lives=2; players[1].score=123; players[1].lives=3;
+    _netSess.epoch=0; _netSess.ctlEpoch=-1;
+    _netHandleMsg(JSON.stringify({t:'rst', seed:0xBEEF, startPts:netPts(), x10:false, epoch:1, lvl:1}));
+    if(level!==2) throw 'rst+lvl must step to the next level, got '+level;
+    if(players[0].score!==777||players[0].lives!==2) throw 'level-up must carry P0 score+lives';
+    if(players[1].score!==123||players[1].lives!==3) throw 'level-up must carry P1 score+lives';
+    if(phase!=='duelReady') throw 'level-up lands on the shared get-ready, got '+phase;
+
+    // a plain RST (no lvl) is still a FULL restart: level 1, score zeroed
+    fakeSess('peer'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
+    simTick=0; simNow=0; beginOnlineDuel(0xBEEF, false); bars=[];
+    for(let i=0;i<40;i++){ netTickPre(); update(); }
+    level=3; players[0].score=999;
+    _netSess.epoch=0; _netSess.ctlEpoch=-1;
+    _netHandleMsg(JSON.stringify({t:'rst', seed:0xBEEF, startPts:netPts(), x10:false, epoch:2}));
+    if(level!==1) throw 'a plain rst is a full restart: level resets to 1, got '+level;
+    if(players[0].score!==0) throw 'a full restart must zero the score';
+    globalThis.fetch=_oFetchL;
+    _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
+    simTick=6000; simNow=simTick*TICK_MS; _lvlCover=false;
+    log('online level-up ok: joiner nudges (epoch-pinned), host owns one start/boundary, cover raised, rst+lvl carries score/lives to the next level vs plain rst full restart');
+
     // ---- PLAY AGAIN handshake (host restarts only when BOTH agreed) ----
     fakeSess('host'); sent.length=0;
     phase='duelOver'; duelWinner=0;

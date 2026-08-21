@@ -656,36 +656,20 @@ function netLocalInput(kind, p, d, now){
     const myP = netMyIndex();
     let tk = simTick + 1;
     if(kind === 'dir'){
-        // A turn is STEP-granular: it has zero effect before the next game-tick
-        // boundary, so it is AUTHORED there (simTick + _gDue) -- the record then
-        // usually arrives before its own tick and applies with no rewind at all,
-        // the same quantization model boost transitions use. During READY/GO
-        // aiming no game ticks run; those stamp the next engine tick as before.
+        // A turn is step-granular: no effect before the next game-tick boundary, so it is
+        // authored there (simTick + _gDue) and applied from the shared log, local and peer alike.
         const P = players && players[myP];
         if(!P) return true;
         const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;
-        // KEYFRAME FILTER: predict the queue at S (live queue + records already
-        // authored for S) and drop what the sim would drop -- pressing the aim you
-        // already have, a reverse, or past the 3-deep queue. A dropped press never
-        // reaches the log or the wire, so both sims see identical silence.
-        // Allocation-free: this runs PER KEYPRESS (once per steer), so the old
-        // `(_rbLog.get(S)||[]).filter(...)` allocated an array + closure on every press --
-        // GC pressure that hurts most exactly when the player is mashing keys. Scan the log
-        // in place instead: count this player's pending dirs at S and keep the last one.
-        // TODO(perf): keyboard-spam still spikes INBOUND pts on Chromium single-thread (10-20ms,
-        // Firefox stays single-digit). Not this filter alone -- a scheduler sim did not reproduce
-        // it; leading suspects are GC pauses on MAIN (single-thread runs the spam sim/rollback/
-        // JSON.stringify + rollback clones there, competing with dc.onmessage; V8 vs SpiderMonkey
-        // GC explains the browser gap) and the wiggly-snake draw cost. DEFERRED: A/B via WORKER
-        // mode (offloads the spam work off main) + DISABLE GLOW; possible fix: buffer keydowns and
-        // drain once per frame (fewer main-thread tasks, one batched send).
+        // The sim's dir handler is the SOLE authority on which turns count (same-as-heading,
+        // reverse, queue full), applied identically on both clients and every rollback re-sim.
+        // Do NOT re-judge that here against a predicted queue: a correction can change dir/dirQueue
+        // before S, so a press this predicts is redundant may be one the corrected sim accepts --
+        // and dropping it here loses it on both sides. Only coalesce an exact duplicate already
+        // authored for S (a record the sim already has); this is also the same-key spam guard.
         const log = _rbLog.get(S);
-        let pendCount = 0, lastDir = null;
-        if(log) for(let i = 0; i < log.length; i++){ const c = log[i]; if(c.t === 'dir' && c.p === myP){ pendCount++; lastDir = c.dir; } }
-        const last = lastDir || (P.dirQueue.length ? P.dirQueue[P.dirQueue.length - 1] : P.dir);
-        if((d.x === last.x && d.y === last.y) || (d.x === -last.x && d.y === -last.y)
-           || P.dirQueue.length + pendCount >= 3) return true;
-        _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x,y:d.y} });   // netTickPre applies it AT S, both here and peer-side
+        if(log) for(let i = 0; i < log.length; i++){ const c = log[i]; if(c.t === 'dir' && c.p === myP && c.dir.x === d.x && c.dir.y === d.y) return true; }
+        _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x, y:d.y} });
         const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y}, n:0 };
         _rbSentPrune(); _rbSent.push(drec);
         if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();

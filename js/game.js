@@ -847,6 +847,7 @@ function loop(rafNow) {
         }
         _lastPhase=phase;
     }
+    if(phase!=='levelDone') _lvlCover=false;
     const s = SCREENS[phase] || (players ? _DUEL_SCREEN : _GAME_SCREEN);   // shared game phases (dying/levelDone) pick the board by snake count
     const transient = achPopups.length>0 || confetti.length>0;
     const skip = s.freeze && !_uiDirty && !transient && !(s.anim && s.anim());
@@ -941,6 +942,28 @@ function beginOnlineDuel(seed, hosting){
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
 }
+// Online level-up: the same shared-start negotiation as a match start, but the match
+// continues -- score/lives carry over and only the level is rebuilt from (seed, level).
+// Both clients re-anchor to the freshly negotiated start_pts, so the level boundary is a
+// clean re-sync point rather than a transmitted 'advance' input that can slip the window.
+function beginOnlineDuelLevel(hosting){
+    _sfxQ.length = 0; _fxQ.length = 0;            // startDuelLevel rewinds simTick to 0: stale queue entries would never flush
+    _pendingSnap = null; _pendingEvents.length = 0; _pendingDuel = null;
+    _netDbg.dsyFor = 0;
+    if(_useWorker()){
+        _wDuel = true;
+        _worker.postMessage({ t:'duelLevelNet',
+            my: hosting ? 0 : 1,
+            ofs: _netSync ? _netSync.ofs : null,
+            startPts: (_netSess && _netSess.startPts) || 0 });
+        return;
+    }
+    _fbAcc = 0;
+    _wsend({ t:'startDuelLevel' });
+    if(typeof _rbReset === 'function') _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
+    _netDbg.psetN = 0; _netDbg.psetAt = 0;
+    _fbSeedPhase();
+}
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
 function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
@@ -999,6 +1022,8 @@ let _pendingSnap = null, _pendingEvents = [];
 // main keeps transport (net.js), input capture and render. These helpers are the
 // main-side seam net.js and duel-core call through (typeof-guarded there).
 let _wDuel = false, _pendingDuel = null;
+// Presentation-only: holds the get-ready splash over the board while the level-up start_pts is negotiated.
+let _lvlCover = false;
 // ---- one place that decides "single threaded" (sim on MAIN, no worker) ----
 // file:// forbids Worker construction, so it is single-threaded by nature. Rather than
 // keep that as a separate hidden path, it just FORCES the two config options: an install

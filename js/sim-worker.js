@@ -203,6 +203,17 @@ onmessage = (e) => {
             _dcOfs = m.ofs; if (m.startPts != null) _dcStartPts = m.startPts;
             _dcSeedPhase();    // the grid moved: re-set the phase to it (one pset event)
             break;
+        case 'duelLevelNet':   // online level-up (mirrors duelStartNet, but keeps players/score/lives)
+            if (!_dcOn) break;
+            _dcMy = m.my|0; _dcOfs = (m.ofs == null ? _dcOfs : m.ofs); _dcStartPts = m.startPts || _dcStartPts;
+            simCommand({ t:'startDuelLevel' });
+            _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
+            _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
+            _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
+            _last = performance.now(); _acc = 0; _dcSnapN = 0; _dcSnapAt = 0;
+            _dcSeedPhase();
+            _post(); _run(true);
+            break;
         case 'duelResync':     // transport asks the host to ship the full state (reconnect)
             if (_dcOn) _rbResyncSend = RB_RESYNC_BURST;
             break;

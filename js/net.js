@@ -1171,7 +1171,7 @@ function _netMkSess(peer, role){
              relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
-             lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false,
+             lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
@@ -1704,9 +1704,10 @@ async function _netRtcReanswer(from, d){
 // the second to ask gets the SAME start_pts back, even if it is already in the past.
 // That is the point: a late peer learns exactly how late it is instead of starting
 // from a wrong origin. A `bye` resets the line, so the next match opens at epoch 0.
-// TODO(netcode): per-level RE-ANCHOR to shrink clock drift. Over a long match the two clocks can
-// drift; re-requesting a start_pts at each LEVEL boundary (this function already re-anchors on any
-// halt+epoch, e.g. respawn/rematch) would reset the drift per level. Not wired for level-ups yet.
+// A per-level start (reason 'level') re-anchors the shared clock at every LEVEL boundary the
+// same way a rematch does: fresh sync + epoch + start_pts. That resets accumulated clock drift
+// each level AND turns the level-up into a negotiated restart instead of a transmitted 'advance'
+// input -- so a level boundary can never slip outside the rollback window and split the two sims.
 async function _netRequestStart(s, reason){
     if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
     // The contract: a fresh sync ALWAYS precedes a new start PTS. Not "a sync from a
@@ -1751,13 +1752,20 @@ async function _netRequestStart(s, reason){
     // WHILE in game, so it must ride 'rst' or the peer silently ignores it and only
     // one client restarts.
     if(s.role === 'host') _netSend({ t: (reason === 'first' || !reason) ? 'sched' : 'rst',
-                                     seed:s.seed, startPts:d.start_pts, x10:s.x10, epoch:s.epoch|0 });
+                                     seed:s.seed, startPts:d.start_pts, x10:s.x10, epoch:s.epoch|0,
+                                     lvl:(reason === 'level') ? 1 : 0 });
     // start_pts may already be in the PAST when we asked late (the epoch key is what
     // lets the server answer us with the same moment anyway). Then wait is 0 and we
     // start at once -- the clock-driven tick immediately puts us on the right tick,
     // which IS the fast-forward the contract describes.
     // No !inGame guard: a rematch or a next-level start happens WHILE in game.
-    const go = () => { if(_netSess === s && s.game){ beginOnlineDuel(s.seed, s.role === 'host'); if(s.role === 'host') _netSend({ t:'start' }); } };
+    const go = () => {
+        if(_netSess !== s || !s.game) return;
+        s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
+        if(reason === 'level'){ beginOnlineDuelLevel(s.role === 'host'); return; }
+        beginOnlineDuel(s.seed, s.role === 'host');
+        if(s.role === 'host') _netSend({ t:'start' });
+    };
     const wait = Math.max(0, Math.min(5000, d.start_pts - netPts()));
     if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
 }
@@ -1830,7 +1838,8 @@ function _netHandleMsg(txt){
             if(m.x10 !== undefined) s.x10 = !!m.x10;
             s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch/level moves it
             s.epoch = ep;              // stay on the pair's epoch line
-            const go = () => { if(_netSess === s && s.game) beginOnlineDuel(s.seed, false); };
+            if(m.lvl) _lvlCover = true;
+            const go = () => { if(_netSess === s && s.game){ if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); } };
             const wait = Math.max(0, Math.min(5000, m.startPts - netPts()));
             if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
             break;
@@ -1851,6 +1860,11 @@ function _netHandleMsg(txt){
             break;
         case 'again':
             if(_netSess && _netSess.game){ _netSess.peerAgain = true; _netMaybeRestart(); _uiDirty = true; }
+            break;
+        case 'reqlvl':   // joiner asks P0 to open the next level; the epoch pins it to the boundary
+            if(_netSess && _netSess.game && _netSess.role === 'host'
+               && (typeof m.epoch !== 'number' || (m.epoch|0) === (_netSess.epoch|0)))
+                _netStartNextLevel(_netSess);
             break;
         case 'bye': _netSessionEnd('OPPONENT LEFT'); break;
         case 'pi': _netDbg.hbRx++; break;   // liveness ping: receiving it already refreshed lastRecv
@@ -1940,6 +1954,24 @@ function _netMaybeRestart(){
     // reason, the 409/400 handling and the re-check. Reuse it rather than re-implement
     // a second, subtly different start path here.
     _netRequestStart(s, 'rematch');
+}
+// Advance to the next duel level online. EITHER player's OK press triggers it; the level
+// boundary re-negotiates a shared start_pts (like a rematch, but score/lives carry over and
+// each sim auto-advances its own level deterministically). Only P0 relays the server-issued
+// start, so a joiner press nudges the host with 'reqlvl'; P0 owns the epoch bump + request.
+function netRequestNextLevel(){
+    const s = _netSess; if(!s || !s.game || !inGame) return;
+    _lvlCover = true;
+    if(s.role === 'host') _netStartNextLevel(s);
+    else _netSend({ t:'reqlvl', epoch:(s.epoch|0) });   // epoch pins the ask to THIS boundary
+}
+function _netStartNextLevel(s){
+    if(!s || !s.game || s.role !== 'host' || s.lvlPending) return;   // one start per boundary
+    if(!_netOk()){ _netSessionEnd('NO SERVER - CANNOT START'); return; }
+    _lvlCover = true;   // host may arrive here from a joiner reqlvl (no local press): cover its board too
+    s.lvlPending = true;
+    s.epoch = (s.epoch|0) + 1;   // a level boundary is a HALT: the epoch advances, exactly like a rematch
+    _netRequestStart(s, 'level');
 }
 // Local leave (quit dialog YES / duelOver NO): tell the peer, tear down silently.
 function netEndSession(){

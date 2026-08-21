@@ -509,11 +509,11 @@ function handleKey(key, pde) {
     // ---- gameplay phases: continuous controls -> player-indexed sim commands ----
     if(phase==='levelDone'){
         if(levelDoneWaiting){
-            // Start the next level. Single player + local duel: straight to the sim. Online
-            // duel: synced over the wire (netLocalInput sends 'adv' -> the same 'advance'
-            // command at an agreed tick; either player may press, the guard makes the later
-            // press a no-op). simCommand's levelDone+waiting guard makes duplicates safe.
-            if(!(typeof netLocalInput==='function' && netLocalInput('adv',0))) _wsend({t:'advance'});
+            // Online duel opens the next level via a start_pts negotiation, not a transmitted 'advance'.
+            if(typeof netRequestNextLevel === 'function' && typeof netGameActive === 'function' && netGameActive())
+                netRequestNextLevel();
+            else
+                _wsend({t:'advance'});
             if(pde)pde();
         }
     }
@@ -813,6 +813,13 @@ document.addEventListener('touchend',e=>{
     }
     if(phase==='credits'){creditsSpeed=_creditsNormal;}
 },{passive:false});
+// touchcancel (iOS system gesture, palm rejection, touch-to-scroll) skips touchend: end the
+// boost here so it cannot stick on with the finger already gone.
+document.addEventListener('touchcancel',e=>{
+    if(!_swipeBase) return;
+    if(_inPlay()) gameBoostEnd(0);
+    _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
+},{passive:true});
 
 // ================================================================
 // SOURCE: D-PAD  (touch gamepad cross)
