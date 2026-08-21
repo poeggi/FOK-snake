@@ -2,6 +2,7 @@
     "name": "Snake - FOK Edition",
     "short_name": "Snake FOK",
     "description": "Classic Snake game - 10 levels, arcade music, high scores, FOKoins",
+    "categories": ["games"],
     "start_url": "./",
     "display": "standalone",
     "background_color": "#07070e",
