@@ -94,6 +94,14 @@ const RB_DEAD_MS = 4000;                              // total silence (p2p or r
 // traffic is dropped, not queued. At ~4KB/s of duel traffic this should NEVER trip:
 // the counter (CONG in the overlay) being nonzero is itself a finding.
 const NET_SEND_CONG = 4 * NET_PKT_MAX;
+// DataChannel options. PRE-NEGOTIATED (negotiated:true + a fixed id): both peers open it
+// with the same id rather than one announcing it in-band and the other waiting on
+// ondatachannel. That drops the DCEP open handshake -- the channel is usable the instant
+// DTLS/SCTP is up, one round trip sooner to the first packet. Safe because both sides run
+// this identical code. ordered:false + maxRetransmits:0 keeps it unreliable/unordered for
+// the rollback netcode: no head-of-line stall, no retransmit lag -- a lost input is repaired
+// by the redundant log, not the transport.
+const NET_DC_OPTS = { negotiated:true, id:0, ordered:false, maxRetransmits:0 };
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
 var _netDbg = { rtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
@@ -1276,7 +1284,7 @@ async function _netRtcOffer(peer, peerProfile){   // we invited / we are the qui
     const pc = _netRtcInit(peer, 'host');
     if(peerProfile) _netSess.peerProfile = peerProfile;
     _netSess.seed = (Math.random()*0x100000000)>>>0;
-    _netWire(pc.createDataChannel('fok', { ordered:false, maxRetransmits:0 }));
+    _netWire(pc.createDataChannel('fok', NET_DC_OPTS));
     try {
         const of = await pc.createOffer();
         await pc.setLocalDescription(of);
@@ -1307,7 +1315,7 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     _netSess.seed = (d.seed>>>0) || 1;
     _netSess.x10 = !!d.x10;   // the host's rare-event scale, pinned for the match
     _netHs.accepting = null;
-    pc.ondatachannel = e => _netWire(e.channel);
+    _netWire(pc.createDataChannel('fok', NET_DC_OPTS));   // pre-negotiated: open our own end at the same id as the offerer
     _netTimeSync();   // in parallel with the ICE handshake: synced by the time sched arrives
     try {
         await pc.setRemoteDescription(d.sdp);
@@ -1666,7 +1674,7 @@ function _netRtcRebuild(s){
 async function _netRtcReoffer(s){
     if(!_netRtcAvail()) return;
     const pc = _netRtcRebuild(s);
-    _netWire(pc.createDataChannel('fok', { ordered:false, maxRetransmits:0 }));
+    _netWire(pc.createDataChannel('fok', NET_DC_OPTS));
     try {
         const of = await pc.createOffer();
         await pc.setLocalDescription(of);
@@ -1689,7 +1697,7 @@ async function _netRtcReanswer(from, d){
     if(!s.reconnectAt){ s.reconnectAt = Date.now(); s.reconnecting = true; _duelMsg = 'RECONNECTING...'; _duelMsgAt = _msgNow(); _uiDirty = true; }
     s.rcOfferSdp = sdpStr;
     const pc = _netRtcRebuild(s);
-    pc.ondatachannel = e => _netWire(e.channel);
+    _netWire(pc.createDataChannel('fok', NET_DC_OPTS));   // pre-negotiated: our own end, same id as the re-offer
     try {
         await pc.setRemoteDescription(d.sdp);
         if(s.pc === pc){ s.rdOk = true; _netIceFlush(s); }
