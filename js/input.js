@@ -590,9 +590,10 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // the finger clearly enters a direction corridor (0-40 deg = horizontal, 50-90 = vertical).
 // In the dead zone the baseline is NOT reset, so displacement keeps accumulating until
 // the angle exits into a real corridor.
-// Move cooldown: if the finger pauses longer than SWIPE_COOLDOWN (50ms) the last
-// direction is cleared, so the next move uses the first-move threshold and re-moves
-// after a pause feel as responsive as the first direction.
+// Move cooldown: if the finger PAUSES longer than SWIPE_COOLDOWN (50ms) -- staying near
+// still, not merely a coalesced gap under load -- the last direction is cleared, so the
+// next move uses the first-move threshold and re-moves after a pause feel as responsive as
+// the first direction.
 // ---- Focus-grab clicks: a click whose job is giving this WINDOW focus (two
 // side-by-side clients) must not also operate the game. Detection, not a blanket
 // first-click filter: such a gesture starts with the window still BLURRED -- its
@@ -743,9 +744,15 @@ document.addEventListener('touchmove',e=>{
     if(!_swipeBase||phase==='splash') return;
     e.preventDefault();
     const now=performance.now();
-    if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN) _swipeLastDir=null;
     const t=e.touches[0];
-    if(!_swipeLastMovePos||Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y)>=6){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
+    const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
+    // Forget the heading only on a GENUINE finger pause. A large jump since the last processed
+    // move means the finger kept sliding and the browser merely coalesced touchmove under
+    // main-thread load -- reading that as a pause wipes _swipeLastDir, restarts the boost
+    // sustain (_firstMoveAt) and is a large part of why boost engaged far less reliably in a
+    // duel than in single player. Distance travelled, not the event-delivery gap, tells them apart.
+    if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN&&moved<SWIPE_N) _swipeLastDir=null;
+    if(!_swipeLastMovePos||moved>=6){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
     const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
     const dist=Math.hypot(dx,dy);
     const sf=_touchSensF();
