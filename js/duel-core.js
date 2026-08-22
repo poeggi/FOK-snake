@@ -654,19 +654,30 @@ function _netPeerInput(m){
         _netDbg.inRx++;
         _netDbg.inLog.unshift(String(r.k) + '@' + tk);
         if(_netDbg.inLog.length > 4) _netDbg.inLog.length = 4;
-        // Deterministic lockstep: an input is applied ONLY by the tick loop, at its authored
-        // tick. THE BUFFER: the peer authors one tick ahead of its own sim and sends at once, so
-        // a remote input normally arrives while its tick is still in OUR future -- it just sits
-        // in the log and netTickPre applies it on time, with no rollback. Injecting a peer's move
-        // stays possible right up until netTickPre runs the tick; that one tick of wire slack is
-        // exactly the cushion that keeps the common case rollback-free. Only an input that lands
-        // after its tick already ran forces a correction: record the earliest such past tick and
-        // let netTickPre do ONE rollback+replay covering every late input from this drain
-        // (batching caps it at one re-sim per tick). There is NO apply-on-receive shortcut for a
-        // past input -- it could only restate what the replay computes, and every past attempt to
-        // skip that rollback (a live dir/boost mutating the present) left the already-recorded
-        // ring snapshots inconsistent with the author's: the duel-desync boost/dir bug.
-        if(tk <= simTick){ if(tk < earliest) earliest = tk; }
+        // Deterministic lockstep: an input is applied by the tick loop at its authored tick. THE
+        // BUFFER: the peer authors one tick ahead of its own sim and sends at once, so a remote
+        // input normally arrives while its tick is still in OUR future -- it sits in the log and
+        // netTickPre applies it on time, no rollback. That one tick of wire slack keeps the common
+        // case rollback-free (tk > simTick, below).
+        //
+        // ONE-TICK-LATE SHORTCUT (tk === simTick): the input for the tick that JUST ran. Apply it
+        // live here and skip the rollback, but ONLY if that tick did not already consume it:
+        //   dir   -- the target must not have stepped at simTick (a step consumed the old heading);
+        //            _rbPeerSteppedSince is exactly that test.
+        //   boost -- no accrual boundary at simTick (tk > _gAt); a boundary already spent the old
+        //            boost flag into stepAccum, so a flip authored for it must be rolled in instead.
+        // This is lockstep-safe where a general past-input live-apply is NOT: simTick is the newest
+        // past tick, so (a) no rollback can ever start later than it -- every future rollback's
+        // replay re-applies the log entry we just added at tk, it can never be skipped -- and (b)
+        // there are no already-recorded intermediate snapshots between tk and now to leave stale.
+        // The old unbounded live-apply violated both and was the duel-desync boost/dir bug.
+        //
+        // Anything older than one tick, or a tick that already stepped/accrued: no honest shortcut
+        // -- record the earliest such past tick and let netTickPre do ONE rollback+replay covering
+        // every late input from this drain (batching caps it at one re-sim per tick).
+        if(tk === simTick && (cmd.t === 'dir' ? !_rbPeerSteppedSince(oP, tk) : tk > _gAt)){
+            simCommand(cmd); _rbDbg.live++;   // SHORTCUT here: spend the peer's headroom -- inject live right before sim, no rollback
+        } else if(tk <= simTick){ if(tk < earliest) earliest = tk; }
         else _rbDbg.live++;
     }
     // Do NOT rollback here: record the earliest rewind and let netTickPre do a SINGLE re-sim
@@ -705,13 +716,21 @@ function netLocalInput(kind, p, d, now){
         return true;
     }
     const myP = netMyIndex();
-    let tk = simTick + 1;
+    // HEADROOM (mandatory, non-negotiable -- half of a pair with the shortcut in _netPeerInput).
+    // Every local input is authored at least ONE tick in the FUTURE, never at simTick or earlier,
+    // and sent at once. That lead IS the network transmit headroom: the window for the peer to
+    // receive it and apply it on its own timeline BEFORE its sim reaches the authored tick, so the
+    // common case costs no rollback. Author at the current tick and the wire gets zero time -> a
+    // rollback on every single input. The two authoring sites below each spend exactly this rule;
+    // the peer SPENDS the headroom via the one-tick-late shortcut in _netPeerInput.
+    let tk = simTick + 1;   // HEADROOM here: boost/boostend authored +1 -- tightest lead that still leaves one full tick of wire slack
     if(kind === 'dir'){
-        // A turn is step-granular: no effect before the next game-tick boundary, so it is
-        // authored there (simTick + _gDue) and applied from the shared log, local and peer alike.
+        // HEADROOM here (mandatory): a turn is step-granular -- no effect before the next game-tick
+        // boundary -- so it is authored at that boundary (simTick + _gDue, always >= simTick+1) and
+        // applied from the shared log, local and peer alike. That >= one-tick lead is the wire slack.
         const P = players && players[myP];
         if(!P) return true;
-        const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;
+        const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;   // <- authored one step boundary ahead
         // The sim's dir handler is the SOLE authority on which turns count (same-as-heading,
         // reverse, queue full), applied identically on both clients and every rollback re-sim.
         // Do NOT re-judge that here against a predicted queue: a correction can change dir/dirQueue
