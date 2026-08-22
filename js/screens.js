@@ -1027,18 +1027,45 @@ function _drawDuelPlatforms(lk){
     if(pl[1]) drawPlatformIcon(CW/2+34, y, pl[1], SNAKE_COLORS[lk.c1].head);
     ctx.restore();
 }
+// A fast-flickering vector lightning bolt at (cx,cy), drawn as a glowing zig-zag stroke.
+// ASCII-safe: the shape IS the path, no glyph. `mir` mirrors it for the right-hand side.
+function _drawBolt(now, cx, cy, mir){
+    const flick=(Math.floor(now/50)&1)===0;
+    ctx.save();
+    ctx.translate(cx, cy); if(mir) ctx.scale(-1,1);
+    ctx.beginPath();
+    ctx.moveTo(5,-19); ctx.lineTo(-5,-2); ctx.lineTo(3,-2); ctx.lineTo(-6,19);
+    ctx.lineWidth=4; ctx.lineJoin='miter'; ctx.lineCap='round';
+    ctx.shadowColor='#fff14a'; ctx.shadowBlur=GLOW.BIG;
+    ctx.strokeStyle=flick?'#ffffff':'#ffd21a';
+    ctx.stroke();
+    ctx.restore();
+}
 // The pre-round "TITLE / subhead ... GO!" splash, shared by solo levelReady and duel
 // duelReady: same timing (READY_DUR, then the GO! fade-in) and geometry for both. Only the
 // title and the secondary headline differ, so the caller passes the title and a subhead fn.
+// A duel SPEED ROUND (duel-only -- _speedRound is cleared in single player) hijacks the title
+// with a fast-strobing lightning banner so the round can never be overlooked; the branch is
+// simply dead in single player, so both modes still run this ONE splash path.
 function drawReadyGo(now, title, subhead){
     const t=now-phaseAt, goPhase=t>=READY_DUR;
     drawOvBg(0.72);
+    const strobe=(Math.floor(now/70)&1)===0;   // ~7Hz: fast enough to read as an alarm
+    if(_speedRound && strobe){ ctx.save(); ctx.globalAlpha=0.16; ctx.fillStyle='#ffee44'; ctx.fillRect(0,0,CW,CH); ctx.restore(); }
     if(!goPhase){
-        ctg(title, CW/2, CH/2-18, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+        if(_speedRound){
+            _drawBolt(now, CW/2-116, CH/2-16, false);
+            _drawBolt(now, CW/2+116, CH/2-16, true);
+            ctg('SPEED ROUND', CW/2, CH/2-18, strobe?'#fff14a':'#ff3b3b', FONT.TITLE, GLOW.BIG);
+        } else {
+            ctg(title, CW/2, CH/2-18, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+        }
         subhead();
     } else {
         const a=Math.min(1,(t-READY_DUR)/80);
-        ctx.save(); ctx.globalAlpha=a; ctg('GO!', CW/2, CH/2+10, '#ffff44', FONT.JUMBO, GLOW.BIG); ctx.restore();
+        ctx.save(); ctx.globalAlpha=a;
+        ctg('GO!', CW/2, CH/2+10, _speedRound?(strobe?'#fff14a':'#ff3b3b'):'#ffff44', FONT.JUMBO, GLOW.BIG);
+        ctx.restore();
     }
 }
 // Level-done + death overlays: shared by the single and duel boards. levelWasPerfect is
@@ -1374,6 +1401,16 @@ function drawDuelBoard(now) {
     const _sh=shakeOffset(now);   // arming happens sim-side via the 'nearmiss' event (see armNearMiss)
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
     else drawWorld(now);      // background + collectibles + both snakes: the shared layer
+    // SPEED ROUND persistent cue: a fast-pulsing hot border for the whole level, so a player who
+    // blinked past the banner still sees they are IN one. Duel-only via _speedRound; off at duelOver.
+    if(_speedRound && phase!=='duelOver'){
+        const p=(Math.floor(now/90)&1)===0;
+        ctx.save();
+        ctx.lineWidth=5; ctx.strokeStyle=p?'#ffd21a':'#ff7b1a';
+        ctx.shadowColor='#fff14a'; ctx.shadowBlur=p?GLOW.BIG:GLOW.TEXT;
+        ctx.strokeRect(3,3,CW-6,CH-6);
+        ctx.restore();
+    }
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
     const _rTitle=(typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1';
     const _rSub=()=>{ _drawDuelControls(lk); _drawDuelPlatforms(lk); };
