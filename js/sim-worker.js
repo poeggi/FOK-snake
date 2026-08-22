@@ -145,7 +145,7 @@ function _step() {
     if (dt > 250) dt = 250;            // clamp a long stall (e.g. worker was throttled)
     _acc += dt;
     let ran = 0;
-    while (_acc >= TICK_MS && ran < MAX_CATCHUP) { _acc -= TICK_MS; if (_dcOn) netTickPre(); update(); ran++; }
+    while (_acc >= TICK_MS && ran < MAX_CATCHUP) { _acc -= TICK_MS; if (_dcOn) netTickPre(); update(); if (_dcOn) netTickPost(); ran++; }
     if (ran >= MAX_CATCHUP) _acc = 0;
     if (_dcOn) {
         // Online duel: gross INTEGER tick lag (a stall, a catch-up truncation) is closed
@@ -154,7 +154,7 @@ function _step() {
         // fire every tick, since the phase measure sweeps a full unit each tick period.
         const tgt = _dcTarget();
         const d = tgt === null ? 0 : tgt - simTick;
-        if (tgt !== null && d > 1 && d <= 120 && ran < MAX_CATCHUP) { netTickPre(); update(); ran++; }
+        if (tgt !== null && d > 1 && d <= 120 && ran < MAX_CATCHUP) { netTickPre(); update(); netTickPost(); ran++; }
         if (simEvents.length) drainSimEvents();
     }
     // Post every tick during gameplay; menus/splash only pace cosmetic animation off

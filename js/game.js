@@ -798,7 +798,7 @@ function loop(rafNow) {
             let ran=0;
             let fb=frameMs; if(fb>250) fb=250;
             _fbAcc+=fb;
-            while(_fbAcc>=TICK_MS && ran<MAX_CATCHUP){ _fbAcc-=TICK_MS; if(typeof netTickPre==='function') netTickPre(); update(); ran++; }
+            while(_fbAcc>=TICK_MS && ran<MAX_CATCHUP){ _fbAcc-=TICK_MS; if(typeof netTickPre==='function') netTickPre(); update(); if(typeof netTickPost==='function') netTickPost(); ran++; }
             if(ran>=MAX_CATCHUP) _fbAcc=0;
             // The shared clock STEERS this, it does not gate it (gating stalled the game at
             // every start). Gross INTEGER tick lag is closed by one extra tick per frame
@@ -808,7 +808,7 @@ function loop(rafNow) {
             // a wrong origin; run free (rollback recovers drift, a dead game does not).
             const _tgt = (typeof netTickTarget==='function') ? netTickTarget() : null;
             const _d = _tgt === null ? 0 : _tgt - simTick;
-            if(_tgt !== null && _d > 1 && _d <= 120 && ran < MAX_CATCHUP){ if(typeof netTickPre==='function') netTickPre(); update(); }   // behind: one extra tick
+            if(_tgt !== null && _d > 1 && _d <= 120 && ran < MAX_CATCHUP){ if(typeof netTickPre==='function') netTickPre(); update(); if(typeof netTickPost==='function') netTickPost(); }   // behind: one extra tick
             if(simEvents.length) drainSimEvents();
             if(dlg){
                 prevPhase = phase;   // the game behind the dialog may have evolved (death, level change)

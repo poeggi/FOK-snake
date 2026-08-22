@@ -20,18 +20,35 @@ const log = s => { steps.push(s); };
 //   clean-boost : phase offset only, NO loss -> isolates the deferred-rollback boost drop (F1)
 //   lossy-boost : + packet loss              -> stresses the redundancy/loss window (F3)
 //   long-levels : longer run to levels 2-3   -> exercises the level-boundary epoch gap (F2)
+//   headroom    : latency + jitter + pts-desync ALL below one engine tick (16.67ms) with heavy
+//                 movement from BOTH ends -> PROVES the one-tick author headroom does its job:
+//                 every input lands within its authoring lead, so it is delivered on time (or via
+//                 the one-tick-late shortcut) and NEVER rolls back. Asserted hard as maxRb:0. The
+//                 contrast is clean-boost, whose ~half-a-tick schedule skew (phase8/tjit4) pushes a
+//                 handful of inputs past the lead and does roll back -- shrink the skew below a tick
+//                 and the count is exactly zero.
 const SCEN = [
     { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:20, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
     { name:'lossy-boost  5% loss      ', seed:0xBEEF, secs:20, wire:{ base:12, jit:6,  loss:0.05 }, phase:8, tjit:4, recv:true },
     { name:'long-levels  to L2-3      ', seed:0x77C0, secs:40, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true },
+    // Sub-tick net + pts with tick schedules ALIGNED (phase0/tjit0): net 2-6ms (base4+/-jit2)
+    // plus a real independent-clock pts-desync (err0 4ms + small drift) sum to ~10ms, a safe
+    // 6.67ms inside the 16.67ms tick. It is the SUM of net + pts + any schedule skew -- not any
+    // one term -- that must stay under a tick; with skew zeroed this is a KNOWN-0rb condition, so
+    // maxRb:0 is exact. The +1 authoring headroom, delivered the same tick by netTickPost, absorbs
+    // every input. Any rb here is a real headroom leak to debug, and it holds across the seed sweep
+    // (not seed-sensitive). Schedule skew is a separate, >1-tick-capable stress -- see clean-boost.
+    { name:'headroom     subtick 0rb  ', seed:0x77C0, secs:30, wire:{ base:4,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:4, drift:5, samples:8 }, recv:true, maxRb:0 },
 ];
 
 let failed = 0;
 for(const sc of SCEN){
     const r = runMatch(sc);
+    const rbOver = sc.maxRb != null && r.rb > sc.maxRb;
     const bad = r.localJumps > 0 || !!r.firstDiverge || !r.converged
-        || r.desyncA > 0 || r.desyncB > 0 || r.exitReason === 'session-end';
+        || r.desyncA > 0 || r.desyncB > 0 || r.exitReason === 'session-end' || rbOver;
     const fd = r.firstDiverge ? ('  1stDiverge @' + r.firstDiverge.tick + ' [' + r.firstDiverge.fields.join(',') + ']') : '';
+    const rbNote = sc.maxRb != null ? (rbOver ? '  rb>' + sc.maxRb + ' HEADROOM LEAK' : '  (<=' + sc.maxRb + ' rb: headroom holds)') : '';
     log(sc.name.trim().padEnd(22)
         + ' L' + r.levelReached
         + ' conv=' + (r.converged ? 'yes' : 'NO')
@@ -39,7 +56,7 @@ for(const sc of SCEN){
         + ' desync=' + r.desyncA + '/' + r.desyncB
         + ' rb=' + r.rb + ' lost=' + r.lost
         + (r.exitReason ? ' exit=' + r.exitReason + '@' + r.diedAt.toFixed(0) + 's' : '')
-        + fd
+        + fd + rbNote
         + '   ' + (bad ? 'FAIL' : 'ok'));
     if(bad) failed++;
 }

@@ -56,11 +56,11 @@ const HOOKS = (id) => `
     _netSess.startPts = Date.now();
   };
   globalThis.__recv    = (txt)=>{ if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(txt); } };
-  globalThis.__tick1   = ()=>{ netTickPre(); update(); };   // exactly ONE engine tick, real path
+  globalThis.__tick1   = ()=>{ netTickPre(); update(); netTickPost(); };   // exactly ONE engine tick, real path
   globalThis.__tickCatchup = ()=>{
     const t = netTickTarget(); if(t === null) return;
     const d = t - simTick;
-    if(d > 1 && d <= 120){ netTickPre(); update(); }
+    if(d > 1 && d <= 120){ netTickPre(); update(); netTickPost(); }
   };
   // ---- gameplay hooks (what makes this a real match, not a dir-only zigzag) ----
   globalThis.__me      = ()=> netMyIndex();
@@ -116,6 +116,18 @@ const HOOKS = (id) => `
   globalThis.__sig = [];
   { const _oS = _netSigLog; _netSigLog = (s)=>{ globalThis.__sig.push(s); return _oS(s); }; }
   globalThis.__sigDump = ()=> globalThis.__sig.slice();
+  // Rollback trace: every _rbRollback with the context to EXPLAIN why it fired -- target tick,
+  // current sim tick (how late the input was = sim-to), the logged command(s) at the target,
+  // and the level/epoch/phase/accrual state. Used to prove a rollback under sub-tick,
+  // schedule-locked conditions is a real bug (headroom leak), never tolerated as noise.
+  globalThis.__rbTrace = [];
+  { const _oRB = _rbRollback; _rbRollback = (toTick)=>{
+      const at = _rbLog.get(toTick);
+      globalThis.__rbTrace.push({ to:toTick, sim:simTick, late:(simTick - toTick),
+        lvl:level, ph:phase, ep:(_netSess ? _netSess.epoch : -1), gAt:_gAt, base:_rbBase, now:__now,
+        cmds:(at ? at.map(c=> c.t + (c.p!=null ? '/p'+c.p : '') + (c._live ? '*' : '')) : []) });
+      return _oRB(toTick); } }
+  globalThis.__rbTraceDump = ()=> globalThis.__rbTrace.slice();
   globalThis.__TICK    = TICK_MS;
 })();`;
 
@@ -396,6 +408,7 @@ function runMatch(opts){
         rb: a.rb + b.rb, resim: a.resim + b.resim, live: a.live + b.live, lost: a.lost + b.lost,
         fix: a.fix + b.fix,
         desyncProbe: opts.desyncProbe ? classifyDesyncs() : null,
+        rbTrace: { A: A.__rbTraceDump(), B: B.__rbTraceDump() },
     };
 }
 

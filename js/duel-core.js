@@ -558,6 +558,21 @@ function netTickPre(){
         _rbResyncSend--;
     }
 }
+// Send side of the tick, called immediately AFTER update(). boost/boostend arm at the END of
+// update (simArmTick), so without this they miss THIS tick's netTickPre flush and wait a whole
+// frame for the next one -- the ~16ms that ate the +1 authoring headroom and pushed every boost
+// one tick late onto the wire. A turn is authored on the input event and already rides the
+// pre-flush; this closes the boost gap so ALL events leave the wire the same tick they happen.
+// Idempotent with the pre-flush: _netInDirty clears on the first send, so an input never doubles.
+function netTickPost(){
+    if(!netGameActive() || !inGame || _replaying) return;
+    if(_netInDirty){
+        _rbSentPrune();
+        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+        _netDbg.inTx++;
+        _netInDirty = false;
+    }
+}
 // Rewind to `toTick` and re-simulate to where we were, now including the input
 // that arrived late. Silent: _replaying keeps the re-run from re-firing visuals
 // that already played.
