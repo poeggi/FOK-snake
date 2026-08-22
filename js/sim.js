@@ -172,17 +172,13 @@ function _duelBeginLevel(reseed) {
         players[i] = fresh;
     }
     gemsDone = 0;
-    bars = [];
     const blocked = new Set(players[0].snake.concat(players[1].snake).map(ck));
     for (let i = 0; i < 3; i++) {   // clear runway ahead of both spawns
         blocked.add(ck({x:(6+1+i)%COLS, y:Math.floor(ROWS/2)-4}));
         blocked.add(ck({x:(COLS-7-1-i+COLS)%COLS, y:Math.floor(ROWS/2)+4}));
     }
     const numBars = Math.min(28, Math.round(LEVEL_CFG[li].bars * DIFF[1].bm));
-    for (let i = 0; i < numBars; i++) {
-        const b = freeCell(blocked); blocked.add(ck(b));
-        bars.push({x:b.x, y:b.y, fragile:false});
-    }
+    bars = _placeBars(blocked, numBars);
     _barsV++;
     powerPellet = null; _powerMode = false;
     heart = null; heartAt = 0;   // the contested heart never survives a level rebuild/respawn
@@ -372,25 +368,14 @@ function _barFragile(x,y) {
     if(x===1||x===COLS-2||y===1||y===ROWS-2) return rng()<0.25;
     return false;
 }
-function beginLevel(isRespawn=false) {
-    const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
-    gPer = lcfg[['easy','normal','hard'][cfg.diff]];
-    _speedRound = false;   // SPEED ROUND is DUEL-ONLY: clear any leftover so single player never runs one
-    const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
-    const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
-    _levelStartLen = sl;
-    snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
-    dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
-    phase='levelReady'; _gDue=0; _stepAccum=0; phaseAt=simNow;
-    spawnAt=0; levelDoneWaiting=false;
-    perfectLevel=true; levelWasPerfect=false; levelBonusCount=0; epicLevelCount=0;
-    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set(); _gourangaSteps=0;
-    heart=null; heartAt=0; heartIsEarly=false;
-    powerPellet=null; _powerMode=false;
-    timeCrystal=null; _slowMode=false;
-    clearBoost();
-    const blocked = new Set(snake.concat([{x:cx+1,y:cy},{x:cx+2,y:cy}]).map(ck));
-    const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
+// THE barricade placement, shared by single player AND duel -- one code path, never
+// mirrored. Both modes get the same fragility rule (the edge ring is always crushable,
+// via _barFragile) and the same ~10% 2-cell paired extensions. Duel used to hard-code
+// every bar fragile:false, so a bar on the outer ring was solid in a duel but crushable
+// in single player: the "solid barricade on the corner" that could never happen solo.
+// The caller supplies its own blocked-set (snake(s) + launch runway) and bar count.
+function _placeBars(blocked, numBars) {
+    const bars = [];
     for(let i=0;i<numBars;i++){
         const b=freeCell(blocked); blocked.add(ck(b));
         bars.push(Object.assign({}, b, {fragile:_barFragile(b.x,b.y)}));
@@ -419,6 +404,28 @@ function beginLevel(isRespawn=false) {
             }
         }
     }
+    return bars;
+}
+function beginLevel(isRespawn=false) {
+    const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
+    gPer = lcfg[['easy','normal','hard'][cfg.diff]];
+    _speedRound = false;   // SPEED ROUND is DUEL-ONLY: clear any leftover so single player never runs one
+    const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
+    const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
+    _levelStartLen = sl;
+    snake = Array.from({length:sl},(_,i)=>({x:cx-i,y:cy}));
+    dir={x:1,y:0}; dirQueue=[]; gem=null; gemsDone=0; bars=[];
+    phase='levelReady'; _gDue=0; _stepAccum=0; phaseAt=simNow;
+    spawnAt=0; levelDoneWaiting=false;
+    perfectLevel=true; levelWasPerfect=false; levelBonusCount=0; epicLevelCount=0;
+    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set(); _gourangaSteps=0;
+    heart=null; heartAt=0; heartIsEarly=false;
+    powerPellet=null; _powerMode=false;
+    timeCrystal=null; _slowMode=false;
+    clearBoost();
+    const blocked = new Set(snake.concat([{x:cx+1,y:cy},{x:cx+2,y:cy}]).map(ck));
+    const numBars = Math.min(28, Math.round(lcfg.bars * d.bm));
+    bars = _placeBars(blocked, numBars);
     _barsV++;
     spawnGem();
     if(isRespawn && (((level===7||level===8)&&lives===2)||((level===9||level===10)&&lives===1)) && rng()<Math.min(1,0.10*_X10())){
