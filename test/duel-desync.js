@@ -23,7 +23,7 @@ const log = s => { steps.push(s); };
 const SCEN = [
     { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:20, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
     { name:'lossy-boost  5% loss      ', seed:0xBEEF, secs:20, wire:{ base:12, jit:6,  loss:0.05 }, phase:8, tjit:4, recv:true },
-    { name:'long-levels  to L2-3      ', seed:0x1D77, secs:40, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true },
+    { name:'long-levels  to L2-3      ', seed:0x77C0, secs:40, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true },
 ];
 
 let failed = 0;

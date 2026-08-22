@@ -97,6 +97,7 @@ const HOOKS = (id) => `
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__simTick = ()=> simTick;
   globalThis.__rbBase  = ()=> _rbBase;
+  globalThis.__rbDepth = ()=> RB_DEPTH;   // immutability horizon: a tick this far back can no longer be rewritten by any accepted input
   globalThis.__rbDbg   = ()=> Object.assign({}, _rbDbg);
   globalThis.__netDbg  = ()=> Object.assign({}, _netDbg);
   globalThis.__badSince= ()=> _rbBadSince;                      // 0 = healthy; else wall clock of the first unhealed mismatch
@@ -142,16 +143,20 @@ function torusDist(ax, ay, bx, by, cols, rows){ return Math.max(Math.abs(torusDe
 const eq = (u, v)=> u.x === v.x && u.y === v.y;
 const rev = (u, v)=> u.x === -v.x && u.y === -v.y;
 
-// Default DIRECTOR: an OPPONENT-AWARE autopilot. Two greedy snakes racing the same shared
-// gem collide head-on and burn all three lives in level 1 (the match never reaches L2-3).
-// So the two snakes split deterministically -- both clients compute the SAME assignment from
-// the shared, lockstep world, so exactly one chases the gem while the other patrols a fixed
-// far corner. It steers onto its target closing the larger torus axis first, boosts on
-// straightaways and brakes into turns (the real bs/be path, next to peer packets -- exactly
-// the concurrency the deferred-rollback boost bug needs), and dodges its own body, the
-// opponent's body, and the opponent's predicted next cell.
-//  - EATER  = the snake with the smaller torus distance to the gem (ties -> index 0)
-//  - PATROL = the other snake heads to a fixed corner (index 0 -> top-left, 1 -> bottom-right)
+// Default DIRECTOR: an OPPONENT-AWARE autopilot that keeps BOTH snakes busy across many
+// levels. Two greedy snakes racing the same shared gem collide head-on and burn all three
+// lives in level 1, so the roles split by distance to the gem: the nearer snake commits to
+// the gem (EATER), the other ROVES a perimeter circuit (ROVER) -- looping corner to corner,
+// turning at each and boosting the long edges. Both sides therefore emit a steady stream of
+// turns and boost transitions right next to peer packets (the concurrency the netcode bugs
+// lived in), with the straight edges as the natural quiet phases -- dense, never sparse. Each
+// steers onto its target closing the larger torus axis first, boosts on straightaways and
+// brakes into turns (the real bs/be path), and dodges its own body, the opponent's body, and
+// the opponent's predicted next cell.
+//  - EATER = smaller torus distance to the gem (ties -> index 0); the role alternates as gems
+//    respawn, so both snakes get gem chases over a match.
+//  - ROVER = the other snake loops the four corners, advancing to the next once it reaches one.
+const _rover = {};   // per-snake circuit progress (index -> corner); input-gen aid only, never touches the sim
 function autopilot(view){
     if(!view || view.phase !== 'duel' || !view.alive) return {};
     if(view.gemx < 0) return {};
@@ -159,8 +164,19 @@ function autopilot(view){
     const myD = torusDist(view.hx, view.hy, view.gemx, view.gemy, view.cols, view.rows);
     const opD = view.oalive ? torusDist(view.ox, view.oy, view.gemx, view.gemy, view.cols, view.rows) : Infinity;
     const iAmEater = myD < opD || (myD === opD && view.mi === 0);
-    const tx = iAmEater ? view.gemx : (view.mi === 0 ? 3 : view.cols - 4);
-    const ty = iAmEater ? view.gemy : (view.mi === 0 ? 3 : view.rows - 4);
+    let tx, ty;
+    if(iAmEater){ tx = view.gemx; ty = view.gemy; }
+    else {
+        // Perimeter circuit: head to the current corner, advance to the next once reached.
+        // Per-snake progress is keyed by index and lives only here -- it feeds input selection,
+        // never the sim, so it cannot affect lockstep (inputs are still logged and replayed
+        // identically on both clients).
+        const TOUR = [[3, 3], [view.cols - 4, 3], [view.cols - 4, view.rows - 4], [3, view.rows - 4]];
+        let ci = _rover[view.mi] | 0;
+        if(torusDist(view.hx, view.hy, TOUR[ci][0], TOUR[ci][1], view.cols, view.rows) <= 2) ci = (ci + 1) % TOUR.length;
+        _rover[view.mi] = ci;
+        tx = TOUR[ci][0]; ty = TOUR[ci][1];
+    }
     const ddx = torusDelta(view.hx, tx, view.cols);
     const ddy = torusDelta(view.hy, ty, view.rows);
     const cand = [];
@@ -206,6 +222,7 @@ function runMatch(opts){
     const secs = opts.secs || 20, W = opts.wire || {};
     const seed = (opts.seed >>> 0) || 0xD0E1;
     const dir = opts.director || autopilot;
+    _rover[0] = 0; _rover[1] = 0;   // fresh circuit each match, so scenarios do not inherit progress
     const A = mk('aaaaaaaa', seed, 'host'), B = mk('bbbbbbbb', seed, 'peer');
     const TICK = A.__TICK;
     const wire = { AB:[], BA:[] };
@@ -224,11 +241,15 @@ function runMatch(opts){
     let firstDiverge = null, maxLocalJump = 0, localJumps = 0;
     const lastHead = { A:null, B:null };
     let levelReached = 1, exitReason = null;
+    // Compare only an IMMUTABLE tick: an accepted input reaches at most RB_DEPTH ticks back, so a
+    // tick that ran RB_DEPTH ago can no longer be rewritten by any late arrival -- a mismatch there
+    // is a genuine, unhealed divergence, never the normal in-window rollback lag. A shallower lag
+    // (e.g. 16) reads a tick still inside the rewrite window and false-positives when a lossy wire
+    // redelivers an input dozens of ticks late (the same stale-read the product's own detector
+    // avoids by freezing its 1Hz hash at RB_HASH_LAG). The product guarantees this tick is in-ring.
+    const DIVERGE_LAG = opts.settleLag || A.__rbDepth();
     const checkDiverge = ()=>{
-        // Compare a tick comfortably BEHIND both sims (16 ticks ~= 267ms): every input for it
-        // has been delivered and rolled in, so a healthy pair is byte-identical there. Any
-        // mismatch is a genuine, unhealed divergence -- not the normal live-rollback lag.
-        const st = Math.min(A.__simTick(), B.__simTick()) - 16;
+        const st = Math.min(A.__simTick(), B.__simTick()) - DIVERGE_LAG;
         const tk = st - (st & 1);   // even tick (ring is thinned to RB_SNAP_EVERY=2)
         if(tk < 2) return;
         const ha = A.__ringHashAt(tk), hb = B.__ringHashAt(tk);

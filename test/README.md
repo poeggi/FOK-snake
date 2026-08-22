@@ -20,15 +20,19 @@ One place that:
    independent device clocks (`clock: {drift, err0}`) that carry a frozen anchor
    error -- the same clock/wire surface the profiler uses.
 
-2. DRIVES a real match (`runMatch(opts)`). The default director is an
-   opponent-aware autopilot: both clients compute the SAME assignment from the
-   shared lockstep world, so exactly one snake chases the shared gem (EATER) while
-   the other heads for a fixed corner (PATROL) -- two greedy snakes racing one gem
-   would collide head-on and burn all three lives in level 1. The eater steers onto
-   the gem closing the larger torus axis first, boosts on straightaways and brakes
-   into turns (the real `bs`/`be` arm path, fired right next to peer packets -- the
-   exact concurrency a deferred-rollback boost bug needs), and dodges its own body,
-   the opponent's body, and the opponent's predicted next cell.
+2. DRIVES a real match (`runMatch(opts)`), keeping BOTH snakes busy the whole way.
+   The default director is an opponent-aware autopilot: both clients compute the
+   SAME role split from the shared lockstep world, so the snake nearer the gem
+   chases it (EATER) while the other ROVES a perimeter circuit -- looping corner to
+   corner, turning at each and boosting the long edges -- because two greedy snakes
+   racing one gem would collide head-on and burn all three lives in level 1. The
+   split keeps a steady stream of turns and boost transitions coming from both sides,
+   right next to peer packets (the exact concurrency a deferred-rollback boost bug
+   needs), with the straight edges as the natural quiet phases -- dense, never sparse.
+   Each steers onto its target closing the larger torus axis first, boosts on
+   straightaways and brakes into turns (the real `bs`/`be` arm path), and dodges its
+   own body, the opponent's body, and the opponent's predicted next cell. The eater
+   role alternates as gems respawn, so both snakes get gem chases over a match.
 
 3. Advances levels through the REAL online boundary: when both clients are parked at
    `levelDone`, the driver replays the receive end of a level-up (shared `start_pts`
@@ -36,12 +40,16 @@ One place that:
    flowing so a pre-boundary packet lands after `simTick` reset to 0.
 
 4. DETECTS divergence continuously and honestly: it compares each client's rollback
-   ring snapshot at a settled PAST tick (comfortably behind both sims, so every input
-   for it has been delivered and rolled in). A healthy pair is byte-identical there;
-   the first tick that disagrees, and which hashed field diverged, is the bug's
-   fingerprint. It also tallies visible LOCAL head jumps (my own head teleporting =
-   a dropped live input), the product `_rbDbg.desync` verdicts, and the 8s
-   `_rbBadSince` exit clock.
+   ring snapshot at an IMMUTABLE past tick -- RB_DEPTH ticks behind the slower sim.
+   An accepted input reaches at most RB_DEPTH ticks back, so a tick that ran that long
+   ago can no longer be rewritten by any late arrival; a healthy pair is byte-identical
+   there, and the first tick that disagrees (with the diverged field names) is the bug's
+   fingerprint. Comparing any nearer would read a tick still inside the rewrite window
+   and false-positive whenever a lossy wire redelivers an input dozens of ticks late --
+   the same stale read the product's own detector dodges by freezing its 1Hz hash at
+   RB_HASH_LAG. It also tallies visible LOCAL head jumps (my own head teleporting = a
+   dropped live input), the product `_rbDbg.desync` verdicts, and the 8s `_rbBadSince`
+   exit clock.
 
 `runMatch(opts)` returns a report; the important fields are in the metrics glossary
 below. Pass `opts.director` to replace the autopilot, `opts.capture` to snapshot the
