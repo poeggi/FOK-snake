@@ -137,14 +137,14 @@ const UI_INPUT = {
             if(key==='ArrowDown'){duelSel=(duelSel+1)%6;Snd.sfxPlay('nav',cfg.music);}
         },
         confirm(){
-            if(duelSel===0){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
-            else if(duelSel===1){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; }
-            else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
-            else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
-            else if(duelSel===4){
+            if(duelSel===0){
                 if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='lobby'; netLobbyEnter(); }
             }
+            else if(duelSel===1){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
+            else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; }
+            else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
+            else if(duelSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
             else this.back();   // BACK row (like drawSettings)
         },
         back: _backToMenu,

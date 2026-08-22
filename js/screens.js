@@ -1210,11 +1210,11 @@ function drawDuelMenu() {
     ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const startY=90, rowH=28;
     const items=[
+        {t:'PLAY ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
         {t:'PLAY LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'(PC + KEYBOARD ONLY)'},
         {t:'MY ID',       en:true},
         {t:'ADD FRIEND',  en:true},
         {t:'FRIENDS',     en:true},
-        {t:'PLAY ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
     ];
     items.forEach((it,i)=>{
         const y=startY+i*rowH, sel=duelSel===i;

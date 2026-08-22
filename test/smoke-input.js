@@ -59,14 +59,14 @@ runTest('SMOKE-INPUT', `
     press('Enter'); if(phase!=='menu') throw 'duel menu BACK did not return to main';
     phase='duelMenu'; duelSel=0;
     press('ArrowUp'); press('ArrowDown'); if(duelSel!==0) throw 'duel menu nav did not wrap down';
-    duelSel=1; press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID did not open';
+    duelSel=2; press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID did not open';   // 1:1 menu order: 0 ONLINE, 1 LOCAL, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
     press('Escape'); if(phase!=='duelMenu') throw 'friendId ESC did not return';
     // Same screen from SETTINGS > USER: returns to settings instead.
     phase='settings'; settingsCat=SETTINGS_CATS.findIndex(c=>c.label==='USER'); settingsSel=1;
     press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID from settings did not open';
     press('Escape'); if(phase!=='settings') throw 'friendId ESC did not return to settings';
     phase='duelMenu';
-    duelSel=2; press('Enter');
+    duelSel=3; press('Enter');
     if(phase!=='nameEntry'||entryMode!=='friend') throw 'ADD FRIEND did not open the entry (phase='+phase+' mode='+entryMode+')';
     press('g'); if(nameStr!=='') throw 'non-hex char must be ignored in friend mode';
     for(const ch of '00ff00bb') press(ch);
@@ -78,7 +78,7 @@ runTest('SMOKE-INPUT', `
     if(_duelMsg.indexOf('FRIEND ADDED')!==0) throw 'missing FRIEND ADDED confirmation';
     // Short/invalid code: submit refuses. Backspace deletes a digit; ESC is BACK --
     // one press leaves ADD FRIEND even with a digit still in the field.
-    duelSel=2; press('Enter'); press('a'); press('Enter');
+    duelSel=3; press('Enter'); press('a'); press('Enter');
     if(phase!=='nameEntry') throw 'short friend code must not submit';
     press('Backspace'); if(nameStr!=='') throw 'Backspace must delete a friend digit';
     press('a'); press('Escape');
@@ -86,7 +86,7 @@ runTest('SMOKE-INPUT', `
     log('friend add flow ok (hex filter, submit, back)');
 
     // A verified scanner hit locks first (field filled, success shown), then submits.
-    duelSel=2; press('Enter');
+    duelSel=3; press('Enter');
     _scanHit('https://poeggi.github.io/FOK-snake/#friend=00ff00cc');
     if(phase!=='nameEntry'||nameStr!=='00FF00CC') throw 'scan hit did not fill the field';
     if(_scanOk!=='00FF-00CC') throw 'scan hit did not show the success message';
@@ -100,7 +100,7 @@ runTest('SMOKE-INPUT', `
     log('scanner hit path ok (lock message + submit)');
 
     // Viewfinder tap CYCLES the camera on-x1 -> on-x2 -> off -> on-x1; taps elsewhere do not touch it.
-    duelSel=2; press('Enter');
+    duelSel=3; press('Enter');
     _scanState='live'; _scanVideo=null; _scanZoom=1;   // pretend the camera runs at x1 (no stream in the harness)
     if(_scanTapAt(50,50)) throw 'tap outside the viewfinder must not cycle';
     if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'viewfinder tap not registered';

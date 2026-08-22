@@ -71,6 +71,17 @@ const NET_KEEPALIVE_MS = 300;
 // the wait roughly halves. THE lever if a level-up still feels slow (lower) or drifts (raise).
 // The FIRST start -- before anyone is watching a clock -- keeps the unbudgeted full sweep.
 const NET_LEVEL_SYNC_MS = 400;
+// ---- P2P clock alignment (in-duel, over the DataChannel) ----
+// During a duel the server clock sync is gated OFF (_netTimeSync refuses while playing: moving
+// the anchor moves the tick timeline under our feet). So the two peers keep their clocks in
+// step DIRECTLY, peer-to-peer: the JOINER runs an NTP-style ping/pong against the HOST (the
+// reference) and, at every level boundary, nudges its own anchor onto the host's timeline. That
+// is what lets the host author ONE start PTS locally (netPts()+LEAD) and ship it on `rst` with
+// no server round trip -- the joiner, already aligned, reads the same instant from that number.
+// Only the JOINER measures/applies; the host answers pongs and never moves (it IS the clock).
+const NET_ALIGN_EVERY_MS = 500;   // background align-ping cadence while playing (cheap: ~2/s, one datagram each)
+const NET_ALIGN_SAMPLES = 5;      // pings in the pre-first-level burst; also the min-RTT window size during play
+const NET_ALIGN_LEAD_MS = 250;    // host's lead when it authors a P2P level start PTS: covers rst transit + its reliable repeats
 // How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
 // a hash mismatch) before the warning clears.
 const NET_WARN_FLASH_MS = 3000;
@@ -1192,6 +1203,7 @@ function _netMkSess(peer, role){
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
+             alOfs:0, alRtt:Infinity, alN:0, alWin:[], alAt:0,   // P2P clock alignment (JOINER only): best NTP offset onto the host's timeline, its min-RTT, and the recent-sample window
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
@@ -1417,6 +1429,62 @@ function _netSend(o, pre){
         s.dc.send(j); s.lastSent = performance.now();
         if(_netIsCtl(o.t)) _netCtlRepeat(s, j);   // unreliable channel: repeat the transition a couple of times
     }catch(e){}
+}
+// ---- P2P clock alignment: the JOINER measures its offset onto the HOST's timeline ----
+// NTP over the DataChannel. The joiner sends `pa` (its send-pts rides in the auto-stamped
+// o.pts = t0); the host answers `pao` echoing that t0 plus its own receive-pts t1, with the
+// pong's own send-pts t2 auto-stamped on the way out; the joiner reads its receive-pts t3 and
+// folds the four stamps into theta = how far the host clock leads its own. Kept min-RTT over a
+// short recent window -- the least-queued round trip is the least-biased, and a window (not an
+// all-time min) lets the estimate follow slow relative drift. Only the joiner measures/applies;
+// the host is the reference and never moves. Applied at a level boundary by _netAlignApply.
+function _netAlignPing(s){
+    s = s || _netSess;
+    if(!s || !s.game || s.role === 'host' || netPts() == null) return;
+    s.alAt = (typeof performance !== 'undefined') ? performance.now() : 0;
+    _netSend({ t:'pa' });   // o.pts (auto) = t0
+}
+function _netAlignPong(s, m){   // HOST: reflect the ping with our receive timestamp (t1); _netSend adds t2
+    if(!s || s.role !== 'host' || typeof m.pts !== 'number') return;
+    const t1 = netPts(); if(t1 == null) return;
+    _netSend({ t:'pao', t0:m.pts, t1:t1 });
+}
+function _netAlignRecv(s, m){   // JOINER: fold one completed round trip into the min-RTT offset
+    if(!s || s.role === 'host') return;
+    const t3 = netPts();
+    if(t3 == null || typeof m.t0 !== 'number' || typeof m.t1 !== 'number' || typeof m.pts !== 'number') return;
+    const t0 = m.t0, t1 = m.t1, t2 = m.pts;
+    const rtt = (t3 - t0) - (t2 - t1);            // round trip minus the host's turnaround
+    if(!(rtt >= 0) || rtt > 5000) return;          // a negative/absurd rtt is a broken sample
+    const theta = ((t1 - t0) + (t2 - t3)) / 2;     // + => host clock LEADS ours; add to our anchor to match
+    s.alWin.push({ rtt, theta });
+    if(s.alWin.length > NET_ALIGN_SAMPLES) s.alWin.shift();
+    let best = null;
+    for(const w of s.alWin) if(!best || w.rtt < best.rtt) best = w;
+    s.alOfs = best.theta; s.alRtt = best.rtt; s.alN = s.alWin.length;
+    _netDbg.alOfs = s.alOfs; _netDbg.alRtt = s.alRtt;
+}
+// Step our anchor onto the host's timeline. Called at a level boundary, where the sim resets to
+// tick 0 -- the same safe moment the server re-anchor used, so the clock step is invisible.
+// After it the host's authored start PTS denotes the same real instant here. Returns the applied
+// delta (ms), 0 when there is nothing to apply (host, no samples, or unsynced).
+function _netAlignApply(s){
+    s = s || _netSess;
+    if(!s || s.role === 'host' || !s.alN || _netSync.ofs == null) return 0;
+    const d = s.alOfs;
+    _netSync = { ofs:_netSync.ofs + d, rtt:_netSync.rtt, at:Date.now() };
+    s.alWin = []; s.alOfs = 0; s.alRtt = Infinity; s.alN = 0;   // consumed: the next level measures afresh
+    _netClockPush();
+    return d;
+}
+// Background cadence, called every engine tick from netTickPre: the joiner sends one align ping
+// at most every NET_ALIGN_EVERY_MS, so a fresh peer offset is always ready to APPLY the instant a
+// level boundary arrives. Cheap (~2 datagrams/s); host is the reference and never pings.
+function _netAlignTick(){
+    const s = _netSess;
+    if(!s || !s.game || s.role === 'host' || netPts() == null) return;
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    if(now - (s.alAt || 0) >= NET_ALIGN_EVERY_MS) _netAlignPing(s);
 }
 // Fall back to the server relay: same messages, ~200-400ms one-way -- the local
 // snake stays instant (prediction), corrections just arrive slower. The user
@@ -1738,6 +1806,13 @@ async function _netRtcReanswer(from, d){
 // each level AND turns the level-up into a negotiated restart instead of a transmitted 'advance'
 // input -- so a level boundary can never slip outside the rollback window and split the two sims.
 async function _netRequestStart(s, reason){
+    // A level boundary in an ONGOING match is pure P2P now: the DataChannel is live and the
+    // joiner's clock is aligned to the host each level, so the host authors the next start PTS
+    // locally and ships it on the reliable 'rst' -- no /api/start.php round trip, no stale
+    // epoch-line 409, and it keeps working even with the sign-in server unreachable. The server
+    // path below stays for the match-IDENTITY moments (first start, rematch), which register and
+    // verify the pair's epoch line.
+    if(reason === 'level'){ _netStartLevelP2P(s); return; }
     if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
     // The contract: a fresh sync ALWAYS precedes a new start PTS. Not "a sync from a
     // minute ago" -- start.php rejects a pts older than ~2s as stale. A mid-match re-anchor
@@ -1800,11 +1875,37 @@ async function _netRequestStart(s, reason){
     const wait = Math.max(0, Math.min(5000, d.start_pts - netPts()));
     if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
 }
+// Host-authored P2P level start: no server. The host picks tick 0 = netPts()+LEAD on its own
+// (stable) clock and ships it reliably on 'rst'; the joiner has stepped ITS clock onto the host
+// each level (background align pings, applied in the rst handler), so the single PTS denotes the
+// same real instant on both. LEAD covers the rst's transit and its reliable repeats. Host only:
+// the joiner never reaches here (it nudges with 'reqlvl' and waits for the rst).
+function _netStartLevelP2P(s){
+    if(_netSess !== s || !s.game || s.role !== 'host') return;
+    if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); s.lvlPending = false; return; }
+    const startPts = netPts() + NET_ALIGN_LEAD_MS;   // tick 0 of the new epoch, on the host's timeline
+    s.startPts = startPts;
+    _netClockPush();            // anchor + startPts move together: the core must see both
+    _netSend({ t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1 });
+    const go = () => {
+        if(_netSess !== s || !s.game) return;
+        s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
+        beginOnlineDuelLevel(true);
+    };
+    const wait = Math.max(0, Math.min(5000, startPts - netPts()));
+    if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+}
 
 // ---- in-session messages ----
 function _netHandleMsg(txt){
     let m; try{ m = JSON.parse(txt); }catch(e){ return; }
     if(!m || typeof m !== 'object') return;
+    // P2P clock-alignment ping/pong: handled BEFORE the pts future-gate below. Their whole point
+    // is to measure a clock offset, so their stamps land in each other's "future" exactly when
+    // there IS an offset -- the gate would drop the samples that matter most. They carry their
+    // own NTP timestamps and never touch the tick stream or the lag stats.
+    if(m.t === 'pa'){ _netAlignPong(_netSess, m); return; }
+    if(m.t === 'pao'){ _netAlignRecv(_netSess, m); return; }
     // The stamp is CHECKED, not just logged. A peer cannot have sent from our
     // future; a packet claiming otherwise is bogus and is dropped. The tolerance
     // matters: unlike the server -- which IS the clock and can be zero-tolerance --
@@ -1875,7 +1976,15 @@ function _netHandleMsg(txt){
             if(m.x10 !== undefined) s.x10 = !!m.x10;
             s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch/level moves it
             s.epoch = ep;              // stay on the pair's epoch line
-            if(m.lvl) _lvlCover = true;
+            if(m.lvl){
+                _lvlCover = true;
+                // A level start is pure P2P: step OUR clock onto the host's timeline (measured in
+                // the background by the align pings) BEFORE we read its startPts, so the single
+                // number lands on the same real instant here as on the host. The sim resets to
+                // tick 0 at this boundary, so the clock step is invisible. (The FIRST start --
+                // m.lvl false -- stays server-synced: both peers share the server as reference.)
+                _netAlignApply(s);
+            }
             const go = () => { if(_netSess === s && s.game){ if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); } };
             const wait = Math.max(0, Math.min(5000, m.startPts - netPts()));
             if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
@@ -2004,7 +2113,6 @@ function netRequestNextLevel(){
 }
 function _netStartNextLevel(s){
     if(!s || !s.game || s.role !== 'host' || s.lvlPending) return;   // one start per boundary
-    if(!_netOk()){ _netSessionEnd('NO SERVER - CANNOT START'); return; }
     _lvlCover = true;   // host may arrive here from a joiner reqlvl (no local press): cover its board too
     s.lvlPending = true;
     s.epoch = (s.epoch|0) + 1;   // a level boundary is a HALT: the epoch advances, exactly like a rematch

@@ -37,8 +37,14 @@ suite test/net-handshake.js
 suite test/smoke-worker.js
 suite test/relay-sim.js
 
+echo "[checks] P2P clock alignment recovers the peer offset (correct sign, sub-tick residual)"
+suite test/duel-align.js
+
 echo "[checks] boosting duel stays in lockstep (two clients, real match, over a lossy wire)"
 suite test/duel-desync.js
+
+echo "[checks] P2P level boundary holds lockstep (host authors start PTS, joiner aligns its clock)"
+suite test/duel-boundary.js
 
 echo "[checks] sim invariants"
 suite test/sim-invariants.js

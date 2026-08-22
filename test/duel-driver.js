@@ -22,7 +22,10 @@ const HOOKS = (id) => `
   cfg.offline=false;
   globalThis.fetch = async ()=>({ status:0, json:async()=>null });
   _netPost = async ()=>null; _netGet = async ()=>null; _netTimeSync = async ()=>{};
-  _netPollOnce = async ()=>{}; _netRequestStart = async ()=>{}; _netRelayLoop = async ()=>{};
+  _netPollOnce = async ()=>{}; _netRelayLoop = async ()=>{};
+  // NB: _netRequestStart is left REAL. The driver never reaches its server branch (first/rematch
+  // boot via __p2pStart, not the server), but the p2pBoundary mode drives its 'level' branch --
+  // the host-authored P2P start (_netStartLevelP2P) -- for real over the wire.
   // Mocked clocks (see duel-profile.js for the full rationale): performance.now is TRUE shared
   // time (frame domain); Date.now is this client's WALL clock, carrying a frozen anchor error
   // (__clkE0) + relative drift (__clkDr). Both default 0 (perfect sync).
@@ -56,6 +59,12 @@ const HOOKS = (id) => `
     _netSess.startPts = Date.now();
   };
   globalThis.__recv    = (txt)=>{ if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(txt); } };
+  // ---- P2P clock alignment hooks (JOINER measures its offset onto the HOST's timeline) ----
+  globalThis.__alignPing = ()=> _netAlignPing(_netSess);       // joiner: send one align ping
+  globalThis.__alignApply= ()=> _netAlignApply(_netSess);      // joiner: step our anchor onto the host's clock (returns applied ms)
+  globalThis.__alOfs     = ()=> _netSess ? _netSess.alOfs : null;   // current best theta (host lead, ms)
+  globalThis.__alN       = ()=> _netSess ? _netSess.alN : 0;        // samples in the min-RTT window
+  globalThis.__pts       = ()=> netPts();                      // this client's shared-timeline PTS right now
   globalThis.__tick1   = ()=>{ netTickPre(); update(); netTickPost(); };   // exactly ONE engine tick, real path
   globalThis.__tickCatchup = ()=>{
     const t = netTickTarget(); if(t === null) return;
@@ -77,6 +86,15 @@ const HOOKS = (id) => `
     _netSess.epoch = epoch|0; _netSess.startPts = startPts;
     beginOnlineDuelLevel(_netSess.role === 'host');
   };
+  // REAL P2P boundary (p2pBoundary mode): this client "presses OK". Host -> authors the next
+  // start PTS locally and ships 'rst' over the wire; joiner -> nudges the host with 'reqlvl'. The
+  // start crosses the simulated wire (loss/jitter/doze), the joiner aligns its clock in the rst
+  // handler, and both fast-forward to tick 0 -- the exact path that flashed CONNECTION LOST live.
+  globalThis.__reqNextLevel = ()=> netRequestNextLevel();
+  globalThis.__lvlPending   = ()=> !!(_netSess && _netSess.lvlPending);
+  // Falsification knob: neuter the boundary clock-alignment so a test can PROVE it is load-
+  // bearing (RED without it, GREEN with it) rather than merely tolerating a small offset.
+  globalThis.__disableAlign = ()=>{ _netAlignApply = ()=>0; _netAlignTick = ()=>{}; };
   // The local player's world (+ the opponent), for the Node-side autopilot. Torus-relative.
   globalThis.__view    = ()=>{
     if(!players) return null;
@@ -236,6 +254,7 @@ function runMatch(opts){
     const dir = opts.director || autopilot;
     _rover[0] = 0; _rover[1] = 0;   // fresh circuit each match, so scenarios do not inherit progress
     const A = mk('aaaaaaaa', seed, 'host'), B = mk('bbbbbbbb', seed, 'peer');
+    if(opts.noAlign){ A.__disableAlign(); B.__disableAlign(); }   // falsification control (see __disableAlign)
     const TICK = A.__TICK;
     const wire = { AB:[], BA:[] };
     let rndS = (opts.rndSeed || 0x51ED) >>> 0;
@@ -345,14 +364,25 @@ function runMatch(opts){
     // boundary (shared start_pts + bumped epoch -> beginOnlineDuelLevel on both). The wire
     // keeps flowing across it, so any pre-boundary 'in' packet still in flight arrives after
     // simTick has reset to 0 -- the exact stale-epoch condition F2 has to survive.
-    let levelEpoch = 1, levelUps = 0;
+    let levelEpoch = 1, levelUps = 0, lastBoundaryLevel = 0;
     const maybeLevelUp = (now)=>{
         const va = A.__view(), vb = B.__view();
-        if(va && vb && va.waiting && vb.waiting){
-            bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // capture this level's tallies before _rbReset wipes them
-            const sp = NET_BASE + now + 40, ep = ++levelEpoch;
-            A.__levelUp(sp, ep); B.__levelUp(sp, ep); levelUps++;
+        if(!(va && vb && va.waiting && vb.waiting)) return;
+        if(opts.p2pBoundary){
+            // Both parked at levelDone -> drive the REAL boundary over the wire. No injected
+            // start_pts: the initiator's client authors/relays it (host rst; joiner reqlvl->host
+            // rst) and the joiner aligns its clock in the rst handler, so a lost rst / clock drift
+            // / doze is exercised for real -- the atomic __levelUp path could never reproduce it.
+            if(va.level === lastBoundaryLevel) return;   // this boundary already fired; wait for it to land
+            lastBoundaryLevel = va.level;
+            bank('A', A.__rbDbg()); bank('B', B.__rbDbg());
+            (opts.initJoiner ? B : A).__reqNextLevel();
+            levelUps++;
+            return;
         }
+        bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // capture this level's tallies before _rbReset wipes them
+        const sp = NET_BASE + now + 40, ep = ++levelEpoch;
+        A.__levelUp(sp, ep); B.__levelUp(sp, ep); levelUps++;
     };
     let diedAt = 0;
     for(let now = 0; now <= secs * 1000; now++){

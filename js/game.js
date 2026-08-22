@@ -38,7 +38,7 @@ let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['PLAY', '1VS1', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
-let duelSel = 0;   // 1:1 submenu selection (0 = PLAY LOCAL, 1 = MY ID, 2 = ADD FRIEND, 3 = FRIENDS, 4 = PLAY ONLINE)
+let duelSel = 0;   // 1:1 submenu selection (0 = PLAY ONLINE, 1 = PLAY LOCAL, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
 // Local 1:1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
 const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
 let cfg = defaultCfg();

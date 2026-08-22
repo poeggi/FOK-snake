@@ -51,7 +51,7 @@ runTest('SMOKE-NET', `
 
     // ---- lobby: open from the 1:1 menu, render, navigate, invite dialog ----
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    phase='duelMenu'; duelSel=4; press('Enter');
+    phase='duelMenu'; duelSel=0; press('Enter');   // 1:1 menu order: 0 PLAY ONLINE, 1 LOCAL, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
     if(phase!=='lobby') throw 'PLAY ONLINE did not open the lobby';
     drawLobby();
     press('ArrowDown'); press('ArrowDown'); press('ArrowDown');
@@ -66,7 +66,7 @@ runTest('SMOKE-NET', `
     press('n');                                    // decline (soft: no network to send on)
     if(_netLb.invite) throw 'decline did not clear the invite';
     // offline mode blocks the lobby entirely
-    cfg.offline=true; phase='duelMenu'; duelSel=4; press('Enter');
+    cfg.offline=true; phase='duelMenu'; duelSel=0; press('Enter');
     if(phase==='lobby') throw 'PLAY ONLINE must be blocked in offline mode';
     cfg.offline=false; drawDuelMenu();
     log('lobby ok: open, nav, invite surface/clamp/decline, offline block');
@@ -655,7 +655,7 @@ runTest('SMOKE-NET', `
     // ---- FRIENDS screen: rows merge server + local, accept/remove flows ----
     simNow=100000; simTick=6000; _splashLeftAt=-1e9;   // past the post-splash input guard again
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    phase='duelMenu'; duelSel=3; press('Enter');
+    phase='duelMenu'; duelSel=4; press('Enter');
     if(phase!=='friends') throw 'FRIENDS entry did not open the screen';
     let rows=_netFrRows();
     if(rows.length!==2||rows[0].state!=='local') throw 'offline rows must show the local list';
