@@ -149,11 +149,18 @@ let _speedRound = false;
 // Per-level seed from (gameSeed, level): a level's content is a pure function of the two, so a
 // re-seed here re-anchors both clients identically regardless of prior rng consumption.
 function _duelLevelSeed(base, lvl){ return (((base >>> 0) + Math.imul(lvl >>> 0, 0x9E3779B1)) >>> 0) || 1; }
-function _duelBeginLevel() {
+// reseed=true only when a genuinely NEW level opens (match start, level-up): re-anchor the
+// stream to (gameSeed, level) so both clients build the identical board. A RESPAWN passes
+// false and leaves the rng where play left it -- the two sims are already in lockstep on
+// _rngState (hashed + rollback-restored), so continuing the stream hands both clients the
+// SAME fresh gem/barricade/speed-round variant, exactly like single player. Re-seeding on a
+// respawn is what pinned every death to the identical board.
+function _duelBeginLevel(reseed) {
+    if(reseed === undefined) reseed = true;
     // LEVEL_CFG has 10 entries; a duel is endless, so past level 10 it reuses the last
     // (hardest) config rather than reading off the end and throwing mid-match.
     const li = Math.min(level, LEVEL_CFG.length) - 1;
-    seedRng(_duelLevelSeed(gameSeed, level));
+    if(reseed) seedRng(_duelLevelSeed(gameSeed, level));
     _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
     gPer = _speedRound ? LEVEL_CFG[9].normal : LEVEL_CFG[li].normal;
     if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
@@ -699,7 +706,7 @@ function update() {
         simArmRebase();   // a held boost must re-earn its grace this level, never spawn already on
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
-        if(players)_duelBeginLevel();                    // duel: out-of-hearts already went to duelOver, so this is always a restart
+        if(players)_duelBeginLevel(false);               // duel: out-of-hearts already went to duelOver, so this is always a respawn -- keep the rng flowing for a fresh board
         else if(lives>0)beginLevel(true);
         else{phase='nameEntry';emit({t:'gameover'});}   // presentation loads the last name, hides HUD, stops music
     }

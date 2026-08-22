@@ -1379,6 +1379,11 @@ function _netSend(o, pre){
     if(!s) return;
     const pts = netPts();
     if(pts != null && o.pts === undefined){ o.pts = pts; pre = undefined; }   // API: every peer message carries the sender's PTS (added after pre was built: re-serialize)
+    // Tick-stream packets are epoch-scoped (see the gate in _netHandleMsg): simTick and the
+    // rollback tick-base reset at every level boundary, so stamp the epoch this copy was
+    // authored under. The receiver drops a copy that crossed a boundary instead of mapping
+    // its pre-reset ticks onto the new timeline. None of these types ever carry `pre`.
+    if((o.t === 'in' || o.t === 'h' || o.t === 'st' || o.t === 'rs') && o.ep === undefined){ o.ep = s.epoch|0; pre = undefined; }
     if(o.w){
         // The radio-warm ping only needs SOMETHING on the wire within the doze interval, so if
         // real traffic (a turn, boost or heartbeat) already went out this window the ping is
@@ -1841,6 +1846,15 @@ function _netHandleMsg(txt){
             }
         }
     }
+    // Epoch gate for the tick-stream packets. simTick and the rollback tick-base reset at
+    // every level boundary, so an 'in'/'h'/'st'/'rs' authored before the boundary carries
+    // ticks from the previous epoch's timeline. Mapped onto the post-reset base they land far
+    // in the "future" and _netPeerInput refuses them -- which set _rbWarnAt and flashed
+    // CONNECTION LOST on every level transition though the link was fine. Drop a stale-epoch
+    // tick packet silently here; sched/rst/reqlvl carry and check their own epoch already.
+    // Guarded on m.ep being present so a peer from before the stamp existed is unaffected.
+    if(typeof m.ep === 'number' && _netSess && (m.ep|0) !== (_netSess.epoch|0)
+       && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')) return;
     switch(m.t){
         case 'sched':
         case 'rst': {   // the match / rematch / level start moment, issued by the server, relayed by P0
