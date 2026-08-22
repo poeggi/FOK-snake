@@ -139,8 +139,12 @@ runTest('SMOKE-NET', `
     netTickPre();   // the engage was authored mid-tick; its wire send flushes on the next tick (rate-limited)
     if(!sent.some(x=>/"k":"bs"/.test(x))) throw 'the engage transition did not cross the wire';
     gameBoostEnd(0);
-    netTickPre(); update();
-    if(players[0].boosting) throw 'boost end must land within a tick';
+    // Boost end is arming too: simArmTick (end of update) issues the real 'be', which -- like
+    // every input now -- is LOGGED for its authored tick and applied by netTickPre, never live.
+    // So it lands a tick or two out (arm -> log -> apply), not the same instant: the deliberate
+    // one-tick local-input deferral that keeps our ring snapshot in step with the peer's.
+    for(let i=0;i<8 && players[0].boosting;i++){ netTickPre(); update(); }
+    if(players[0].boosting) throw 'boost end never landed at its authored tick';
     // ONE DATAGRAM OR NOTHING. Past the path MTU, SCTP fragments the message and losing
     // any fragment loses all of it -- on a channel that never retransmits, a fragmented
     // packet is one that mostly does not arrive. Measure the WORST case of each type we

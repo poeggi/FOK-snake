@@ -37,6 +37,9 @@ suite test/net-handshake.js
 suite test/smoke-worker.js
 suite test/relay-sim.js
 
+echo "[checks] boosting duel stays in lockstep (two clients, real match, over a lossy wire)"
+suite test/duel-desync.js
+
 echo "[checks] sim invariants"
 suite test/sim-invariants.js
 

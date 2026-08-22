@@ -36,14 +36,22 @@
 // and the 1Hz 'h' with per-field hashes (~575B). Declared HERE (not net.js):
 // both the transport and the core enforce it, and the sim worker loads only the core.
 const NET_PKT_MAX = 1200;
-const RB_RING = 32;          // ring ENTRIES kept. Snapshots are THINNED (RB_SNAP_EVERY), so these
-                             // entries span RB_DEPTH ticks at half the per-tick clone cost.
-                             // Rollback is for short hiccups only: something arrives every 16
-                             // ticks; a divergence older than the ring gets a full resync.
 const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the nearest earlier
                              // entry and re-sims at most one extra tick -- a sub-microsecond tick
                              // against a full clone saved on every other tick.
-const RB_DEPTH = RB_RING * RB_SNAP_EVERY;   // rewind window in TICKS (~1067ms at 60Hz)
+const RB_DEPTH = 64;         // rewind window in TICKS (~1067ms at 60Hz): the oldest input we still
+                             // accept and roll back to. An input older than this is REFUSED, so a
+                             // tick that ran RB_DEPTH ago can no longer be rewritten -- it is immutable.
+const RB_HASH_LAG = RB_DEPTH;// the 1Hz detector freezes the hash of a tick this many ticks old -- one
+                             // already immutable -- so a later late-input rollback can never re-record
+                             // it after we sent. Hashing the live ring tip (still mutable) instead made
+                             // the peer compare its settled copy against our stale hash: a phantom desync
+                             // that scaled with latency. Both clients emit on the same deterministic tick
+                             // and freeze the SAME immutable tick, so the compare is apples-to-apples.
+const RB_RING = 36;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY. Spans RB_DEPTH ticks of
+                             // rewind history plus a few entries of headroom so the immutable hash tick
+                             // (RB_HASH_LAG old) is always still in the ring to hash and compare.
+                             // A divergence older than the ring gets a full resync, not a rollback.
 const RB_FUTURE = 32;        // honest inputs are authored up to a GAME tick ahead (dir stamps its
                              // effective boundary, simTick + _gDue <= gPer) plus start-time skew;
                              // beyond half a second ahead is a connection problem -- refuse it
@@ -213,11 +221,11 @@ function _rbHashBoth(snap){
 // every time either player steers -- a false desync once a second, which is not a
 // divergence at all, just a race. So park the peer's hash and check it only after
 // enough ticks have passed for any in-flight input for t to have landed.
-const RB_SETTLE = 2;         // HASH settle: judge a tick only once our own snapshot of it has
-                             // stopped moving. Inputs are authored at their effective boundary
-                             // (they normally arrive EARLY), so two ticks cover the remaining
-                             // transit jitter -- and a verdict judged too soon merely costs one
-                             // redundant no-op repair under the one-shot protocol.
+const RB_SETTLE = RB_HASH_LAG;  // HASH settle: judge a tick only once BOTH clients' snapshots of it
+                             // are immutable. The sender already froze it at RB_HASH_LAG old; our own
+                             // copy stops moving once no accepted input can still rewrite it, which is
+                             // RB_DEPTH ticks after the tick ran -- the SAME margin. Comparing sooner
+                             // races an in-flight late input and reads a phantom desync once a second.
 const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORITATIVE and does not
                              // depend on our inputs settling, so apply it the moment its tick is in
                              // the past (simTick >= tk) -- no wait. Applying immediately keeps the
@@ -515,9 +523,17 @@ function netTickPre(){
         // _rbHashSettle -- no request round trip, no repair cadence of its own. Fires on its
         // own cadence even when an input flush already went out this tick (they carry different data).
         if(!_replaying && _rbRing.length){
-            const sn = _rbRing[_rbRing.length-1].snap;
-            const hb = _rbHashBoth(sn);
-            _netSend({ t:'h', tk:_rbToWire(t), h:hb.h, f:hb.f });
+            // Freeze the hash of the tick RB_HASH_LAG in the past -- immutable, so no later
+            // rollback can re-record it after we send. Both clients run this on the same
+            // deterministic tick and target the same tk. Skip if it has aged out of the ring
+            // (only near a level start, before the ring is deep enough): nothing to compare yet.
+            const hk = t - RB_HASH_LAG;
+            let he = null;
+            for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === hk){ he = _rbRing[j]; break; }
+            if(he){
+                const hb = _rbHashBoth(he.snap);
+                _netSend({ t:'h', tk:_rbToWire(hk), h:hb.h, f:hb.f });
+            }
         }
     } else if(!_inFlushed && (t & 15) === 0 && !_replaying){
         // 16-tick heartbeat (~267ms), on the OFF-64 ticks so it never doubles up with the
@@ -638,41 +654,20 @@ function _netPeerInput(m){
         _netDbg.inRx++;
         _netDbg.inLog.unshift(String(r.k) + '@' + tk);
         if(_netDbg.inLog.length > 4) _netDbg.inLog.length = 4;
-        if(tk <= simTick){
-            // A late input can often be applied RIGHT NOW instead of rewinding, when doing so
-            // reaches the IDENTICAL state a replay-at-tk would -- the whole slack the step
-            // interval (and the boost grace) gives us. Each such case is bit-identical to the
-            // rewind, so it converges with an un-upgraded peer; it is just the cheaper path.
-            //  - dir: takes effect only at the peer's next STEP. If the peer has NOT stepped
-            //    since tk (head unmoved), the queued turn is still pending -> apply live.
-            //  - boost start, grace-delayed (keyboard/dpad, cmd.now false): only ARMS the boost;
-            //    it does not engage for BOOST_GRACE_TICKS. If it has not had time to engage on
-            //    either sim, it has changed nothing yet -> apply live (the log replays at tk,
-            //    so a later rewind stays consistent).
-            //  - boost end: matters only if a boosted step already ran since tk (head moved).
-            // Applied live AND logged: a later rewind past tk restores the snapshot (dropping
-            // this live effect) and replays from the log, so it lands exactly once either way.
-            let live = false;
-            if(cmd.t === 'dir')           live = !_rbPeerSteppedSince(oP, tk);
-            // Boost transitions are GAME-TICK granular: the boosting flag is only read
-            // at accrual boundaries, so a flip authored after the last one (_gAt) has
-            // changed nothing yet on either sim -- apply live, bit-identical.
-            else if(cmd.t === 'boost' || cmd.t === 'boostend') live = tk > _gAt;
-            // A live apply corrects the present but not the recorded past: with a hash
-            // boundary between the authored tick and now, the boundary's ring snapshot
-            // would disagree with the sender's -- a false DESYNC. Rewind instead; the
-            // re-sim re-records the ring, keeping the hashed history consistent.
-            if(live && ((tk >> 6) !== (simTick >> 6) || ((simTick & 63) === 0 && tk < simTick))) live = false;
-            if(live){
-                simCommand(cmd);
-                _rbDbg.live++;
-            } else if(tk < earliest) earliest = tk;   // crossed a step / accrual boundary: rewind
-        } else {
-            // Arrived AHEAD of its tick: just logged above, netTickPre applies it on time. This
-            // is the best case (the behind-client sees the ahead-client's inputs like this) --
-            // count it as live too: it lands with no rewind.
-            _rbDbg.live++;
-        }
+        // Deterministic lockstep: an input is applied ONLY by the tick loop, at its authored
+        // tick. THE BUFFER: the peer authors one tick ahead of its own sim and sends at once, so
+        // a remote input normally arrives while its tick is still in OUR future -- it just sits
+        // in the log and netTickPre applies it on time, with no rollback. Injecting a peer's move
+        // stays possible right up until netTickPre runs the tick; that one tick of wire slack is
+        // exactly the cushion that keeps the common case rollback-free. Only an input that lands
+        // after its tick already ran forces a correction: record the earliest such past tick and
+        // let netTickPre do ONE rollback+replay covering every late input from this drain
+        // (batching caps it at one re-sim per tick). There is NO apply-on-receive shortcut for a
+        // past input -- it could only restate what the replay computes, and every past attempt to
+        // skip that rollback (a live dir/boost mutating the present) left the already-recorded
+        // ring snapshots inconsistent with the author's: the duel-desync boost/dir bug.
+        if(tk <= simTick){ if(tk < earliest) earliest = tk; }
+        else _rbDbg.live++;
     }
     // Do NOT rollback here: record the earliest rewind and let netTickPre do a SINGLE re-sim
     // covering every packet that arrived this tick. Replaying the full log from the earliest
@@ -734,10 +729,14 @@ function netLocalInput(kind, p, d, now){
     }
     const cmd = kind === 'bs' ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
                               : { t:'boostend', p:myP };
-    _rbEnsureSnap(tk);   // pin the PRE-input state as tk's rollback point, before we apply it
-    cmd._live = true;    // netTickPre must not apply it a second time (a re-sim still does)
+    // Authored for tk and applied FROM THE LOG (netTickPre + every re-sim), exactly like a
+    // turn -- never live. simArmTick runs at the END of update(), so a live apply here lands
+    // the flip in the owner's ring snapshot one tick BEFORE the peer's log-driven apply lands
+    // it in theirs: a standing one-tick boosting-flag split that the settled-history hash
+    // reads as a real desync (-> resync snap -> the visible self/gem jumps). Logging it the
+    // same way both sides replay it removes the split, and there is no _live record left for a
+    // deferred rollback to drop.
     _rbAdd(tk, cmd);
-    simCommand(cmd);   // NOW, like single player. The log is for the re-sim, not the delivery.
     const rec = kind === 'bs' ? { q:++_rbSeq, tk:_rbToWire(tk), k:'bs', d:{x:d.x, y:d.y}, n: now?1:0 }
                               : { q:++_rbSeq, tk:_rbToWire(tk), k:'be' };   // be carries no dir/now: the receiver reads neither
     _rbSentPrune(); _rbSent.push(rec);
