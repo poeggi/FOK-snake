@@ -69,6 +69,10 @@ const RB_RX_MAX = 12;
 // a real PC+iOS pair: raise it if the trickle is enough, lower it (~33ms at 2) if it dozes.
 const NET_WARM_EVERY = 4;
 var _rbSent = [];            // recent local inputs, resent for redundancy
+// Outgoing input is rate-limited to one packet per tick: authoring marks this, netTickPre
+// flushes it once (latest-valid, since _rbSent already holds the most recent records). A burst
+// of touches or key-repeats between two ticks collapses to a single send, not one packet each.
+var _netInDirty = false;
 // A received input that lands AFTER its own tick needs a rollback re-sim (the clone-heavy
 // path). Many packets draining together after a busy frame would each trigger their own --
 // a rollback flood on the single main thread. Instead every _netPeerInput only RECORDS the
@@ -103,6 +107,7 @@ function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
     _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
+    _netInDirty = false;
     _rbResyncSend = 0;
     _rbRewindTo = Infinity;
     _rbBadSince = 0;
@@ -488,25 +493,39 @@ function netTickPre(){
     // the only place allowed to. When the per-level/respawn starts land, they get their
     // re-anchor for free by going through it.
     if(!_replaying) _rbPhase = phase;
+    // Rate-limited input flush: at most one 'in' per tick, sent EARLY (one tick before this
+    // input's step runs). Every turn/boost authored since the last tick was applied live and
+    // only marked _netInDirty; here they collapse into a single latest-valid packet -- a burst
+    // of touches or key-repeats costs one send, not one per event. It carries the whole recent
+    // log (_rbSent) for redundancy, so a heartbeat this same tick would only repeat it: skip it.
+    let _inFlushed = false;
+    if(_netInDirty && !_replaying){
+        _rbSentPrune();
+        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+        _netDbg.inTx++;
+        _netInDirty = false;
+        _inFlushed = true;
+    }
     if((t & 63) === 0){
         for(const k of _rbLog.keys()) if(k < t - RB_DEPTH - 8) _rbLog.delete(k);
         for(const k of _rbHeads.keys()) if(k < t - RB_DEPTH - 8) _rbHeads.delete(k);
         // The 1Hz detector, keyed to the deterministic tick so both clients emit on the
         // same tick. It ALWAYS carries the per-field hashes (~575B): a mismatch verdict
         // lands with its diagnosis in hand and the targeted repair fires right there in
-        // _rbHashSettle -- no request round trip, no repair cadence of its own.
+        // _rbHashSettle -- no request round trip, no repair cadence of its own. Fires on its
+        // own cadence even when an input flush already went out this tick (they carry different data).
         if(!_replaying && _rbRing.length){
             const sn = _rbRing[_rbRing.length-1].snap;
             const hb = _rbHashBoth(sn);
             _netSend({ t:'h', tk:_rbToWire(t), h:hb.h, f:hb.f });
         }
-    } else if((t & 15) === 0 && !_replaying){
+    } else if(!_inFlushed && (t & 15) === 0 && !_replaying){
         // 16-tick heartbeat (~267ms), on the OFF-64 ticks so it never doubles up with the
         // full state. Carries the recent input log = free input-redundancy repair, and keeps
         // SOMETHING on the wire every 16 ticks for liveness.
         _rbSentPrune();
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
-    } else if((t % NET_WARM_EVERY) === 0 && !_replaying){
+    } else if(!_inFlushed && (t % NET_WARM_EVERY) === 0 && !_replaying){
         // Radio-warm keepalive (see NET_WARM_EVERY): a bare ~15B ping on the ticks that would
         // otherwise be silent, so the wire never idles long enough for an iOS radio to doze.
         // p2p ONLY -- _netSend drops a warm ping on the relay path (HTTP-polled; a ~20Hz ping
@@ -710,8 +729,7 @@ function netLocalInput(kind, p, d, now){
         const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y} };
         _rbSentPrune(); _rbSent.push(drec);
         if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
-        _netDbg.inTx++;
-        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+        _netInDirty = true;   // netTickPre flushes it, coalesced to one packet per tick
         return true;
     }
     const cmd = kind === 'bs' ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
@@ -724,8 +742,7 @@ function netLocalInput(kind, p, d, now){
                               : { q:++_rbSeq, tk:_rbToWire(tk), k:'be' };   // be carries no dir/now: the receiver reads neither
     _rbSentPrune(); _rbSent.push(rec);
     if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
-    _netDbg.inTx++;
-    _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });   // the whole recent log: redundancy, not just this one
+    _netInDirty = true;   // flushed with the next tick's input packet (the redundancy log carries it)
     return true;
 }
 

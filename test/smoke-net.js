@@ -109,14 +109,15 @@ runTest('SMOKE-NET', `
     update();
     // OUR OWN steer is authored at its EFFECTIVE moment -- the next game-tick
     // boundary -- and applied from the shared input log there, exactly like the
-    // remote copy of the same record: local is a peer with zero latency. The wire
-    // record leaves IMMEDIATELY; the queue receives it when the sim reaches the
-    // boundary (a turn had no effect before that tick anyway).
+    // remote copy of the same record: local is a peer with zero latency. Authoring
+    // only MARKS the wire send: outgoing input is rate-limited to one packet per tick,
+    // flushed by netTickPre (a turn had no effect before that tick anyway).
     const w0=sent.length, q0h=players[0].dirQueue.length;
     gameSteer(0, GDIRS.ArrowUp);
-    if(sent.length!==w0+1) throw 'own steer must hit the wire at once';
+    if(sent.length!==w0) throw 'a steer must not send at once -- outgoing input is rate-limited to one packet per tick';
     for(let i=0;i<20 && players[0].dirQueue.length===q0h;i++){ netTickPre(); update(); }
     if(players[0].dirQueue.length!==q0h+1) throw 'own steer never reached our snake at its boundary';
+    if(sent.length<=w0) throw 'the tick must flush the pending steer to the wire';
     const pk=JSON.parse(sent[w0]);
     if(pk.t!=='in'||!Array.isArray(pk.l)||!pk.l.length) throw 'own steer must reach the peer as an input log';
     if(pk.s!==undefined||pk.snake!==undefined) throw 'no state may ride the wire';
@@ -135,6 +136,7 @@ runTest('SMOKE-NET', `
     gameBoostStart(0, { x:players[0].dir.x, y:players[0].dir.y }, true);
     for(let i=0;i<300 && !players[0].boosting;i++){ netTickPre(); update(); }
     if(!players[0].boosting) throw 'armed boost never engaged';
+    netTickPre();   // the engage was authored mid-tick; its wire send flushes on the next tick (rate-limited)
     if(!sent.some(x=>/"k":"bs"/.test(x))) throw 'the engage transition did not cross the wire';
     gameBoostEnd(0);
     netTickPre(); update();

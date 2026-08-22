@@ -108,7 +108,11 @@ const HOOKS = (myId) => `
     _rbReset();                   // AFTER startDuel, exactly like beginOnlineDuel
   };
   globalThis.__tick = (n)=>{ for(let i=0;i<n;i++){ netTickPre(); update(); } };
-  globalThis.__steer = (d)=>{ gameSteer(0, d); };
+  // gameSteer only AUTHORS now (the wire send is rate-limited to one packet/tick, flushed by
+  // netTickPre). These routing/determinism tests care about the record and its duel-relative
+  // stamp, not the 1-tick send latency, so flush it here at once -- same packet netTickPre would
+  // emit. The rate-limit contract itself is covered in smoke-net.
+  globalThis.__steer = (d)=>{ gameSteer(0, d); if(_netInDirty){ _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent }); _netInDirty = false; } };
   globalThis.__boost = (d)=>{ gameBoostStart(0, d); };   // grace-delayed (keyboard-style, now=false)
   globalThis.__recv = (txt)=>{ _netHandleMsg(txt); };
   globalThis.__drain = ()=>{ const o = __wire.splice(0); return o; };
