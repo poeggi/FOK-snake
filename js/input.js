@@ -719,7 +719,7 @@ function _dbgSteerLog(p, d){
     _dbgTurnCtx=null;
 }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
-let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null, _firstMoveAt=0;
+let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 // Swipes are read on the whole document; a touch starting on a live control (the gamepad cluster,
 // or the MUTE/FPS boxes) is excluded, grown by a margin so a near-miss isn't stolen as a swipe.
 const _MASK_MARGIN=16;
@@ -748,9 +748,10 @@ document.addEventListener('touchmove',e=>{
     const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
     // Forget the heading only on a GENUINE finger pause. A large jump since the last processed
     // move means the finger kept sliding and the browser merely coalesced touchmove under
-    // main-thread load -- reading that as a pause wipes _swipeLastDir, restarts the boost
-    // sustain (_firstMoveAt) and is a large part of why boost engaged far less reliably in a
-    // duel than in single player. Distance travelled, not the event-delivery gap, tells them apart.
+    // main-thread load -- reading that as a pause would wrongly wipe _swipeLastDir and re-seed
+    // the next move as a fresh first swipe. Distance travelled, not the event-delivery gap,
+    // tells a real pause from a coalesced slide. (This no longer touches boost: the boost gate
+    // is anchored to touchdown, so a forgotten heading can never restart it.)
     if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN&&moved<SWIPE_N) _swipeLastDir=null;
     if(!_swipeLastMovePos||moved>=6){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
     const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
@@ -787,15 +788,15 @@ document.addEventListener('touchmove',e=>{
             // duel snake -- gameBoostEnd routes to the right player in both modes.
             const _mb=_myBoost();
             if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){gameBoostEnd(0);}
-            // A short aggressive same-direction continue right after a heading is first established
-            // is a panic flick, not a boost intent: hold boost off until the finger has stayed on
-            // that heading for BOOST_GATE_MS, so only a sustained slide -- not a fast tap-and-flick
-            // (new touch, or a still finger stabbing off after a pause) -- can engage it.
-            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_firstMoveAt>=BOOST_GATE_MS) gameBoostStart(0,d,true); }
+            // Panic-flick guard: a same-direction continue can engage boost only once the finger
+            // has been down for BOOST_GATE_MS. Anchored to touchdown (_swipeTouchStartAt) so it arms
+            // exactly once per touch -- pauses and forgotten headings never restart it -- and its
+            // ONLY effect is to hold boost off; steering is untouched. A finger already resting on
+            // the pad past the gate therefore boosts on its first sustained slide, no penalty.
+            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_swipeTouchStartAt>=BOOST_GATE_MS) gameBoostStart(0,d,true); }
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }
-    if(!_swipeLastDir) _firstMoveAt=now;   // a heading is first established here (new touch, or re-armed after a cooldown pause); the boost gate measures sustain from this instant
     _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
 },{passive:false});
 document.addEventListener('touchend',e=>{
