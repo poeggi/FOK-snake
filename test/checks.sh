@@ -58,3 +58,11 @@ if [ "${1:-}" = "--profile" ]; then
     echo "[checks] performance profile"
     node test/profile.js
 fi
+
+# On-demand netcode profile (NOT part of the default run): bash test/checks.sh --netprofile
+# Two clients over a simulated wire; reports rollback rate/depth, live-apply ratio and the
+# warm-ping A/B across realistic links, so the lag/artifact bottleneck is a number.
+if [ "${1:-}" = "--netprofile" ]; then
+    echo "[checks] two-client duel netcode profile"
+    node test/duel-profile.js
+fi
