@@ -713,12 +713,6 @@ function update() {
         simArmRebase();   // same rule as single player: no respawn (or level) begins mid-boost
     }
     if(phase==='duel'){
-        // TODO(netcode): RE-TEST boost-time rollbacks on devices. Root cause found: keyboard
-        // auto-repeat re-sent the held direction as a fresh 'dir' record every ~30ms (the
-        // e.repeat gate covered only the boost branch, not handleKey's steer) -- a sim no-op
-        // on the wire that still forces a rollback when it lands across a step boundary,
-        // and boosting doubles the step rate. input.js now drops play-phase repeats. If any
-        // boost rollback remains, field-diff the two sims' _rbHashFields at the rollback.
         // boosting is COMMAND-DRIVEN (see simArmTick): only real transitions arrive,
         // authored by the owning device -- the sim never re-derives an engage.
         if(--_gDue<=0){

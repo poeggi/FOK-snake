@@ -1211,11 +1211,6 @@ async function _netSignalIce(to, payload){
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
-    // TODO(netcode/infra): STUN-only, no TURN. Two phones on CELLULAR IPv6 could not connect P2P
-    // (mDNS host-candidate obfuscation + no usable IPv6 srflx); the peer-net mDNS de-obfuscation
-    // (v2.2.3) is a partial client fix -- RE-TEST on cellular after the recent patches, it may now
-    // work. The bulletproof fix is INFRA: run coturn (STUN+TURN) on the fok-server box and point
-    // this iceServers list at it (also retires the unusable relay.php fallback -- see _netRelayStart).
     const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
     _netSess.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignalIce(peer, JSON.stringify(e.candidate)); };
@@ -1426,7 +1421,7 @@ function netRelayActive(){ return !!(_netSess && _netSess.game && _netSess.relay
 // path. A coturn entry in iceServers keeps the IDENTICAL DataChannel (same unreliable-
 // unordered netcode, one forwarding hop) and retires relay.php entirely. This is infra,
 // not logic: coturn needs a host with open UDP, which the shared webhost cannot provide
-// (see the iceServers TODO in _netRtcInit). ACCEPTED as long-term; until then this relay
+// (the STUN-only iceServers in _netRtcInit). ACCEPTED as long-term; until then this relay
 // IS the real fallback path -- its floor is ~RTT plus a few ms server-side, but verify on
 // live devices before trusting it for play.
 function _netRelayStart(s){
@@ -1825,12 +1820,9 @@ function _netHandleMsg(txt){
             // trip to the SERVER. This is the real one-way peer path, and it carries
             // both clients' clock-offset error with it. Worth watching separately:
             // if the average drifts away from ~half the peer RTT, the anchors are off.
-            // TODO(netcode): peer PTS-delta should be ~0 for two instances on ONE machine, but it
-            // jitters up to 6+ ms -- and notably WORSE on the de-obfuscated (peer-net graft) ICE
-            // path. CHECK whether the extra jitter is deob-path-specific or present on every path,
-            // and whether it is send-side (stamping) or receive-side. Harmless today (< 1 tick, no
-            // rollback), but not the ~0 expected. Lever: quantize the stamped PTS to the tick, or
-            // tighten/share the min-RTT clock sync (each instance syncs independently -> anchors differ).
+            // Stamped RAW (never tick-quantized): pts and tick have a fixed relation on both
+            // clients, so the sub-tick part is exactly the signal -- rounding it to the tick would
+            // hide the send/receive jitter this readout exists to expose.
             _netDbg.lag = mine - m.pts;
             _netLagN.push(_netDbg.lag);
             if(_netLagN.length > 64) _netLagN.shift();
