@@ -636,7 +636,7 @@ canvas.addEventListener('pointerup', e => {
     if (phase === 'splash') { triggerSplashExit(); }
 });
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=48, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=48;
@@ -647,7 +647,7 @@ const _TOUCH_SENS_F=[1.33,1.0,0.66];
 function _touchSensF(){ return _TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1; }
 // Anti-spiral touch guard: three quick same-way 90-degree turns in one gesture curl the head
 // straight onto the body -- the classic fat-finger death. So the THIRD (and any further)
-// same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 48px) than a free
+// same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 64px) than a free
 // 90-degree turn (SWIPE_N, 24px); a lighter flick in that band is ignored and the snake holds
 // its heading, but swipe past the guard and the turn still commits. A turn the other way or a
 // pause resets the run, so a spiral you actually mean is still yours to make. Gesture-only: it
@@ -767,11 +767,18 @@ document.addEventListener('touchmove',e=>{
     // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
     // one-gesture handling below, so every menu scrolls by the same rule -- no per-screen tuning.
     const inMenu=!_inPlay()&&phase!=='credits';
-    // first or reverse: SWIPE_1 (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention).
+    // Reverse = BRAKE: a swipe opposite the current heading only ends the boost, it can never turn
+    // the snake (a 180 is illegal), so keep it cheap at SWIPE_1 -- braking should be easier than a
+    // turn. While boosting the heading IS _myBoost().dir, so this still fires after a pause has
+    // forgotten _swipeLastDir (finger held still, then flicked back). Otherwise: first swipe SWIPE_1
+    // (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention).
     // Menu UP/DOWN overrides that with its own longer two-tier distances; the in-play path is untouched.
     const isMenuV=inMenu&&(key==='ArrowUp'||key==='ArrowDown');
+    const _mbT=_myBoost(), _kd=GDIRS[key];
+    const isBrake=_inPlay()&&_mbT.on&&_mbT.dir&&_kd&&_kd.x===-_mbT.dir.x&&_kd.y===-_mbT.dir.y;
     const thresh=Math.round((isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
-        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_myBoost().on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N))*sf);
+        :isBrake?SWIPE_1
+        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_mbT.on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N))*sf);
     if(dist<thresh) return;
     if(_spiralHold(key,dist,sf)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,Math.round(SWIPE_GUARD*sf)); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
