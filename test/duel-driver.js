@@ -65,6 +65,13 @@ const HOOKS = (id) => `
   globalThis.__alOfs     = ()=> _netSess ? _netSess.alOfs : null;   // current best theta (host lead, ms)
   globalThis.__alN       = ()=> _netSess ? _netSess.alN : 0;        // samples in the min-RTT window
   globalThis.__pts       = ()=> netPts();                      // this client's shared-timeline PTS right now
+  // ---- boundary clock BURST hooks (symmetric midpoint: BOTH sides measure + nudge half) ----
+  globalThis.__burstReset = ()=> _netBurstReset(_netSess);     // open a fresh burst (forget last boundary's samples)
+  globalThis.__burstPing  = ()=> _netBurstPing(_netSess);      // fire one stamped burst datagram
+  globalThis.__burstTheta = ()=>{ const t = _netBurstTheta(_netSess); return t ? t.theta : null; };  // agreed peer offset (ms), or null if unusable
+  globalThis.__burstApply = ()=> _netBurstApply(_netSess);     // nudge our clock half-way to the midpoint; returns applied ms
+  globalThis.__bsFwd      = ()=> _netSess ? _netSess.bsFwd : Infinity;   // my measured min forward-delta
+  globalThis.__bsRev      = ()=> _netSess ? _netSess.bsRev : Infinity;   // the peer's min forward-delta (piggybacked)
   globalThis.__tick1   = ()=>{ netTickPre(); update(); netTickPost(); };   // exactly ONE engine tick, real path
   globalThis.__tickCatchup = ()=>{
     const t = netTickTarget(); if(t === null) return;

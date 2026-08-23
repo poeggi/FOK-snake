@@ -68,6 +68,9 @@ suite test/relay-sim.js
 echo "[checks] P2P clock alignment recovers the peer offset (correct sign, sub-tick residual)"
 suite test/duel-align.js
 
+echo "[checks] P2P boundary clock burst: both sides agree on the peer offset and nudge to the shared midpoint"
+suite test/duel-sync.js
+
 echo "[checks] CONNECTION LOST banner debounces lone refusals (jitter) but still flags a real stall/silence"
 suite test/duel-warn.js
 

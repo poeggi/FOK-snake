@@ -82,6 +82,21 @@ const NET_LEVEL_SYNC_MS = 400;
 const NET_ALIGN_EVERY_MS = 500;   // background align-ping cadence while playing (cheap: ~2/s, one datagram each)
 const NET_ALIGN_SAMPLES = 5;      // pings in the pre-first-level burst; also the min-RTT window size during play
 const NET_ALIGN_LEAD_MS = 250;    // host's lead when it authors a P2P level start PTS: covers rst transit + its reliable repeats
+// ---- P2P boundary clock BURST (symmetric midpoint) ----
+// Retires the continuous align pings above. At EVERY level boundary (first included) each side
+// fires NET_BURST_N stamped datagrams over ~NET_BURST_N*NET_BURST_GAP_MS and keeps the MINIMUM
+// one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi power-save doze),
+// so the min is the least-biased sample and rejects exactly the doze spikes that poisoned the old
+// single-snapshot align. Every packet piggybacks the sender's own forward-min, so BOTH sides end
+// holding the same two direction-mins and compute the IDENTICAL peer clock offset from them; each
+// then nudges its OWN clock half way onto the shared midpoint -- neither side is the master, so
+// neither takes the whole jump. Gated: a starved or impossible burst is rejected and the previous
+// (in-play, still-good) clock is kept; the applied nudge is slew-capped so one bad estimate cannot
+// teleport the timeline (it converges over the next boundaries, inside the rollback window).
+const NET_BURST_N = 10;           // datagrams per direction in one boundary burst
+const NET_BURST_GAP_MS = 15;      // spacing between them (~150ms total, comfortably inside a level cover)
+const NET_BURST_MIN = 3;          // accept-gate: fewest usable samples per direction before we trust the estimate
+const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
 // How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
 // a hash mismatch) before the warning clears.
 const NET_WARN_FLASH_MS = 3000;
@@ -1204,6 +1219,7 @@ function _netMkSess(peer, role){
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
              alOfs:0, alRtt:Infinity, alN:0, alWin:[], alAt:0,   // P2P clock alignment (JOINER only): best NTP offset onto the host's timeline, its min-RTT, and the recent-sample window
+             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
@@ -1485,6 +1501,63 @@ function _netAlignTick(){
     if(!s || !s.game || s.role === 'host' || netPts() == null) return;
     const now = (typeof performance !== 'undefined') ? performance.now() : 0;
     if(now - (s.alAt || 0) >= NET_ALIGN_EVERY_MS) _netAlignPing(s);
+}
+// ---- boundary clock burst (symmetric midpoint; see NET_BURST_* above) ----
+// Open a fresh burst: forget the previous boundary's samples so this one measures the clock as it
+// is NOW. Both sides call it when a boundary opens.
+function _netBurstReset(s){
+    s = s || _netSess; if(!s) return;
+    s.bsFwd = Infinity; s.bsRev = Infinity; s.bsNf = 0; s.bsRevN = 0; s.bsSeq = 0;
+}
+// Fire one burst datagram: _netSend stamps our send-pts (o.pts); we add our best forward-min so
+// far (mr) and how many samples it is over (mn), so the peer learns the one direction it cannot
+// measure itself and can gate on our sample count.
+function _netBurstPing(s){
+    s = s || _netSess;
+    if(!s || !s.game || netPts() == null) return;
+    _netSend({ t:'bs', sq: s.bsSeq++, mr:(s.bsFwd === Infinity ? null : Math.round(s.bsFwd)), mn: s.bsNf });
+}
+// Fold one received burst datagram. m.pts = the peer's send-pts (OUR forward direction: recv-pts
+// minus send-pts = clock offset + this direction's transit); m.mr/m.mn = the peer's own
+// forward-min and its count (OUR reverse direction, which only the peer can measure). Keep the MIN
+// of each direction -- the least-delayed datagram is the least clock-offset-biased one.
+function _netBurstRecv(s, m){
+    s = s || _netSess;
+    if(!s) return;
+    const r = netPts(); if(r == null || typeof m.pts !== 'number') return;
+    const d = r - m.pts;
+    if(d < s.bsFwd) s.bsFwd = d;
+    s.bsNf++;
+    if(typeof m.mr === 'number' && m.mr < s.bsRev) s.bsRev = m.mr;
+    if(typeof m.mn === 'number' && m.mn > s.bsRevN) s.bsRevN = m.mn|0;
+}
+// The agreed peer clock offset from the two exchanged direction-mins, or null if the burst is
+// unusable (too few samples either way, or an impossible round trip). Both sides feed the SAME two
+// numbers in, so both get the IDENTICAL theta -- the invariant the symmetric nudge relies on.
+function _netBurstTheta(s){
+    s = s || _netSess; if(!s) return null;
+    if(s.bsNf < NET_BURST_MIN || s.bsRevN < NET_BURST_MIN) return null;   // starved (a dozing side): keep the old clock
+    if(s.bsFwd === Infinity || s.bsRev === Infinity) return null;
+    const host = (s.role === 'host');
+    const mAB = host ? s.bsRev : s.bsFwd;   // A->B: the host measures it via the peer's mr; the joiner measures it directly
+    const mBA = host ? s.bsFwd : s.bsRev;   // B->A: the reverse
+    const rttMin = mAB + mBA;               // the offsets cancel in the sum: this is 2x the min one-way latency
+    if(!(rttMin >= 0) || rttMin > 5000) return null;   // impossible/absurd: a one-sided doze inflated one direction
+    return { theta:(mBA - mAB) / 2, rttMin, host };   // theta > 0 => the host clock LEADS the joiner's
+}
+// Nudge OUR clock half of theta onto the shared midpoint (slew-capped). The host pulls its clock
+// back, the joiner steps its clock up; with the same theta on both, they meet at the exact
+// midpoint (residual 0). Returns the applied ms, 0 when nothing was applied (rejected/unsynced).
+function _netBurstApply(s){
+    s = s || _netSess;
+    if(!s || _netSync.ofs == null) return 0;
+    const t = _netBurstTheta(s); if(!t) return 0;
+    let d = (t.host ? -1 : 1) * (t.theta / 2);
+    if(d >  NET_BURST_SLEW_MS) d =  NET_BURST_SLEW_MS;   // symmetric clamp: clips to the same magnitude on both sides
+    if(d < -NET_BURST_SLEW_MS) d = -NET_BURST_SLEW_MS;
+    _netSync = { ofs:_netSync.ofs + d, rtt:_netSync.rtt, at:Date.now() };
+    _netClockPush();
+    return d;
 }
 // Fall back to the server relay: same messages, ~200-400ms one-way -- the local
 // snake stays instant (prediction), corrections just arrive slower. The user
@@ -1914,6 +1987,10 @@ function _netHandleMsg(txt){
     // own NTP timestamps and never touch the tick stream or the lag stats.
     if(m.t === 'pa'){ _netAlignPong(_netSess, m); return; }
     if(m.t === 'pao'){ _netAlignRecv(_netSess, m); return; }
+    // Boundary clock-burst datagram: measured before the future-gate for the same reason as pa/pao
+    // -- when there IS a clock offset its stamp lands in our "future", exactly the sample the gate
+    // would drop. Carries only NTP-style stamps; never touches the tick stream or the lag stats.
+    if(m.t === 'bs'){ _netBurstRecv(_netSess, m); return; }
     // The stamp is CHECKED, not just logged. A peer cannot have sent from our
     // future; a packet claiming otherwise is bogus and is dropped. The tolerance
     // matters: unlike the server -- which IS the clock and can be zero-tolerance --
