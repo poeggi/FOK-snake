@@ -250,6 +250,29 @@ function autopilot(view){
     return out;
 }
 
+// DEATH-forcing director: both snakes make a beeline for board center, so they meet head-on
+// (or ram a body) and DIE -- the respawn path the autopilot deliberately dodges. Over a lossy
+// wire the peer's collision-deciding steer often arrives late, so a client mispredicts survival,
+// advances (even respawns), then a rollback across the death boundary corrects it -- the exact
+// condition bug C (own snake yanked back to its death cell after respawn) lives in. Deterministic
+// (a pure function of the view: no state, no rng), so both clients log/replay identical inputs.
+function collider(view){
+    if(!view || view.phase !== 'duel' || !view.alive) return {};
+    const cx = Math.floor(view.cols/2), cy = Math.floor(view.rows/2);
+    const ddx = torusDelta(view.hx, cx, view.cols), ddy = torusDelta(view.hy, cy, view.rows);
+    const cur = { x:view.dx, y:view.dy };
+    const cand = [];
+    if(ddx !== 0) cand.push({ x:Math.sign(ddx), y:0, mag:Math.abs(ddx) });
+    if(ddy !== 0) cand.push({ x:0, y:Math.sign(ddy), mag:Math.abs(ddy) });
+    cand.sort((a, b)=> b.mag - a.mag);
+    for(const c of cand){
+        if(rev(c, cur)) continue;                       // never author a reverse (the sim would drop it anyway)
+        if(c.x !== cur.x || c.y !== cur.y) return { steer:{ x:c.x, y:c.y } };
+        return {};                                      // already heading the productive way: hold
+    }
+    return {};
+}
+
 function applyDirective(C, out){
     if(!out) return;
     if(out.boost === 'end') C.__boostEnd();
@@ -330,13 +353,26 @@ function runMatch(opts){
     };
     // A visible LOCAL jump: my own head moved more than one torus cell in a tick -- i.e. a
     // rollback/resync teleported me (the "I see myself jump" symptom), never normal movement.
+    // The own snake is a pure function of MY OWN logged inputs, so the ONE legitimate own-head
+    // teleport is a rebuild onto the fixed spawn cell (a respawn after a death, or a level-up).
+    // Any other >1 jump -- crucially a jump BACK onto a death cell after I had already respawned
+    // (bug C: a resync/rollback resurrecting my own dead snake) -- is the artifact. Measured
+    // across ALL phases (not just 'duel'), so the death->'dying'->respawn window is covered: the
+    // old metric nulled the baseline off 'duel' and was blind to exactly the death-boundary snap.
+    const spawnHead = (v)=> v.mi === 0
+        ? { x:6, y:Math.floor(v.rows/2) - 4 }              // P0 spawn head (js/sim.js _mkDuelPlayer)
+        : { x:v.cols - 7, y:Math.floor(v.rows/2) + 4 };    // P1 spawn head (mirror)
     const noteHead = (S, v)=>{
-        if(!v || v.phase !== 'duel'){ lastHead[S.me] = null; return; }
+        if(!v) return;   // no sim view: keep the last head (do NOT null -- a null gap would hide a respawn-boundary snap)
         const prev = lastHead[S.me];
         if(prev){
             const dx = Math.abs(torusDelta(prev.x, v.hx, v.cols)), dy = Math.abs(torusDelta(prev.y, v.hy, v.rows));
             const jump = Math.max(dx, dy);
-            if(jump > 1){ localJumps++; maxLocalJump = Math.max(maxLocalJump, jump); }
+            if(jump > 1){
+                const sp = spawnHead(v);
+                const isRespawn = v.hx === sp.x && v.hy === sp.y;   // the sole legit own-head teleport
+                if(!isRespawn){ localJumps++; maxLocalJump = Math.max(maxLocalJump, jump); }
+            }
         }
         lastHead[S.me] = { x:v.hx, y:v.hy };
     };
@@ -409,8 +445,28 @@ function runMatch(opts){
     const rematch = opts.rematch || null;
     const rematchAt = rematch ? Math.round(rematch.at * 1000) : -1;
     let rematchDone = false;
+    // Optional DOZE: freeze one client (default the joiner 'B') for `ms`, modelling an iOS
+    // WiFi power-save / backgrounded-tab stall. While dozing the client does not tick, send,
+    // or receive. On resume it does NOT burst-replay every missed tick -- it drops the backlog
+    // exactly as sim-worker._step does (clamped dt -> MAX_CATCHUP -> _acc=0) and catches up one
+    // tick per pass via __tickCatchup. So it genuinely falls behind, the peer's inputs for the
+    // frozen span age out of its ring, and the host's aged-out-divergence path owes it a FULL
+    // resync (duel-core.js:425) that lands on the joiner's HARD-APPLY branch (:381) -- the only
+    // path that can leave the own snake yanked to a stale (death) cell. opts.doze = { at, ms, who }.
+    const doze = opts.doze || null;
+    const dozeWho = doze ? (doze.who || 'B') : null;
+    const doze0 = doze ? Math.round(doze.at * 1000) : -1;
+    const doze1 = doze ? doze0 + (doze.ms | 0) : -1;
+    let dozeResumed = false;
     let diedAt = 0;
     for(let now = 0; now <= secs * 1000; now++){
+        const dozing = doze && now >= doze0 && now < doze1;
+        if(doze && !dozeResumed && now >= doze1){
+            // Resume: skip the frozen span instead of bursting through it (worker _acc drop).
+            dozeResumed = true;
+            const S = sch[dozeWho];
+            S.k = Math.round((now - S.phase) / TICK); S.next = S.k * TICK + S.phase;
+        }
         if(rematch && !rematchDone && now >= rematchAt){
             const va = A.__view(), vb = B.__view();
             if(va && vb){
@@ -421,13 +477,17 @@ function runMatch(opts){
                 levelUps++;
             }
         }
-        A.__now = now; B.__now = now; A.__fire(); B.__fire();
+        A.__now = now; B.__now = now;
+        if(!(dozing && dozeWho === 'A')) A.__fire();
+        if(!(dozing && dozeWho === 'B')) B.__fire();
         if(!A.__alive() || !B.__alive()){ exitReason = 'session-end'; diedAt = now/1000; break; }
         if(over(A) || over(B)){ exitReason = 'duelOver'; diedAt = now/1000; break; }
-        while(now >= sch.A.next) fireOnce(sch.A);
-        while(now >= sch.B.next) fireOnce(sch.B);
-        emit(sch.A); emit(sch.B);
-        drain(wire.AB, B, sch.B); drain(wire.BA, A, sch.A);
+        if(!(dozing && dozeWho === 'A')) while(now >= sch.A.next) fireOnce(sch.A);
+        if(!(dozing && dozeWho === 'B')) while(now >= sch.B.next) fireOnce(sch.B);
+        if(!(dozing && dozeWho === 'A')) emit(sch.A);
+        if(!(dozing && dozeWho === 'B')) emit(sch.B);
+        if(!(dozing && dozeWho === 'B')) drain(wire.AB, B, sch.B);
+        if(!(dozing && dozeWho === 'A')) drain(wire.BA, A, sch.A);
         maybeLevelUp(now);
         checkDiverge();
         if(opts.desyncProbe) sampleRingAgree();
@@ -477,4 +537,4 @@ function runMatch(opts){
     };
 }
 
-module.exports = { runInGame, HOOKS, mk, anchor, runMatch, autopilot, torusDelta, NET_BASE };
+module.exports = { runInGame, HOOKS, mk, anchor, runMatch, autopilot, collider, torusDelta, NET_BASE };

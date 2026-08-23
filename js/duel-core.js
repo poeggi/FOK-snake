@@ -359,8 +359,9 @@ function _rbApplyResync(m){
         into.boosting = !!pk.bg; into.stepAccum = pk.sa;
         into.score = pk.sc|0; into.lives = pk.l|0; into.alive = pk.al !== false; into.slowUntil = pk.su|0;
     };
-    // The FULL authoritative snapshot AT tick T. Lockstep needs both sims byte-identical, so we
-    // adopt BOTH snakes (keeping our own would guarantee a permanent mismatch -> resync forever).
+    // The FULL authoritative snapshot AT tick T: the whole SHARED world (level/gems/rng/bars/
+    // power/heart/timers) plus the HOST's own snake (p0). How we treat OUR snake (p1) depends on
+    // whether T is still replayable -- see the two branches below.
     const snap = simSnapshot();
     snap.phase = m.ph; snap.level = m.lv|0; snap.gemsDone = m.gd|0; snap.gem = m.gem; snap.gemAt = m.ga; snap.deathMsg = m.dm; snap._barsV = (snap._barsV|0) + 1;
     snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; } return b; });
@@ -369,16 +370,39 @@ function _rbApplyResync(m){
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
-    unpackInto(m.p0, snap.players[0]); unpackInto(m.p1, snap.players[1]);
+    unpackInto(m.p0, snap.players[0]);   // the HOST's snake is always the host's to author
     snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;   // ring convention: entry tk=T holds the state at simTick T-1
-    // Apply it at T through the SAME path a normal correction uses: drop it into the ring entry
-    // for T and roll forward, replaying the logged inputs. Both sims then land on identical state
-    // at T and evolve identically -> they converge and STAY converged (no loop). If T has aged out
-    // of the ring (clocks drifted far), fall back to a hard apply at our current tick.
     let e = null;
     for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === T){ e = _rbRing[j]; break; }
-    if(e){ e.snap = _rbClone(snap); _rbRollback(T); }
-    else { snap.simTick = simTick; snap.simNow = simNow; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); }
+    if(e){
+        // IN-RING: keep OUR own snake as WE recorded it at T (the ring entry), not the host's copy
+        // -- we own our snake. Only the shared world + the host's snake are the host's to correct.
+        // Rolling forward then REPLAYS our logged inputs from T, re-deriving our own snake exactly.
+        // Both sims land byte-identical at the frontier and STAY converged (a rollback renders
+        // final-only, so no visible jump). Adopting the host's stale copy here is what re-yanked
+        // our head after a preceding hard-apply had wiped the log the replay needs.
+        if(e.snap && e.snap.players && e.snap.players[1]) snap.players[1] = e.snap.players[1];
+        e.snap = _rbClone(snap); _rbRollback(T);
+    } else {
+        // AGED OUT (a long doze / far clock drift): T is gone from the ring, so there is NO log to
+        // replay and a hard apply of the host's STALE copy of our snake would yank our own head to
+        // an old/dead cell -- the "after a death the level did not start clean" glitch (bug C). We
+        // OWN our snake (the per-owner 'st' ownership rule above), so keep our own geometry and take
+        // only the authoritative shared world + our match state (lives/alive/score; the shared
+        // respawn timers were already copied into snap). Our snake then simply resumes forward from
+        // where it froze -- no teleport -- and the shared spawnAt respawns BOTH sides to the spawn
+        // cell in lockstep. One 'st' pushes our snake to the host so it converges to us (the hash
+        // would otherwise flag 'players' next second and the host would re-resync): no resync-forever.
+        const mine = snap.players[1];
+        mine.lives = m.p1.l|0; mine.alive = m.p1.al !== false; mine.score = m.p1.sc|0;
+        // Re-anchor our tick to the host's T when T is AHEAD (the doze case: we froze, the shared
+        // clock ran on, so netTickTarget is already out there). Catching up stops our inputs from
+        // landing in the host's deep past -- which is what made it re-resync every second. Never
+        // rewind (T < simTick: we keep our tick so the shared world is not dragged backwards).
+        const anchor = T > simTick ? T : simTick;
+        snap.simTick = anchor; snap.simNow = anchor * TICK_MS; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
+        _rbSendState(anchor, simSnapshot());
+    }
     _rbStateQ = []; _rbHashQ = [];
     _rbResyncSend = 0;
     _rbDbg.fix = (_rbDbg.fix|0) + 1;   // a repair landing is HEALING, not a connection event

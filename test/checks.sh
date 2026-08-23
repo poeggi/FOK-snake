@@ -49,6 +49,9 @@ suite test/duel-boundary.js
 echo "[checks] server-path restart (rematch) holds lockstep (joiner aligns its clock on every start)"
 suite test/duel-rematch.js
 
+echo "[checks] post-death respawn is clean (a full resync never yanks your own snake back to a death cell)"
+suite test/duel-respawn.js
+
 echo "[checks] duel sim rules (speed round per-level stable across respawns; fragile bars crush like single player)"
 suite test/sim-duel.js
 
