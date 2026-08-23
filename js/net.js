@@ -1701,6 +1701,14 @@ function _netLiveStart(){
         // genuinely go missing before we say a word.
         if(nowMs - s.lastSent > NET_KEEPALIVE_MS)
             _netSend(inGame && !_netWD() ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });   // worker duel: _rbSent lives in the worker; its 16-tick heartbeat covers repair
+        // Keep the P2P clock-alignment window warm the WHOLE session, not just while a duel ticks:
+        // netTickPre (and its _netAlignTick) stops between matches (duelOver -> rematch) and before
+        // the first start, so a start landing in that gap would have no fresh offset to apply and
+        // would begin on an uncorrected clock. One joiner ping at the align cadence here means every
+        // start -- first, rematch, level -- always has a current sample ready. The cadence gate is
+        // shared with _netAlignTick (both key off s.alAt), so the two never double-ping.
+        if(s.role !== 'host' && netPts() != null && nowMs - (s.alAt || 0) >= NET_ALIGN_EVERY_MS)
+            _netAlignPing(s);
         // The re-offer retry is gated off in-game, so drive it from here while reconnecting.
         if(s.reconnecting && s.role === 'host' && _netHs.offerTo === s.peer && _netHs.offerPayload && Date.now() - _netHs.offeredAt > 2000){
             _netHs.offeredAt = Date.now(); _netSignal(s.peer, 'offer', _netHs.offerPayload);
@@ -1976,15 +1984,18 @@ function _netHandleMsg(txt){
             if(m.x10 !== undefined) s.x10 = !!m.x10;
             s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch/level moves it
             s.epoch = ep;              // stay on the pair's epoch line
-            if(m.lvl){
-                _lvlCover = true;
-                // A level start is pure P2P: step OUR clock onto the host's timeline (measured in
-                // the background by the align pings) BEFORE we read its startPts, so the single
-                // number lands on the same real instant here as on the host. The sim resets to
-                // tick 0 at this boundary, so the clock step is invisible. (The FIRST start --
-                // m.lvl false -- stays server-synced: both peers share the server as reference.)
-                _netAlignApply(s);
-            }
+            if(m.lvl) _lvlCover = true;
+            // Step OUR clock onto the host's timeline (measured continuously by the align pings)
+            // BEFORE we read its startPts, so the single number lands on the same real instant here
+            // as on the host. The sim resets to tick 0 at EVERY start, so the clock step is
+            // invisible. This runs for all starts, not just levels: a first-start/rematch that
+            // skipped it carried the two clients' independent server-sync residual UNCORRECTED into
+            // the new match -- the peer's honest current-tick inputs then fell outside the rollback
+            // window and were refused, flashing CONNECTION LOST on every restart. Alignment makes
+            // the joiner track the HOST whatever timeline the startPts was authored on; with no
+            // sample yet (a cold first-start before any pong) it is a safe no-op that falls back to
+            // the shared server sync, exactly as before.
+            _netAlignApply(s);
             const go = () => { if(_netSess === s && s.game){ if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); } };
             const wait = Math.max(0, Math.min(5000, m.startPts - netPts()));
             if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);

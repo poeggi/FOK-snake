@@ -46,6 +46,9 @@ suite test/duel-desync.js
 echo "[checks] P2P level boundary holds lockstep (host authors start PTS, joiner aligns its clock)"
 suite test/duel-boundary.js
 
+echo "[checks] server-path restart (rematch) holds lockstep (joiner aligns its clock on every start)"
+suite test/duel-rematch.js
+
 echo "[checks] sim invariants"
 suite test/sim-invariants.js
 

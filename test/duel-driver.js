@@ -92,6 +92,21 @@ const HOOKS = (id) => `
   // handler, and both fast-forward to tick 0 -- the exact path that flashed CONNECTION LOST live.
   globalThis.__reqNextLevel = ()=> netRequestNextLevel();
   globalThis.__lvlPending   = ()=> !!(_netSess && _netSess.lvlPending);
+  // REAL rematch / first-start RECEIVE path. Unlike a level boundary (pure P2P, host authors the
+  // start on its own clock and ships 'rst' lvl:1 so the joiner aligns), a first-start/rematch is
+  // SERVER-issued: the host relays a start_pts on 'sched'/'rst' with lvl:0. This hook is the SEND
+  // end the mocked server would have driven -- the host stamps the shared start_pts on the epoch
+  // line and ships 'rst' lvl:0, then resets via the REAL beginOnlineDuel after the lead. The
+  // joiner receives it through the REAL _netHandleMsg, so whether a lvl:0 start P2P-aligns the
+  // joiner's clock (it must, or an offset carries uncorrected into the new match) is the real code.
+  globalThis.__rematchHost = (startPts, epoch, seed)=>{
+    const s = _netSess; if(!s || s.role !== 'host' || !s.game) return;
+    s.epoch = epoch|0; s.seed = seed>>>0; s.startPts = startPts; _netClockPush();
+    _netSend({ t:'rst', seed:s.seed, startPts:startPts, epoch:s.epoch, lvl:0 });
+    const go = ()=>{ if(_netSess === s && s.game) beginOnlineDuel(s.seed, true); };
+    const wait = Math.max(0, Math.min(5000, startPts - netPts()));
+    if(wait <= 0) go(); else setTimeout(go, wait);
+  };
   // Falsification knob: neuter the boundary clock-alignment so a test can PROVE it is load-
   // bearing (RED without it, GREEN with it) rather than merely tolerating a small offset.
   globalThis.__disableAlign = ()=>{ _netAlignApply = ()=>0; _netAlignTick = ()=>{}; };
@@ -357,7 +372,7 @@ function runMatch(opts){
     // per-client counters only ever reflect the CURRENT level. Snapshot + accumulate them
     // across each boundary so rb/resim/live/lost/fix/desync are true match totals (and the
     // fail gate cannot miss a desync that a level-up reset away).
-    const DBG_KEYS = ['rb', 'resim', 'live', 'lost', 'fix', 'desync'];
+    const DBG_KEYS = ['rb', 'resim', 'live', 'lost', 'fix', 'desync', 'drop'];
     const acc = { A:{}, B:{} }; for(const k of DBG_KEYS){ acc.A[k] = 0; acc.B[k] = 0; }
     const bank = (S, dbg)=>{ for(const k of DBG_KEYS) acc[S][k] += (dbg[k] | 0); };
     // Level-up: when BOTH clients are parked at levelDone/waiting, replay the real online
@@ -384,8 +399,28 @@ function runMatch(opts){
         const sp = NET_BASE + now + 40, ep = ++levelEpoch;
         A.__levelUp(sp, ep); B.__levelUp(sp, ep); levelUps++;
     };
+    // Optional REMATCH (game restart) at `at` seconds: the SERVER-issued start path (rst lvl:0),
+    // the one a level boundary's pure-P2P align does NOT cover. The host authors a fresh start_pts
+    // + epoch + seed and ships 'rst' lvl:0 over the wire; the joiner receives it through the real
+    // handler -- so whether a lvl:0 start P2P-aligns the joiner's clock is the real code. Fired
+    // while both sims are mid-play, so the joiner's align window holds the samples the ongoing
+    // match kept warm -- the realistic field condition (the window is consumed only at a start, so
+    // it still carries the last level's samples when a match ends). opts.rematch = { at }.
+    const rematch = opts.rematch || null;
+    const rematchAt = rematch ? Math.round(rematch.at * 1000) : -1;
+    let rematchDone = false;
     let diedAt = 0;
     for(let now = 0; now <= secs * 1000; now++){
+        if(rematch && !rematchDone && now >= rematchAt){
+            const va = A.__view(), vb = B.__view();
+            if(va && vb){
+                rematchDone = true;
+                bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // pre-rematch tallies before _rbReset wipes them
+                const sp = A.__pts() + 250, ep = ++levelEpoch;    // host authors the shared start_pts (server would, in the field)
+                A.__rematchHost(sp, ep, (seed ^ 0x9e3779b9) >>> 0);
+                levelUps++;
+            }
+        }
         A.__now = now; B.__now = now; A.__fire(); B.__fire();
         if(!A.__alive() || !B.__alive()){ exitReason = 'session-end'; diedAt = now/1000; break; }
         if(over(A) || over(B)){ exitReason = 'duelOver'; diedAt = now/1000; break; }
@@ -432,11 +467,11 @@ function runMatch(opts){
     const a = acc.A, b = acc.B;
     return {
         converged, firstDiverge, exitReason, diedAt,
-        levelReached, levelUps, localJumps, maxLocalJump,
+        levelReached, levelUps, localJumps, maxLocalJump, rematched: rematchDone,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,
         rb: a.rb + b.rb, resim: a.resim + b.resim, live: a.live + b.live, lost: a.lost + b.lost,
-        fix: a.fix + b.fix,
+        fix: a.fix + b.fix, drop: a.drop + b.drop, dropA: a.drop, dropB: b.drop,
         desyncProbe: opts.desyncProbe ? classifyDesyncs() : null,
         rbTrace: { A: A.__rbTraceDump(), B: B.__rbTraceDump() },
     };
