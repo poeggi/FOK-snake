@@ -68,6 +68,9 @@ suite test/relay-sim.js
 echo "[checks] P2P clock alignment recovers the peer offset (correct sign, sub-tick residual)"
 suite test/duel-align.js
 
+echo "[checks] CONNECTION LOST banner debounces lone refusals (jitter) but still flags a real stall/silence"
+suite test/duel-warn.js
+
 # --- REGRESSION tier: the heavy duel sweeps (many long lockstep matches). Skipped by
 # the fast pre-commit run; CI (--full) and a manual --full after a netcode/sim rework
 # run them. Each plays real 20-40s boosting matches over lossy/dozing wires -- the only

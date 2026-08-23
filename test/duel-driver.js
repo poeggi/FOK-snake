@@ -126,6 +126,7 @@ const HOOKS = (id) => `
   };
   // ---- divergence surface ----
   globalThis.__alive   = ()=> !!_netSess;
+  globalThis.__warn    = ()=> netDuelWarn();   // the exact in-game banner a player sees (null = none)
   globalThis.__phase   = ()=> phase;
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__simTick = ()=> simTick;

@@ -16,7 +16,8 @@ full regression coverage still gates every deploy:
     bash test/checks.sh          FAST tier (~8s) -- the local pre-commit hook. Every
                                  cheap guard: syntax, ASCII, sim determinism + invariants,
                                  all smoke tests, and the single-scenario netcode paths
-                                 (net-handshake, smoke-worker, relay-sim, duel-align).
+                                 (net-handshake, smoke-worker, relay-sim, duel-align,
+                                 duel-warn).
     bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the four heavy duel
                                  sweeps below. CI runs this on every push/PR, so it gates
                                  the auto-deploy to Pages.
@@ -74,6 +75,17 @@ One place that:
 below. Pass `opts.director` to replace the autopilot, `opts.capture` to snapshot the
 diverged tick's state and input logs, `opts.desyncProbe` to classify each product
 desync verdict as stale-vs-real against the ring-agreement history.
+
+### duel-warn.js  (FAST tier -- the CONNECTION LOST banner guard)
+
+Drives the real receive path with crafted refused packets and asserts the banner text
+`netDuelWarn()` reports. A LONE refused peer packet is normal jitter under independent
+clocks -- the redundant resend re-delivers that input a beat later at a usable tick, so
+the two worlds never diverge -- yet refusing one packet used to arm the 3s banner, a
+scary self-healing flash on a healthy link. The guard proves a lone future/stale/future-
+pts refusal shows NO banner, while a sustained burst (a real one-sided stall) and total
+silence still do. Divergence itself is caught separately by the hash -> DESYNC, never by
+this banner, so the debounce drops no real signal.
 
 ### duel-desync.js  (REGRESSION tier -- the boost-lockstep guard)
 

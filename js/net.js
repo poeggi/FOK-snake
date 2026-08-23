@@ -1949,7 +1949,7 @@ function _netHandleMsg(txt){
             // which IS the clock and can be zero-tolerance -- we compare against our
             // ESTIMATE of it, so a strict test would discard honest packets.
             if(m.pts - mine > NET_PTS_TOL){
-                _rbDbg.drop++; _rbWarnAt = performance.now();
+                _rbRefused();
                 _netSigLog('! future pts +' + Math.round(m.pts - mine) + 'ms');
                 return;
             }

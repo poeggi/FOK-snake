@@ -105,6 +105,23 @@ var _rbPhase = '';   // last seen duel phase: drives the re-anchor at level/resp
 var _rbWarnAt = -1e9;
 var _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = healthy): repeated
                           // failed repairs escalate to a session end on the disconnect timeout
+// A LONE refused packet is normal jitter under independent clocks: the redundant resend
+// re-delivers that input at a usable tick and the two worlds never actually diverge (the
+// hash stays equal). Only a SUSTAINED refusal -- EVERY packet unusable, the tick-base /
+// clock-residual fault -- is a real "connection lost". So leak a small counter instead of
+// arming the 3s banner on the first stray: an isolated refusal decays before it can flash,
+// a one-sided stall crosses the bar within a few beats. Genuine world divergence is caught
+// separately by the hash -> DESYNC, never by this warning.
+var _rbRefuse = 0, _rbRefuseAt = -1e9;
+const RB_REFUSE_LEAK_MS = 1200;   // one refusal fully decays in ~1.2s of otherwise-clean traffic
+const RB_REFUSE_TRIP = 3;         // this many un-decayed refusals = a one-sided stall, not jitter
+function _rbRefused(){
+    const now = performance.now();
+    _rbRefuse = Math.max(0, _rbRefuse - (now - _rbRefuseAt) / RB_REFUSE_LEAK_MS) + 1;
+    _rbRefuseAt = now;
+    _rbDbg.drop++;
+    if(_rbRefuse >= RB_REFUSE_TRIP) _rbWarnAt = now;   // corroborated: the link, not one packet
+}
 // A redundant-log record older than the rewind window is undeliverable (the peer
 // must refuse it), so resending it repairs nothing: prune before every send.
 function _rbSentPrune(){
@@ -123,6 +140,7 @@ function _rbReset(){
     _rbBase = simTick;
     _rbPhase = '';
     _rbWarnAt = -1e9;
+    _rbRefuse = 0; _rbRefuseAt = -1e9;
     _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, desyncAt:'' };
 }
 // Two identical sims fed identical inputs produce identical state, so a hash that
@@ -683,12 +701,12 @@ function _netPeerInput(m){
         if(r.k === 'dir' && okDir)     cmd = { t:'dir', p:oP, dir:d };
         else if(r.k === 'bs' && okDir) cmd = { t:'boost', p:oP, dir:d, now:!!r.n };
         else if(r.k === 'be')          cmd = { t:'boostend', p:oP };
-        if(!cmd){ _rbDbg.drop++; _rbWarnAt = performance.now(); continue; }
+        if(!cmd){ _rbRefused(); continue; }
         // Beyond the rewind window there is no honest way to honour it: applying it
         // at the wrong tick would desync the two worlds silently. Refuse, visibly.
-        if(tk <= simTick - RB_DEPTH){ _rbDbg.drop++; _rbWarnAt = performance.now(); _netSigLog('! input too old @' + tk); continue; }
+        if(tk <= simTick - RB_DEPTH){ _rbRefused(); _netSigLog('! input too old @' + tk); continue; }
         // Authored far ahead of us: an honest peer stamps its OWN current tick.
-        if(tk > simTick + RB_FUTURE){ _rbDbg.drop++; _rbWarnAt = performance.now(); _netSigLog('! input from the future @' + tk); continue; }
+        if(tk > simTick + RB_FUTURE){ _rbRefused(); _netSigLog('! input from the future @' + tk); continue; }
         _rbPeerSeq = q;
         _rbAdd(tk, cmd);
         _netDbg.inRx++;
