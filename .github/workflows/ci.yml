@@ -1,7 +1,9 @@
-# Lightweight CI: JS syntax, ASCII-only sources, headless smoke test, and the
-# sw.js integrity check. Pure Node -- no package.json, no installs, no build.
-# Runs on every push and PR so a broken commit is caught even though main
-# auto-deploys to GitHub Pages.
+# CI: the FULL regression tier (test/checks.sh --full) -- JS syntax, ASCII-only
+# sources, sim determinism/invariants, headless smoke tests, and the heavy duel
+# lockstep sweeps -- plus the sw.js integrity check. Pure Node: no package.json,
+# no installs, no build. Runs on every push and PR so a broken commit is caught
+# even though main auto-deploys to GitHub Pages. The local pre-commit hook runs
+# only the fast tier (bash test/checks.sh) for speed; CI is the full gate.
 name: ci
 
 on:
@@ -17,8 +19,8 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Code checks (syntax + ASCII + smoke)
-        run: bash test/checks.sh
+      - name: Code checks (full regression tier -- includes the heavy duel sweeps)
+        run: bash test/checks.sh --full
 
       - name: sw.js integrity
         run: node test/check-sw.js
@@ -27,9 +29,11 @@ jobs:
         if: always()
         run: |
           {
-            echo "### FOK-snake CI"
+            echo "### FOK-snake CI (full regression tier)"
             echo "- JS syntax check (node --check)"
             echo "- ASCII-only sources"
+            echo "- sim determinism + invariants (golden hashes)"
             echo "- headless smoke test (menus + gameplay)"
+            echo "- duel lockstep sweeps (desync / boundary / rematch / respawn)"
             echo "- sw.js CACHE / ASSETS integrity"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -8,6 +8,25 @@ wire and prove the pair stays in lockstep while a real, boosting match is played
 Everything here is headless Node against the real `js/*` (loaded in a VM by
 `harness.js`) -- no browser, no server, no relay.
 
+## Test tiers
+
+`test/checks.sh` runs in two tiers so the local pre-commit hook stays snappy while the
+full regression coverage still gates every deploy:
+
+    bash test/checks.sh          FAST tier (~8s) -- the local pre-commit hook. Every
+                                 cheap guard: syntax, ASCII, sim determinism + invariants,
+                                 all smoke tests, and the single-scenario netcode paths
+                                 (net-handshake, smoke-worker, relay-sim, duel-align).
+    bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the four heavy duel
+                                 sweeps below. CI runs this on every push/PR, so it gates
+                                 the auto-deploy to Pages.
+
+RUN `--full` LOCALLY after any significant netcode or sim rework (and before a release).
+The fast tier proves each netcode PATH still works; the regression tier plays many long,
+lossy, dozing matches to catch rare, slow-accumulation divergence a single scenario misses.
+The heavy sweeps dominate runtime (each plays real 20-40s lockstep matches), which is the
+whole reason they are not on the commit hot path -- they are not weaker, just slower.
+
 ## Files
 
 ### duel-driver.js  (shared engine, imported -- not run directly)
@@ -56,24 +75,47 @@ below. Pass `opts.director` to replace the autopilot, `opts.capture` to snapshot
 diverged tick's state and input logs, `opts.desyncProbe` to classify each product
 desync verdict as stale-vs-real against the ring-agreement history.
 
-### duel-desync.js  (DEFAULT suite -- the regression guard)
+### duel-desync.js  (REGRESSION tier -- the boost-lockstep guard)
 
-Runs three scenarios through the driver and FAILS if a boosting duel does not stay
+Runs four scenarios through the driver and FAILS if a boosting duel does not stay
 in lockstep. This is the coverage the dir-only convergence test (`relay-sim.js`)
 never had: it never boosts, so the boost path shipped a desync no test could see.
 
     clean-boost   phase offset only, no loss   -- isolates the boost/rollback path
     lossy-boost   + 5% packet loss             -- stresses the redundancy/loss window
     long-levels   longer run to levels 2-3     -- exercises the level-boundary path
+    headroom      sub-tick clock, 0 rollbacks  -- proves the 1-tick input headroom holds
 
 Fail gate (any one trips it): a local-head jump, a first-divergence, non-convergence
 at the end, a product desync verdict on either client, or a session-end exit.
 
-Run it:
+### duel-boundary.js  (REGRESSION tier -- the level-boundary guard)
 
-    node test/duel-desync.js
-    # or via the full pre-commit / CI suite:
-    bash test/checks.sh
+Plays real P2P level-ups (host authors the start PTS, joiner aligns its clock) over
+loss + drift + doze, and asserts both sims stay byte-identical across the `simTick`
+reset to 0. Includes an "align load-bearing" control: the SAME match with clock
+alignment disabled must diverge, proving the alignment is what holds it.
+
+### duel-rematch.js  (REGRESSION tier -- the server-path restart guard)
+
+Same idea across a server-issued rematch/restart (a new `start_pts` moves tick zero):
+the joiner must re-align its clock on EVERY start, not just at level boundaries. Also
+carries the align load-bearing control.
+
+### duel-respawn.js  (REGRESSION tier -- the post-death clean-start guard)
+
+Freezes one client for seconds (the `doze` knob = iOS WiFi power-save / a backgrounded
+tab) while a head-on `collider` director drives both snakes into deaths, so the host
+owes the frozen peer a FULL RESYNC whose tick has aged out of its rollback ring. Asserts
+the resync never yanks your own head back to a death cell (`selfJumps==0`), never storms
+(a resync every second because our own snake never converged), and never ends the match.
+Guards the fix that a resync repairs only the shared world + the host's snake -- each
+client still owns its own snake.
+
+Run any of them directly, or the whole regression tier:
+
+    node test/duel-desync.js         # one suite
+    bash test/checks.sh --full       # fast tier + all four heavy sweeps (what CI runs)
 
 ### duel-profile.js  (on-demand -- latency/rollback profiler)
 

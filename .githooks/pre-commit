@@ -4,9 +4,11 @@
 # PATCH auto-increments each commit; resets to 0 when the tag's MAJOR.MINOR changes.
 # Version is duplicated in comment + CACHE for bogus-update detection.
 
-# Run the same code checks CI runs (parity), before bumping the version, so a
-# broken commit never reaches the auto-deploying main branch. Skipped only if
-# node is unavailable locally -- CI still enforces them.
+# Run the FAST tier of the code checks before bumping the version, so an obviously
+# broken commit is caught locally without the multi-minute duel sweeps. CI runs the
+# FULL tier (bash test/checks.sh --full) on every push and gates the auto-deploy, so
+# the heavy regression coverage is not lost -- just kept off the commit hot path.
+# Skipped only if node is unavailable locally -- CI still enforces everything.
 if [ -f test/checks.sh ]; then
     if command -v node >/dev/null 2>&1; then
         if ! bash test/checks.sh; then

@@ -1,8 +1,36 @@
 #!/usr/bin/env bash
-# Code checks shared by the pre-commit hook and CI (kept in one place so local
-# and CI run exactly the same thing). Fast, no dependencies beyond node + git.
+# Code checks, no dependencies beyond node + git. Two tiers, one script:
+#
+#   bash test/checks.sh            FAST tier (the local pre-commit hook): every
+#                                  cheap correctness guard -- syntax, ASCII, sim
+#                                  determinism/invariants, all smoke tests, and the
+#                                  single-scenario netcode paths (handshake, worker,
+#                                  relay, clock align). ~8s. Snappy enough to run on
+#                                  every commit.
+#
+#   bash test/checks.sh --full     REGRESSION tier (CI + after any significant
+#     (or --regression)            netcode/sim rework, before a release): FAST plus
+#                                  the four heavy duel sweeps (duel-desync/-boundary/
+#                                  -rematch/-respawn). Those play many full 20-40s
+#                                  lockstep matches over lossy/dozing wires to shake
+#                                  out rare, slow-accumulation divergence. ~2min.
+#
+# CI runs --full on every push/PR, so the regression tier still gates the auto-deploy
+# to Pages -- moving it off the local hook trades nothing but the developer's wait.
+# See test/README.md ("Test tiers") for which suites live where and why.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Tier + on-demand-profile selection from the first arg. The deep profilers imply the
+# full suite (you would not profile a half-run). Anything else is a usage error rather
+# than a silent fast run.
+FULL=0
+case "${1:-}" in
+    ""|--fast)              FULL=0 ;;
+    --full|--regression)    FULL=1 ;;
+    --profile|--netprofile) FULL=1 ;;
+    *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile]"; exit 2 ;;
+esac
 
 # A suite whose async body stalls (an await that never settles) drains the event
 # loop and exits 0 having asserted NOTHING -- which read as a pass and hid a real
@@ -40,17 +68,25 @@ suite test/relay-sim.js
 echo "[checks] P2P clock alignment recovers the peer offset (correct sign, sub-tick residual)"
 suite test/duel-align.js
 
-echo "[checks] boosting duel stays in lockstep (two clients, real match, over a lossy wire)"
-suite test/duel-desync.js
+# --- REGRESSION tier: the heavy duel sweeps (many long lockstep matches). Skipped by
+# the fast pre-commit run; CI (--full) and a manual --full after a netcode/sim rework
+# run them. Each plays real 20-40s boosting matches over lossy/dozing wires -- the only
+# way rare, slow-accumulation divergence shows up -- so together they dominate runtime.
+if [ "$FULL" = 1 ]; then
+    echo "[checks] boosting duel stays in lockstep (two clients, real match, over a lossy wire)"
+    suite test/duel-desync.js
 
-echo "[checks] P2P level boundary holds lockstep (host authors start PTS, joiner aligns its clock)"
-suite test/duel-boundary.js
+    echo "[checks] P2P level boundary holds lockstep (host authors start PTS, joiner aligns its clock)"
+    suite test/duel-boundary.js
 
-echo "[checks] server-path restart (rematch) holds lockstep (joiner aligns its clock on every start)"
-suite test/duel-rematch.js
+    echo "[checks] server-path restart (rematch) holds lockstep (joiner aligns its clock on every start)"
+    suite test/duel-rematch.js
 
-echo "[checks] post-death respawn is clean (a full resync never yanks your own snake back to a death cell)"
-suite test/duel-respawn.js
+    echo "[checks] post-death respawn is clean (a full resync never yanks your own snake back to a death cell)"
+    suite test/duel-respawn.js
+else
+    echo "[checks] (fast tier) skipping heavy duel sweeps -- run 'bash test/checks.sh --full' after any netcode/sim rework"
+fi
 
 echo "[checks] duel sim rules (speed round per-level stable across respawns; fragile bars crush like single player)"
 suite test/sim-duel.js
