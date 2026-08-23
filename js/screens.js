@@ -1401,14 +1401,16 @@ function drawDuelBoard(now) {
     const _sh=shakeOffset(now);   // arming happens sim-side via the 'nearmiss' event (see armNearMiss)
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
     else drawWorld(now);      // background + collectibles + both snakes: the shared layer
-    // SPEED ROUND persistent cue: a fast-pulsing hot border for the whole level, so a player who
-    // blinked past the banner still sees they are IN one. Duel-only via _speedRound; off at duelOver.
+    // SPEED ROUND persistent cue: a thin hot rim hugging the canvas edge for the whole level, so a
+    // player who blinked past the banner still sees they are IN one. Kept to a 2px line with a gentle
+    // glow/colour pulse so the cue stays out of the play area and never washes over the board or the
+    // HUD. Duel-only via _speedRound; off at duelOver. (cfg.disableGlow still zeroes the glow globally.)
     if(_speedRound && phase!=='duelOver'){
-        const p=(Math.floor(now/90)&1)===0;
+        const p=(Math.floor(now/160)&1)===0;
         ctx.save();
-        ctx.lineWidth=5; ctx.strokeStyle=p?'#ffd21a':'#ff7b1a';
-        ctx.shadowColor='#fff14a'; ctx.shadowBlur=p?GLOW.BIG:GLOW.TEXT;
-        ctx.strokeRect(3,3,CW-6,CH-6);
+        ctx.lineWidth=2; ctx.strokeStyle=p?'#ffd21a':'#ff7b1a';
+        ctx.shadowColor='#ffb21a'; ctx.shadowBlur=p?GLOW.TEXT:GLOW.FAINT;
+        ctx.strokeRect(1,1,CW-2,CH-2);
         ctx.restore();
     }
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
