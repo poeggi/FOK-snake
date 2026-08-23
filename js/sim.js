@@ -160,10 +160,16 @@ function _duelBeginLevel(reseed) {
     // LEVEL_CFG has 10 entries; a duel is endless, so past level 10 it reuses the last
     // (hardest) config rather than reading off the end and throwing mid-match.
     const li = Math.min(level, LEVEL_CFG.length) - 1;
-    if(reseed) seedRng(_duelLevelSeed(gameSeed, level));
-    _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
+    if(reseed){
+        seedRng(_duelLevelSeed(gameSeed, level));
+        // Roll the speed round HERE and nowhere else: it is a property of the LEVEL, decided
+        // once when the level opens. A respawn (reseed=false) keeps the standing verdict --
+        // _speedRound is hashed + rollback-restored, so both clients stay on it -- otherwise a
+        // level with several deaths would re-roll the 1-in-10 each time and run well above 10%.
+        _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
+        if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
+    }
     gPer = _speedRound ? LEVEL_CFG[9].normal : LEVEL_CFG[li].normal;
-    if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
     for (let i = 0; i < 2; i++) {
         const keep = players[i];
         const fresh = i === 0 ? _mkDuelPlayer(6, Math.floor(ROWS/2)-4, 1)
@@ -269,8 +275,9 @@ function duelStep(now) {
         const eats = gem && ck(gem) === hk;
         if (!protect) {
             if (barKeys.has(hk)) {
-                if (_powerMode) crushK[i] = hk;   // powered: smash through, classic-style
-                else dead[i] = true;
+                const hb = bars.find(b => ck(b) === hk);
+                if (hb && (hb.fragile || _powerMode)) crushK[i] = hk;   // fragile OR powered: smash through, same rule as single player
+                else dead[i] = true;                                    // solid bar: lethal
             }
             // own body: tail vacates unless eating (same rule as classic; power does not excuse it)
             else if ((eats ? players[i].snake : players[i].snake.slice(0,-1)).some(s => ck(s) === hk)) dead[i] = true;
@@ -302,14 +309,11 @@ function duelStep(now) {
         }
         return;
     }
-    // Powered bar crush (no pairs in duel bars; no coin rewards in duel).
+    // Bar crush (fragile or powered): the SAME destruction path as single player, so a
+    // paired unit breaks as one. No coin/score reward in a duel (its economy is gems + hearts).
     for (let i = 0; i < 2; i++) {
         if (!crushK[i]) continue;
-        const cb = bars.find(b => ck(b) === crushK[i]);
-        if (cb) {
-            emit({t:'crush', x:cb.x, y:cb.y}); emit({t:'sfx',name:'crash'});
-            bars = bars.filter(b => ck(b) !== crushK[i]); _barsV++;
-        }
+        _crushBarAt(crushK[i]);
     }
     // Apply both moves first; gem consequences afterwards (a level-up rebuilds the
     // players array, so it must not happen while this loop still holds references).
@@ -405,6 +409,22 @@ function _placeBars(blocked, numBars) {
         }
     }
     return bars;
+}
+// Crush the fragile/powered bar at cell key hk AND its paired partner (a 2-cell unit shares
+// one fate), emit the crush fx + crash sfx, bump the change ticker. Shared by single player
+// (step) and duel (duelStep) so the destruction rule is ONE code path: hit either half of a
+// pair -> both go. A still (non-powered) crush repaints the bars; powered bars already
+// re-render every tick as they flee, so it skips the repaint then.
+function _crushBarAt(hk){
+    let primCk = hk;
+    const hb = bars.find(b => ck(b) === hk);
+    if(hb && hb.paired){ const p = bars.find(b => b.pairEnd && ck(b.pairEnd) === primCk); if(p) primCk = ck(p); }
+    const primBar = bars.find(b => ck(b) === primCk);
+    const secCk = primBar && primBar.pairEnd ? ck(primBar.pairEnd) : null;
+    if(hb) emit({t:'crush', x:hb.x, y:hb.y});
+    bars = bars.filter(b => ck(b) !== primCk && (secCk === null || ck(b) !== secCk)); _barsV++;
+    emit({t:'sfx', name:'crash'});
+    if(!_powerMode) emit({t:'bars'});
 }
 function beginLevel(isRespawn=false) {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
@@ -548,15 +568,8 @@ function step(now) {
         const hitBar=bars.find(b=>ck(b)===hk);
         if(hitBar){
             if(hitBar.fragile||_powerMode){
-                let primCk=ck(hitBar);
-                if(hitBar.paired){const p=bars.find(b=>b.pairEnd&&ck(b.pairEnd)===primCk);if(p)primCk=ck(p);}
-                const primBar=bars.find(b=>ck(b)===primCk);
-                const secCk=primBar&&primBar.pairEnd?ck(primBar.pairEnd):null;
-                emit({t:'crush', x:hitBar.x, y:hitBar.y});
-                bars=bars.filter(b=>ck(b)!==primCk&&(secCk===null||ck(b)!==secCk)); _barsV++;
+                _crushBarAt(hk);
                 score+=level*100;   // a crush scores like a gem; FOKoins follow from the run score at game over
-                emit({t:'sfx',name:'crash'});
-                if(!_powerMode) emit({t:'bars'});
             } else { die(now); return; }
         }
     }

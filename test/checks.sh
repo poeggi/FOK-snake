@@ -49,6 +49,9 @@ suite test/duel-boundary.js
 echo "[checks] server-path restart (rematch) holds lockstep (joiner aligns its clock on every start)"
 suite test/duel-rematch.js
 
+echo "[checks] duel sim rules (speed round per-level stable across respawns; fragile bars crush like single player)"
+suite test/sim-duel.js
+
 echo "[checks] sim invariants"
 suite test/sim-invariants.js
 
