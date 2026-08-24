@@ -1931,6 +1931,13 @@ async function _netRequestStart(s, reason){
         if(s.role === 'host') _netSend({ t: (reason === 'first' || !reason) ? 'sched' : 'rst',
                                          seed:s.seed, startPts:s.startPts, x10:s.x10, epoch:s.epoch|0,
                                          lvl:0, bth:Math.round(theta || 0) });
+        // The HOST authors the begin moment; the joiner takes it from the sched/rst it receives --
+        // that packet re-anchors the joiner's clock to the shared midpoint (its half of `bth`) BEFORE
+        // it begins. A joiner that instead began off its OWN start request would skip that nudge: the
+        // sched's inGame gate then swallows `bth` and the first-start burst is only half-applied (the
+        // host moved its clock, the joiner did not). Deferring to the host packet is exactly how every
+        // LEVEL boundary already begins the joiner, so the first start now follows that one path too.
+        if(s.role !== 'host') return;
         // start_pts may already be in the PAST when we asked late (the epoch key is what lets the
         // server answer us with the same moment anyway). Then wait is 0 and we start at once -- the
         // clock-driven tick immediately puts us on the right tick, the fast-forward the contract
@@ -1938,18 +1945,19 @@ async function _netRequestStart(s, reason){
         const go = () => {
             if(_netSess !== s || !s.game) return;
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
-            beginOnlineDuel(s.seed, s.role === 'host');
-            if(s.role === 'host') _netSend({ t:'start' });
+            beginOnlineDuel(s.seed, true);
+            _netSend({ t:'start' });
         };
         const wait = Math.max(0, Math.min(5000, s.startPts - netPts()));
         if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
     };
-    // A rematch is host-authored (only the host reaches here for it -- the joiner just receives the
-    // rst): run the boundary burst first so both clocks meet at the midpoint before the shared
-    // start_pts is read, then ship with the agreed offset. A first start is freshly server-synced on
-    // BOTH sides (both POST it) and carries no burst -- it ships at once and the first level boundary
-    // refines the clock.
-    if(reason === 'rematch' && s.role === 'host') _netBurstThenStart(s, shipAndSchedule);
+    // Every server-authored start -- the FIRST start and a rematch alike -- runs the boundary burst
+    // first, so both clocks meet at the shared midpoint before start_pts is read (the joiner applies
+    // its half from the `bth` on the start packet). This is the SAME p2p clock sync a level boundary
+    // does; the first start is no longer the one path that skipped it and left each client anchored on
+    // its own independent server-sync offset -- the widest the clocks ever sit apart, right at level 1
+    // where the snakes are closest and a dropped/late input is most likely to force a visible rollback.
+    if(s.role === 'host') _netBurstThenStart(s, shipAndSchedule);
     else shipAndSchedule(0);
 }
 // Host-authored P2P level start: no server. The host runs a bilateral boundary BURST (both sides

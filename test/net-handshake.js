@@ -136,10 +136,12 @@ const HOOKS = (myId) => `
     _netTimeSync = async ()=>{};
     _netPostRes = async ()=>({ status:200, err:'',
       json:{ ok:true, start_pts:netPts()+50, epoch:epoch|0, now:netPts() } });
-    beginOnlineDuel = ()=>{};   // probe the wire packets, not the duel setup
-    // A host rematch runs a short paced clock-burst (bsync + a few 'bs') on timers before it
-    // authors and ships the rst. Run those paced pings inline so the deferred rst is on the wire
-    // when we drain (a first start carries no burst, so this is a no-op there).
+    __ctlBegins = 0;
+    beginOnlineDuel = ()=>{ __ctlBegins++; };   // count begins; probe the wire, not the duel setup
+    // EVERY server-authored start -- the first start and a rematch alike -- now runs a short paced
+    // clock-burst (bsync + a few 'bs') on timers before the host authors and ships its sched/rst.
+    // Run those paced pings inline so the deferred start packet is on the wire when we drain. With no
+    // peer here the burst starves -> theta 0 -> bth 0, but the bsync/bs still prove the path ran.
     const realST = setTimeout;
     globalThis.setTimeout = (fn)=>{ fn(); return -1; };
     try { await _realReqStart(_netSess, reason); }
@@ -932,13 +934,33 @@ try {
     if(!types.includes('rst')) throw new Error('a rematch sent no restart at all: ' + JSON.stringify(types));
   });
 
-  await acheck('the FIRST start still uses sched', async () => {
+  await acheck('the FIRST start syncs the clock like any level (host bursts, ships sched+bth, begins once)', async () => {
     const A = mk(A_ID);
     A.__duelStart(0xBEEF, 'host', 1000);
     A.__drain();
     await A.__reqStart('first', 0);
-    const types = A.__drain().map(x => JSON.parse(x).t);
-    if(!types.includes('sched')) throw new Error('the first start must still be sched: ' + JSON.stringify(types));
+    const pkts = A.__drain().map(x => JSON.parse(x));
+    const types = pkts.map(p => p.t);
+    if(!types.includes('sched')) throw new Error('the first start must still be sched (refused while inGame): ' + JSON.stringify(types));
+    // The load-bearing assertion: the first start now opens the SAME bilateral clock burst every
+    // level boundary does, instead of being the one path that shipped on two independent server syncs.
+    if(!types.includes('bsync')) throw new Error('the first start must open the boundary burst (bsync), same as every level: ' + JSON.stringify(types));
+    const sched = pkts.find(p => p.t === 'sched');
+    if(!('bth' in sched)) throw new Error('the first-start sched must carry the burst offset bth (the joiner applies its half): ' + JSON.stringify(sched));
+    if(A.__ctlBeginsN() !== 1) throw new Error('the host authors its own begin exactly once on the first start: ' + A.__ctlBeginsN());
+  });
+
+  await acheck('the FIRST-start joiner defers its begin to the host sched (no self-start)', async () => {
+    const B = mk(B_ID);
+    B.__duelStart(0xBEEF, 'peer', 3000);
+    B.__drain();
+    await B.__reqStart(undefined, 0);   // the joiner's dc.onopen calls _netRequestStart with NO reason
+    // A joiner that self-began off its OWN request would skip the sched's bth nudge (the inGame gate
+    // swallows it) and only half-apply the burst. It must instead wait for the host's sched/rst.
+    if(B.__ctlBeginsN() !== 0) throw new Error('the joiner must NOT self-begin on the first start -- it defers to the host sched: ' + B.__ctlBeginsN());
+    const types = B.__drain().map(x => JSON.parse(x).t);
+    for(const t of ['sched', 'rst', 'start', 'bsync'])
+      if(types.includes(t)) throw new Error('the joiner authored a start packet (' + t + '); only the host authors: ' + JSON.stringify(types));
   });
 
   // Control transitions (sched/rst) now carry no redundancy of their own AND are repeated
