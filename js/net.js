@@ -110,8 +110,9 @@ const RB_RECONNECT_MS = Math.round(64 * TICK_MS);     // ~1067ms (4 missed) -> s
 // The single persistence deadline for BOTH faults: a peer we have not heard from, or a
 // hash that keeps disagreeing after its resync, is a dead match once it lasts this long.
 // The banner shows from ~RB_WARN_MS; the recovery attempt (p2p rebuild / resync) runs in
-// the gap; unrecovered past this -> end. ~2s: two heartbeats to notice, ~1.5s to recover.
-const RB_PERSIST_KILL_MS = 2000;
+// the gap; unrecovered past this -> end. 4s: two heartbeats to notice, then a wide margin
+// for a p2p link rebuild -- a >=1.5s interruption must recover the match, not end it.
+const RB_PERSIST_KILL_MS = 4000;
 // NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
 // enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a
@@ -1742,48 +1743,53 @@ function _netBreakRecover(s){
 // In-game liveness: the DataChannel is the session -- ping when idle, 4s silence = dead.
 function _netLiveStart(){
     if(!_netTimers) return;
-    _netSess.liveT = setInterval(()=>{
-        const s = _netSess; if(!s || !s.game) return;
-        const nowMs = performance.now();
-        if(!s.pathAt || nowMs - s.pathAt > 2000){ s.pathAt = nowMs; _netPathStat(s); }   // refresh the ICE-path readout ~0.5Hz
-        // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
-        // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
-        const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
-        if(inGame && _dsyFor > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return; }
-        _netBreakRecover(s);   // post-suspend hard-snap: re-anchor a sim frozen far behind the clock
-        // The idle keepalive carries the recent input log, so it doubles as repair:
-        // a lost LAST input would otherwise sit unfixed until the player pressed
-        // something else. An empty log is just an alive check, as before.
-        //
-        // The keepalive PERIOD used to equal the warning THRESHOLD: this ran on a
-        // 1000ms interval (setInterval never fires early, often late) while the warning
-        // fires after 1000ms of silence. So the gap crossed the line just before every
-        // single arrival -- CONNECTION LOST flashed once a second on a perfect link.
-        // Deterministic, not a jitter edge case. A keepalive must be comfortably faster
-        // than whatever watches for its absence: three per window, so three must
-        // genuinely go missing before we say a word.
-        if(nowMs - s.lastSent > NET_KEEPALIVE_MS)
-            _netSend(inGame && !_netWD() ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });   // worker duel: _rbSent lives in the worker; its 16-tick heartbeat covers repair
-        // The re-offer retry is gated off in-game, so drive it from here while reconnecting.
-        if(s.reconnecting && s.role === 'host' && _netHs.offerTo === s.peer && _netHs.offerPayload && Date.now() - _netHs.offeredAt > 2000){
-            _netHs.offeredAt = Date.now(); _netSignal(s.peer, 'offer', _netHs.offerPayload);
-        }
-        // Silence on the WALL clock (Date.now): a suspended tab freezes performance.now() and
-        // the timers, so only real elapsed time reveals the gap on the side that was asleep.
-        const nowW = Date.now();
-        const silent = nowW - s.lastRecvWall;
-        if(s.relay){
-            if(nowMs < s.relayGraceUntil) return;                             // relay just engaged: let the peer catch up
-            if(silent > RB_PERSIST_KILL_MS) _netSessionEnd('CONNECTION LOST'); // relay has no transport to rebuild -> silence past the deadline ends it
-            return;
-        }
-        // p2p ladder: WARN (netDuelWarn, ~RB_WARN_MS) -> RECONNECT (rebuild the link, ~RB_RECONNECT_MS)
-        // -> hard KILL at the deadline. The kill is unconditional so ">2s of silence ends the
-        // match" holds even where no rebuild was possible; below it, start one rebuild or clear it.
-        if(silent > RB_PERSIST_KILL_MS){ _netSessionEnd('CONNECTION LOST'); return; }
-        if(silent > RB_RECONNECT_MS && !s.reconnectAt) _netReconnect(s);
-        else if(s.reconnectAt && silent < RB_WARN_MS) _netReconnectDone(s);   // packets flowing again -- recovered
-    }, 250);
+    _netSess.liveT = setInterval(_netLiveCheck, 250);
+}
+// ONE liveness pass (ping-when-idle, reconnect/kill on silence, end a stuck desync). Split out
+// of the setInterval body so the headless duel driver can run the REAL check on its simulated
+// clock -- the timeouts and the kill are then tested by the same code the browser runs, not a
+// re-implementation. Production calls it every 250ms; the driver pumps it off its fake clock.
+function _netLiveCheck(){
+    const s = _netSess; if(!s || !s.game) return;
+    const nowMs = performance.now();
+    if(!s.pathAt || nowMs - s.pathAt > 2000){ s.pathAt = nowMs; _netPathStat(s); }   // refresh the ICE-path readout ~0.5Hz
+    // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
+    // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
+    const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
+    if(inGame && _dsyFor > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return; }
+    _netBreakRecover(s);   // post-suspend hard-snap: re-anchor a sim frozen far behind the clock
+    // The idle keepalive carries the recent input log, so it doubles as repair:
+    // a lost LAST input would otherwise sit unfixed until the player pressed
+    // something else. An empty log is just an alive check, as before.
+    //
+    // The keepalive PERIOD used to equal the warning THRESHOLD: this ran on a
+    // 1000ms interval (setInterval never fires early, often late) while the warning
+    // fires after 1000ms of silence. So the gap crossed the line just before every
+    // single arrival -- CONNECTION LOST flashed once a second on a perfect link.
+    // Deterministic, not a jitter edge case. A keepalive must be comfortably faster
+    // than whatever watches for its absence: three per window, so three must
+    // genuinely go missing before we say a word.
+    if(nowMs - s.lastSent > NET_KEEPALIVE_MS)
+        _netSend(inGame && !_netWD() ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });   // worker duel: _rbSent lives in the worker; its 16-tick heartbeat covers repair
+    // The re-offer retry is gated off in-game, so drive it from here while reconnecting.
+    if(s.reconnecting && s.role === 'host' && _netHs.offerTo === s.peer && _netHs.offerPayload && Date.now() - _netHs.offeredAt > 2000){
+        _netHs.offeredAt = Date.now(); _netSignal(s.peer, 'offer', _netHs.offerPayload);
+    }
+    // Silence on the WALL clock (Date.now): a suspended tab freezes performance.now() and
+    // the timers, so only real elapsed time reveals the gap on the side that was asleep.
+    const nowW = Date.now();
+    const silent = nowW - s.lastRecvWall;
+    if(s.relay){
+        if(nowMs < s.relayGraceUntil) return;                             // relay just engaged: let the peer catch up
+        if(silent > RB_PERSIST_KILL_MS) _netSessionEnd('CONNECTION LOST'); // relay has no transport to rebuild -> silence past the deadline ends it
+        return;
+    }
+    // p2p ladder: WARN (netDuelWarn, ~RB_WARN_MS) -> RECONNECT (rebuild the link, ~RB_RECONNECT_MS)
+    // -> hard KILL at the deadline. The kill is unconditional so "silence past the deadline ends
+    // the match" holds even where no rebuild was possible; below it, start one rebuild or clear it.
+    if(silent > RB_PERSIST_KILL_MS){ _netSessionEnd('CONNECTION LOST'); return; }
+    if(silent > RB_RECONNECT_MS && !s.reconnectAt) _netReconnect(s);
+    else if(s.reconnectAt && silent < RB_WARN_MS) _netReconnectDone(s);   // packets flowing again -- recovered
 }
 // ---- mid-game reconnect: rebuild the p2p transport WITHOUT restarting the match ----
 // The sim keeps running on both sides throughout (each ticks off the shared clock), so once

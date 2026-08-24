@@ -135,6 +135,8 @@ const HOOKS = (id) => `
   // ---- divergence surface ----
   globalThis.__alive   = ()=> !!_netSess;
   globalThis.__warn    = ()=> netDuelWarn();   // the exact in-game banner a player sees (null = none)
+  globalThis.__silent  = ()=> _netSess ? Date.now() - _netSess.lastRecvWall : 0;   // wall-clock ms since our last inbound packet
+  globalThis.__live    = ()=>{ _netLiveCheck(); };   // run ONE real liveness pass (kill/reconnect/keepalive) -- the driver pumps it at 250ms like production
   globalThis.__phase   = ()=> phase;
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__simTick = ()=> simTick;
@@ -399,7 +401,9 @@ function runMatch(opts){
         S.next = S.k * TICK + S.phase + (opts.tjit ? (rnd()*2 - 1) * opts.tjit : 0);
     };
     const emit = (S)=>{
-        for(const txt of S.c.__out.splice(0)){
+        const out = S.c.__out.splice(0);   // always drain the buffer, even when the link is down
+        if(wireDown) return;               // ...but a dead wire carries nothing: authored packets are lost
+        for(const txt of out){
             let cls = '?'; try{ cls = (JSON.parse(txt).t) || '?'; }catch(e){}
             if(cls === 'pi') continue;
             if(rnd() < (W.loss || 0)) continue;
@@ -409,7 +413,8 @@ function runMatch(opts){
             wire[S.dir].push([S.c.__now + d, txt]);
         }
     };
-    const drain = (q, C, R)=>{ for(let j = 0; j < q.length; j++){
+    const drain = (q, C, R)=>{ if(wireDown) return;   // nothing is delivered while the link is down
+        for(let j = 0; j < q.length; j++){
         const ready = q[j][0] <= C.__now && (!opts.recv || C.__now >= R.busyUntil);
         if(ready){ C.__recv(q[j][1]); q.splice(j--, 1); }
     } };
@@ -468,9 +473,24 @@ function runMatch(opts){
     const doze0 = doze ? Math.round(doze.at * 1000) : -1;
     const doze1 = doze ? doze0 + (doze.ms | 0) : -1;
     let dozeResumed = false;
+    // Optional WIRE OUTAGE: a total bidirectional blackout for `ms` starting at `at` seconds,
+    // modelling a connection interruption (a WiFi drop / a few lost seconds) where BOTH clients
+    // keep running -- they tick, author inputs and send as normal, but nothing crosses the wire.
+    // On restore the redundant input log + the periodic state/hash recovery must re-converge them
+    // WITHOUT a session-end: the design goal is that a brief interruption is survived, not fatal.
+    // Distinct from doze (which freezes one client's clock+sim): here neither side sleeps, only
+    // the link is dead, so the silence-ladder / RB_PERSIST_KILL_MS deadline is what is on trial.
+    // opts.outage = { at, ms }.
+    const outage = opts.outage || null;
+    const out0 = outage ? Math.round(outage.at * 1000) : -1;
+    const out1 = outage ? out0 + (outage.ms | 0) : -1;
+    let sawConnLost = false, maxSilentMs = 0;
+    const CL = 'CONNECTION LOST';
+    let wireDown = false, nextLive = 0;
     let diedAt = 0;
     for(let now = 0; now <= secs * 1000; now++){
         const dozing = doze && now >= doze0 && now < doze1;
+        wireDown = !!(outage && now >= out0 && now < out1);   // total bidirectional blackout window
         if(doze && !dozeResumed && now >= doze1){
             // Resume: skip the frozen span instead of bursting through it (worker _acc drop).
             dozeResumed = true;
@@ -490,6 +510,14 @@ function runMatch(opts){
         A.__now = now; B.__now = now;
         if(!(dozing && dozeWho === 'A')) A.__fire();
         if(!(dozing && dozeWho === 'B')) B.__fire();
+        // Real liveness pass at production cadence (250ms): the same _netLiveCheck the browser runs
+        // on setInterval -- it is what warns, reconnects, keeps-alive and KILLS on the deadline. A
+        // dozing client's timers are frozen, so skip its pass while it sleeps.
+        if(now >= nextLive){
+            if(!(dozing && dozeWho === 'A')) A.__live();
+            if(!(dozing && dozeWho === 'B')) B.__live();
+            nextLive += 250;
+        }
         if(!A.__alive() || !B.__alive()){ exitReason = 'session-end'; diedAt = now/1000; break; }
         if(over(A) || over(B)){ exitReason = 'duelOver'; diedAt = now/1000; break; }
         if(!(dozing && dozeWho === 'A')) while(now >= sch.A.next) fireOnce(sch.A);
@@ -501,20 +529,31 @@ function runMatch(opts){
         maybeLevelUp(now);
         checkDiverge();
         if(opts.desyncProbe) sampleRingAgree();
+        // Banner + silence tracking: prove the outage actually surfaced CONNECTION LOST (the fault
+        // was exercised, not skated past) and record the worst silence either side saw (must stay
+        // under RB_PERSIST_KILL_MS for the match to be recoverable rather than killed).
+        if(A.__warn() === CL || B.__warn() === CL) sawConnLost = true;
+        maxSilentMs = Math.max(maxSilentMs, A.__silent(), B.__silent());
+        if(opts.onSample) opts.onSample(now, A, B);   // diagnostic tap (null in the suite): watch recovery over time
     }
     // Settle: stop authoring, deliver everything in flight losslessly, tick both to a common
     // tick, then judge convergence (two independently-phased loops end up to a tick apart).
+    // A session that already ENDED (the liveness kill fired) has no live sim to converge -- the
+    // duel is torn down, so ticking it would crash; skip settle and report it as not-converged.
+    const ended = exitReason === 'session-end';
     const settleNow = (diedAt ? diedAt * 1000 : secs * 1000) + 1;
     const pump = ()=>{ for(const [S, peer] of [[A, B], [B, A]]) for(const txt of S.__out.splice(0)){
         let t = '?'; try{ t = (JSON.parse(txt).t) || '?'; }catch(e){} if(t === 'pi') continue; peer.__recv(txt); } };
-    A.__now = settleNow; B.__now = settleNow; pump();
-    const target = Math.max(A.__simTick(), B.__simTick()) + 40;
-    for(let g = 0; g < 400 && (A.__simTick() < target || B.__simTick() < target); g++){
-        if(A.__simTick() < target) A.__tick1();
-        if(B.__simTick() < target) B.__tick1();
-        pump();
-        checkDiverge();
-        if(opts.desyncProbe) sampleRingAgree();
+    if(!ended){
+        A.__now = settleNow; B.__now = settleNow; pump();
+        const target = Math.max(A.__simTick(), B.__simTick()) + 40;
+        for(let g = 0; g < 400 && (A.__simTick() < target || B.__simTick() < target); g++){
+            if(A.__simTick() < target) A.__tick1();
+            if(B.__simTick() < target) B.__tick1();
+            pump();
+            checkDiverge();
+            if(opts.desyncProbe) sampleRingAgree();
+        }
     }
     // Classify every product DESYNC verdict (sniffed from each client's sig-log) against the
     // settled ring-agreement history: agreed => the verdict was FALSE (peer's frozen 1Hz hash
@@ -532,11 +571,12 @@ function runMatch(opts){
         scan(A.__sigDump(), 'A'); scan(B.__sigDump(), 'B');
         return out;
     };
-    const converged = A.__simTick() === B.__simTick() && A.__hashNow() === B.__hashNow();
+    const converged = !ended && A.__simTick() === B.__simTick() && A.__hashNow() === B.__hashNow();
     bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // fold the final (post-last-level) tallies in
     const a = acc.A, b = acc.B;
     return {
         converged, firstDiverge, exitReason, diedAt,
+        sawConnLost, maxSilentMs, endWarn: A.__warn() || B.__warn() || null,
         levelReached, levelUps, localJumps, maxLocalJump, rematched: rematchDone,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,

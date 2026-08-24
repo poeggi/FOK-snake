@@ -291,11 +291,16 @@ function _rbSendState(t, sn){
     if(!sn || !sn.players) return;
     const mi = netMyIndex(), me = sn.players[mi];
     if(!me || !Array.isArray(me.snake)) return;
-    const cells = [];
-    for(const c of me.snake) cells.push(c.x, c.y);   // flat [x0,y0,x1,y1,...]: compact on the wire
-    const o = { t:'st', tk:_rbToWire(t), i:mi, s:cells, gd:sn.gemsDone|0, gem:sn.gem, rng:sn._rngState,
+    // Carry the COMPLETE snake -- cells AND dir/boost/accrual/score/lives, via the same
+    // _rbPackPlayer descriptor the full resync uses (R1: one player field set). A cells-only
+    // patch only fixes the head for a single tick: the peer then re-steps our snake with a stale
+    // direction/boost/accrual and re-diverges next tick. That is why an outage longer than the
+    // redundant input window (~8 inputs) could never heal the 'players' field -- once the early
+    // inputs aged out, this fallback was the only repair left and it never converged. The full
+    // pack makes the peer's copy of our snake byte-identical in one shot.
+    const o = Object.assign({ t:'st', tk:_rbToWire(t), i:mi, gd:sn.gemsDone|0, gem:sn.gem, rng:sn._rngState,
                 pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:sn._powerMode, pma:sn._powerModeAt,
-                hb:sn.heart, hba:sn.heartAt };
+                hb:sn.heart, hba:sn.heartAt }, _rbPackPlayer(me));
     const pts = netPts();
     if(pts != null) o.pts = pts;   // stamped HERE so the size check sees the final packet and the string can be reused
     // A very long snake can push the state past the one-datagram cap; skip it this second
@@ -310,7 +315,9 @@ function _rbSendState(t, sn){
 function _rbCellsSane(flat){ return Array.isArray(flat) && flat.length <= 2 * COLS * ROWS; }
 function _rbCheckState(m){
     if(typeof m.tk !== 'number' || typeof m.i !== 'number' || !_rbCellsSane(m.s)) return;
-    _rbStateQ.push({ tk:_rbFromWire(m.tk), i:m.i|0, s:m.s, gd:m.gd|0, gem:m.gem, rng:m.rng,
+    _rbStateQ.push({ tk:_rbFromWire(m.tk), i:m.i|0, s:m.s, d:m.d, dq:m.dq, bd:m.bd, bg:m.bg, sa:m.sa,
+                     sc:m.sc, l:m.l, al:m.al, su:m.su,
+                     gd:m.gd|0, gem:m.gem, rng:m.rng,
                      pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma, hb:m.hb, hba:m.hba });
     if(_rbStateQ.length > 8) _rbStateQ.shift();
 }
@@ -325,6 +332,14 @@ function _rbPackPlayer(p){
     const s = []; for(const c of p.snake) s.push(c.x, c.y);
     return { s, d:p.dir, dq:p.dirQueue, bd:p.boostDir, bg:!!p.boosting,
              sa:p.stepAccum, sc:p.score|0, l:p.lives|0, al:p.alive!==false, su:p.slowUntil|0 };
+}
+// The inverse of _rbPackPlayer: overwrite `into` with the packed snake. Shared by the full
+// resync (host's p0/p1) and the per-owner 'st' apply, so both adopt the exact same field set.
+function _rbUnpackPlayer(pk, into){
+    const s = []; for(let k = 0; k + 1 < pk.s.length; k += 2) s.push({ x:pk.s[k]|0, y:pk.s[k+1]|0 });
+    into.snake = s; into.dir = pk.d; into.dirQueue = pk.dq || []; into.boostDir = pk.bd;
+    into.boosting = !!pk.bg; into.stepAccum = pk.sa;
+    into.score = pk.sc|0; into.lives = pk.l|0; into.alive = pk.al !== false; into.slowUntil = pk.su|0;
 }
 // tk MUST be the ring entry's own tick (not the live simTick, which is one behind in netTickPre),
 // or the peer applies it to the wrong ring slot. Carries EVERY field the hash covers (RB_HASH_DUEL)
@@ -352,12 +367,6 @@ function _rbApplyResync(m){
     if(!_rbCellsSane(m.p0.s) || !_rbCellsSane(m.p1.s)) return;   // reject a resync with an over-board snake
     if(Array.isArray(m.bars) && m.bars.length > COLS * ROWS) return;
     const T = _rbFromWire(m.tk);
-    const unpackInto = (pk, into) => {
-        const s = []; for(let k = 0; k + 1 < pk.s.length; k += 2) s.push({ x:pk.s[k]|0, y:pk.s[k+1]|0 });
-        into.snake = s; into.dir = pk.d; into.dirQueue = pk.dq || []; into.boostDir = pk.bd;
-        into.boosting = !!pk.bg; into.stepAccum = pk.sa;
-        into.score = pk.sc|0; into.lives = pk.l|0; into.alive = pk.al !== false; into.slowUntil = pk.su|0;
-    };
     // The FULL authoritative snapshot AT tick T: the whole SHARED world (level/gems/rng/bars/
     // power/heart/timers) plus the HOST's own snake (p0). How we treat OUR snake (p1) depends on
     // whether T is still replayable -- see the two branches below.
@@ -369,7 +378,7 @@ function _rbApplyResync(m){
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
-    unpackInto(m.p0, snap.players[0]);   // the HOST's snake is always the host's to author
+    _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is always the host's to author
     snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;   // ring convention: entry tk=T holds the state at simTick T-1
     let e = null;
     for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === T){ e = _rbRing[j]; break; }
@@ -407,11 +416,6 @@ function _rbApplyResync(m){
     _rbDbg.fix = (_rbDbg.fix|0) + 1;   // a repair landing is HEALING, not a connection event
     _netSigLog('~ RESYNC @' + T);
 }
-function _rbCellsEqual(a, flat){
-    if(!Array.isArray(a) || a.length * 2 !== flat.length) return false;
-    for(let i = 0; i < a.length; i++) if(a[i].x !== (flat[2*i]|0) || a[i].y !== (flat[2*i+1]|0)) return false;
-    return true;
-}
 // Called each live tick beside _rbHashSettle: apply any peer state whose tick has settled.
 function _rbStateSettle(){
     if(!_rbStateQ.length) return;
@@ -421,15 +425,15 @@ function _rbStateSettle(){
         if(simTick < q.tk + RB_STATE_SETTLE) continue;   // authoritative: apply almost immediately (not the hash wait)
         _rbStateQ.splice(i, 1);
         if(q.i === mine) continue;                       // never let the peer overwrite our own snake
-        const cells = [];
-        for(let k = 0; k + 1 < q.s.length; k += 2) cells.push({ x:q.s[k]|0, y:q.s[k+1]|0 });
         let e = null;
         for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === q.tk){ e = _rbRing[j]; break; }
         if(e && e.snap && e.snap.players && e.snap.players[q.i]){
             // Recent enough to be in the ring: patch the historical snapshot and roll forward, so
-            // the correction lands seamlessly (no visible jump).
-            let changed = false;
-            if(!_rbCellsEqual(e.snap.players[q.i].snake, q.s)){ e.snap.players[q.i].snake = cells; changed = true; }
+            // the correction lands seamlessly (no visible jump). Adopt the WHOLE snake (dir/boost/
+            // accrual too, via _rbUnpackPlayer) -- a cells-only patch re-diverges on the next step.
+            const before = JSON.stringify(_rbPackPlayer(e.snap.players[q.i]));
+            _rbUnpackPlayer(q, e.snap.players[q.i]);
+            let changed = JSON.stringify(_rbPackPlayer(e.snap.players[q.i])) !== before;
             // gems/items follow the PRNG: the more advanced world wins -- but only by a
             // PLAUSIBLE margin. An unbounded gd (e.g. 0x7fffffff) would let a peer forge the
             // lead and dictate the shared gem/RNG state; one st cycle is at most a level or two.

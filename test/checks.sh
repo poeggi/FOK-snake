@@ -10,10 +10,11 @@
 #
 #   bash test/checks.sh --full     REGRESSION tier (CI + after any significant
 #     (or --regression)            netcode/sim rework, before a release): FAST plus
-#                                  the four heavy duel sweeps (duel-desync/-boundary/
-#                                  -rematch/-respawn). Those play many full 20-40s
-#                                  lockstep matches over lossy/dozing wires to shake
-#                                  out rare, slow-accumulation divergence. ~2min.
+#                                  the five heavy duel sweeps (duel-desync/-boundary/
+#                                  -rematch/-respawn/-outage). Those play many full
+#                                  20-40s lockstep matches over lossy/dozing/dropped
+#                                  wires to shake out rare, slow-accumulation
+#                                  divergence and prove interruption recovery. ~2min.
 #
 # CI runs --full on every push/PR, so the regression tier still gates the auto-deploy
 # to Pages -- moving it off the local hook trades nothing but the developer's wait.
@@ -87,6 +88,9 @@ if [ "$FULL" = 1 ]; then
 
     echo "[checks] post-death respawn is clean (a full resync never yanks your own snake back to a death cell)"
     suite test/duel-respawn.js
+
+    echo "[checks] connection-interruption recovery (a <4s wire outage is survived; an over-long one still kills)"
+    suite test/duel-outage.js
 else
     echo "[checks] (fast tier) skipping heavy duel sweeps -- run 'bash test/checks.sh --full' after any netcode/sim rework"
 fi

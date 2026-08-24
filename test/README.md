@@ -18,7 +18,7 @@ full regression coverage still gates every deploy:
                                  all smoke tests, and the single-scenario netcode paths
                                  (net-handshake, smoke-worker, relay-sim, duel-sync,
                                  duel-warn).
-    bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the four heavy duel
+    bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the five heavy duel
                                  sweeps below. CI runs this on every push/PR, so it gates
                                  the auto-deploy to Pages.
 
@@ -131,10 +131,22 @@ the resync never yanks your own head back to a death cell (`selfJumps==0`), neve
 Guards the fix that a resync repairs only the shared world + the host's snake -- each
 client still owns its own snake.
 
+### duel-outage.js  (REGRESSION tier -- the interruption-recovery guard)
+
+Blacks out the WHOLE wire for a fixed span (the `outage` knob = a WiFi drop / a few
+lost seconds) while BOTH clients keep ticking and steering, so each mispredicts the
+other for the duration. On restore the redundant input log + the state/hash resync must
+re-converge them, the CONNECTION LOST banner must clear, and the match must NOT
+session-end -- as long as the silence stayed under the 4s deadline. The load-bearing
+control is an over-long outage that MUST kill: it proves the recovery cases pass because
+the link genuinely returned in time, not because the deadline never bites. Guards the fix
+that the per-owner state packet carries the WHOLE snake (dir/boost/accrual, not just
+cells), so recovery no longer stalls once the outage outlasts the redundant input window.
+
 Run any of them directly, or the whole regression tier:
 
     node test/duel-desync.js         # one suite
-    bash test/checks.sh --full       # fast tier + all four heavy sweeps (what CI runs)
+    bash test/checks.sh --full       # fast tier + all five heavy sweeps (what CI runs)
 
 ### duel-profile.js  (on-demand -- latency/rollback profiler)
 
