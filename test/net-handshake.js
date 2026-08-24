@@ -136,7 +136,14 @@ const HOOKS = (myId) => `
     _netTimeSync = async ()=>{};
     _netPostRes = async ()=>({ status:200, err:'',
       json:{ ok:true, start_pts:netPts()+50, epoch:epoch|0, now:netPts() } });
-    await _realReqStart(_netSess, reason);
+    beginOnlineDuel = ()=>{};   // probe the wire packets, not the duel setup
+    // A host rematch runs a short paced clock-burst (bsync + a few 'bs') on timers before it
+    // authors and ships the rst. Run those paced pings inline so the deferred rst is on the wire
+    // when we drain (a first start carries no burst, so this is a no-op there).
+    const realST = setTimeout;
+    globalThis.setTimeout = (fn)=>{ fn(); return -1; };
+    try { await _realReqStart(_netSess, reason); }
+    finally { globalThis.setTimeout = realST; }
   };
   // Reliable-control dedup + relay-coalesce probes. beginOnlineDuel is stubbed to a
   // counter so a repeated start is OBSERVABLE without running the whole duel setup --

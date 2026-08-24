@@ -516,7 +516,6 @@ function _rbEnsureSnap(t){
 // a re-simulation reproduces the tick exactly.
 function netTickPre(){
     if(!netGameActive() || !inGame) return;
-    if(typeof _netAlignTick === 'function') _netAlignTick();   // joiner: keep the peer-clock offset fresh for the next boundary
     // One rollback per tick, covering every late input that arrived since the last tick
     // (recorded by _netPeerInput). Done first, while simTick is still the last-completed tick,
     // so the re-sim corrects history before this tick's snapshot, inputs and hash settle.

@@ -59,11 +59,6 @@ const HOOKS = (id) => `
     _netSess.startPts = Date.now();
   };
   globalThis.__recv    = (txt)=>{ if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(txt); } };
-  // ---- P2P clock alignment hooks (JOINER measures its offset onto the HOST's timeline) ----
-  globalThis.__alignPing = ()=> _netAlignPing(_netSess);       // joiner: send one align ping
-  globalThis.__alignApply= ()=> _netAlignApply(_netSess);      // joiner: step our anchor onto the host's clock (returns applied ms)
-  globalThis.__alOfs     = ()=> _netSess ? _netSess.alOfs : null;   // current best theta (host lead, ms)
-  globalThis.__alN       = ()=> _netSess ? _netSess.alN : 0;        // samples in the min-RTT window
   globalThis.__pts       = ()=> netPts();                      // this client's shared-timeline PTS right now
   // ---- boundary clock BURST hooks (symmetric midpoint: BOTH sides measure + nudge half) ----
   globalThis.__burstReset = ()=> _netBurstReset(_netSess);     // open a fresh burst (forget last boundary's samples)
@@ -99,24 +94,30 @@ const HOOKS = (id) => `
   // handler, and both fast-forward to tick 0 -- the exact path that flashed CONNECTION LOST live.
   globalThis.__reqNextLevel = ()=> netRequestNextLevel();
   globalThis.__lvlPending   = ()=> !!(_netSess && _netSess.lvlPending);
-  // REAL rematch / first-start RECEIVE path. Unlike a level boundary (pure P2P, host authors the
-  // start on its own clock and ships 'rst' lvl:1 so the joiner aligns), a first-start/rematch is
-  // SERVER-issued: the host relays a start_pts on 'sched'/'rst' with lvl:0. This hook is the SEND
-  // end the mocked server would have driven -- the host stamps the shared start_pts on the epoch
-  // line and ships 'rst' lvl:0, then resets via the REAL beginOnlineDuel after the lead. The
-  // joiner receives it through the REAL _netHandleMsg, so whether a lvl:0 start P2P-aligns the
-  // joiner's clock (it must, or an offset carries uncorrected into the new match) is the real code.
-  globalThis.__rematchHost = (startPts, epoch, seed)=>{
+  // REAL rematch RECEIVE path. A rematch is host-authored (only the host runs _netRequestStart for
+  // it; the joiner just receives the rst). This hook is the SEND end the mocked server would drive:
+  // the host runs the boundary BURST (bsync + bilateral 'bs' over the wire), nudges its own clock
+  // onto the shared midpoint, authors the start_pts on that clock and ships 'rst' lvl:0 with the
+  // agreed peer offset as 'bth'. The joiner receives it through the REAL _netHandleMsg and applies
+  // its half from bth -- so whether a lvl:0 start midpoint-syncs the joiner's clock (it must, or an
+  // offset carries uncorrected into the new match) is the real code.
+  globalThis.__rematchHost = (epoch, seed)=>{
     const s = _netSess; if(!s || s.role !== 'host' || !s.game) return;
-    s.epoch = epoch|0; s.seed = seed>>>0; s.startPts = startPts; _netClockPush();
-    _netSend({ t:'rst', seed:s.seed, startPts:startPts, epoch:s.epoch, lvl:0 });
-    const go = ()=>{ if(_netSess === s && s.game) beginOnlineDuel(s.seed, true); };
-    const wait = Math.max(0, Math.min(5000, startPts - netPts()));
-    if(wait <= 0) go(); else setTimeout(go, wait);
+    s.epoch = epoch|0; s.seed = seed>>>0; s.lvlPending = true;
+    _netBurstThenStart(s, (theta)=>{
+      if(_netSess !== s || !s.game){ s.lvlPending = false; return; }
+      const sp = netPts() + 250;   // author on the now-midpoint clock (production uses NET_BURST_LEAD_MS)
+      s.startPts = sp; _netClockPush();
+      _netSend({ t:'rst', seed:s.seed, startPts:sp, epoch:s.epoch, lvl:0, bth:Math.round(theta) });
+      const go = ()=>{ if(_netSess === s && s.game){ s.lvlPending = false; beginOnlineDuel(s.seed, true); } };
+      const wait = Math.max(0, Math.min(5000, sp - netPts()));
+      if(wait <= 0) go(); else setTimeout(go, wait);
+    });
   };
-  // Falsification knob: neuter the boundary clock-alignment so a test can PROVE it is load-
-  // bearing (RED without it, GREEN with it) rather than merely tolerating a small offset.
-  globalThis.__disableAlign = ()=>{ _netAlignApply = ()=>0; _netAlignTick = ()=>{}; };
+  // Falsification knob: neuter the boundary clock-burst nudge on BOTH sides so a test can PROVE it
+  // is load-bearing (RED without it, GREEN with it) rather than merely tolerating a small offset.
+  // With the nudge gone, a drifting clock is never corrected and the two sims diverge.
+  globalThis.__disableBurst = ()=>{ _netBurstApply = ()=>0; };
   // The local player's world (+ the opponent), for the Node-side autopilot. Torus-relative.
   globalThis.__view    = ()=>{
     if(!players) return null;
@@ -300,7 +301,7 @@ function runMatch(opts){
     const dir = opts.director || autopilot;
     _rover[0] = 0; _rover[1] = 0;   // fresh circuit each match, so scenarios do not inherit progress
     const A = mk('aaaaaaaa', seed, 'host'), B = mk('bbbbbbbb', seed, 'peer');
-    if(opts.noAlign){ A.__disableAlign(); B.__disableAlign(); }   // falsification control (see __disableAlign)
+    if(opts.noBurst){ A.__disableBurst(); B.__disableBurst(); }   // falsification control (see __disableBurst)
     const TICK = A.__TICK;
     const wire = { AB:[], BA:[] };
     let rndS = (opts.rndSeed || 0x51ED) >>> 0;
@@ -480,8 +481,8 @@ function runMatch(opts){
             if(va && vb){
                 rematchDone = true;
                 bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // pre-rematch tallies before _rbReset wipes them
-                const sp = A.__pts() + 250, ep = ++levelEpoch;    // host authors the shared start_pts (server would, in the field)
-                A.__rematchHost(sp, ep, (seed ^ 0x9e3779b9) >>> 0);
+                const ep = ++levelEpoch;    // the host bursts + authors the shared start_pts (server would, in the field)
+                A.__rematchHost(ep, (seed ^ 0x9e3779b9) >>> 0);
                 levelUps++;
             }
         }

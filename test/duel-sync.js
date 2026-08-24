@@ -1,5 +1,5 @@
-// P2P boundary clock-BURST primitive (DEFAULT suite). Replaces the continuous joiner->host align
-// ping (duel-align.js) with a short, symmetric burst run at every boundary: BOTH sides fire a few
+// P2P boundary clock-BURST primitive (DEFAULT suite). Replaces the old continuous joiner->host
+// align ping with a short, symmetric burst run at every boundary: BOTH sides fire a few
 // stamped datagrams, each keeps the MINIMUM one-way delta per direction, piggybacks its own
 // forward-min so both end holding the SAME two numbers, and each nudges its OWN clock half of the
 // agreed offset onto the shared midpoint. Neither side is the master.
@@ -25,8 +25,8 @@ let failed = 0;
 const line = (name, ok, detail)=>{ steps.push(name.padEnd(22) + detail + (ok ? '  ok' : '  FAIL')); if(!ok) failed++; };
 
 // Deliver one burst datagram sender->receiver: fire it at true-time `sendT` (so its send-pts is
-// stamped on the sender's clock then) and fold it at `recvT` (the receiver's clock then). Mirrors
-// duel-align's roundTrip, which drives __now to the exact send/receive instants around each __recv.
+// stamped on the sender's clock then) and fold it at `recvT` (the receiver's clock then). Drives
+// __now to the exact send/receive instants around each __recv.
 function deliver(sender, receiver, sendT, recvT){
     sender.__now = sendT;
     sender.__out.length = 0;

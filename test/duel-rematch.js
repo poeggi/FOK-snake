@@ -1,23 +1,22 @@
-// SERVER-PATH RESTART (rematch) test (DEFAULT suite). A level boundary in an ongoing match is
-// pure P2P and P2P-aligns the joiner's clock to the host (rst lvl:1). A first-start/rematch is
-// different: it is SERVER-issued (start.php authors the start_pts; host relays it on 'sched'/'rst'
-// with lvl:0). The joiner used to align ONLY on lvl:1, so a rematch carried whatever relative
-// clock offset the two independent server syncs left UNCORRECTED into the new match. The peer's
-// honest current-tick inputs then landed outside the rollback window and were refused (drop ->
-// _rbWarnAt -> "CONNECTION LOST"), and past ~250ms one-sided apply diverged the ring -> DESYNC.
-// The fix aligns the joiner's clock on EVERY start (net.js rst handler), so the server-authored
-// start_pts lands on the same real instant on both. This drives the REAL rematch RECEIVE path
-// (__rematchHost -> rst lvl:0) over the simulated wire and asserts lockstep with NO drops.
+// SERVER-PATH RESTART (rematch) test (DEFAULT suite). A rematch is host-authored now: the host runs
+// a bilateral clock BURST (both sides measure the peer offset over ~150ms), nudges its own clock
+// onto the shared midpoint, authors the new match's start PTS on that clock and ships it on the
+// reliable 'rst'/'sched' lvl:0 with the agreed offset as 'bth' -- the joiner applies its own half
+// from bth, so that single number lands on the same real instant on both. Before the burst a rematch
+// carried whatever relative clock offset the two independent server syncs left UNCORRECTED into the
+// new match. The peer's honest current-tick inputs then landed outside the rollback window and were
+// refused (drop -> _rbWarnAt -> "CONNECTION LOST"), and past ~250ms one-sided apply diverged the
+// ring -> DESYNC. This drives the REAL rematch RECEIVE path (__rematchHost -> rst lvl:0) over the
+// simulated wire and asserts lockstep with NO drops.
 //
-// The last pair is a FALSIFICATION: the same rematch-across-an-offset holds WITH alignment but,
-// with alignment neutered (noAlign), the joiner begins the new match on its stale clock and the
-// peer's inputs are refused -- drops (CONNECTION LOST). That the control reliably drops is what
-// proves the alignment, not mere latency slack, is doing the work.
+// The last pair is a FALSIFICATION: the same rematch-across-an-offset holds WITH the burst but,
+// with the burst nudge neutered (noBurst), the joiner begins the new match on its stale clock and
+// the peer's inputs are refused -- drops (CONNECTION LOST). That the control reliably drops is what
+// proves the burst, not mere latency slack, is doing the work.
 const { runMatch } = require('./duel-driver');
 
-// A rematch fires mid-run (opts.rematch.at seconds); the joiner's align window still carries the
-// last level's samples (consumed only at a start), the realistic field condition. err0 is the
-// initial relative clock offset the server syncs leave; the fix must correct it across the restart.
+// A rematch fires mid-run (opts.rematch.at seconds). err0 is the initial relative clock offset the
+// server syncs leave; the burst must correct it across the restart.
 //   clean     : a moderate offset that flashed CONNECTION LOST in the field (drop>0 before the fix)
 //   loss+drift: a larger realistic offset + 3% loss (rst repeats must survive) + a drifting clock
 const CONVERGE = [
@@ -27,7 +26,7 @@ const CONVERGE = [
       phase:8, tjit:4, recv:true, clock:{ drift:1200, err0:150, samples:8 }, rematch:{ at:14 } },
 ];
 
-// Falsification pair: a rematch across err0=150. Alignment corrects it at the restart (drop=0);
+// Falsification pair: a rematch across err0=150. The burst corrects it at the restart (drop=0);
 // without it the offset carries uncorrected and the peer's current-tick inputs are refused.
 const LB = { secs:34, seed:0x77C0, p2pBoundary:true, wire:{ base:6, jit:3, loss:0.02 },
     phase:8, tjit:4, recv:true, clock:{ drift:600, err0:150, samples:8 }, rematch:{ at:14 } };
@@ -54,23 +53,23 @@ for(const sc of CONVERGE){
     if(bad) failed++;
 }
 
-// Load-bearing: WITH alignment the rematch must hold (drop=0); the noAlign control must drop (the
-// CONNECTION LOST symptom) -- else the scenario no longer isolates the restart alignment and the
+// Load-bearing: WITH the burst the rematch must hold (drop=0); the noBurst control must drop (the
+// CONNECTION LOST symptom) -- else the scenario no longer isolates the restart burst and the
 // guard is worthless, so fail it to force a re-examination.
-const withAlign = runMatch(Object.assign({}, LB));
-const noAlign   = runMatch(Object.assign({}, LB, { noAlign:true }));
-const lbBad = withAlign.drop > 0 || !withAlign.converged || !!withAlign.firstDiverge
-    || !withAlign.rematched || noAlign.drop === 0;
-steps.push('align load-bearing'.padEnd(18)
-    + ' WITH: drop=' + withAlign.drop + ' conv=' + (withAlign.converged ? 'yes' : 'NO')
-    + '  | noAlign(ctrl): drop=' + noAlign.drop
+const withBurst = runMatch(Object.assign({}, LB));
+const noBurst   = runMatch(Object.assign({}, LB, { noBurst:true }));
+const lbBad = withBurst.drop > 0 || !withBurst.converged || !!withBurst.firstDiverge
+    || !withBurst.rematched || noBurst.drop === 0;
+steps.push('burst load-bearing'.padEnd(18)
+    + ' WITH: drop=' + withBurst.drop + ' conv=' + (withBurst.converged ? 'yes' : 'NO')
+    + '  | noBurst(ctrl): drop=' + noBurst.drop
     + '   ' + (lbBad ? 'FAIL' : 'ok'));
 if(lbBad) failed++;
 
 console.log(steps.join('\n'));
 if(failed){
     console.log('\nDUEL-REMATCH FAIL: ' + failed + ' case(s) -- the server-path restart did not hold lockstep'
-        + '\n  (refused inputs / CONNECTION LOST / DESYNC exit), or the alignment control failed to falsify.');
+        + '\n  (refused inputs / CONNECTION LOST / DESYNC exit), or the burst control failed to falsify.');
     process.exit(1);
 }
 console.log('\nDUEL-REMATCH PASSED');

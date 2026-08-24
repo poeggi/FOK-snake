@@ -71,32 +71,29 @@ const NET_KEEPALIVE_MS = 300;
 // the wait roughly halves. THE lever if a level-up still feels slow (lower) or drifts (raise).
 // The FIRST start -- before anyone is watching a clock -- keeps the unbudgeted full sweep.
 const NET_LEVEL_SYNC_MS = 400;
-// ---- P2P clock alignment (in-duel, over the DataChannel) ----
-// During a duel the server clock sync is gated OFF (_netTimeSync refuses while playing: moving
-// the anchor moves the tick timeline under our feet). So the two peers keep their clocks in
-// step DIRECTLY, peer-to-peer: the JOINER runs an NTP-style ping/pong against the HOST (the
-// reference) and, at every level boundary, nudges its own anchor onto the host's timeline. That
-// is what lets the host author ONE start PTS locally (netPts()+LEAD) and ship it on `rst` with
-// no server round trip -- the joiner, already aligned, reads the same instant from that number.
-// Only the JOINER measures/applies; the host answers pongs and never moves (it IS the clock).
-const NET_ALIGN_EVERY_MS = 500;   // background align-ping cadence while playing (cheap: ~2/s, one datagram each)
-const NET_ALIGN_SAMPLES = 5;      // pings in the pre-first-level burst; also the min-RTT window size during play
-const NET_ALIGN_LEAD_MS = 250;    // host's lead when it authors a P2P level start PTS: covers rst transit + its reliable repeats
-// ---- P2P boundary clock BURST (symmetric midpoint) ----
-// Retires the continuous align pings above. At EVERY level boundary (first included) each side
-// fires NET_BURST_N stamped datagrams over ~NET_BURST_N*NET_BURST_GAP_MS and keeps the MINIMUM
-// one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi power-save doze),
-// so the min is the least-biased sample and rejects exactly the doze spikes that poisoned the old
-// single-snapshot align. Every packet piggybacks the sender's own forward-min, so BOTH sides end
-// holding the same two direction-mins and compute the IDENTICAL peer clock offset from them; each
-// then nudges its OWN clock half way onto the shared midpoint -- neither side is the master, so
-// neither takes the whole jump. Gated: a starved or impossible burst is rejected and the previous
-// (in-play, still-good) clock is kept; the applied nudge is slew-capped so one bad estimate cannot
-// teleport the timeline (it converges over the next boundaries, inside the rollback window).
+// ---- P2P boundary clock BURST (symmetric midpoint, over the DataChannel) ----
+// During a duel the server clock sync is gated OFF (_netTimeSync refuses while playing: moving the
+// anchor moves the tick timeline under our feet). So the two peers keep their clocks in step
+// DIRECTLY, peer-to-peer -- but only at the one moment it matters: a level boundary. At EVERY
+// boundary (the first start included) the host triggers a short bilateral BURST ('bsync'): each
+// side fires NET_BURST_N stamped datagrams over ~NET_BURST_N*NET_BURST_GAP_MS and keeps the
+// MINIMUM one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi power-save
+// doze), so the min is the least-biased sample and rejects exactly the doze spikes a single
+// snapshot would swallow. Every packet piggybacks the sender's own forward-min, so BOTH sides end
+// holding the same two direction-mins and compute the IDENTICAL peer clock offset (theta) from
+// them. The host applies half of theta to its OWN clock and TRANSMITS theta on the start packet
+// ('bth'); the joiner applies the other half onto ITS clock -- so the two meet at the shared
+// MIDPOINT, neither is the master, and neither takes the whole jump. That is what lets the host
+// author ONE start PTS on its (now midpoint) clock and ship it on 'rst'/'sched' with no server
+// round trip -- the joiner reads the same real instant from that number. Gated: a starved or
+// impossible burst is rejected (theta 0) and the previous in-play clock is kept; the applied nudge
+// is slew-capped so one bad estimate cannot teleport the timeline (it converges over the next
+// boundaries, inside the rollback window).
 const NET_BURST_N = 10;           // datagrams per direction in one boundary burst
 const NET_BURST_GAP_MS = 15;      // spacing between them (~150ms total, comfortably inside a level cover)
 const NET_BURST_MIN = 3;          // accept-gate: fewest usable samples per direction before we trust the estimate
 const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
+const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
 // How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
 // a hash mismatch) before the warning clears.
 const NET_WARN_FLASH_MS = 3000;
@@ -1218,8 +1215,7 @@ function _netMkSess(peer, role){
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
-             alOfs:0, alRtt:Infinity, alN:0, alWin:[], alAt:0,   // P2P clock alignment (JOINER only): best NTP offset onto the host's timeline, its min-RTT, and the recent-sample window
-             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq
+             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
@@ -1386,7 +1382,7 @@ function _netWire(dc){
 // -- a lost `rst` hangs the guest -- so both transports make it reliable: the relay retries
 // (_netRelayCtl), the DataChannel repeats (_netCtlRepeat). The receiver dedups by epoch
 // (rst/sched) or is idempotent (start/again/bye).
-function _netIsCtl(t){ return t === 'sched' || t === 'rst' || t === 'start' || t === 'again' || t === 'bye'; }
+function _netIsCtl(t){ return t === 'sched' || t === 'rst' || t === 'start' || t === 'again' || t === 'bye' || t === 'reqlvl'; }
 // Repeat a pre-serialized control message twice more over the DataChannel, spaced, to
 // survive the unreliable channel's occasional drop without an ack protocol. Stops early if
 // the session or channel is gone. Same j (its original pts) each time -- a repeat is always
@@ -1431,7 +1427,7 @@ function _netSend(o, pre){
         // budget leaves room for IP+UDP+DTLS+SCTP headers (~70B) under a 1280 floor.
         if(j.length > NET_PKT_MAX) _netSigLog('! packet ' + j.length + 'B > budget');
         // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
-        // queue them late. Rare one-shot control messages (sched/rst/start/again/bye)
+        // queue them late. Rare one-shot control messages (sched/rst/start/again/bye/reqlvl)
         // still queue and are repeated below -- for those, late beats never.
         if(s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
             _netDbg.congDrop = (_netDbg.congDrop|0) + 1;
@@ -1445,62 +1441,6 @@ function _netSend(o, pre){
         s.dc.send(j); s.lastSent = performance.now();
         if(_netIsCtl(o.t)) _netCtlRepeat(s, j);   // unreliable channel: repeat the transition a couple of times
     }catch(e){}
-}
-// ---- P2P clock alignment: the JOINER measures its offset onto the HOST's timeline ----
-// NTP over the DataChannel. The joiner sends `pa` (its send-pts rides in the auto-stamped
-// o.pts = t0); the host answers `pao` echoing that t0 plus its own receive-pts t1, with the
-// pong's own send-pts t2 auto-stamped on the way out; the joiner reads its receive-pts t3 and
-// folds the four stamps into theta = how far the host clock leads its own. Kept min-RTT over a
-// short recent window -- the least-queued round trip is the least-biased, and a window (not an
-// all-time min) lets the estimate follow slow relative drift. Only the joiner measures/applies;
-// the host is the reference and never moves. Applied at a level boundary by _netAlignApply.
-function _netAlignPing(s){
-    s = s || _netSess;
-    if(!s || !s.game || s.role === 'host' || netPts() == null) return;
-    s.alAt = (typeof performance !== 'undefined') ? performance.now() : 0;
-    _netSend({ t:'pa' });   // o.pts (auto) = t0
-}
-function _netAlignPong(s, m){   // HOST: reflect the ping with our receive timestamp (t1); _netSend adds t2
-    if(!s || s.role !== 'host' || typeof m.pts !== 'number') return;
-    const t1 = netPts(); if(t1 == null) return;
-    _netSend({ t:'pao', t0:m.pts, t1:t1 });
-}
-function _netAlignRecv(s, m){   // JOINER: fold one completed round trip into the min-RTT offset
-    if(!s || s.role === 'host') return;
-    const t3 = netPts();
-    if(t3 == null || typeof m.t0 !== 'number' || typeof m.t1 !== 'number' || typeof m.pts !== 'number') return;
-    const t0 = m.t0, t1 = m.t1, t2 = m.pts;
-    const rtt = (t3 - t0) - (t2 - t1);            // round trip minus the host's turnaround
-    if(!(rtt >= 0) || rtt > 5000) return;          // a negative/absurd rtt is a broken sample
-    const theta = ((t1 - t0) + (t2 - t3)) / 2;     // + => host clock LEADS ours; add to our anchor to match
-    s.alWin.push({ rtt, theta });
-    if(s.alWin.length > NET_ALIGN_SAMPLES) s.alWin.shift();
-    let best = null;
-    for(const w of s.alWin) if(!best || w.rtt < best.rtt) best = w;
-    s.alOfs = best.theta; s.alRtt = best.rtt; s.alN = s.alWin.length;
-    _netDbg.alOfs = s.alOfs; _netDbg.alRtt = s.alRtt;
-}
-// Step our anchor onto the host's timeline. Called at a level boundary, where the sim resets to
-// tick 0 -- the same safe moment the server re-anchor used, so the clock step is invisible.
-// After it the host's authored start PTS denotes the same real instant here. Returns the applied
-// delta (ms), 0 when there is nothing to apply (host, no samples, or unsynced).
-function _netAlignApply(s){
-    s = s || _netSess;
-    if(!s || s.role === 'host' || !s.alN || _netSync.ofs == null) return 0;
-    const d = s.alOfs;
-    _netSync = { ofs:_netSync.ofs + d, rtt:_netSync.rtt, at:Date.now() };
-    s.alWin = []; s.alOfs = 0; s.alRtt = Infinity; s.alN = 0;   // consumed: the next level measures afresh
-    _netClockPush();
-    return d;
-}
-// Background cadence, called every engine tick from netTickPre: the joiner sends one align ping
-// at most every NET_ALIGN_EVERY_MS, so a fresh peer offset is always ready to APPLY the instant a
-// level boundary arrives. Cheap (~2 datagrams/s); host is the reference and never pings.
-function _netAlignTick(){
-    const s = _netSess;
-    if(!s || !s.game || s.role === 'host' || netPts() == null) return;
-    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
-    if(now - (s.alAt || 0) >= NET_ALIGN_EVERY_MS) _netAlignPing(s);
 }
 // ---- boundary clock burst (symmetric midpoint; see NET_BURST_* above) ----
 // Open a fresh burst: forget the previous boundary's samples so this one measures the clock as it
@@ -1547,17 +1487,56 @@ function _netBurstTheta(s){
 }
 // Nudge OUR clock half of theta onto the shared midpoint (slew-capped). The host pulls its clock
 // back, the joiner steps its clock up; with the same theta on both, they meet at the exact
-// midpoint (residual 0). Returns the applied ms, 0 when nothing was applied (rejected/unsynced).
-function _netBurstApply(s){
+// midpoint (residual 0). `theta` may be passed EXPLICITLY -- the joiner applies the value the host
+// measured and shipped on the start packet (bth), so both use the IDENTICAL number with no
+// convergence race; omitted, it is computed locally from this side's own burst samples (a rejected
+// or unusable burst -> no-op). Returns the applied ms, 0 when nothing was applied.
+function _netBurstApply(s, theta){
     s = s || _netSess;
     if(!s || _netSync.ofs == null) return 0;
-    const t = _netBurstTheta(s); if(!t) return 0;
-    let d = (t.host ? -1 : 1) * (t.theta / 2);
+    if(theta == null){ const t = _netBurstTheta(s); if(!t) return 0; theta = t.theta; }
+    if(!theta) return 0;
+    let d = (s.role === 'host' ? -1 : 1) * (theta / 2);
     if(d >  NET_BURST_SLEW_MS) d =  NET_BURST_SLEW_MS;   // symmetric clamp: clips to the same magnitude on both sides
     if(d < -NET_BURST_SLEW_MS) d = -NET_BURST_SLEW_MS;
     _netSync = { ofs:_netSync.ofs + d, rtt:_netSync.rtt, at:Date.now() };
     _netClockPush();
     return d;
+}
+// Run one side's outgoing burst: fire NET_BURST_N stamped datagrams NET_BURST_GAP_MS apart, then
+// (one final gap later, so the last pings land at the peer) call `done`. Timer-driven so the pings
+// genuinely spread over the wire and the min-filter has samples to pick from; with no timers
+// available, or if we are torn down mid-burst, it degrades to a single synchronous ping + immediate
+// done (which the accept-gate then rejects as starved -> the prior clock is kept).
+function _netBurstRun(s, done){
+    s = s || _netSess;
+    if(!s || !s.game){ if(done) done(); return; }
+    _netBurstReset(s);
+    s.bsRunning = true;
+    if(typeof setTimeout !== 'function'){ _netBurstPing(s); s.bsRunning = false; if(done) done(); return; }
+    let i = 0;
+    const step = ()=>{
+        if(_netSess !== s || !s.game){ s.bsRunning = false; return; }   // torn down mid-burst: abandon
+        _netBurstPing(s);
+        if(++i < NET_BURST_N){ setTimeout(step, NET_BURST_GAP_MS); return; }
+        setTimeout(()=>{ if(_netSess === s) s.bsRunning = false; if(done && _netSess === s && s.game) done(); }, NET_BURST_GAP_MS);
+    };
+    step();
+}
+// Host side of a boundary: open the joiner's burst ('bsync'), run our own, then hand `then` the
+// agreed peer offset (theta; 0 if the burst was unusable). The caller applies OUR half, authors the
+// start PTS on the nudged clock, and ships theta on the start packet as `bth` for the joiner's half.
+function _netBurstThenStart(s, then){
+    s = s || _netSess;
+    if(!s || !s.game || s.role !== 'host'){ if(then) then(0); return; }
+    _netSend({ t:'bsync', epoch:(s.epoch|0) });   // trigger the joiner's burst; both measure over the same window
+    _netBurstRun(s, ()=>{
+        if(_netSess !== s || !s.game) return;
+        const bt = _netBurstTheta(s);
+        const theta = bt ? bt.theta : 0;
+        _netBurstApply(s, theta);   // host applies -theta/2 here; the joiner applies +theta/2 from bth
+        then(theta);
+    });
 }
 // Fall back to the server relay: same messages, ~200-400ms one-way -- the local
 // snake stays instant (prediction), corrections just arrive slower. The user
@@ -1774,14 +1753,6 @@ function _netLiveStart(){
         // genuinely go missing before we say a word.
         if(nowMs - s.lastSent > NET_KEEPALIVE_MS)
             _netSend(inGame && !_netWD() ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });   // worker duel: _rbSent lives in the worker; its 16-tick heartbeat covers repair
-        // Keep the P2P clock-alignment window warm the WHOLE session, not just while a duel ticks:
-        // netTickPre (and its _netAlignTick) stops between matches (duelOver -> rematch) and before
-        // the first start, so a start landing in that gap would have no fresh offset to apply and
-        // would begin on an uncorrected clock. One joiner ping at the align cadence here means every
-        // start -- first, rematch, level -- always has a current sample ready. The cadence gate is
-        // shared with _netAlignTick (both key off s.alAt), so the two never double-ping.
-        if(s.role !== 'host' && netPts() != null && nowMs - (s.alAt || 0) >= NET_ALIGN_EVERY_MS)
-            _netAlignPing(s);
         // The re-offer retry is gated off in-game, so drive it from here while reconnecting.
         if(s.reconnecting && s.role === 'host' && _netHs.offerTo === s.peer && _netHs.offerPayload && Date.now() - _netHs.offeredAt > 2000){
             _netHs.offeredAt = Date.now(); _netSignal(s.peer, 'offer', _netHs.offerPayload);
@@ -1934,62 +1905,72 @@ async function _netRequestStart(s, reason){
         _netSync = { ofs: d.now + _rtt/2 - Date.now(), rtt: _rtt, at: Date.now() };
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
     _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
-    // 'sched' is the FIRST start and is refused while inGame (a stale one must not
-    // restart a running match). Every later start -- rematch, level, respawn -- happens
-    // WHILE in game, so it must ride 'rst' or the peer silently ignores it and only
-    // one client restarts.
-    if(s.role === 'host') _netSend({ t: (reason === 'first' || !reason) ? 'sched' : 'rst',
-                                     seed:s.seed, startPts:d.start_pts, x10:s.x10, epoch:s.epoch|0,
-                                     lvl:(reason === 'level') ? 1 : 0 });
-    // start_pts may already be in the PAST when we asked late (the epoch key is what
-    // lets the server answer us with the same moment anyway). Then wait is 0 and we
-    // start at once -- the clock-driven tick immediately puts us on the right tick,
-    // which IS the fast-forward the contract describes.
-    // No !inGame guard: a rematch or a next-level start happens WHILE in game.
-    const go = () => {
+    // Ship the shared start, then schedule tick 0. `theta` is the burst-agreed peer offset the host
+    // measured (0 when it did not burst); the joiner applies its half from the 'bth' we stamp here.
+    const shipAndSchedule = (theta) => {
         if(_netSess !== s || !s.game) return;
-        s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
-        if(reason === 'level'){ beginOnlineDuelLevel(s.role === 'host'); return; }
-        beginOnlineDuel(s.seed, s.role === 'host');
-        if(s.role === 'host') _netSend({ t:'start' });
+        // 'sched' is the FIRST start and is refused while inGame (a stale one must not restart a
+        // running match). Every later start -- rematch, respawn -- happens WHILE in game, so it must
+        // ride 'rst' or the peer silently ignores it and only one client restarts.
+        if(s.role === 'host') _netSend({ t: (reason === 'first' || !reason) ? 'sched' : 'rst',
+                                         seed:s.seed, startPts:s.startPts, x10:s.x10, epoch:s.epoch|0,
+                                         lvl:0, bth:Math.round(theta || 0) });
+        // start_pts may already be in the PAST when we asked late (the epoch key is what lets the
+        // server answer us with the same moment anyway). Then wait is 0 and we start at once -- the
+        // clock-driven tick immediately puts us on the right tick, the fast-forward the contract
+        // describes. No !inGame guard: a rematch happens WHILE in game.
+        const go = () => {
+            if(_netSess !== s || !s.game) return;
+            s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
+            beginOnlineDuel(s.seed, s.role === 'host');
+            if(s.role === 'host') _netSend({ t:'start' });
+        };
+        const wait = Math.max(0, Math.min(5000, s.startPts - netPts()));
+        if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
     };
-    const wait = Math.max(0, Math.min(5000, d.start_pts - netPts()));
-    if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+    // A rematch is host-authored (only the host reaches here for it -- the joiner just receives the
+    // rst): run the boundary burst first so both clocks meet at the midpoint before the shared
+    // start_pts is read, then ship with the agreed offset. A first start is freshly server-synced on
+    // BOTH sides (both POST it) and carries no burst -- it ships at once and the first level boundary
+    // refines the clock.
+    if(reason === 'rematch' && s.role === 'host') _netBurstThenStart(s, shipAndSchedule);
+    else shipAndSchedule(0);
 }
-// Host-authored P2P level start: no server. The host picks tick 0 = netPts()+LEAD on its own
-// (stable) clock and ships it reliably on 'rst'; the joiner has stepped ITS clock onto the host
-// each level (background align pings, applied in the rst handler), so the single PTS denotes the
-// same real instant on both. LEAD covers the rst's transit and its reliable repeats. Host only:
-// the joiner never reaches here (it nudges with 'reqlvl' and waits for the rst).
+// Host-authored P2P level start: no server. The host runs a bilateral boundary BURST (both sides
+// measure the peer offset over ~150ms), nudges its own clock onto the shared midpoint, then picks
+// tick 0 = netPts()+LEAD on that clock and ships it reliably on 'rst' with the agreed offset as
+// 'bth' -- the joiner applies its own half from bth, so the single PTS denotes the same real
+// instant on both. LEAD covers the rst's transit and its reliable repeats. Host only: the joiner
+// never reaches here (it nudges with 'reqlvl', bursts on 'bsync', and waits for the rst).
 function _netStartLevelP2P(s){
     if(_netSess !== s || !s.game || s.role !== 'host') return;
     if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); s.lvlPending = false; return; }
-    const startPts = netPts() + NET_ALIGN_LEAD_MS;   // tick 0 of the new epoch, on the host's timeline
-    s.startPts = startPts;
-    _netClockPush();            // anchor + startPts move together: the core must see both
-    _netSend({ t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1 });
-    const go = () => {
-        if(_netSess !== s || !s.game) return;
-        s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
-        beginOnlineDuelLevel(true);
-    };
-    const wait = Math.max(0, Math.min(5000, startPts - netPts()));
-    if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+    _netBurstThenStart(s, (theta)=>{
+        if(_netSess !== s || !s.game){ s.lvlPending = false; return; }
+        const startPts = netPts() + NET_BURST_LEAD_MS;   // tick 0 of the new epoch, on the host's now-midpoint clock
+        s.startPts = startPts;
+        _netClockPush();            // anchor + startPts move together: the core must see both
+        _netSend({ t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1, bth:Math.round(theta) });
+        const go = () => {
+            if(_netSess !== s || !s.game) return;
+            s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
+            beginOnlineDuelLevel(true);
+        };
+        const wait = Math.max(0, Math.min(5000, startPts - netPts()));
+        if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+    });
 }
 
 // ---- in-session messages ----
 function _netHandleMsg(txt){
     let m; try{ m = JSON.parse(txt); }catch(e){ return; }
     if(!m || typeof m !== 'object') return;
-    // P2P clock-alignment ping/pong: handled BEFORE the pts future-gate below. Their whole point
-    // is to measure a clock offset, so their stamps land in each other's "future" exactly when
-    // there IS an offset -- the gate would drop the samples that matter most. They carry their
-    // own NTP timestamps and never touch the tick stream or the lag stats.
-    if(m.t === 'pa'){ _netAlignPong(_netSess, m); return; }
-    if(m.t === 'pao'){ _netAlignRecv(_netSess, m); return; }
-    // Boundary clock-burst datagram: measured before the future-gate for the same reason as pa/pao
-    // -- when there IS a clock offset its stamp lands in our "future", exactly the sample the gate
-    // would drop. Carries only NTP-style stamps; never touches the tick stream or the lag stats.
+    // Boundary clock-burst datagrams: handled BEFORE the pts future-gate below. Their whole point is
+    // to measure a clock offset, so a stamp lands in our "future" exactly when there IS an offset --
+    // the gate would drop the samples that matter most. They carry only NTP-style stamps and never
+    // touch the tick stream or the lag stats. 'bsync' is the host's trigger to open OUR burst so both
+    // sides measure over the same window; 'bs' is one measured datagram.
+    if(m.t === 'bsync'){ if(_netSess && _netSess.role !== 'host') _netBurstRun(_netSess); return; }
     if(m.t === 'bs'){ _netBurstRecv(_netSess, m); return; }
     // The stamp is CHECKED, not just logged. A peer cannot have sent from our
     // future; a packet claiming otherwise is bogus and is dropped. The tolerance
@@ -2062,17 +2043,14 @@ function _netHandleMsg(txt){
             s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch/level moves it
             s.epoch = ep;              // stay on the pair's epoch line
             if(m.lvl) _lvlCover = true;
-            // Step OUR clock onto the host's timeline (measured continuously by the align pings)
-            // BEFORE we read its startPts, so the single number lands on the same real instant here
-            // as on the host. The sim resets to tick 0 at EVERY start, so the clock step is
-            // invisible. This runs for all starts, not just levels: a first-start/rematch that
-            // skipped it carried the two clients' independent server-sync residual UNCORRECTED into
-            // the new match -- the peer's honest current-tick inputs then fell outside the rollback
-            // window and were refused, flashing CONNECTION LOST on every restart. Alignment makes
-            // the joiner track the HOST whatever timeline the startPts was authored on; with no
-            // sample yet (a cold first-start before any pong) it is a safe no-op that falls back to
-            // the shared server sync, exactly as before.
-            _netAlignApply(s);
+            // Nudge OUR clock half of the way onto the shared MIDPOINT BEFORE we read startPts, so
+            // the single number lands on the same real instant here as on the host. `bth` is the
+            // peer offset the host measured in the boundary burst and shipped with the start; we
+            // apply the joiner's half (+bth/2) while the host already applied -bth/2, so neither
+            // takes the whole jump. The sim resets to tick 0 at EVERY start, so the clock step is
+            // invisible. bth 0/absent (a first start, or a starved/rejected burst) is a safe no-op
+            // that keeps the shared server sync, exactly as a cold start did before.
+            _netBurstApply(s, m.bth || 0);
             const go = () => { if(_netSess === s && s.game){ if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); } };
             const wait = Math.max(0, Math.min(5000, m.startPts - netPts()));
             if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);

@@ -16,7 +16,7 @@ full regression coverage still gates every deploy:
     bash test/checks.sh          FAST tier (~8s) -- the local pre-commit hook. Every
                                  cheap guard: syntax, ASCII, sim determinism + invariants,
                                  all smoke tests, and the single-scenario netcode paths
-                                 (net-handshake, smoke-worker, relay-sim, duel-align,
+                                 (net-handshake, smoke-worker, relay-sim, duel-sync,
                                  duel-warn).
     bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the four heavy duel
                                  sweeps below. CI runs this on every push/PR, so it gates
@@ -103,16 +103,23 @@ at the end, a product desync verdict on either client, or a session-end exit.
 
 ### duel-boundary.js  (REGRESSION tier -- the level-boundary guard)
 
-Plays real P2P level-ups (host authors the start PTS, joiner aligns its clock) over
-loss + drift + doze, and asserts both sims stay byte-identical across the `simTick`
-reset to 0. Includes an "align load-bearing" control: the SAME match with clock
-alignment disabled must diverge, proving the alignment is what holds it.
+Plays real P2P level-ups (host bursts to the shared midpoint and ships `bth` on `rst`,
+joiner applies its half) over loss + drift + doze, and asserts both sims stay
+byte-identical across the `simTick` reset to 0. It guards the boundary PATH -- epoch
+bump, `simTick`->0, `rst` and its reliable repeats over a lossy wire, the `reqlvl` round
+trip. The burst MECHANISM is proven elsewhere (see `duel-sync.js` for the unit test and
+`duel-rematch.js` for the load-bearing control), because a single level boundary can't
+host that control: the only offset present is one level's accumulation, and a constant
+offset that survives a level survives the next unchanged, while drift big enough to
+compound across a boundary already blows level 1 (which has not bursted yet) -- so a
+noBurst run at the same realistic drift converges too. The multi-boundary accumulation
+the burst bounds is a slow sweep in the on-demand netprofile.
 
 ### duel-rematch.js  (REGRESSION tier -- the server-path restart guard)
 
-Same idea across a server-issued rematch/restart (a new `start_pts` moves tick zero):
-the joiner must re-align its clock on EVERY start, not just at level boundaries. Also
-carries the align load-bearing control.
+Same idea across a host-authored rematch/restart (a new `start_pts` moves tick zero):
+the host must burst to the shared midpoint on EVERY start, not just at level boundaries.
+Also carries the burst load-bearing control.
 
 ### duel-respawn.js  (REGRESSION tier -- the post-death clean-start guard)
 

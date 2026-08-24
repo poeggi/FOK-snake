@@ -1,16 +1,24 @@
-// P2P LEVEL-BOUNDARY test (DEFAULT suite). A level change in an ongoing 1:1 is pure P2P now: the
-// host authors the next level's start PTS on its own clock and ships it on the reliable 'rst'
-// (no /api/start.php, no stale-epoch 409), and the joiner steps ITS clock onto the host's -- the
-// background align pings, applied in the rst handler -- so that single number lands on the same
-// real instant on both. This drives the REAL boundary over the simulated wire (the atomic
-// __levelUp shortcut the other tests use can't: it injects a shared start_pts and so could never
-// reproduce the field's CONNECTION-LOST-at-level-2/3). Each scenario plays across >=1 boundary
-// under a distinct adversity and asserts the two sims stay in lockstep.
+// P2P LEVEL-BOUNDARY test (DEFAULT suite). A level change in an ongoing 1:1 is pure P2P now: at the
+// boundary the host runs a bilateral clock BURST (both sides measure the peer offset over ~150ms),
+// nudges its own clock onto the shared midpoint, authors the next level's start PTS on that clock
+// and ships it on the reliable 'rst' (no /api/start.php, no stale-epoch 409) with the agreed offset
+// as 'bth' -- the joiner applies its own half from bth, so that single number lands on the same real
+// instant on both. This drives the REAL boundary over the simulated wire (the atomic __levelUp
+// shortcut the other tests use can't: it injects a shared start_pts and so could never reproduce the
+// field's CONNECTION-LOST-at-level-2/3). Each scenario plays across >=1 boundary under a distinct
+// adversity -- loss, drift, doze -- and asserts the two sims stay byte-identical across the simTick
+// reset to 0.
 //
-// The last pair is a FALSIFICATION: the same drifting-clock match WITH alignment holds, but with
-// alignment neutered (noAlign) the joiner re-anchors each boundary on its stale clock and the
-// offset compounds until it blows the tolerance window and diverges. That the control reliably
-// diverges is what proves the alignment -- not mere latency slack -- is doing the work.
+// This test guards the boundary PATH (epoch bump, simTick->0, rst + its reliable repeats over a
+// lossy wire, the reqlvl round trip). The burst MECHANISM is guarded elsewhere and not re-proven
+// here: duel-sync.js is the unit test (both sides compute the same theta and nudge to the midpoint),
+// and duel-rematch.js is the load-bearing control (a fresh server sync injects a correctable offset
+// the burst must remove, drop>0 without it). A single level boundary can't host that control: the
+// only offset present is what accumulated during one level, and a constant offset that survives a
+// level survives the next unchanged (drift big enough to compound across a boundary already blows
+// level 1, where nothing has bursted yet), so a noBurst run at the same realistic drift converges
+// too -- the multi-boundary accumulation the burst actually bounds is a slow sweep that lives in the
+// on-demand netprofile, not this fast guard.
 const { runMatch } = require('./duel-driver');
 
 // Adversity scenarios that must STAY in lockstep across the real P2P boundary. levelReached>=2
@@ -28,14 +36,6 @@ const CONVERGE = [
     { name:'joiner-init reqlvl', secs:30, seed:0x77C0, p2pBoundary:true, initJoiner:true, wire:{ base:6, jit:3, loss:0.02 },
       phase:8, tjit:4, recv:true, clock:{ drift:1000, err0:0, samples:8 } },
 ];
-
-// Falsification pair: a heavily drifting joiner clock (models a doze-throttled device). Alignment
-// snaps it back each boundary; without it the offset compounds and diverges. drift=12000 diverges
-// fast (noAlign @~tick 500) so the default run stays cheap. The multi-seed robustness of the
-// mechanism was verified separately at drift=6000 across 0x77C0/0xD0E1/0xBEEF/0x1234 (all diverge
-// without alignment); a slower full sweep lives in the on-demand netprofile.
-const LB = { secs:26, seed:0x77C0, p2pBoundary:true, wire:{ base:7, jit:3, loss:0.02 },
-    phase:8, tjit:4, recv:true, clock:{ drift:12000, err0:6, samples:8 } };
 
 const steps = [];
 let failed = 0;
@@ -58,21 +58,10 @@ for(const sc of CONVERGE){
     if(bad) failed++;
 }
 
-// Load-bearing: WITH alignment must hold; the noAlign control must diverge (else the scenario no
-// longer isolates alignment and the guard is worthless -- fail so it gets re-examined).
-const withAlign = runMatch(Object.assign({}, LB));
-const noAlign   = runMatch(Object.assign({}, LB, { noAlign:true }));
-const lbBad = !!withAlign.firstDiverge || !withAlign.converged || !noAlign.firstDiverge;
-steps.push('align load-bearing'.padEnd(20)
-    + ' WITH: div=' + (withAlign.firstDiverge ? ('@' + withAlign.firstDiverge.tick) : 'none') + ' conv=' + (withAlign.converged ? 'yes' : 'NO')
-    + '  | noAlign(ctrl): div=' + (noAlign.firstDiverge ? ('@' + noAlign.firstDiverge.tick) : 'none')
-    + '   ' + (lbBad ? 'FAIL' : 'ok'));
-if(lbBad) failed++;
-
 console.log(steps.join('\n'));
 if(failed){
     console.log('\nDUEL-BOUNDARY FAIL: ' + failed + ' case(s) -- the P2P level boundary did not hold lockstep'
-        + '\n  (unhealed divergence / DESYNC exit / local teleport), or the alignment control failed to falsify.');
+        + '\n  (unhealed divergence / DESYNC exit / local teleport).');
     process.exit(1);
 }
 console.log('\nDUEL-BOUNDARY PASSED');

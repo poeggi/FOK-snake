@@ -5,7 +5,7 @@
 #                                  cheap correctness guard -- syntax, ASCII, sim
 #                                  determinism/invariants, all smoke tests, and the
 #                                  single-scenario netcode paths (handshake, worker,
-#                                  relay, clock align). ~8s. Snappy enough to run on
+#                                  relay, clock burst). ~8s. Snappy enough to run on
 #                                  every commit.
 #
 #   bash test/checks.sh --full     REGRESSION tier (CI + after any significant
@@ -65,9 +65,6 @@ suite test/net-handshake.js
 suite test/smoke-worker.js
 suite test/relay-sim.js
 
-echo "[checks] P2P clock alignment recovers the peer offset (correct sign, sub-tick residual)"
-suite test/duel-align.js
-
 echo "[checks] P2P boundary clock burst: both sides agree on the peer offset and nudge to the shared midpoint"
 suite test/duel-sync.js
 
@@ -82,10 +79,10 @@ if [ "$FULL" = 1 ]; then
     echo "[checks] boosting duel stays in lockstep (two clients, real match, over a lossy wire)"
     suite test/duel-desync.js
 
-    echo "[checks] P2P level boundary holds lockstep (host authors start PTS, joiner aligns its clock)"
+    echo "[checks] P2P level boundary holds lockstep (host bursts to the shared midpoint, ships bth on rst)"
     suite test/duel-boundary.js
 
-    echo "[checks] server-path restart (rematch) holds lockstep (joiner aligns its clock on every start)"
+    echo "[checks] server-path restart (rematch) holds lockstep (host bursts to the shared midpoint on every start)"
     suite test/duel-rematch.js
 
     echo "[checks] post-death respawn is clean (a full resync never yanks your own snake back to a death cell)"
