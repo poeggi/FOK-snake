@@ -76,9 +76,12 @@ const NET_LEVEL_SYNC_MS = 400;
 // anchor moves the tick timeline under our feet). So the two peers keep their clocks in step
 // DIRECTLY, peer-to-peer -- but only at the one moment it matters: a level boundary. At EVERY
 // boundary (the first start included) the host triggers a short bilateral BURST ('bsync'): each
-// side fires NET_BURST_N stamped datagrams over ~NET_BURST_N*NET_BURST_GAP_MS and keeps the
-// MINIMUM one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi power-save
-// doze), so the min is the least-biased sample and rejects exactly the doze spikes a single
+// side fires NET_BURST_N stamped datagrams one engine tick apart (the same cadence as the regular
+// per-tick send), then holds the collection window open up to NET_BURST_WAIT_MS longer so the
+// peer's return datagrams have time to cross a full, possibly doze-inflated round trip -- finishing
+// the instant both directions already have enough samples, so a healthy link is never slowed. Each
+// side keeps the MINIMUM one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi
+// power-save doze), so the min is the least-biased sample and rejects exactly the doze spikes a single
 // snapshot would swallow. Every packet piggybacks the sender's own forward-min, so BOTH sides end
 // holding the same two direction-mins and compute the IDENTICAL peer clock offset (theta) from
 // them. The host applies half of theta to its OWN clock and TRANSMITS theta on the start packet
@@ -89,8 +92,9 @@ const NET_LEVEL_SYNC_MS = 400;
 // impossible burst is rejected (theta 0) and the previous in-play clock is kept; the applied nudge
 // is slew-capped so one bad estimate cannot teleport the timeline (it converges over the next
 // boundaries, inside the rollback window).
-const NET_BURST_N = 10;           // datagrams per direction in one boundary burst
-const NET_BURST_GAP_MS = 15;      // spacing between them (~150ms total, comfortably inside a level cover)
+const NET_BURST_N = 6;            // stamped datagrams each side fires in one boundary burst
+const NET_BURST_GAP_MS = 17;      // spacing: ~one engine tick (1/60s), the SAME cadence as the regular per-tick send -- not a bespoke fast timer a foreground iOS clamp could stretch
+const NET_BURST_WAIT_MS = 100;    // after the last ping, hold the collection window open this much longer for the peer's returns to cross a doze-inflated round trip; finish EARLY once both directions are usable
 const NET_BURST_MIN = 3;          // accept-gate: fewest usable samples per direction before we trust the estimate
 const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
 const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
@@ -1503,23 +1507,30 @@ function _netBurstApply(s, theta){
     _netClockPush();
     return d;
 }
-// Run one side's outgoing burst: fire NET_BURST_N stamped datagrams NET_BURST_GAP_MS apart, then
-// (one final gap later, so the last pings land at the peer) call `done`. Timer-driven so the pings
-// genuinely spread over the wire and the min-filter has samples to pick from; with no timers
-// available, or if we are torn down mid-burst, it degrades to a single synchronous ping + immediate
-// done (which the accept-gate then rejects as starved -> the prior clock is kept).
+// Run one side's outgoing burst: fire NET_BURST_N stamped datagrams NET_BURST_GAP_MS (~one engine
+// tick) apart, then HOLD the collection window open up to NET_BURST_WAIT_MS longer -- waiting for the
+// peer's return datagrams to cross a full (possibly doze-inflated) round trip -- but finish the
+// instant both directions are already usable (early-out), so a healthy link is never slowed and a
+// slow one still gets its samples. `done` fires at finish. Timer-driven so the pings genuinely spread
+// over the wire and the min-filter has samples to pick from; with no timers available, or if we are
+// torn down mid-burst, it degrades to a single synchronous ping + immediate done (which the
+// accept-gate then rejects as starved -> the prior clock is kept).
 function _netBurstRun(s, done){
     s = s || _netSess;
     if(!s || !s.game){ if(done) done(); return; }
     _netBurstReset(s);
     s.bsRunning = true;
     if(typeof setTimeout !== 'function'){ _netBurstPing(s); s.bsRunning = false; if(done) done(); return; }
-    let i = 0;
+    let sent = 0, waited = 0;
+    const finish = ()=>{ if(_netSess === s) s.bsRunning = false; if(done && _netSess === s && s.game) done(); };
     const step = ()=>{
         if(_netSess !== s || !s.game){ s.bsRunning = false; return; }   // torn down mid-burst: abandon
-        _netBurstPing(s);
-        if(++i < NET_BURST_N){ setTimeout(step, NET_BURST_GAP_MS); return; }
-        setTimeout(()=>{ if(_netSess === s) s.bsRunning = false; if(done && _netSess === s && s.game) done(); }, NET_BURST_GAP_MS);
+        if(sent < NET_BURST_N){ _netBurstPing(s); sent++; setTimeout(step, NET_BURST_GAP_MS); return; }
+        // Every ping sent: keep collecting until both directions have enough samples (theta usable),
+        // or the extra window runs out -- whichever comes first.
+        if(_netBurstTheta(s) || waited >= NET_BURST_WAIT_MS){ finish(); return; }
+        waited += NET_BURST_GAP_MS;
+        setTimeout(step, NET_BURST_GAP_MS);
     };
     step();
 }
