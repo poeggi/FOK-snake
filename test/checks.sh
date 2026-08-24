@@ -68,7 +68,7 @@ suite test/relay-sim.js
 echo "[checks] P2P boundary clock burst: both sides agree on the peer offset and nudge to the shared midpoint"
 suite test/duel-sync.js
 
-echo "[checks] CONNECTION LOST banner debounces lone refusals (jitter) but still flags a real stall/silence"
+echo "[checks] duel banners: CONNECTION LOST is pure silence (refusals never flash), OUT OF SYNC tracks a hash divergence"
 suite test/duel-warn.js
 
 # --- REGRESSION tier: the heavy duel sweeps (many long lockstep matches). Skipped by

@@ -5,8 +5,8 @@
 // from bth, so that single number lands on the same real instant on both. Before the burst a rematch
 // carried whatever relative clock offset the two independent server syncs left UNCORRECTED into the
 // new match. The peer's honest current-tick inputs then landed outside the rollback window and were
-// refused (drop -> _rbWarnAt -> "CONNECTION LOST"), and past ~250ms one-sided apply diverged the
-// ring -> DESYNC. This drives the REAL rematch RECEIVE path (__rematchHost -> rst lvl:0) over the
+// refused (dropped inputs), and past ~250ms one-sided apply diverged the
+// ring -> OUT OF SYNC. This drives the REAL rematch RECEIVE path (__rematchHost -> rst lvl:0) over the
 // simulated wire and asserts lockstep with NO drops.
 //
 // The last pair is a FALSIFICATION: the same rematch-across-an-offset holds WITH the burst but,

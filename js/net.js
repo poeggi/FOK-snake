@@ -98,9 +98,6 @@ const NET_BURST_WAIT_MS = 100;    // after the last ping, hold the collection wi
 const NET_BURST_MIN = 3;          // accept-gate: fewest usable samples per direction before we trust the estimate
 const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
 const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
-// How long one CONNECTION LOST flash lingers after hard evidence (a refused input,
-// a hash mismatch) before the warning clears.
-const NET_WARN_FLASH_MS = 3000;
 // How long a pending invite (sent, received, or accepting) lingers before it goes stale.
 // The server drops undelivered signals at 30s; we give up a touch sooner so the UI resolves
 // to NO ANSWER / clears the dialog while the peer could, in theory, still collect it.
@@ -108,10 +105,13 @@ const NET_INVITE_STALE_MS = 24000;
 // Silence ladder (wall-clock ms, derived from the 16-tick heartbeat -- something should
 // arrive every ~267ms). Wall-clock, NOT ticks: a suspended tab freezes simTick too, so only
 // real elapsed time reveals the gap on the side that was asleep.
-const RB_WARN_MS = Math.round(32 * TICK_MS);          // ~533ms (2 missed beats) -> CONNECTION LOST warning
-const RB_RECONNECT_MS = Math.round(128 * TICK_MS);    // ~2133ms (8 missed) -> rebuild the p2p link, keep the match
-const RB_RECONNECT_TIMEOUT_MS = 8000;                 // desync repairs never converged -> end the match
-const RB_DEAD_MS = 4000;                              // total silence (p2p or relay), no packet in -> link dead, tear down
+const RB_WARN_MS = Math.round(32 * TICK_MS);          // ~533ms (2 missed beats) -> CONNECTION LOST / OUT OF SYNC banner
+const RB_RECONNECT_MS = Math.round(64 * TICK_MS);     // ~1067ms (4 missed) -> start a p2p link rebuild, still inside the kill window
+// The single persistence deadline for BOTH faults: a peer we have not heard from, or a
+// hash that keeps disagreeing after its resync, is a dead match once it lasts this long.
+// The banner shows from ~RB_WARN_MS; the recovery attempt (p2p rebuild / resync) runs in
+// the gap; unrecovered past this -> end. ~2s: two heartbeats to notice, ~1.5s to recover.
+const RB_PERSIST_KILL_MS = 2000;
 // NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
 // enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a
@@ -1749,7 +1749,7 @@ function _netLiveStart(){
         // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
         // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
         const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
-        if(inGame && _dsyFor > RB_RECONNECT_TIMEOUT_MS){ _netSessionEnd('DESYNC - MATCH ENDED'); return; }
+        if(inGame && _dsyFor > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return; }
         _netBreakRecover(s);   // post-suspend hard-snap: re-anchor a sim frozen far behind the clock
         // The idle keepalive carries the recent input log, so it doubles as repair:
         // a lost LAST input would otherwise sit unfixed until the player pressed
@@ -1773,17 +1773,16 @@ function _netLiveStart(){
         const nowW = Date.now();
         const silent = nowW - s.lastRecvWall;
         if(s.relay){
-            if(nowMs < s.relayGraceUntil) return;                       // relay just engaged: let the peer catch up
-            if(silent > RB_DEAD_MS) _netSessionEnd('CONNECTION LOST');  // relay has no transport to rebuild -> a long silence ends it
+            if(nowMs < s.relayGraceUntil) return;                             // relay just engaged: let the peer catch up
+            if(silent > RB_PERSIST_KILL_MS) _netSessionEnd('CONNECTION LOST'); // relay has no transport to rebuild -> silence past the deadline ends it
             return;
         }
-        // p2p ladder: WARN (netDuelWarn) -> RECONNECT (rebuild the link) -> hard KILL if it never recovers.
-        if(silent > RB_RECONNECT_MS){
-            if(!s.reconnectAt) _netReconnect(s);
-            else if(silent > RB_DEAD_MS) _netSessionEnd('CONNECTION LOST');   // total silence past the cap -> give up (reconnect had RB_RECONNECT_MS..RB_DEAD_MS to rebuild)
-        } else if(s.reconnectAt && silent < RB_WARN_MS){
-            _netReconnectDone(s);   // packets flowing again -- recovered
-        }
+        // p2p ladder: WARN (netDuelWarn, ~RB_WARN_MS) -> RECONNECT (rebuild the link, ~RB_RECONNECT_MS)
+        // -> hard KILL at the deadline. The kill is unconditional so ">2s of silence ends the
+        // match" holds even where no rebuild was possible; below it, start one rebuild or clear it.
+        if(silent > RB_PERSIST_KILL_MS){ _netSessionEnd('CONNECTION LOST'); return; }
+        if(silent > RB_RECONNECT_MS && !s.reconnectAt) _netReconnect(s);
+        else if(s.reconnectAt && silent < RB_WARN_MS) _netReconnectDone(s);   // packets flowing again -- recovered
     }, 250);
 }
 // ---- mid-game reconnect: rebuild the p2p transport WITHOUT restarting the match ----
@@ -2027,8 +2026,8 @@ function _netHandleMsg(txt){
     // Epoch gate for the tick-stream packets. simTick and the rollback tick-base reset at
     // every level boundary, so an 'in'/'h'/'st'/'rs' authored before the boundary carries
     // ticks from the previous epoch's timeline. Mapped onto the post-reset base they land far
-    // in the "future" and _netPeerInput refuses them -- which set _rbWarnAt and flashed
-    // CONNECTION LOST on every level transition though the link was fine. Drop a stale-epoch
+    // in the "future" and _netPeerInput refuses them -- harmless now (a refusal never warns),
+    // but still pure noise on every level transition. Drop a stale-epoch
     // tick packet silently here; sched/rst/reqlvl carry and check their own epoch already.
     // Guarded on m.ep being present so a peer from before the stamp existed is unaffected.
     if(typeof m.ep === 'number' && _netSess && (m.ep|0) !== (_netSess.epoch|0)
@@ -2098,13 +2097,19 @@ function _netHandleMsg(txt){
 function netDuelWarn(){
     const s = _netSess;
     if(!s || !s.game || !inGame) return null;
-    const nowMs = performance.now();
     if(s.reconnecting) return 'RECONNECTING...';
-    if(nowMs - _rbWarnAt < NET_WARN_FLASH_MS) return 'CONNECTION LOST';
-    // Relay arrivals ride jittered HTTP round trips (~200-400ms one-way), so the p2p
-    // silence bar reads routine gaps as loss; relay warns at DOUBLE the p2p bar
-    // (~1067ms), still well under its 3s session kill.
-    if(Date.now() - s.lastRecvWall > (s.relay ? RB_WARN_MS * 2 : RB_WARN_MS) && !(s.relay && nowMs < s.relayGraceUntil)) return 'CONNECTION LOST';
+    // CONNECTION LOST is a pure SILENCE detector: nothing on the wire for ~2 heartbeats
+    // (RB_WARN_MS). Every inbound datagram -- the minimal 'pi' liveness ping included --
+    // refreshes lastRecvWall before dispatch, so a link still carrying ANYTHING never
+    // flashes; a refused input is not a fault (it still arrived). Relay arrivals ride
+    // jittered HTTP round trips, so relay warns at DOUBLE the p2p bar.
+    if(Date.now() - s.lastRecvWall > (s.relay ? RB_WARN_MS * 2 : RB_WARN_MS) && !(s.relay && performance.now() < s.relayGraceUntil)) return 'CONNECTION LOST';
+    // OUT OF SYNC is the OTHER fault: the link is fine, the worlds diverged (a hash
+    // disagreed). duel-core fires one targeted repair per verdict; this banner is its live
+    // status. It clears the instant a hash agrees again (_rbBadSince -> 0); unhealed past
+    // the same 2s deadline as silence, the liveness timer ends the match.
+    const dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
+    if(dsyFor > 0) return 'OUT OF SYNC';
     return null;
 }
 // Which snake is ours. The offerer is P0 and the answerer P1 -- an index, not a
@@ -2133,7 +2138,6 @@ function netTickTarget(){
     // game running at 60Hz either way, and the next start re-bases the origin.
     if(Math.abs(t - simTick) > 600){
         _netSigLog('! tick target ' + (t - simTick) + 't off: bad start origin');
-        _rbWarnAt = performance.now();
         return null;
     }
     return t;

@@ -97,31 +97,14 @@ var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live
 // window and is dropped -- which looks exactly like "nothing ever gets through".
 var _rbBase = 0;
 var _rbPhase = '';   // last seen duel phase: drives the re-anchor at level/respawn breaks
-// When we last had HARD evidence the two worlds are not the same game: a refused
-// input, or a hash that disagreed. Silence alone would not have caught the
-// tick-base bug -- packets kept arriving, they were just all unusable.
-// -1e9, not 0: performance.now() is legitimately ~0 just after load, and a falsy
-// check would then read a real warning as "never warned".
-var _rbWarnAt = -1e9;
 var _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = healthy): repeated
-                          // failed repairs escalate to a session end on the disconnect timeout
-// A LONE refused packet is normal jitter under independent clocks: the redundant resend
+                          // failed repairs escalate to a session end on the persistence deadline
+// A refused packet is normal jitter under independent clocks: the redundant resend
 // re-delivers that input at a usable tick and the two worlds never actually diverge (the
-// hash stays equal). Only a SUSTAINED refusal -- EVERY packet unusable, the tick-base /
-// clock-residual fault -- is a real "connection lost". So leak a small counter instead of
-// arming the 3s banner on the first stray: an isolated refusal decays before it can flash,
-// a one-sided stall crosses the bar within a few beats. Genuine world divergence is caught
-// separately by the hash -> DESYNC, never by this warning.
-var _rbRefuse = 0, _rbRefuseAt = -1e9;
-const RB_REFUSE_LEAK_MS = 1200;   // one refusal fully decays in ~1.2s of otherwise-clean traffic
-const RB_REFUSE_TRIP = 3;         // this many un-decayed refusals = a one-sided stall, not jitter
-function _rbRefused(){
-    const now = performance.now();
-    _rbRefuse = Math.max(0, _rbRefuse - (now - _rbRefuseAt) / RB_REFUSE_LEAK_MS) + 1;
-    _rbRefuseAt = now;
-    _rbDbg.drop++;
-    if(_rbRefuse >= RB_REFUSE_TRIP) _rbWarnAt = now;   // corroborated: the link, not one packet
-}
+// hash stays equal). It is NOT a connection fault -- the packet DID arrive -- and NOT a
+// warning of any kind. Only genuine SILENCE (net.js, nothing on the wire) raises CONNECTION
+// LOST, and only a disagreeing hash raises OUT OF SYNC; a refusal just counts as a drop.
+function _rbRefused(){ _rbDbg.drop++; }
 // A redundant-log record older than the rewind window is undeliverable (the peer
 // must refuse it), so resending it repairs nothing: prune before every send.
 function _rbSentPrune(){
@@ -139,8 +122,6 @@ function _rbReset(){
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
     _rbPhase = '';
-    _rbWarnAt = -1e9;
-    _rbRefuse = 0; _rbRefuseAt = -1e9;
     _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, desyncAt:'' };
 }
 // Two identical sims fed identical inputs produce identical state, so a hash that

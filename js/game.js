@@ -1008,7 +1008,7 @@ function _initWorker(){
                 // All of these are latest-wins ages/counters -- dsyFor drives the desync
                 // match-end deadline, so a coalesced batch must keep the FRESHEST, not the
                 // first-in-batch (a stale nonzero dsyFor would delay or misfire the kill).
-                p.ptk = d.ptk; p.warnAgo = d.warnAgo; p.dsyFor = d.dsyFor; p.psetN = d.psetN; p.psetAgo = d.psetAgo;
+                p.ptk = d.ptk; p.dsyFor = d.dsyFor; p.psetN = d.psetN; p.psetAgo = d.psetAgo;
                 if(d.msg) p.msg = d.msg;   // never let a later empty frame erase a real message
             } else _pendingDuel = d;
         }
@@ -1118,8 +1118,7 @@ function applyWorkerFrame(){
         _netDbg.inRx = d.inRx|0; _netDbg.inTx = d.inTx|0;
         if(d.inLog) _netDbg.inLog = d.inLog;
         _netDbg.peerTkOfs = d.ptk || 0;
-        if(typeof d.warnAgo === 'number') _rbWarnAt = performance.now() - d.warnAgo;   // age-based: clocks differ
-        _netDbg.dsyFor = d.dsyFor|0;   // unhealed-desync age, for the escalation deadline
+        _netDbg.dsyFor = d.dsyFor|0;   // unhealed-desync age, drives the OUT OF SYNC banner + escalation deadline
         _netDbg.psetN = d.psetN|0;     // phase-set counter + age (worker clocks differ: age travels)
         _netDbg.psetAt = (typeof d.psetAgo === 'number' && d.psetAgo >= 0) ? performance.now() - d.psetAgo : 0;
         if(d.msg && d.msg !== _duelMsg){ _duelMsg = d.msg; _duelMsgAt = _msgNow(); _uiDirty = true; }

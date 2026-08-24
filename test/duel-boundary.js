@@ -44,7 +44,7 @@ for(const sc of CONVERGE){
     const r = runMatch(sc);
     // A clean boundary: converged, no unhealed ring split, no product desync, no DESYNC exit, no
     // teleporting local head, and at least one boundary actually crossed. A gameplay duelOver is
-    // fine (someone lost their lives); only a session-end (DESYNC - MATCH ENDED) is a failure.
+    // fine (someone lost their lives); only a session-end (OUT OF SYNC - MATCH ENDED) is a failure.
     const bad = !r.converged || !!r.firstDiverge || r.desyncA > 0 || r.desyncB > 0
         || r.exitReason === 'session-end' || r.localJumps > 0 || r.levelReached < 2;
     const fd = r.firstDiverge ? ('  1stDiverge @' + r.firstDiverge.tick + ' [' + r.firstDiverge.fields.join(',') + ']') : '';

@@ -143,6 +143,7 @@ const HOOKS = (id) => `
   globalThis.__rbDbg   = ()=> Object.assign({}, _rbDbg);
   globalThis.__netDbg  = ()=> Object.assign({}, _netDbg);
   globalThis.__badSince= ()=> _rbBadSince;                      // 0 = healthy; else wall clock of the first unhealed mismatch
+  globalThis.__setBad  = (age)=>{ _rbBadSince = age > 0 ? Date.now() - age : 0; };   // force an unhealed-divergence age (ms), or 0 to heal, for the OUT OF SYNC banner test
   // Ring-snapshot hashes at a PAST tick: the settled-history equality test the continuous
   // detector uses. The ring is thinned to even ticks (RB_SNAP_EVERY), so pass an even tk.
   globalThis.__ringTicks   = ()=> _rbRing.map(e=>e.tk);

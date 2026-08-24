@@ -26,7 +26,7 @@ function menuItem(text,y,sel,c=ctx,dim) {
 const STATUS_Y = CH - 76;
 function drawStatus(msg){
     if(!msg) return;
-    const col = /FAIL|INVALID|OFFLINE|WRONG|TOO LARGE|NO CLOUD|NO BACKUP|BAD|MISMATCH|BUSY|DESYNC|UNREACHABLE|NOT SUPPORTED|CANNOT|LOST|DECLINE|EXPIRED/i.test(msg) ? '#ff5555'
+    const col = /FAIL|INVALID|OFFLINE|WRONG|TOO LARGE|NO CLOUD|NO BACKUP|BAD|MISMATCH|BUSY|SYNC|UNREACHABLE|NOT SUPPORTED|CANNOT|LOST|DECLINE|EXPIRED/i.test(msg) ? '#ff5555'
               : /SAVED|RESTORED|ADDED|ACCEPTED|CONNECTED|READY|SENT/i.test(msg) ? '#7fff7f'
               : '#ffaa44';
     ct(msg, CW/2, STATUS_Y, col, FONT.HINT);
@@ -1382,18 +1382,19 @@ function drawInvite() {
     if(_inviteMsg && simNow-_inviteMsgAt<1600) ct(_inviteMsg, CW/2, 330, '#ffd700', FONT.HINT);
     ct('UP/DN:nav  A:ok', CW/2, HINT_Y, '#888', FONT.HINT);
 }
-// The other side is not reaching us: either nothing has arrived for a second, or
-// what arrives is unusable (refused inputs, a hash that disagrees). Both mean the
-// two clients have stopped playing the same game, so say so on the board rather
-// than let it look like the opponent is standing still.
+// Two ways the board stops being a shared game, each its own colour. RED CONNECTION LOST:
+// nothing has reached us for ~2 heartbeats (a silent link). AMBER OUT OF SYNC: packets flow
+// but a hash disagreed, so a resync is in flight. Both pulse the same way and read as "the
+// opponent is not really there", rather than letting it look like they are standing still.
 function _drawDuelWarn(){
     const w = (typeof netDuelWarn==='function') ? netDuelWarn() : null;
     if(!w) return;
+    const sync = (w === 'OUT OF SYNC');   // world divergence: amber, distinct from a red link loss
     ctx.save();
     ctx.globalAlpha = 0.10 + 0.05*Math.sin(simNow/150);   // a live pulse: never mistaken for the board
-    ctx.fillStyle = '#ff0000'; ctx.fillRect(0,0,CW,CH);
+    ctx.fillStyle = sync ? '#ffcc00' : '#ff0000'; ctx.fillRect(0,0,CW,CH);
     ctx.restore();
-    ctg(w, CW/2, 22, '#ff6666', FONT.HINT, GLOW.TEXT);
+    ctg(w, CW/2, 22, sync ? '#ffe066' : '#ff6666', FONT.HINT, GLOW.TEXT);
 }
 function drawDuelBoard(now) {
     if(typeof netRelayActive==='function' && netRelayActive())

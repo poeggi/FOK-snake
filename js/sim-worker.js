@@ -117,11 +117,11 @@ function _post() {
     const msg = { t: 'frame', snap, events: simEvents.splice(0) };
     if (_dcOn) {
         // Duel extras: tick-tagged events, the rewind marker, and the debug counters the
-        // main-thread overlay shows. warnAgo travels as an AGE (worker and main have
-        // different performance.now() origins).
+        // main-thread overlay shows. dsyFor travels as an AGE (worker and main have
+        // different Date.now() bases only through the same wall clock -- age is origin-free).
         msg.duel = { ev: _dcEvents.splice(0), rew: _dcRewTo, rb: _rbDbg,
                      inRx: _netDbg.inRx, inTx: _netDbg.inTx, inLog: _netDbg.inLog, ptk: _netDbg.peerTkOfs,
-                     warnAgo: performance.now() - _rbWarnAt, dsyFor: _rbBadSince ? Date.now() - _rbBadSince : 0,
+                     dsyFor: _rbBadSince ? Date.now() - _rbBadSince : 0,
                      psetN: _dcSnapN, psetAgo: _dcSnapAt ? performance.now() - _dcSnapAt : -1,
                      msg: _duelMsg };
         // ONE-SHOT: a duel message is an event, not a state. Clearing it after posting

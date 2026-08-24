@@ -223,15 +223,18 @@ runTest('SMOKE-NET', `
     _netHandleMsg(JSON.stringify({t:'h', tk:_hTick-10000, h:12345}));
     for(let i=0;i<RB_SETTLE+2;i++){ netTickPre(); update(); }
     if(_rbDbg.desync!==_dz0+1) throw 'an un-comparable hash must not be called a desync';
-    // A desync is NOT a connection problem: the link is fine, the worlds are not.
-    _rbWarnAt=-1e9; _netSess.lastRecvWall=Date.now();
-    if(netDuelWarn()!==null) throw 'a desync must not masquerade as CONNECTION LOST';
-    log('divergence detection ok: hash agrees, mismatch flagged, stale hash ignored');
+    // A desync is NOT a connection problem: the link is fine, the worlds are not. It shows
+    // its OWN banner, OUT OF SYNC, never CONNECTION LOST, and clears the moment it heals.
+    _netSess.lastRecvWall=Date.now();
+    if(netDuelWarn()!=='OUT OF SYNC') throw 'an unhealed desync must show OUT OF SYNC';
+    _rbBadSince=0;                                   // a later hash agrees -> healed
+    if(netDuelWarn()!==null) throw 'a healed desync must clear the banner';
+    log('divergence detection ok: hash agrees, mismatch flagged, stale hash ignored, OUT OF SYNC tracks it');
 
-    // ---- in-game warning: the other side is not reaching us ----
-    // Silence alone would NOT have caught the tick-base bug -- packets kept
-    // arriving, they were just all unusable. So refused input counts as evidence too.
-    _rbWarnAt=-1e9; _netSess.lastRecvWall=Date.now();
+    // ---- in-game warning: CONNECTION LOST is a PURE silence detector ----
+    // Nothing on the wire for ~2 heartbeats is the ONLY thing that flashes it. A refused
+    // input is not silence (the packet still arrived), so it must NOT warn.
+    _netSess.lastRecvWall=Date.now();
     if(netDuelWarn()!==null) throw 'a healthy duel must show no warning';
     // The 16-tick heartbeat (~267ms) must be comfortably faster than the ~533ms warn window
     // it prevents, so a healthy link never flashes.
@@ -243,14 +246,13 @@ runTest('SMOKE-NET', `
     if(netDuelWarn()!=='CONNECTION LOST') throw 'silence past the warn window must warn';
     _netSess.lastRecvWall=Date.now();               // packets flowing again...
     if(netDuelWarn()!==null) throw 'a recovered link must clear the warning';
-    _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:900,tk:-99999,k:'dir',d:{x:0,y:1}}]}));   // ...but unusable
-    if(netDuelWarn()!=='CONNECTION LOST') throw 'refused input must warn even while packets arrive';
-    _rbWarnAt=-1e9;
+    _netHandleMsg(JSON.stringify({t:'in',tk:0,l:[{q:900,tk:-99999,k:'dir',d:{x:0,y:1}}]}));   // an unusable input, but it ARRIVED
+    if(netDuelWarn()!==null) throw 'a refused input must NOT warn -- it still arrived (silence, not refusal)';
     // A reconnect in progress reads as RECONNECTING, not a bare CONNECTION LOST.
     _netSess.reconnecting=true; if(netDuelWarn()!=='RECONNECTING...') throw 'a reconnect must show RECONNECTING';
     _netSess.reconnecting=false;
-    drawDuelBoard(simNow);                             // the red overlay renders
-    log('duel warning ok: silence + unusable input warn, reconnect shows RECONNECTING, recovery clears it');
+    drawDuelBoard(simNow);                             // the overlay renders
+    log('duel warning ok: only silence warns, a refused input does not, reconnect shows RECONNECTING, recovery clears it');
 
     // ---- clock-driven ticking: the shared clock owns the tick, not our frame timer ----
     // Pacing from local frame time let the two clients slide apart forever (a dropped
