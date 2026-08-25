@@ -48,7 +48,7 @@ let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHear
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
 let _barMoveTick=0;   // power-mode bar-drift cadence counter
 let _nmWasAdjacent=false;   // near-miss edge tracker (presentation-only; see _duelNearMiss)
-const _BAR_MOVE_EVERY=4;   // blocks step once every 4th game tick -- ONE cadence for both modes (half the old rate)
+const _BAR_MOVE_EVERY=6;   // blocks step once every 6th game tick -- ONE cadence for both modes (a calm glide, slower than the snake)
 // DEBUG x10: multiplies every rare-event probability (pellet/crystal/gouranga/gem tiers/
 // respawn heart) by 10 for testing. cfg.x10 is persisted config, read at call time like
 // cfg.diff/cfg.turbo (the worker receives it via the cfg message; like diff, a replay or
@@ -683,18 +683,18 @@ function _moveBarsGhost(){
     if(_gourangaActive) _gourangaLine.forEach(g=>blocked.add(ck(g)));
     const free=(x,y)=>x>=0&&x<COLS&&y>=0&&y<ROWS&&!blocked.has(x+','+y);
     for(const b of bars){
-        // Each block holds ONE heading for 2-4s so the flight reads as a calm directed glide.
+        // Each block holds ONE heading for 4-8s so the flight reads as a calm directed glide.
         // Blocked ahead, it TURNS 90 degrees rather than reversing -- a reversal is exactly what
         // read as jitter -- and if boxed in on both sides it simply holds this step, which is
         // calmer than a random jerk. gd/gdUntil live only sim-side (the render transport strips them).
-        if(b.gd==null || simTick>=b.gdUntil){ b.gd=ri(4); b.gdUntil=simTick+120+ri(121); }
+        if(b.gd==null || simTick>=b.gdUntil){ b.gd=ri(4); b.gdUntil=simTick+240+ri(241); }
         let d=DIRS[b.gd], nx=b.x+d.x, ny=b.y+d.y;
         if(!free(nx,ny)){
             const perp=b.gd<2?2:0, pick=ri(2);   // horizontal(0,1)<->vertical(2,3): the two 90-degree turns
             let turned=false;
             for(const g of [perp+pick, perp+(1-pick)]){
                 const dd=DIRS[g], px=b.x+dd.x, py=b.y+dd.y;
-                if(free(px,py)){ b.gd=g; b.gdUntil=simTick+120+ri(121); nx=px; ny=py; turned=true; break; }
+                if(free(px,py)){ b.gd=g; b.gdUntil=simTick+240+ri(241); nx=px; ny=py; turned=true; break; }
             }
             if(!turned) continue;   // boxed in on both turns: hold position
         }
