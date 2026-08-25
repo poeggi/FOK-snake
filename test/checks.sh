@@ -72,6 +72,9 @@ suite test/duel-sync.js
 echo "[checks] duel banners: CONNECTION LOST is pure silence (refusals never flash), OUT OF SYNC tracks a hash divergence"
 suite test/duel-warn.js
 
+echo "[checks] touch input funnel: a same-direction swipe collapses onto the dpad (no per-48px flood), real turns still author"
+suite test/duel-touch.js
+
 # --- REGRESSION tier: the heavy duel sweeps (many long lockstep matches). Skipped by
 # the fast pre-commit run; CI (--full) and a manual --full after a netcode/sim rework
 # run them. Each plays real 20-40s boosting matches over lossy/dozing wires -- the only
@@ -91,6 +94,12 @@ if [ "$FULL" = 1 ]; then
 
     echo "[checks] connection-interruption recovery (a <4s wire outage is survived; an over-long one still kills)"
     suite test/duel-outage.js
+
+    echo "[checks] rollback is one-sided under a clock offset (falls on the AHEAD client; a modest skew is absorbed, lockstep holds)"
+    suite test/duel-asym.js
+
+    echo "[checks] wall-clock drift immunity (the lockstep timeline rides the monotonic clock; an NTP slew/step is inert)"
+    suite test/duel-drift.js
 else
     echo "[checks] (fast tier) skipping heavy duel sweeps -- run 'bash test/checks.sh --full' after any netcode/sim rework"
 fi

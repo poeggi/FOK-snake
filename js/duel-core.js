@@ -59,6 +59,7 @@ var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk
 var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
 var _rbSeq = 0;              // our outgoing input sequence
 var _rbPeerSeq = -1;         // highest peer sequence applied
+var _lastLocalDir = null;    // last dir we AUTHORED for our snake -- the intent-change gate (netLocalInput)
 // Every packet repeats the recent inputs, so a lost one is repaired by the next without a
 // retransmit (the DataChannel is deliberately unreliable). 8 covers far more than any hand
 // generates inside a round trip, and keeps the worst-case packet (~500 bytes) well inside both
@@ -115,6 +116,7 @@ function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
     _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
+    _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
     _rbResyncSend = 0;
     _rbRewindTo = Infinity;
@@ -773,6 +775,19 @@ function netLocalInput(kind, p, d, now){
         const P = players && players[myP];
         if(!P) return true;
         const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;   // <- authored one step boundary ahead
+        // Intent-change gate (source-agnostic: keyboard, dpad and free-touch swipe all funnel here).
+        // A turn onto the heading the snake already holds is dropped by the sim on BOTH clients, so
+        // authoring a wire record for it is pure waste -- one peer rollback/live-apply for a snake
+        // that never turned. A held dpad key and keyboard auto-repeat already suppress this at the
+        // source; a continuous same-direction swipe does not, so it re-emits one no-op turn per
+        // ~48px of slide. Suppress ONLY when it is PROVABLY a no-op: the new dir equals BOTH our last
+        // AUTHORED dir (so no distinct turn is queued behind it in the not-yet-applied window -- this
+        // is what the caution below forbids predicting, so we read a committed fact, not a forecast)
+        // AND our snake's CURRENT heading (so a respawn/level heading reset -- which changes P.dir
+        // without an authored record -- is never mis-suppressed; that turn goes through). Both true
+        // means same-as-heading now and through S: the sim would discard it either way.
+        if(_lastLocalDir && _lastLocalDir.x === d.x && _lastLocalDir.y === d.y &&
+           P.dir && P.dir.x === d.x && P.dir.y === d.y) return true;
         // The sim's dir handler is the SOLE authority on which turns count (same-as-heading,
         // reverse, queue full), applied identically on both clients and every rollback re-sim.
         // Do NOT re-judge that here against a predicted queue: a correction can change dir/dirQueue
@@ -781,6 +796,7 @@ function netLocalInput(kind, p, d, now){
         // authored for S (a record the sim already has); this is also the same-key spam guard.
         const log = _rbLog.get(S);
         if(log) for(let i = 0; i < log.length; i++){ const c = log[i]; if(c.t === 'dir' && c.p === myP && c.dir.x === d.x && c.dir.y === d.y) return true; }
+        _lastLocalDir = { x:d.x, y:d.y };   // remember the intent we just authored (the gate's baseline)
         _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x, y:d.y} });
         const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y} };
         _rbSentPrune(); _rbSent.push(drec);

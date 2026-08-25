@@ -31,10 +31,16 @@ function elStub(id) {
 
 function runInGame(driver) {
     const _els = {};
+    // Capture document-level listeners so a test can drive the REAL DOM handlers (touch swipe /
+    // key repeat) via document.__emit(type, evt). Purely additive: existing tests never __emit, so
+    // a captured handler never fires -- identical to the old no-op drop.
+    const _docL = {};
     const documentStub = {
         getElementById: id => (_els[id] || (_els[id] = elStub(id))),
         createElement: tag => elStub(tag + '#new'),
-        addEventListener() {}, removeEventListener() {},
+        addEventListener(type, fn) { (_docL[type] || (_docL[type] = [])).push(fn); },
+        removeEventListener(type, fn) { const a = _docL[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } },
+        __emit(type, evt) { for (const fn of (_docL[type] || []).slice()) fn(evt); },
         get cookie() { return ''; }, set cookie(v) {},   // Node has no cookie jar: getPlayerId falls back to localStorage
         body: elStub('body'),
         fonts: { ready: Promise.resolve() },
