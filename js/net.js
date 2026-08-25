@@ -265,11 +265,21 @@ function _netClampProfile(p){
 // (5 samples, keep the lowest-RTT one) and adjust ourselves. REQUIRED before
 // an online game starts; re-synced when older than a minute. ----
 var _netSync = { ofs:null, rtt:-1, at:0 };
-// WHOLE milliseconds, always. The offset carries a fractional part (it is derived
-// from rtt/2), and an un-rounded PTS serialises as 1784190294971.8 -- which PHP's
-// strict is_int() rejects with 400 'invalid pts', silently killing the signal. It
-// only failed SOMETIMES because rtt/2 occasionally lands on a whole millisecond.
-function netPts(){ return _netSync.ofs == null ? null : Math.round(Date.now() + _netSync.ofs); }
+// The lockstep timeline rides the MONOTONIC clock, never Date.now(). Date.now() is the wall
+// clock, which the OS silently slews and steps (its time daemon disciplining toward network
+// time) -- anchoring the shared PTS to it let those adjustments leak straight into the timeline
+// as drift. A foregrounding phone can move its wall clock ~10ms in a minute this way (~167ppm),
+// far past any crystal error, which is exactly the "not normal wall drift" the field reported.
+// performance.now() is a monotonic clock: it never decreases and is not subject to adjustments;
+// timeOrigin pins it to a wall reading captured ONCE at context start, so this reads like a wall
+// clock but cannot be nudged afterward. Whole ms (PHP is_int rejects a fractional pts). The
+// staleness/silence timers below stay on Date.now() -- those genuinely want adjustable wall time.
+function _wall(){
+    return (typeof performance !== 'undefined' && performance.now && performance.timeOrigin != null)
+        ? performance.timeOrigin + performance.now()
+        : Date.now();
+}
+function netPts(){ return _netSync.ofs == null ? null : Math.round(_wall() + _netSync.ofs); }
 // MANDATED latency report (API: Latency measurement and reporting): the same
 // time.php samples yield the value -- at least three, an extreme FIRST sample
 // (cold connection: DNS/TCP/TLS) discarded, the rest averaged for stability.
@@ -328,7 +338,7 @@ async function _netTimeSync(force, budgetMs){
             // Keep the LOWEST-rtt sample, never an average: a sample delayed by queuing
             // carries that delay straight into its offset, so averaging spreads the poison
             // instead of discarding it. The fastest sample is the least polluted one.
-            if(!best || rtt < best.rtt) best = { rtt, ofs: t + rtt/2 - Date.now() };
+            if(!best || rtt < best.rtt) best = { rtt, ofs: t + rtt/2 - _wall() };
             // Budgeted (menu-music) sync: adopt as soon as we have ANY sample so netPts()
             // is usable within one round trip -- the menu gate then almost always sees a
             // synced clock inside its short wall. Later samples only refine it. NEVER
@@ -1918,7 +1928,7 @@ async function _netRequestStart(s, reason){
     // as the clock samples -- only adopt it when this round trip beat our best one,
     // since a slower one carries a worse estimate.
     if(typeof d.now === 'number' && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
-        _netSync = { ofs: d.now + _rtt/2 - Date.now(), rtt: _rtt, at: Date.now() };
+        _netSync = { ofs: d.now + _rtt/2 - _wall(), rtt: _rtt, at: Date.now() };
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
     _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
     // Ship the shared start, then schedule tick 0. `theta` is the burst-agreed peer offset the host

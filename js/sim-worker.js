@@ -42,7 +42,13 @@ self._duelMsg = ''; self._duelMsgAt = 0;
 self._msgNow = () => performance.now();
 self.netGameActive = () => _dcOn;
 self.netMyIndex = () => _dcMy;
-self.netPts = () => _dcOfs == null ? null : Math.round(Date.now() + _dcOfs);
+// Monotonic wall reading -- see net.js _wall(): the lockstep timeline must not ride the
+// OS-adjustable Date.now(), or NTP slews leak in as drift. timeOrigin pins performance.now()
+// to a one-time wall capture. The worker twin MUST match net.js exactly.
+self._wall = () => (typeof performance !== 'undefined' && performance.now && performance.timeOrigin != null)
+    ? performance.timeOrigin + performance.now()
+    : Date.now();
+self.netPts = () => _dcOfs == null ? null : Math.round(_wall() + _dcOfs);
 self._netSend = (o, pre) => { if(_dcOn) postMessage({ t:'wire', o }); };
 self._netSigLog = (line) => { if(_dcOn) postMessage({ t:'dsig', line }); };
 self._netDbg = { inRx:0, inTx:0, inLog:[], peerTkOfs:0, lag:0, hbRx:0, hbTx:0 };
@@ -73,7 +79,7 @@ self.simArmIssue = (p, kind, d) => { if (_dcOn) netLocalInput(kind, 0, d, true);
 // fires every tick as normal operation -- the grid only actually moves on an anchor change.
 function _dcSeedPhase(){
     if(_dcOfs == null || !_dcStartPts) return;
-    const ft0 = (Date.now() + _dcOfs - _dcStartPts) / TICK_MS;
+    const ft0 = (_wall() + _dcOfs - _dcStartPts) / TICK_MS;
     _acc = Math.max(-TICK_MS, Math.min(TICK_MS, (ft0 - simTick - 0.5) * TICK_MS));
     _dcSnapN++; _dcSnapAt = performance.now();
 }
@@ -81,7 +87,7 @@ function _dcSeedPhase(){
 // origin sanity window). null = steer nowhere, free-run at 60Hz.
 function _dcTarget(){
     if(!_dcOn || !_dcStartPts || _dcOfs == null) return null;
-    const t = Math.floor((Date.now() + _dcOfs - _dcStartPts) / TICK_MS);
+    const t = Math.floor((_wall() + _dcOfs - _dcStartPts) / TICK_MS);
     return Math.abs(t - simTick) > 600 ? null : t;
 }
 

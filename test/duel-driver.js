@@ -29,16 +29,33 @@ const HOOKS = (id) => `
   // Mocked clocks (see duel-profile.js for the full rationale): performance.now is TRUE shared
   // time (frame domain); Date.now is this client's WALL clock, carrying a frozen anchor error
   // (__clkE0) + relative drift (__clkDr). Both default 0 (perfect sync).
+  //
+  // The lockstep timeline now reads the MONOTONIC clock (net.js _wall() = timeOrigin +
+  // performance.now()), NOT Date.now(). So the model splits cleanly here:
+  //   * timeOrigin carries the real inter-device anchor error (__clkE0) and NOTHING else --
+  //     the standing offset the boundary burst must still measure and correct, and the lead
+  //     that opens the one-sided rollback (duel-asym). It never moves after install.
+  //   * Date.now keeps __clkE0 + drift, for the wall-only uses (silence/staleness timers).
+  //     Its drift term is now INERT for the timeline -- which is exactly the fix: an OS wall
+  //     adjustment (NTP slew) can no longer leak into the shared PTS. duel-drift.js asserts it.
   globalThis.__NET_BASE = 1784500000000;
   globalThis.__now = 0; globalThis.__clkE0 = 0; globalThis.__clkDr = 0;
   performance.now = ()=> __now;
+  performance.timeOrigin = __NET_BASE + __clkE0;   // monotonic origin: wall captured ONCE, drift-free
   Date.now = ()=> __NET_BASE + __now + __clkE0 + __clkDr * __now;
   globalThis.__clkInstall = (e0, dr, startPts)=>{
     __clkE0 = e0; __clkDr = dr;
+    performance.timeOrigin = __NET_BASE + e0;   // anchor error lives in the monotonic origin now
     simTick = 0; simNow = 0;
     if(_netSess) _netSess.startPts = startPts;
     _rbReset();
   };
+  // Wall-only perturbations, for duel-drift.js. __clkStep bumps ONLY Date.now (via __clkE0), never
+  // the monotonic origin -- an OS wall adjustment (NTP correction / foregrounding jump) the lockstep
+  // timeline must ignore, since netPts rides _wall() = timeOrigin + performance.now(). __wallNow
+  // exposes this client's raw wall clock so a test can confirm the step really landed.
+  globalThis.__clkStep = (ms)=>{ __clkE0 += ms; };
+  globalThis.__wallNow = ()=> Date.now();
   globalThis.__ivals = [];
   globalThis.setInterval = (fn, ms)=>{ __ivals.push({ fn, ms, next: __now + ms }); return __ivals.length; };
   globalThis.clearInterval = ()=>{};
@@ -297,6 +314,7 @@ function applyDirective(C, out){
 //   opts.phase : B's sub-tick schedule offset vs A (ms)     -- the rAF phase gap
 //   opts.tjit  : per-tick schedule jitter on both clients   -- makes the gap wobble
 //   opts.clock : { drift, err0, samples } | null            -- independent device clocks
+//   opts.clockLeadsFire : with a fixed offset (bursts off), err0 also leads B's fire schedule (bPhase)
 //   opts.director : (view)=>directive  (defaults to autopilot)
 function runMatch(opts){
     const secs = opts.secs || 20, W = opts.wire || {};
@@ -314,9 +332,20 @@ function runMatch(opts){
     const dr = CK ? (CK.drift || 0) * 1e-6 : 0;
     if(CK){ A.__clkInstall(0, 0, NET_BASE); B.__clkInstall(e0, dr, NET_BASE); }
     const FRAME_BUSY = opts.busy || 5, RESIM_MS = 0.6;
+    // A clock offset is not only a netPts/target shift. In the real loop _fbSeedPhase (game.js) seeds
+    // each client's fixed-timestep tick phase from its OWN wall clock, so a client whose clock sits
+    // e0 ms AHEAD also FIRES its tick ~e0 ms earlier -- opening a real simTick lead, which is the
+    // source of the one-sided rollback the offset causes. The general suites keep this DECOUPLED (the
+    // clock moves only the target) because their bursts re-sync the clock and would also re-seed that
+    // fire phase; modelling that correction dynamically is out of scope here. A test that holds a
+    // FIXED offset (bursts off) opts into the faithful static coupling with opts.clockLeadsFire, so
+    // err0 ALONE drives both the target lead and the fire lead -- no separate phase to keep in step.
+    // See test/duel-asym.js. `opts.phase` remains the SEPARATE rAF sub-tick gap.
+    const bLead = (CK && opts.clockLeadsFire) ? e0 : 0;
+    const bPhase = (opts.phase || 0) - bLead;
     const sch = {
-        A:{ c:A, dir:'AB', me:'A', pe:'B', k:0, next:0,               phase:0,             busyUntil:0 },
-        B:{ c:B, dir:'BA', me:'B', pe:'A', k:0, next:opts.phase || 0, phase:opts.phase || 0, busyUntil:0 },
+        A:{ c:A, dir:'AB', me:'A', pe:'B', k:0, next:0,      phase:0,      busyUntil:0 },
+        B:{ c:B, dir:'BA', me:'B', pe:'A', k:0, next:bPhase, phase:bPhase, busyUntil:0 },
     };
     // Continuous divergence: compare each client's ring snapshot at a settled PAST tick.
     let firstDiverge = null, maxLocalJump = 0, localJumps = 0;
@@ -484,6 +513,14 @@ function runMatch(opts){
     const outage = opts.outage || null;
     const out0 = outage ? Math.round(outage.at * 1000) : -1;
     const out1 = outage ? out0 + (outage.ms | 0) : -1;
+    // Optional one-off WALL STEP: at `at` seconds, jump one client's Date.now by `ms` (default the
+    // joiner 'B', the phone). The monotonic origin is untouched, so on the fixed code the lockstep
+    // timeline must not so much as flinch; duel-drift.js pairs this with a huge inert drift and
+    // asserts the rollback counts are byte-identical to an unperturbed run. opts.wallStep={at,ms,who}.
+    const wallStep = opts.wallStep || null;
+    const wallStepAt = wallStep ? Math.round(wallStep.at * 1000) : -1;
+    const wallStepWho = wallStep ? (wallStep.who || 'B') : null;
+    let wallStepped = false;
     let sawConnLost = false, maxSilentMs = 0;
     const CL = 'CONNECTION LOST';
     let wireDown = false, nextLive = 0;
@@ -496,6 +533,10 @@ function runMatch(opts){
             dozeResumed = true;
             const S = sch[dozeWho];
             S.k = Math.round((now - S.phase) / TICK); S.next = S.k * TICK + S.phase;
+        }
+        if(wallStep && !wallStepped && now >= wallStepAt){
+            wallStepped = true;
+            (wallStepWho === 'A' ? A : B).__clkStep(wallStep.ms);
         }
         if(rematch && !rematchDone && now >= rematchAt){
             const va = A.__view(), vb = B.__view();
@@ -580,7 +621,8 @@ function runMatch(opts){
         levelReached, levelUps, localJumps, maxLocalJump, rematched: rematchDone,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,
-        rb: a.rb + b.rb, resim: a.resim + b.resim, live: a.live + b.live, lost: a.lost + b.lost,
+        rb: a.rb + b.rb, rbA: a.rb, rbB: b.rb,
+        resim: a.resim + b.resim, live: a.live + b.live, liveA: a.live, liveB: b.live, lost: a.lost + b.lost,
         fix: a.fix + b.fix, drop: a.drop + b.drop, dropA: a.drop, dropB: b.drop,
         desyncProbe: opts.desyncProbe ? classifyDesyncs() : null,
         rbTrace: { A: A.__rbTraceDump(), B: B.__rbTraceDump() },
