@@ -402,34 +402,29 @@ function _rbApplyResync(m){
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
-    // Capture OUR OWN authoritative snake BEFORE the host-snake adopt below can mutate it:
-    // simSnapshot() hands back LIVE references, and on the role-agnostic catch-up path a frozen HOST
-    // would otherwise have its own snake (players[0]) clobbered by the next line. The bug-C invariant
-    // (duel-respawn.js) is that a resync must NEVER move our own head.
-    const myIdx = netMyIndex();
-    const myKeep = _rbPackPlayer(snap.players[myIdx]);
-    _rbUnpackPlayer(m.p0, snap.players[0]);   // ordinary (joiner) path: the HOST's snake is the host's to author
+    _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is the host's to author (both branches adopt it)
     if(catchUp){
         // ONE-SIDED SUSPEND CATCH-UP (role-agnostic). The sender's frontier is a FULL RING ahead of
         // our sim -- only possible if WE froze (backgrounded tab / iOS radio doze) while it ran on, so
         // the tick BASE diverged and no in-ring rollback reaches T. A frozen HOST needs this too, hence
-        // role-agnostic. But we still OWN our snake: KEEP our frozen geometry (adopting the sender's
-        // dead-reckoned copy of our own head is exactly bug C -- across a death/respawn boundary it
-        // teleports our head to a stale cell, duel-respawn.js), adopt only the PEER's snake + the
-        // shared world, re-anchor our tick FORWARD, and ship an 'st' so the sender converges to OUR
-        // snake (no resync-forever). The shared spawnAt still respawns both sides in lockstep.
-        const peerIdx = 1 - myIdx;
-        _rbUnpackPlayer(peerIdx === 0 ? m.p0 : m.p1, snap.players[peerIdx]);   // the PEER's snake is theirs to author
-        _rbUnpackPlayer(myKeep, snap.players[myIdx]);                          // KEEP our own (restore if the host-adopt above clobbered it)
-        const mm = myIdx === 0 ? m.p0 : m.p1, mine = snap.players[myIdx];
-        mine.lives = mm.l|0; mine.alive = mm.al !== false; mine.score = mm.sc|0;   // take only our match state (lives/alive/score) from the sender
+        // role-agnostic. We produced NO inputs while frozen, so the sender (current on the shared clock)
+        // holds the authoritative continuation of BOTH snakes -- including its dead-reckoning of OURS
+        // (with no inputs, our snake simply ran straight, which is exactly what the sender simulated).
+        // Adopt the sender's ENTIRE frontier and re-anchor forward. Keeping our stale frozen snake
+        // instead baked an N-cell own-snake divergence into the ring that the 64-lag hash detector
+        // tripped on; a death landing before it aged out then cascaded to a DESYNC match-end. The one
+        // forward catch-up snap of our own head is correct here (duel-suspend.js allows the frozen side
+        // exactly one). Bug C -- an own-head yank BACK to a death cell -- is guarded on the ORDINARY
+        // aged-out path below, where T is NOT a full ring ahead so the sender's copy can predate our
+        // live respawn; here the sender is current, so its copy IS the truth. The shared spawnAt still
+        // respawns both sides in lockstep, and being byte-identical to the sender needs no 'st' back.
+        _rbUnpackPlayer(m.p1, snap.players[1]);   // adopt the sender's copy of the OTHER snake too
         // Ring convention: entry tk=T holds the state at simTick T-1 (snapshot taken in netTickPre
         // BEFORE tick T runs). Anchoring at T put our _gDue countdown one decrement ahead -> a 1-tick
         // game-phase divergence. The residual to the live frontier is closed by the integer-lag catch-up.
         snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;
         simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
         _rbStateQ = []; _rbHashQ = [];
-        _rbSendState(T - 1, simSnapshot());   // push our authoritative own snake so the sender converges to us
         _rbResyncSend = 0;
         _rbDbg.fix = (_rbDbg.fix|0) + 1;
         _netSigLog('~ RESYNC-CATCHUP @' + T);
