@@ -328,6 +328,15 @@ function runMatch(opts){
     let rndS = (opts.rndSeed || 0x51ED) >>> 0;
     const rnd = ()=> (rndS = (rndS * 1103515245 + 12345) >>> 0) / 4294967296;
     const CK = opts.clock || null;
+    // Integer-lag catch-up (sim-worker._step:161-163): a real online-duel client closes gross
+    // whole-tick lag from "a stall, a catch-up truncation" by running ONE extra tick per pass
+    // toward the shared-clock target, EVERY _dcOn step -- independent of clock drift. The driver
+    // gated this behind CK (drifting clocks), which is the only place the general suites ever
+    // produce integer lag. A one-sided suspend produces integer lag WITHOUT drift: after a resync
+    // re-anchors the frozen side to the sender's ring tick (a tick or two behind the live frontier),
+    // this same per-step catch-up closes the final residual. opts.catchup opts a drift-free suite
+    // into that faithful modelling; it is a NO-OP whenever the sim already tracks the target (d<=1).
+    const CATCHUP = !!(CK || opts.catchup);
     const e0 = CK ? anchor({ base:W.base, jit:W.jit, asym:W.asym, clock:CK }, rnd) : 0;
     const dr = CK ? (CK.drift || 0) * 1e-6 : 0;
     if(CK){ A.__clkInstall(0, 0, NET_BASE); B.__clkInstall(e0, dr, NET_BASE); }
@@ -349,6 +358,7 @@ function runMatch(opts){
     };
     // Continuous divergence: compare each client's ring snapshot at a settled PAST tick.
     let firstDiverge = null, maxLocalJump = 0, localJumps = 0;
+    const localJumpsBy = { A:0, B:0 };   // per-side: a frozen client legitimately snaps its own head ONCE on catch-up; a LIVE client must never
     const lastHead = { A:null, B:null };
     let levelReached = 1, exitReason = null;
     // Compare only an IMMUTABLE tick: an accepted input reaches at most RB_DEPTH ticks back, so a
@@ -412,7 +422,7 @@ function runMatch(opts){
             if(jump > 1){
                 const sp = spawnHead(v);
                 const isRespawn = v.hx === sp.x && v.hy === sp.y;   // the sole legit own-head teleport
-                if(!isRespawn){ localJumps++; maxLocalJump = Math.max(maxLocalJump, jump); }
+                if(!isRespawn){ localJumps++; localJumpsBy[S.me]++; maxLocalJump = Math.max(maxLocalJump, jump); }
             }
         }
         lastHead[S.me] = { x:v.hx, y:v.hy };
@@ -423,7 +433,7 @@ function runMatch(opts){
         if(v){ levelReached = Math.max(levelReached, v.level); applyDirective(S.c, dir(v)); }
         const r0 = opts.recv ? S.c.__rbDbg().resim : 0;
         S.c.__tick1();
-        if(CK) S.c.__tickCatchup();
+        if(CATCHUP) S.c.__tickCatchup();
         if(opts.recv) S.busyUntil = (0 | S.next) + FRAME_BUSY + (S.c.__rbDbg().resim - r0) * RESIM_MS;
         noteHead(S, S.c.__view());
         S.k++;
@@ -618,7 +628,7 @@ function runMatch(opts){
     return {
         converged, firstDiverge, exitReason, diedAt,
         sawConnLost, maxSilentMs, endWarn: A.__warn() || B.__warn() || null,
-        levelReached, levelUps, localJumps, maxLocalJump, rematched: rematchDone,
+        levelReached, levelUps, localJumps, localJumpsA: localJumpsBy.A, localJumpsB: localJumpsBy.B, maxLocalJump, rematched: rematchDone,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,
         rb: a.rb + b.rb, rbA: a.rb, rbB: b.rb,

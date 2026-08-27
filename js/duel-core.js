@@ -240,6 +240,10 @@ function _rbCheckHash(m){
     if(m.f && typeof m.f === 'object'){ f = {}; for(const k of RB_HASH_DUEL) if(k in m.f) f[k] = m.f[k]; }
     _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f });
     if(_rbHashQ.length > 8) _rbHashQ.shift();
+    // A hash rides RB_HASH_LAG behind its sender's live tick, so reconstruct that live tick to
+    // tell "peer froze" from "hash is just old". Backup detector for a quiet straightaway where no
+    // 'in' packet flows; the packet-level detector in _netPeerInput is the primary (no built-in lag).
+    _rbNoteBehindPeer(_rbFromWire(m.tk) + RB_HASH_LAG);
 }
 // Called each tick: compare whatever has settled and is still inside the ring.
 function _rbHashSettle(){
@@ -323,13 +327,24 @@ function _rbCheckState(m){
                      pp:m.pp, ppa:m.ppa, pm:m.pm, pma:m.pma, hb:m.hb, hba:m.hba });
     if(_rbStateQ.length > 8) _rbStateQ.shift();
 }
-// ---- FULL RESYNC: the whole duel state, from the HOST (P0) as authority, for a divergence too
-// deep for the ring to rewind. ONLY the joiner (P1) applies it (see _rbApplyResync's guard), and
-// it adopts EVERYTHING including both snakes -- keeping its own would guarantee a permanent
+// ---- FULL RESYNC: the whole duel state, snapshotted by whoever is CURRENT on the shared clock,
+// for a divergence too deep for the ring to rewind. Two callers apply it (see _rbApplyResync):
+//   * ORDINARY structural desync -- HOST-authoritative, only the joiner (P1) adopts (else a peer
+//     'rs' could overwrite the whole world past the per-owner 'st' ownership guard).
+//   * ONE-SIDED SUSPEND catch-up -- ROLE-AGNOSTIC: whoever froze is a full ring behind and adopts
+//     the sender's entire frontier (both snakes) to re-anchor its tick base. A frozen HOST needs
+//     this too, so the send authority (below) is role-agnostic and gated on who is AHEAD.
+// It adopts EVERYTHING including both snakes -- keeping its own would guarantee a permanent
 // mismatch. This is the only thing that heals a STRUCTURAL desync (the 'st' packet carries no
 // level/bars/phase). Sent in a small burst because the channel is unreliable and this can fragment.
 const RB_RESYNC_BURST = 4;
-var _rbResyncSend = 0;       // full-resync sends still owed (host only)
+var _rbResyncSend = 0;       // full-resync sends still owed (whoever is ahead of a frozen peer)
+// A peer packet stamped a full RB_DEPTH behind our sim can only mean the peer FROZE (backgrounded)
+// while we ran on: arm an authoritative resync burst so it can catch its tick base forward. Gated
+// on _rbRing so we only offer to heal once we actually have a frontier to send.
+function _rbNoteBehindPeer(peerTk){
+    if(peerTk <= simTick - RB_DEPTH && _rbRing.length) _rbResyncSend = RB_RESYNC_BURST;
+}
 function _rbPackPlayer(p){
     const s = []; for(const c of p.snake) s.push(c.x, c.y);
     return { s, d:p.dir, dq:p.dirQueue, bd:p.boostDir, bg:!!p.boosting,
@@ -361,17 +376,24 @@ function _rbFullState(sn, tk){
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
 }
 function _rbApplyResync(m){
-    // ONLY the joiner (P1) adopts the host's authoritative full state. A host applying a
-    // peer's 'rs' would let that peer overwrite the ENTIRE world -- both snakes, level,
-    // rng, winner -- the one path that bypasses the per-owner 'st' ownership guard.
-    if(netMyIndex() !== 1) return;
     if(!players || !m || !m.p0 || !m.p1) return;
     if(!_rbCellsSane(m.p0.s) || !_rbCellsSane(m.p1.s)) return;   // reject a resync with an over-board snake
     if(Array.isArray(m.bars) && m.bars.length > COLS * ROWS) return;
     const T = _rbFromWire(m.tk);
+    // TWO kinds of resync land here, told apart by WHERE the sender's frontier T sits relative to
+    // our sim -- and the guard MUST run before simSnapshot(), which hands back LIVE references (an
+    // unpack into snap.players mutates the real snake): a non-adopting role must bail untouched.
+    //   * CATCH-UP (T a full ring AHEAD of us): a one-sided suspend -- WE froze while the sender ran
+    //     on, so the tick BASE diverged and no in-ring rollback reaches T. Role-agnostic: a frozen
+    //     HOST must catch up too. Handled below by adopting the sender's ENTIRE frontier.
+    //   * ORDINARY (T at/behind our tick, or just ahead): a small structural divergence. Stays
+    //     HOST-authoritative -- only the joiner (P1) adopts, or a peer 'rs' could overwrite the whole
+    //     world (both snakes/level/rng/winner), bypassing the per-owner 'st' ownership guard.
+    const catchUp = T > simTick + RB_DEPTH;
+    if(!catchUp && netMyIndex() !== 1) return;
     // The FULL authoritative snapshot AT tick T: the whole SHARED world (level/gems/rng/bars/
     // power/heart/timers) plus the HOST's own snake (p0). How we treat OUR snake (p1) depends on
-    // whether T is still replayable -- see the two branches below.
+    // the branch below.
     const snap = simSnapshot();
     snap.phase = m.ph; snap.level = m.lv|0; snap.gemsDone = m.gd|0; snap.gem = m.gem; snap.gemAt = m.ga; snap.deathMsg = m.dm; snap._barsV = (snap._barsV|0) + 1;
     snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; } return b; });
@@ -380,7 +402,39 @@ function _rbApplyResync(m){
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
-    _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is always the host's to author
+    // Capture OUR OWN authoritative snake BEFORE the host-snake adopt below can mutate it:
+    // simSnapshot() hands back LIVE references, and on the role-agnostic catch-up path a frozen HOST
+    // would otherwise have its own snake (players[0]) clobbered by the next line. The bug-C invariant
+    // (duel-respawn.js) is that a resync must NEVER move our own head.
+    const myIdx = netMyIndex();
+    const myKeep = _rbPackPlayer(snap.players[myIdx]);
+    _rbUnpackPlayer(m.p0, snap.players[0]);   // ordinary (joiner) path: the HOST's snake is the host's to author
+    if(catchUp){
+        // ONE-SIDED SUSPEND CATCH-UP (role-agnostic). The sender's frontier is a FULL RING ahead of
+        // our sim -- only possible if WE froze (backgrounded tab / iOS radio doze) while it ran on, so
+        // the tick BASE diverged and no in-ring rollback reaches T. A frozen HOST needs this too, hence
+        // role-agnostic. But we still OWN our snake: KEEP our frozen geometry (adopting the sender's
+        // dead-reckoned copy of our own head is exactly bug C -- across a death/respawn boundary it
+        // teleports our head to a stale cell, duel-respawn.js), adopt only the PEER's snake + the
+        // shared world, re-anchor our tick FORWARD, and ship an 'st' so the sender converges to OUR
+        // snake (no resync-forever). The shared spawnAt still respawns both sides in lockstep.
+        const peerIdx = 1 - myIdx;
+        _rbUnpackPlayer(peerIdx === 0 ? m.p0 : m.p1, snap.players[peerIdx]);   // the PEER's snake is theirs to author
+        _rbUnpackPlayer(myKeep, snap.players[myIdx]);                          // KEEP our own (restore if the host-adopt above clobbered it)
+        const mm = myIdx === 0 ? m.p0 : m.p1, mine = snap.players[myIdx];
+        mine.lives = mm.l|0; mine.alive = mm.al !== false; mine.score = mm.sc|0;   // take only our match state (lives/alive/score) from the sender
+        // Ring convention: entry tk=T holds the state at simTick T-1 (snapshot taken in netTickPre
+        // BEFORE tick T runs). Anchoring at T put our _gDue countdown one decrement ahead -> a 1-tick
+        // game-phase divergence. The residual to the live frontier is closed by the integer-lag catch-up.
+        snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;
+        simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
+        _rbStateQ = []; _rbHashQ = [];
+        _rbSendState(T - 1, simSnapshot());   // push our authoritative own snake so the sender converges to us
+        _rbResyncSend = 0;
+        _rbDbg.fix = (_rbDbg.fix|0) + 1;
+        _netSigLog('~ RESYNC-CATCHUP @' + T);
+        return;
+    }
     snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;   // ring convention: entry tk=T holds the state at simTick T-1
     let e = null;
     for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === T){ e = _rbRing[j]; break; }
@@ -405,11 +459,16 @@ function _rbApplyResync(m){
         // would otherwise flag 'players' next second and the host would re-resync): no resync-forever.
         const mine = snap.players[1];
         mine.lives = m.p1.l|0; mine.alive = m.p1.al !== false; mine.score = m.p1.sc|0;
-        // Re-anchor our tick to the host's T when T is AHEAD (the doze case: we froze, the shared
-        // clock ran on, so netTickTarget is already out there). Catching up stops our inputs from
-        // landing in the host's deep past -- which is what made it re-resync every second. Never
-        // rewind (T < simTick: we keep our tick so the shared world is not dragged backwards).
-        const anchor = T > simTick ? T : simTick;
+        // Re-anchor our tick to the host's frontier when T is AHEAD (the doze case: we froze, the
+        // shared clock ran on, so netTickTarget is already out there). Catching up stops our inputs
+        // from landing in the host's deep past -- which is what made it re-resync every second. Same
+        // ring convention as the catch-up (line 423) and in-ring (line 431) branches: entry tk=T
+        // holds the state at simTick T-1, so we anchor at T-1, NOT T. Anchoring at T (the old bug
+        // here) labelled a T-1 state as tick T -> our _gDue countdown and our kept own-snake both sat
+        // one tick ahead of the adopted world -> a permanent 1-tick game-phase + 1-cell own-snake
+        // divergence (seen when a RESYNC-burst 'rs' lands here right after the catch-up wiped the
+        // ring). Never rewind (T <= simTick: keep our tick so the shared world is not dragged back).
+        const anchor = T > simTick ? T - 1 : simTick;
         snap.simTick = anchor; snap.simNow = anchor * TICK_MS; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
         _rbSendState(anchor, simSnapshot());
     }
@@ -577,10 +636,15 @@ function netTickPre(){
         // there would hammer the server). The 267ms/1Hz sends already keep those ticks awake.
         _netSend({ t:'pi', w:1 });
     }
-    // Full resync burst (host only): ship the whole duel state on consecutive ticks so at least
-    // one survives the unreliable, possibly-fragmenting channel. Triggered on a heavy desync or a
-    // reconnect. Not during a rollback re-sim.
-    if(!_replaying && _rbResyncSend > 0 && netMyIndex() === 0 && _rbRing.length){
+    // Full resync burst (role-agnostic): ship the whole duel state on consecutive ticks so at least
+    // one survives the unreliable, possibly-fragmenting channel. Armed on a heavy desync, a reconnect,
+    // or when a peer packet shows the peer froze a full ring behind us (_rbNoteBehindPeer). NOT
+    // host-only: a frozen JOINER's resync must reach a frozen-then-caught HOST too. Authority is by
+    // WHO IS AHEAD (only a client current on the shared clock ever arms this), not by role. The
+    // ORDINARY-desync apply stays joiner-only inside _rbApplyResync, so a stale peer 'rs' still cannot
+    // overwrite the live world -- only the catch-up branch (peer a full ring behind) is role-agnostic.
+    // Not during a rollback re-sim.
+    if(!_replaying && _rbResyncSend > 0 && _rbRing.length){
         const last = _rbRing[_rbRing.length-1];
         const full = _rbFullState(last.snap, last.tk);   // stamp the ring entry's OWN tick
         if(full) _netSend(full);
@@ -669,6 +733,10 @@ function _netPeerInput(m){
         _netDbg.peerTkOfs = (typeof m.pts === 'number' && _p != null)
             ? (m.pts - _p) / TICK_MS
             : (_rbFromWire(m.tk) - simTick);
+        // Every packet stamps the sender's OWN current tick (no lag), so this is the primary
+        // "peer froze while we ran on" detector: if it is a full ring behind us, arm a resync
+        // burst to catch its tick base forward. Cheap; _rbNoteBehindPeer no-ops unless truly deep.
+        _rbNoteBehindPeer(_rbFromWire(m.tk));
     }
     const oP = 1 - netMyIndex();
     let earliest = Infinity;

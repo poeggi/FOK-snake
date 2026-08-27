@@ -95,6 +95,9 @@ if [ "$FULL" = 1 ]; then
     echo "[checks] connection-interruption recovery (a <4s wire outage is survived; an over-long one still kills)"
     suite test/duel-outage.js
 
+    echo "[checks] one-sided suspend recovery (a backgrounded client re-anchors its tick base and re-converges; the live side never jumps)"
+    suite test/duel-suspend.js
+
     echo "[checks] rollback is one-sided under a clock offset (falls on the AHEAD client; a modest skew is absorbed, lockstep holds)"
     suite test/duel-asym.js
 
