@@ -183,6 +183,28 @@ runTest('SMOKE-INPUT', `
     boostDir=null; boosting=false; phase='menu'; inGame=false;
     log('swipe boost reads our own snake in every mode (classic, local duel, online)');
 
+    // RINGTONE PANEL (hold SND) owns the pointer while it is up. The document swipe layer
+    // preventDefault()s every touch outside the control mask -- and a prevented touchstart is
+    // a click the browser never synthesises, so the panel buttons went dead -- then it
+    // answered finger-up with handleKey(Enter), pressing the menu item behind the glass.
+    for(const id of ['gamepad','btn-mute','fps-el'])   // the elStub reports 600x400 for every id, which would mask the whole screen
+      document.getElementById(id).getBoundingClientRect=()=>({left:0,top:0,width:0,height:0,right:0,bottom:0});
+    const touch=(x,y)=>{ const o={touches:[{clientX:x,clientY:y}],changedTouches:[{clientX:x,clientY:y}],
+      prevented:false,preventDefault(){o.prevented=true;},stopPropagation(){},stopImmediatePropagation(){}}; return o; };
+    phase='menu'; menuSel=0;
+    const bare=touch(300,200); document.__emit('touchstart',bare);
+    if(!bare.prevented||!_swipeBase) throw 'no panel: the menu swipe layer must still claim the touch';
+    _swipeBase=null;   // drop the armed gesture: its touchend would select a menu item
+    ringOfferOpen(); if(!_ringEl) throw 'ringtone panel did not open';
+    const over=touch(300,200); document.__emit('touchstart',over);
+    if(over.prevented) throw 'panel up: the swipe layer swallowed the tap -- the panel buttons get no click';
+    if(_swipeBase) throw 'panel up: the swipe layer armed a gesture behind the panel';
+    const ph0=phase, sel0=menuSel;
+    document.__emit('touchend',over);
+    if(phase!==ph0||menuSel!==sel0) throw 'panel up: finger-up pressed the menu behind the glass';
+    ringOfferClose(); if(_ringEl) throw 'ringtone panel did not close';
+    log('ringtone panel owns the pointer: no swallowed tap, no menu press behind the glass');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

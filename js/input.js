@@ -735,7 +735,12 @@ function _inControlMask(x,y){
 }
 document.addEventListener('touchstart',e=>{
     const t=e.touches[0];
-    if(!t || _inControlMask(t.clientX,t.clientY)) return;
+    // A panel that is up owns the pointer, exactly as it owns the keyboard. Arming a gesture
+    // here would preventDefault() the tap -- and a prevented touchstart is a click the browser
+    // never synthesises, so the panel's own buttons go dead -- and then answer finger-up with
+    // handleKey('Enter'), pressing whatever menu item sits behind the glass. Both reported
+    // symptoms are that one line, so bail before either: no arm, no preventDefault, real clicks.
+    if(!t || _ringEl || _inControlMask(t.clientX,t.clientY)) return;
     e.preventDefault();
     if(phase==='nameEntry' && !(entryMode==='friend' && _scanTapAt(t.clientX, t.clientY))) nameInp.focus();
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
