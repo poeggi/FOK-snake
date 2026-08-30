@@ -1083,24 +1083,30 @@ updateMuteBtn();
 // ================================================================
 // SOURCE: RINGTONE EASTER EGG  (hold SND for ten seconds)
 // ================================================================
-// The theme is pre-rendered to docs/snake-theme.m4r by test/render-theme.js, which reads
-// the very SEQ table js/audio.js plays -- so the file cannot drift from the game. No
-// platform lets a web page INSTALL a ringtone (iOS gates the Tones library behind a private
-// entitlement, Android behind WRITE_SETTINGS), so the egg does the one thing a page may do:
-// hand over a correctly typed file, named for the importer that platform actually has, and
-// show the three manual steps. One asset serves all three -- .m4r and .m4a are the same AAC
-// in the same MP4 container, and only the name decides which app offers to open it.
-const RING_URL = 'docs/snake-theme.m4r';
+// Both in-game themes are pre-rendered by test/render-theme.js, which reads the very SEQ
+// table js/audio.js plays -- so a file cannot drift from the music. Each is exactly 30s
+// (the tempos are chosen so the loop tiles whole), and you get the one your AUDIO STYLE
+// setting is on, the theme you actually hear. No platform lets a web page INSTALL a
+// ringtone (iOS gates the Tones library behind a private entitlement, Android behind
+// WRITE_SETTINGS), so the egg does the one thing a page may do: hand over a correctly
+// typed file, named for the importer that platform actually has, and show the three manual
+// steps. The extension is all that changes -- .m4r and .m4a are the same AAC in the same
+// MP4 container, and only the name decides which app offers to open it.
+const RING_STYLE = [
+    { url:'docs/snake-theme.m4r',         name:'snake-theme' },          // AUDIO STYLE: NEW
+    { url:'docs/snake-theme-classic.m4r', name:'snake-theme-classic' }   // AUDIO STYLE: CLASSIC
+];
 const RING_HOLD_MS = 10000;
 const RING_HINT_MS = 3000;   // the bar appears only once a hold looks deliberate, so a normal tap shows nothing
 const RING_PLAT = {
-    ios: { file:'snake-theme.m4a',   // GarageBand's browser lists audio files; .m4r it may not show at all
+    ios: { ext:'.m4a',   // GarageBand's browser lists audio files; .m4r it may not show at all
         steps:['DOWNLOAD - IT LANDS IN FILES','OPEN GARAGEBAND, TAP BROWSE','LONG-PRESS IT: SHARE > RINGTONE'] },
-    android: { file:'snake-theme.m4a',
+    android: { ext:'.m4a',
         steps:['DOWNLOAD - IT LANDS IN DOWNLOADS','SETTINGS > SOUND > PHONE RINGTONE','ADD RINGTONE, PICK SNAKE THEME'] },
-    desktop: { file:'snake-theme.m4r',
+    desktop: { ext:'.m4r',
         steps:['DOWNLOAD THE .M4R','PLUG IN THE PHONE, OPEN FINDER/ITUNES','DROP IT ON THE DEVICE > GENERAL'] }
 };
+function _ringStyle(){ return RING_STYLE[cfg.musicStyle === 1 ? 1 : 0]; }
 function _ringPlatform(){
     const ua = navigator.userAgent || '';
     // Same iPad test as game.js: iPadOS reports a Mac UA, only the touch points give it away.
@@ -1128,8 +1134,9 @@ function _ringHoldEnd(){
     if(_muteCharge){ _muteCharge = 0; updateMuteBtn(); }
 }
 function _ringDownload(){
+    const s = _ringStyle();
     const a = document.createElement('a');
-    a.href = RING_URL; a.download = RING_PLAT[_ringPlatform()].file;
+    a.href = s.url; a.download = s.name + RING_PLAT[_ringPlatform()].ext;
     document.body.appendChild(a); a.click(); a.remove();
 }
 function ringOfferOpen(){
@@ -1139,7 +1146,9 @@ function ringOfferOpen(){
     _ringEl.id = 'ring-egg';
     const panel = document.createElement('div'); panel.className = 'panel';
     const h = document.createElement('h2'); h.textContent = 'SNAKE THEME RINGTONE';
-    const lead = document.createElement('p'); lead.textContent = 'YOU FOUND IT. 30 SECONDS OF THE THEME, AS A FILE YOUR PHONE CAN RING WITH:';
+    const lead = document.createElement('p');
+    lead.textContent = 'YOU FOUND IT. 30 SECONDS OF THE '
+        + (cfg.musicStyle === 1 ? 'CLASSIC' : 'NEW') + ' THEME, AS A FILE YOUR PHONE CAN RING WITH:';
     const ol = document.createElement('ol');
     p.steps.forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ol.appendChild(li); });
     const row = document.createElement('div'); row.className = 'row';
