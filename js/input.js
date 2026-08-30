@@ -1104,8 +1104,11 @@ const RING_STYLE = [
 const RING_HOLD_MS = 10000;
 const RING_HINT_MS = 3000;   // the bar appears only once a hold looks deliberate, so a normal tap shows nothing
 const RING_PLAT = {
-    ios: { ext:'.m4a',   // GarageBand's browser lists audio files; .m4r it may not show at all
-        steps:['DOWNLOAD - IT LANDS IN FILES','OPEN GARAGEBAND, TAP BROWSE','LONG-PRESS IT: SHARE > RINGTONE'] },
+    // iOS PREVIEWS an audio download rather than saving it, so the tone reaches Files only
+    // through that preview's own share sheet -- and once it is there, Files' share sheet carries
+    // the RINGTONE action itself. No third-party app in the way.
+    ios: { ext:'.m4a',
+        steps:['DOWNLOAD, THEN MORE... > SAVE TO FILES','OPEN FILES, LONG-PRESS THE TONE','SHARE > RINGTONE'] },
     android: { ext:'.m4a',
         steps:['DOWNLOAD - IT LANDS IN DOWNLOADS','SETTINGS > SOUND > PHONE RINGTONE','ADD RINGTONE, PICK SNAKE THEME'] },
     desktop: { ext:'.m4r',
