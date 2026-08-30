@@ -195,6 +195,7 @@ runTest('SMOKE-INPUT', `
     const bare=touch(300,200); document.__emit('touchstart',bare);
     if(!bare.prevented||!_swipeBase) throw 'no panel: the menu swipe layer must still claim the touch';
     _swipeBase=null;   // drop the armed gesture: its touchend would select a menu item
+    fetch=()=>Promise.reject(new Error('harness offline'));   // opening the panel prefetches the tone (share sheet needs it in hand)
     ringOfferOpen(); if(!_ringEl) throw 'ringtone panel did not open';
     const over=touch(300,200); document.__emit('touchstart',over);
     if(over.prevented) throw 'panel up: the swipe layer swallowed the tap -- the panel buttons get no click';

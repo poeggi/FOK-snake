@@ -1105,10 +1105,13 @@ const RING_HOLD_MS = 10000;
 const RING_HINT_MS = 3000;   // the bar appears only once a hold looks deliberate, so a normal tap shows nothing
 const RING_PLAT = {
     // iOS PREVIEWS an audio download rather than saving it, so the tone reaches Files only
-    // through that preview's own share sheet -- and once it is there, Files' share sheet carries
-    // the RINGTONE action itself. No third-party app in the way.
+    // through a share sheet -- and once it is there, Files' own share sheet carries the RINGTONE
+    // action. No third-party app in the way. Where the browser shares files for us (iOS 15+) the
+    // button opens that sheet itself, which skips the preview and its MORE... menu entirely --
+    // hence two step lists for the one platform, and the panel prints the one you will see.
     ios: { ext:'.m4a',
-        steps:['DOWNLOAD, THEN MORE... > SAVE TO FILES','OPEN FILES, LONG-PRESS THE TONE','SHARE > RINGTONE'] },
+        steps:['DOWNLOAD, THEN MORE... > SAVE TO FILES','OPEN FILES, LONG-PRESS THE TONE','SHARE > RINGTONE'],
+        shareSteps:['DOWNLOAD, THEN SAVE TO FILES','OPEN FILES, LONG-PRESS THE TONE','SHARE > RINGTONE'] },
     android: { ext:'.m4a',
         steps:['DOWNLOAD - IT LANDS IN DOWNLOADS','SETTINGS > SOUND > PHONE RINGTONE','ADD RINGTONE, PICK SNAKE THEME'] },
     desktop: { ext:'.m4r',
@@ -1141,28 +1144,48 @@ function _ringHoldEnd(){
     _ringRaf = 0; _ringT0 = 0;
     if(_muteCharge){ _muteCharge = 0; updateMuteBtn(); }
 }
-// The anchor is handed a Blob, never the URL. An <a href> download saves whatever comes
-// back, so anything but the file -- a 404 page, a captive portal -- gets saved under our
-// name with the served type's extension appended: snake-theme.m4a.html. Fetching first
-// lets a bad response fail loudly instead, and the Blob carries the real audio/mp4 type,
-// so the name we ask for is the name that lands.
-function _ringDownload(btn){
+// The tone is fetched when the PANEL OPENS, not when DOWNLOAD is tapped. Two reasons: a bad
+// response (a 404 page, a captive portal) is caught before the button is ever pressed, and
+// navigator.share() only runs inside the tap that called it -- an await in between spends the
+// user gesture and iOS refuses the sheet. Half a megabyte, once, behind a ten-second hold.
+// Re-typing the body as audio/mp4 matters on both routes: an <a href> download saves whatever
+// came back and appends the SERVED type's extension to our name (that is where the reported
+// snake-theme.m4a.html came from), and the share sheet names the file from the File we hand it.
+let _ringBlob = null, _ringName = '', _ringWait = null;
+function _ringFetchTone(){
     const s = _ringStyle();
-    const name = s.name + RING_PLAT[_ringPlatform()].ext;
-    const label = btn ? btn.textContent : '';
-    if(btn){ btn.textContent = 'FETCHING...'; btn.disabled = true; }
-    fetch(s.url, {cache:'no-store'}).then(res=>{
+    _ringBlob = null; _ringName = s.name + RING_PLAT[_ringPlatform()].ext;
+    _ringWait = fetch(s.url, {cache:'no-store'}).then(res=>{
         if(!res.ok) throw new Error('HTTP ' + res.status);
         if(/html/i.test(res.headers.get('content-type') || '')) throw new Error('served a page, not the tone');
         return res.blob();
-    }).then(b=>{
-        const url = URL.createObjectURL(new Blob([b], {type:'audio/mp4'}));
+    }).then(b=>{ _ringBlob = new Blob([b], {type:'audio/mp4'}); return _ringBlob; });
+    _ringWait.catch(()=>{});   // a branch of its own: the tap still sees the rejection, the console never sees an unhandled one
+    return _ringWait;
+}
+// The File the share sheet would carry, or null where that route does not exist. Called with no
+// argument it is a probe -- will this browser share such a file at all -- so the panel can print
+// the steps that match the sheet before the tone has finished arriving. iOS only: Android and
+// desktop already save the file where their own instructions say to look for it.
+function _ringShareFile(blob){
+    try {
+        if(_ringPlatform() !== 'ios' || !navigator.share || !navigator.canShare) return null;
+        const f = new File([blob || new Uint8Array(1)], _ringName || 'snake-theme.m4a', {type:'audio/mp4'});
+        return navigator.canShare({files:[f]}) ? f : null;
+    } catch(_){ return null; }
+}
+function _ringDownload(btn){
+    const label = btn ? btn.textContent : '';
+    if(btn){ btn.textContent = 'FETCHING...'; btn.disabled = true; }
+    (_ringWait || _ringFetchTone()).then(b=>{
+        const url = URL.createObjectURL(b);
         const a = document.createElement('a');
-        a.href = url; a.download = name;
+        a.href = url; a.download = _ringName;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(()=>URL.revokeObjectURL(url), 60000);   // Safari reads the blob well after the click returns
         if(btn){ btn.textContent = label; btn.disabled = false; }
     }).catch(err=>{
+        _ringWait = null;   // a rejected fetch must not be re-awaited: RETRY has to mean retry
         if(btn){ btn.textContent = 'FAILED - RETRY'; btn.disabled = false; }
         console.warn('ringtone download failed:', err);
     });
@@ -1170,6 +1193,8 @@ function _ringDownload(btn){
 function ringOfferOpen(){
     if(_ringEl) return;
     const p = RING_PLAT[_ringPlatform()];
+    _ringFetchTone();
+    const steps = (p.shareSteps && _ringShareFile()) ? p.shareSteps : p.steps;
     _ringEl = document.createElement('div');
     _ringEl.id = 'ring-egg';
     const panel = document.createElement('div'); panel.className = 'panel';
@@ -1178,11 +1203,19 @@ function ringOfferOpen(){
     lead.textContent = 'YOU FOUND IT. 30 SECONDS OF THE '
         + (cfg.musicStyle === 1 ? 'CLASSIC' : 'NEW') + ' THEME, AS A FILE YOUR PHONE CAN RING WITH:';
     const ol = document.createElement('ol');
-    p.steps.forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ol.appendChild(li); });
+    steps.forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ol.appendChild(li); });
     const row = document.createElement('div'); row.className = 'row';
     const dl = document.createElement('button'); dl.className='sbtn'; dl.textContent='DOWNLOAD';
     const cl = document.createElement('button'); cl.className='sbtn'; cl.textContent='CLOSE';
-    dl.addEventListener('click',()=>{ Snd.sfxPlay('select',cfg.music); _ringDownload(dl); });
+    dl.addEventListener('click',()=>{
+        Snd.sfxPlay('select',cfg.music);
+        // Straight into the native sheet where there is one: SAVE TO FILES is a tap and the
+        // preview screen never appears. A dismissed sheet is a decision, not a failure -- only a
+        // refusal falls through to the plain save.
+        const f = _ringBlob && _ringShareFile(_ringBlob);
+        if(f) navigator.share({files:[f]}).catch(e=>{ if(!e || e.name !== 'AbortError') _ringDownload(dl); });
+        else _ringDownload(dl);
+    });
     cl.addEventListener('click',ringOfferClose);
     _ringEl.addEventListener('click',e=>{ if(e.target===_ringEl) ringOfferClose(); });   // tap the glass to dismiss
     row.appendChild(dl); row.appendChild(cl);
@@ -1195,6 +1228,7 @@ function ringOfferOpen(){
 function ringOfferClose(){
     if(!_ringEl) return;
     _ringEl.remove(); _ringEl = null; _ringFired = false;
+    _ringBlob = null; _ringWait = null;   // the next open re-fetches: by then it may be the other theme
     Snd.sfxPlay('nav',cfg.music);
 }
 // Capture phase: while the panel is up it owns the keyboard, ahead of the game's window
