@@ -1,6 +1,6 @@
 // AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually
-// version snake-v2.5.2, released 2026-08-27 19:22 +0300
-const CACHE = 'snake-v2.5.2';
+// version snake-v2.5.3, released 2026-08-30 11:28 +0200
+const CACHE = 'snake-v2.5.3';
 const ASSETS = ['./', './css/fonts.css', './css/style.css', './docs/barricade-fragile.svg', './docs/barricade.svg', './docs/gem-epic.svg', './docs/gem-gouranga.svg', './docs/gem-lucky.svg', './docs/gem.svg', './docs/heart.svg', './docs/power-pellet.svg', './docs/time-crystal.svg', './fonts/PressStart2P-Regular.woff2', './icon.svg', './js/assets.js', './js/audio.js', './js/duel-core.js', './js/game.js', './js/input.js', './js/net.js', './js/qr.js', './js/render.js', './js/screens.js', './js/sim-worker.js', './js/sim.js', './js/storage.js', './js/text.js', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -22,18 +22,39 @@ self.addEventListener('activate', e => {
     );
 });
 
-// Network-first: serve fresh when online, cached version when offline
+// How long a request may spend on the network before the cached copy wins. Network-first
+// alone is a trap on a crawling uplink: the .catch() below only fires on a hard failure,
+// never on slowness, so every boot asset sat out its full request while a perfectly good
+// copy waited in the cache -- a start that takes minutes on a bad connection. Racing the
+// fetch against a short timer keeps "fresh when we can" without ever paying more than this
+// for it. The request is NOT aborted when the timer wins: it keeps running in the
+// background and still refreshes the cache, so the next start is both fast and current.
+const NET_TIMEOUT_MS = 2000;
+
+// Network-first with a timeout: serve fresh when the network is quick, cached when it is
+// slow or gone. Same-origin app assets only -- API/relay traffic must never be answered
+// from a cache (a stale clock sample or an ancient long-poll payload is worse than no
+// answer at all), so those are left to the browser's own fetch.
 self.addEventListener('fetch', e => {
     if (e.request.method !== 'GET') return;
-    e.respondWith(
-        fetch(e.request.clone(), { cache: 'no-store' })   // bypass the browser HTTP cache: GitHub Pages sets max-age=600, which otherwise serves stale JS for ~10 min after a push even when online
-            .then(res => {
-                if (res.ok) {
-                    const copy = res.clone();
-                    caches.open(CACHE).then(c => c.put(e.request, copy));
-                }
-                return res;
-            })
-            .catch(() => caches.match(e.request))
-    );
+    if (new URL(e.request.url).origin !== self.location.origin) return;
+
+    const net = fetch(e.request.clone(), { cache: 'no-store' })   // bypass the browser HTTP cache: GitHub Pages sets max-age=600, which otherwise serves stale JS for ~10 min after a push even when online
+        .then(res => {
+            if (res.ok) {
+                const copy = res.clone();
+                caches.open(CACHE).then(c => c.put(e.request, copy));
+            }
+            return res;
+        });
+    const settled = net.catch(() => null);
+    e.waitUntil(settled);   // the background refresh outlives the response we hand back
+
+    e.respondWith(caches.match(e.request).then(hit => {
+        if (!hit) return net;   // nothing cached: the network is the only possible answer, wait for it
+        return new Promise(resolve => {
+            const t = setTimeout(() => resolve(hit), NET_TIMEOUT_MS);
+            settled.then(res => { clearTimeout(t); resolve(res || hit); });
+        });
+    }));
 });

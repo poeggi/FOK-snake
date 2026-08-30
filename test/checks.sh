@@ -61,6 +61,9 @@ node test/check-ownership.js
 echo "[checks] headless smoke tests"
 for t in test/smoke-*.js; do suite "$t"; done
 
+echo "[checks] service-worker fetch policy: a slow uplink falls back to cache within the timeout, API traffic never does"
+suite test/sw-cache.js
+
 echo "[checks] two-client handshake (invite / connect over a signal bus)"
 suite test/net-handshake.js
 suite test/smoke-worker.js
