@@ -31,8 +31,8 @@ const Snd = (() => {
                 [220,1],[262,1],[330,1],[0,1],
             ]},
         ]},
-        // 192bpm makes the 16-beat loop exactly 5.000s, so the theme tiles to a whole
-        // 30s -- what the pre-rendered ringtone (docs/snake-theme.m4r) needs to loop
+        // 192bpm makes the 16-beat loop exactly 5.000s -- a whole number, which is what
+        // the pre-rendered one-loop ringtone (docs/snake-theme.m4r) needs to repeat
         // seamlessly. classicGame's 8 beats at 80bpm already come out at a flat 6.000s.
         game: { bpm: 192, channels: [
             { fn:'fat',  vol:0.28, notes:[

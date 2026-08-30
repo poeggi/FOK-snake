@@ -1,9 +1,12 @@
 // Offline renderer for the game music: turns a SEQ track from js/audio.js into a WAV
 // master, which ffmpeg then encodes to the .m4r ringtone shipped in docs/.
 //
-//   node test/render-theme.js game 6 docs/snake-theme.wav
+//   node test/render-theme.js game 1 docs/snake-theme.wav
 //   wsl -d Ubuntu-22.04 ffmpeg -y -i docs/snake-theme.wav -c:a aac -b:a 128k \
-//       -movflags +faststart docs/snake-theme.m4r
+//       -movflags +faststart -f ipod docs/snake-theme.m4r
+//
+// -f ipod is not optional: ffmpeg has no output format registered for the .m4r name and
+// refuses it outright. It selects the same MP4 muxer an .m4a would have picked by itself.
 //
 // It lives under test/ ON PURPOSE: the pre-commit hook builds sw.js ASSETS from every
 // tracked .js outside test/ and .github/, so a tools/ copy would be precached by the
@@ -21,6 +24,7 @@ const SR = 44100;
 const NOTE_LEN = 0.84;    // musicTick(): a note sounds for 0.84 of its slot
 const TABLE = 2048;       // single-cycle wavetable resolution
 const PEAK = 0.95;        // ringtones want level: peak-normalise (the game's 0.5 master gain is a constant, so normalising simply replaces it)
+const FADE = 0.1;         // just enough taper to kill the click at the cut -- a long one would pump on every repeat
 
 // The SEQ literal, lifted out of the audio engine by brace matching (it is a plain data
 // table with no strings that could carry a brace).
@@ -104,7 +108,8 @@ function render(seq, loops, fadeSec) {
     // Each channel walks and wraps its OWN pattern, exactly as musicTick does.
     const loopSec = Math.max(...seq.channels.map(ch => ch.notes.reduce((a, n) => a + n[1], 0) * spb));
     const total = loopSec * loops;
-    const buf = new Float32Array(Math.ceil((total + 0.5) * SR));   // headroom: the last notes ring past the cut
+    const TAIL = 0.5;   // headroom: the last notes ring past the cut
+    const buf = new Float32Array(Math.ceil((total + TAIL) * SR));
     for (const ch of seq.channels) {
         let when = 0, pos = 0;
         while (when < total) {
@@ -114,7 +119,14 @@ function render(seq, loops, fadeSec) {
             pos = (pos + 1) % ch.notes.length;
         }
     }
-    const out = buf.subarray(0, Math.round(total * SR));
+    const cut = Math.round(total * SR);
+    const out = buf.subarray(0, cut);
+    // The phone plays the file on REPEAT, so the notes still ringing at the cut are notes you
+    // hear underneath the restart. Fold that overhang onto the head rather than dropping it:
+    // the join then sounds exactly like a join inside a longer render, and a one-loop file
+    // repeats as seamlessly as the old six-loop one did -- which is the whole point of
+    // shipping one loop instead of thirty seconds of the same thing six times over.
+    for (let i = cut; i < buf.length; i++) out[i - cut] += buf[i];
     let peak = 0;
     for (let i = 0; i < out.length; i++) peak = Math.max(peak, Math.abs(out[i]));
     const gain = peak > 0 ? PEAK / peak : 1;
@@ -145,9 +157,9 @@ if (!track || !SEQ[track]) {
     console.error('usage: node test/render-theme.js <' + Object.keys(SEQ).join('|') + '> [loops] [out.wav]');
     process.exit(2);
 }
-const loops = Number(args[1]) || 6;
+const loops = Number(args[1]) || 1;
 const out = args[2] || ('docs/' + track + '.wav');
-const r = render(SEQ[track], loops, 1.5);
+const r = render(SEQ[track], loops, FADE);
 writeWav(out, r.pcm);
 console.log(track + ': ' + SEQ[track].bpm + 'bpm, loop ' + r.loopSec.toFixed(2) + 's x' + loops
     + ' = ' + r.total.toFixed(2) + 's, synth peak ' + r.peak.toFixed(3) + ' -> normalised ' + PEAK

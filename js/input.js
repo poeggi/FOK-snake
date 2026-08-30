@@ -1089,14 +1089,15 @@ updateMuteBtn();
 // SOURCE: RINGTONE EASTER EGG  (hold SND for ten seconds)
 // ================================================================
 // Both in-game themes are pre-rendered by test/render-theme.js, which reads the very SEQ
-// table js/audio.js plays -- so a file cannot drift from the music. Each is exactly 30s
-// (the tempos are chosen so the loop tiles whole), and you get the one your AUDIO STYLE
-// setting is on, the theme you actually hear. No platform lets a web page INSTALL a
-// ringtone (iOS gates the Tones library behind a private entitlement, Android behind
-// WRITE_SETTINGS), so the egg does the one thing a page may do: hand over a correctly
-// typed file, named for the importer that platform actually has, and show the three manual
-// steps. The extension is all that changes -- .m4r and .m4a are the same AAC in the same
-// MP4 container, and only the name decides which app offers to open it.
+// table js/audio.js plays -- so a file cannot drift from the music. Each file is ONE loop
+// (5s new, 6s classic) because a ringtone repeats anyway; the render folds the notes still
+// ringing at the cut back onto the head, so the repeat is seamless and the download is a
+// tenth of the size. You get the one your AUDIO STYLE setting is on, the theme you actually
+// hear. No platform lets a web page INSTALL a ringtone (iOS gates the Tones library behind a
+// private entitlement, Android behind WRITE_SETTINGS), so the egg does the one thing a page
+// may do: hand over a correctly typed file, named for the importer that platform actually
+// has, and show the three manual steps. The extension is all that changes -- .m4r and .m4a
+// are the same AAC in the same MP4 container, and only the name decides which app offers to open it.
 const RING_STYLE = [
     { url:'docs/snake-theme.m4r',         name:'snake-theme' },          // AUDIO STYLE: NEW
     { url:'docs/snake-theme-classic.m4r', name:'snake-theme-classic' }   // AUDIO STYLE: CLASSIC
@@ -1200,7 +1201,7 @@ function ringOfferOpen(){
     const panel = document.createElement('div'); panel.className = 'panel';
     const h = document.createElement('h2'); h.textContent = 'SNAKE THEME RINGTONE';
     const lead = document.createElement('p');
-    lead.textContent = 'YOU FOUND IT. 30 SECONDS OF THE '
+    lead.textContent = 'YOU FOUND IT. ONE LOOP OF THE '
         + (cfg.musicStyle === 1 ? 'CLASSIC' : 'NEW') + ' THEME, AS A FILE YOUR PHONE CAN RING WITH:';
     const ol = document.createElement('ol');
     steps.forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ol.appendChild(li); });
