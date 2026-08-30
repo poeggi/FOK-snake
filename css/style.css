@@ -73,6 +73,28 @@ body[data-phase="splash"] #btn-mute, body[data-phase="splash"] #fps-el { opacity
    tabindex="-1" so Tab skips it; the FPS span was never tab-focusable but its text is drag-selectable. */
 #fps-el, #btn-mute { -webkit-user-select: none; user-select: none; }
 #fps-el:focus, #btn-mute:focus, #fps-el:focus-visible, #btn-mute:focus-visible { outline: none; }
+/* MUTE also takes a ten-second hold (the ringtone easter egg), so iOS must not answer that
+   hold with its own long-press callout. */
+#btn-mute { -webkit-touch-callout: none; touch-action: manipulation; }
+/* The ringtone panel that hold opens: same chrome as the gamepad buttons, so it reads as
+   part of the cabinet rather than as a browser dialog. Built by js/input.js on first open. */
+#ring-egg {
+    position: fixed; inset: 0; z-index: 99998;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; background: rgba(0,0,0,0.8);
+    font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px);
+    -webkit-user-select: none; user-select: none;
+}
+#ring-egg .panel {
+    box-sizing: border-box; width: 100%; max-width: 420px; max-height: 100%; overflow-y: auto;
+    background: #0d180d; border: 1px solid #3a5a3a; border-radius: 6px; padding: 14px;
+    box-shadow: 0 0 24px #000;
+}
+#ring-egg h2 { margin: 0 0 12px; font-weight: normal; font-size: var(--fs-menu-px, 14px); color: #7fff7f; text-shadow: 0 0 8px #7fff7f; }
+#ring-egg p { margin: 0 0 10px; color: #888; line-height: 1.8; }
+#ring-egg ol { margin: 0 0 14px; padding-left: 20px; color: #ccc; line-height: 2; }
+#ring-egg .row { display: flex; gap: 8px; }
+#ring-egg .sbtn { flex: 1 1 0; height: 40px; }
 /* Canvas region: flex:1 takes the space chrome leaves; the canvas is the largest box of
    its native aspect that fits, centred, with a 4px margin. */
 #wrap {

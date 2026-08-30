@@ -1044,6 +1044,7 @@ function _scanHit(str){
 const muteBtn = document.getElementById('btn-mute');
 const _muteCv = document.getElementById('btn-mute-cv');
 const _muteCvCtx = _muteCv.getContext('2d');
+let _muteCharge = 0;   // 0..1 while the ringtone hold is charging (see RINGTONE EASTER EGG)
 function updateMuteBtn(){
     const on=cfg.music; muteBtn.classList.toggle('muted',!on);
     const c=_muteCvCtx;
@@ -1061,11 +1062,111 @@ function updateMuteBtn(){
         c.fillStyle=on?spkHi[ry]:'#aa3333';
         c.fillRect(rx*2+16,ry*2,2,2);
     }));
+    // Charging bar for the ringtone hold, painted over the icon's bottom row.
+    if(_muteCharge>0){
+        c.fillStyle='#1a3a1a'; c.fillRect(0,14,32,2);
+        c.fillStyle='#7fff7f'; c.fillRect(0,14,Math.round(32*Math.min(1,_muteCharge)),2);
+    }
 }
 function toggleMute(){ cfg.music=!cfg.music; if(!cfg.music)Snd.musicMute('mute'); else{Snd.audioResume();Snd.musicUnmute('mute');Snd.sfxPlay('nav',cfg.music);} updateMuteBtn(); saveCfg(); _uiDirty=true; }
-muteBtn.addEventListener('click',toggleMute);
-muteBtn.addEventListener('touchstart',e=>{e.preventDefault();toggleMute();},{passive:false});
+// Both pointer kinds toggle on RELEASE, so a press that turns into the 10s hold below can
+// still swallow its own toggle (_ringFired). touchstart keeps its preventDefault: that is
+// what stops iOS synthesising a second click -- and the long-press callout.
+muteBtn.addEventListener('click',()=>{ if(_ringFired){ _ringFired=false; return; } toggleMute(); });
+muteBtn.addEventListener('mousedown',_ringHoldStart);
+muteBtn.addEventListener('mouseup',_ringHoldEnd);
+muteBtn.addEventListener('mouseleave',_ringHoldEnd);
+muteBtn.addEventListener('touchstart',e=>{e.preventDefault();_ringHoldStart();},{passive:false});
+muteBtn.addEventListener('touchend',e=>{e.preventDefault();_ringHoldEnd(); if(_ringFired){ _ringFired=false; return; } toggleMute();},{passive:false});
+muteBtn.addEventListener('touchcancel',_ringHoldEnd);
 updateMuteBtn();
+// ================================================================
+// SOURCE: RINGTONE EASTER EGG  (hold SND for ten seconds)
+// ================================================================
+// The theme is pre-rendered to docs/snake-theme.m4r by test/render-theme.js, which reads
+// the very SEQ table js/audio.js plays -- so the file cannot drift from the game. No
+// platform lets a web page INSTALL a ringtone (iOS gates the Tones library behind a private
+// entitlement, Android behind WRITE_SETTINGS), so the egg does the one thing a page may do:
+// hand over a correctly typed file, named for the importer that platform actually has, and
+// show the three manual steps. One asset serves all three -- .m4r and .m4a are the same AAC
+// in the same MP4 container, and only the name decides which app offers to open it.
+const RING_URL = 'docs/snake-theme.m4r';
+const RING_HOLD_MS = 10000;
+const RING_HINT_MS = 3000;   // the bar appears only once a hold looks deliberate, so a normal tap shows nothing
+const RING_PLAT = {
+    ios: { file:'snake-theme.m4a',   // GarageBand's browser lists audio files; .m4r it may not show at all
+        steps:['DOWNLOAD - IT LANDS IN FILES','OPEN GARAGEBAND, TAP BROWSE','LONG-PRESS IT: SHARE > RINGTONE'] },
+    android: { file:'snake-theme.m4a',
+        steps:['DOWNLOAD - IT LANDS IN DOWNLOADS','SETTINGS > SOUND > PHONE RINGTONE','ADD RINGTONE, PICK SNAKE THEME'] },
+    desktop: { file:'snake-theme.m4r',
+        steps:['DOWNLOAD THE .M4R','PLUG IN THE PHONE, OPEN FINDER/ITUNES','DROP IT ON THE DEVICE > GENERAL'] }
+};
+function _ringPlatform(){
+    const ua = navigator.userAgent || '';
+    // Same iPad test as game.js: iPadOS reports a Mac UA, only the touch points give it away.
+    if(/iPhone|iPad|iPod/.test(ua) || (/Mac/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+    if(/Android/.test(ua)) return 'android';
+    return 'desktop';
+}
+let _ringT0 = 0, _ringRaf = 0, _ringFired = false, _ringEl = null;
+function _ringHoldStart(){
+    if(_ringT0 || _ringEl) return;   // already charging, or the panel is already up
+    _ringT0 = performance.now(); _ringFired = false;
+    const step = () => {
+        if(!_ringT0) return;
+        const held = performance.now() - _ringT0;
+        if(held >= RING_HOLD_MS){ _ringHoldEnd(); _ringFired = true; ringOfferOpen(); return; }
+        _muteCharge = held < RING_HINT_MS ? 0 : (held - RING_HINT_MS) / (RING_HOLD_MS - RING_HINT_MS);
+        updateMuteBtn();
+        _ringRaf = requestAnimationFrame(step);
+    };
+    _ringRaf = requestAnimationFrame(step);
+}
+function _ringHoldEnd(){
+    if(_ringRaf) cancelAnimationFrame(_ringRaf);
+    _ringRaf = 0; _ringT0 = 0;
+    if(_muteCharge){ _muteCharge = 0; updateMuteBtn(); }
+}
+function _ringDownload(){
+    const a = document.createElement('a');
+    a.href = RING_URL; a.download = RING_PLAT[_ringPlatform()].file;
+    document.body.appendChild(a); a.click(); a.remove();
+}
+function ringOfferOpen(){
+    if(_ringEl) return;
+    const p = RING_PLAT[_ringPlatform()];
+    _ringEl = document.createElement('div');
+    _ringEl.id = 'ring-egg';
+    const panel = document.createElement('div'); panel.className = 'panel';
+    const h = document.createElement('h2'); h.textContent = 'SNAKE THEME RINGTONE';
+    const lead = document.createElement('p'); lead.textContent = 'YOU FOUND IT. 30 SECONDS OF THE THEME, AS A FILE YOUR PHONE CAN RING WITH:';
+    const ol = document.createElement('ol');
+    p.steps.forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ol.appendChild(li); });
+    const row = document.createElement('div'); row.className = 'row';
+    const dl = document.createElement('button'); dl.className='sbtn'; dl.textContent='DOWNLOAD';
+    const cl = document.createElement('button'); cl.className='sbtn'; cl.textContent='CLOSE';
+    dl.addEventListener('click',()=>{ Snd.sfxPlay('select',cfg.music); _ringDownload(); });
+    cl.addEventListener('click',ringOfferClose);
+    _ringEl.addEventListener('click',e=>{ if(e.target===_ringEl) ringOfferClose(); });   // tap the glass to dismiss
+    row.appendChild(dl); row.appendChild(cl);
+    panel.appendChild(h); panel.appendChild(lead); panel.appendChild(ol); panel.appendChild(row);
+    _ringEl.appendChild(panel);
+    document.body.appendChild(_ringEl);
+    try { dl.focus({preventScroll:true}); } catch(_){ }
+    Snd.sfxPlay('achievement',cfg.music);
+}
+function ringOfferClose(){
+    if(!_ringEl) return;
+    _ringEl.remove(); _ringEl = null; _ringFired = false;
+    Snd.sfxPlay('nav',cfg.music);
+}
+// Capture phase: while the panel is up it owns the keyboard, ahead of the game's window
+// handler -- so ENTER/SPACE reach the focused button instead of steering a snake behind it.
+window.addEventListener('keydown',e=>{
+    if(!_ringEl) return;
+    e.stopPropagation();
+    if(e.key==='Escape'){ e.preventDefault(); ringOfferClose(); }
+},true);
 // ================================================================
 // SOURCE: FPS BOX (a button like MUTE: tap toggles the live number; SETTINGS > GAME > SHOW FPS mirrors it)
 // ================================================================
