@@ -1133,11 +1133,31 @@ function _ringHoldEnd(){
     _ringRaf = 0; _ringT0 = 0;
     if(_muteCharge){ _muteCharge = 0; updateMuteBtn(); }
 }
-function _ringDownload(){
+// The anchor is handed a Blob, never the URL. An <a href> download saves whatever comes
+// back, so anything but the file -- a 404 page, a captive portal -- gets saved under our
+// name with the served type's extension appended: snake-theme.m4a.html. Fetching first
+// lets a bad response fail loudly instead, and the Blob carries the real audio/mp4 type,
+// so the name we ask for is the name that lands.
+function _ringDownload(btn){
     const s = _ringStyle();
-    const a = document.createElement('a');
-    a.href = s.url; a.download = s.name + RING_PLAT[_ringPlatform()].ext;
-    document.body.appendChild(a); a.click(); a.remove();
+    const name = s.name + RING_PLAT[_ringPlatform()].ext;
+    const label = btn ? btn.textContent : '';
+    if(btn){ btn.textContent = 'FETCHING...'; btn.disabled = true; }
+    fetch(s.url, {cache:'no-store'}).then(res=>{
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        if(/html/i.test(res.headers.get('content-type') || '')) throw new Error('served a page, not the tone');
+        return res.blob();
+    }).then(b=>{
+        const url = URL.createObjectURL(new Blob([b], {type:'audio/mp4'}));
+        const a = document.createElement('a');
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 60000);   // Safari reads the blob well after the click returns
+        if(btn){ btn.textContent = label; btn.disabled = false; }
+    }).catch(err=>{
+        if(btn){ btn.textContent = 'FAILED - RETRY'; btn.disabled = false; }
+        console.warn('ringtone download failed:', err);
+    });
 }
 function ringOfferOpen(){
     if(_ringEl) return;
@@ -1154,7 +1174,7 @@ function ringOfferOpen(){
     const row = document.createElement('div'); row.className = 'row';
     const dl = document.createElement('button'); dl.className='sbtn'; dl.textContent='DOWNLOAD';
     const cl = document.createElement('button'); cl.className='sbtn'; cl.textContent='CLOSE';
-    dl.addEventListener('click',()=>{ Snd.sfxPlay('select',cfg.music); _ringDownload(); });
+    dl.addEventListener('click',()=>{ Snd.sfxPlay('select',cfg.music); _ringDownload(dl); });
     cl.addEventListener('click',ringOfferClose);
     _ringEl.addEventListener('click',e=>{ if(e.target===_ringEl) ringOfferClose(); });   // tap the glass to dismiss
     row.appendChild(dl); row.appendChild(cl);
