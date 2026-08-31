@@ -323,6 +323,61 @@ function _netReshipStart(s, peerEp){
     _netSigLog('! peer an epoch behind (' + (peerEp|0) + ' < ' + (s.epoch|0) + '): re-sending the start');
     _netSend(s.lastStart);
 }
+// The begin moment of an epoch is CLOCK-driven; the one-shot below is only the fast path to it.
+// A throttled or backgrounded tab can defer or drop that timer, and a client that never begins
+// keeps the new epoch on the session while its tick base stays on the old one -- from then on
+// every packet the pair exchanges is epoch-gated, in BOTH directions, and nothing in the stream
+// heals it. Arming the begin on the session lets the liveness pass fire it off the shared clock
+// the moment startPts is reached, so the boundary lands even when the timer never arrives.
+function _netArmBegin(s, atPts, fn){
+    s.beginAt = atPts; s.beginFn = fn;
+    const wait = Math.max(0, Math.min(5000, atPts - netPts()));
+    if(wait <= 0 || typeof setTimeout !== 'function') _netFireBegin(s);
+    else setTimeout(()=>{ _netFireBegin(s); }, wait);
+}
+// Fire an armed begin exactly once, whichever path reaches it first (timer, clock, or peer ask).
+function _netFireBegin(s){
+    if(!s || _netSess !== s || !s.game || !s.beginFn) return;
+    const fn = s.beginFn;
+    s.beginFn = null; s.beginAt = null;
+    fn();
+}
+// A tick packet authored on a different base than ours. One boundary's worth of this is NORMAL --
+// the two sides begin an epoch up to a lead apart -- so the fault is not the drop but its
+// DURATION, and it is timed rather than counted.
+function _netEpochSplit(s, peerEp){
+    _netDbg.epDrop = (_netDbg.epDrop|0) + 1;
+    if(!s.epSplitAt) s.epSplitAt = _wall();
+    s.epPeer = peerEp;
+    _netReshipStart(s, peerEp);   // a peer below our line missed the start: re-serve it
+}
+// Recovery from a persistent split, one pass per liveness tick:
+//   1. An overdue begin fires off the shared clock. The usual cause is our own one-shot never
+//      arriving, and that repair is entirely local -- no peer cooperation needed.
+//   2. Past NET_EPOCH_ASK_MS the peer is asked with 'epq'. This is the only way a JOINER can
+//      ask for anything: _netReshipStart is host-authored, so on its own it repairs exactly one
+//      of the four role/direction combinations.
+//   3. Past RB_PERSIST_KILL_MS the match is dead, on the same deadline as an unhealed desync.
+//      Two clients on separate timelines IS out of sync; ending silent-and-split is the bug.
+function _netEpochRecover(s){
+    if(!s || !s.game || !inGame || !s.epSplitAt) return false;
+    if(s.beginFn && s.beginAt != null){
+        const p = netPts();
+        if(p != null && p >= s.beginAt){ _netFireBegin(s); return false; }
+    }
+    const now = _wall();
+    const age = now - s.epSplitAt;
+    if(age > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return true; }
+    if(age > NET_EPOCH_ASK_MS && now - (s.epAskAt || 0) > NET_EPOCH_ASK_MS){
+        s.epAskAt = now;
+        _netSigLog('! epoch split (peer base ' + (s.epPeer|0) + ' vs ours ' + _netMyEpoch() + '): asking for repair');
+        _netSend({ t:'epq', ep:_netMyEpoch(), sep:(s.epoch|0) });
+    }
+    return false;
+}
+// The epoch of OUR tick base. In worker-duel mode the base lives in the worker, so fall back to
+// the session line -- the same reading the epoch gate takes.
+function _netMyEpoch(){ return (typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess ? _netSess.epoch|0 : 0); }
 // Server-issued start: both peers call start.php and receive the IDENTICAL
 // absolute start PTS (the server owns the clock, so it owns the start point).
 // A VERIFIED sync is a precondition, not a nicety: the two sims share one tick
@@ -409,14 +464,11 @@ async function _netRequestStart(s, reason){
         // server answer us with the same moment anyway). Then wait is 0 and we start at once -- the
         // clock-driven tick immediately puts us on the right tick, the fast-forward the contract
         // describes. No !inGame guard: a rematch happens WHILE in game.
-        const go = () => {
-            if(_netSess !== s || !s.game) return;
+        _netArmBegin(s, s.startPts, () => {
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
             beginOnlineDuel(s.seed, true);
             _netSend({ t:'start' });
-        };
-        const wait = Math.max(0, Math.min(5000, s.startPts - netPts()));
-        if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+        });
     };
     // Every server-authored start -- the FIRST start and a rematch alike -- runs the boundary burst
     // first, so both clocks meet at the shared midpoint before start_pts is read (the joiner applies
@@ -442,13 +494,10 @@ function _netStartLevelP2P(s){
         s.startPts = startPts;
         _netClockPush();            // anchor + startPts move together: the core must see both
         _netShipStart(s, { t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1, bth:Math.round(theta) });
-        const go = () => {
-            if(_netSess !== s || !s.game) return;
+        _netArmBegin(s, startPts, () => {
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
             beginOnlineDuelLevel(true);
-        };
-        const wait = Math.max(0, Math.min(5000, startPts - netPts()));
-        if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+        });
     });
 }
 
@@ -472,6 +521,18 @@ function _netHandleMsg(txt){
         return;
     }
     if(m.t === 'bs'){ _netBurstRecv(_netSess, m); return; }
+    // Epoch-split repair request. Deliberately NOT epoch-gated -- gating the repair on the very
+    // thing that is broken is what made the split permanent -- and answered in BOTH directions:
+    // if the asker is ahead of our base we run the begin we never got to, and if it is behind our
+    // line the host re-serves the start it missed. Either side may ask; only the host can re-serve.
+    if(m.t === 'epq'){
+        const s = _netSess;
+        if(s && s.game){
+            if((m.ep|0) > _netMyEpoch()) _netFireBegin(s);
+            _netReshipStart(s, m.ep|0);
+        }
+        return;
+    }
     // The stamp is CHECKED, not just logged. A peer cannot have sent from our
     // future; a packet claiming otherwise is bogus and is dropped. The tolerance
     // matters: unlike the server -- which IS the clock and can be zero-tolerance --
@@ -524,13 +585,11 @@ function _netHandleMsg(txt){
     // timeline, and a packet from that window is only usable by a peer still on the SAME base.
     // Every peer that passes the version gate stamps ep on these four types, so absence
     // is not special-cased: a missing ep reads as epoch 0 and gates like any other.
-    if(_netSess
-       && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')
-       && (m.ep|0) !== ((typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess.epoch|0))){
-        // A peer stamping an epoch BELOW our line announces a missed start on every packet it
+    if(_netSess && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')){
+        // A peer stamping an epoch other than our base announces the split on every packet it
         // sends. Recover off that, not off the player pressing something.
-        _netReshipStart(_netSess, m.ep|0);
-        return;
+        if((m.ep|0) !== _netMyEpoch()){ _netEpochSplit(_netSess, m.ep|0); return; }
+        _netSess.epSplitAt = 0;   // a packet on our own base: the two tick streams are shared again
     }
     switch(m.t){
         case 'sched':
@@ -561,9 +620,7 @@ function _netHandleMsg(txt){
             // invisible. bth 0/absent (a first start, or a starved/rejected burst) is a safe no-op
             // that keeps the shared server sync, exactly as a cold start did before.
             _netBurstApply(s, m.bth || 0);
-            const go = () => { if(_netSess === s && s.game){ if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); } };
-            const wait = Math.max(0, Math.min(5000, m.startPts - netPts()));
-            if(wait <= 0 || typeof setTimeout !== 'function') go(); else setTimeout(go, wait);
+            _netArmBegin(s, m.startPts, () => { if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); });
             break;
         }
         case 'start': break;   // schedule confirmation; its PTS is already in the past

@@ -92,6 +92,9 @@ if [ "$FULL" = 1 ]; then
     echo "[checks] P2P level boundary holds lockstep (host bursts to the shared midpoint, ships bth on rst)"
     suite test/duel-boundary.js
 
+    echo "[checks] a lost boundary begin is repaired, not survived silently (no split onto separate tick bases)"
+    suite test/duel-epoch.js
+
     echo "[checks] server-path restart (rematch) holds lockstep (host bursts to the shared midpoint on every start)"
     suite test/duel-rematch.js
 

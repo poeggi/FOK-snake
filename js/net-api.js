@@ -111,6 +111,12 @@ const RB_RECONNECT_MS = Math.round(64 * TICK_MS);     // ~1067ms (4 missed) -> s
 // the gap; unrecovered past this -> end. 4s: two heartbeats to notice, then a wide margin
 // for a p2p link rebuild -- a >=1.5s interruption must recover the match, not end it.
 const RB_PERSIST_KILL_MS = 4000;
+// How long two clients may exchange tick packets on DIFFERENT epoch bases before it counts as a
+// fault rather than a boundary in flight. One begin lands ~NET_BURST_LEAD_MS after the other at
+// worst, so a second is generous; past it the pair is simulating independent games and the split
+// has to be announced and repaired, because every other detector is blind to it (the hash packet
+// never reaches the comparator, and the link still carries traffic so nothing reads as silent).
+const NET_EPOCH_ASK_MS = 1000;
 // NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
 // enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a

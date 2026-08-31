@@ -367,7 +367,6 @@ function _netBurstThenStart(s, then){
             if(_netSess !== s || !s.game) return;
             const bt = _netBurstTheta(s);
             if(!bt){
-                console.error('starve r='+s.role+' try='+tries+' nf='+s.bsNf+' revN='+s.bsRevN+' fwd='+s.bsFwd+' rev='+s.bsRev);
                 if(tries < NET_BURST_TRIES){ _netSigLog('! burst starved -> retry ' + tries); attempt(); return; }
                 _netSessionEnd('CLOCK SYNC FAILED - MATCH ENDED');
                 return;
@@ -435,6 +434,7 @@ function _netLiveCheck(){
     const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
     if(inGame && _dsyFor > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return; }
     if(_netBreakRecover(s)) return;   // sim frozen ~10s behind the shared clock: the match is over, stop here
+    if(_netEpochRecover(s)) return;   // the pair drifted onto separate epoch bases: fire an overdue begin, ask, or end
     // The idle keepalive carries the recent input log, so it doubles as repair:
     // a lost LAST input would otherwise sit unfixed until the player pressed
     // something else. An empty log is just an alive check, as before.

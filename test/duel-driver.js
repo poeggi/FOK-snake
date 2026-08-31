@@ -59,7 +59,15 @@ const HOOKS = (id) => `
   globalThis.__ivals = [];
   globalThis.setInterval = (fn, ms)=>{ __ivals.push({ fn, ms, next: __now + ms }); return __ivals.length; };
   globalThis.clearInterval = ()=>{};
-  globalThis.setTimeout = (fn, ms)=>{ __ivals.push({ fn, ms:0, next: __now + ms, once:true }); return -1; };
+  // __armEatBegin: swallow this client's next ONE-SHOT boundary begin, the way a throttled or
+  // backgrounded tab defers or drops that timer. The client then holds the new epoch on the
+  // session while its tick base stays on the old one -- the silent permanent split seen live
+  // between a PC and a phone at level 1 -> 2, where every detector goes blind at once.
+  globalThis.__eatBegin = 0;
+  globalThis.__armEatBegin = ()=>{ __eatBegin = 1; };
+  globalThis.setTimeout = (fn, ms)=>{
+    if(__eatBegin && /beginOnlineDuel|_netFireBegin/.test(String(fn))){ __eatBegin = 0; return -1; }
+    __ivals.push({ fn, ms:0, next: __now + ms, once:true }); return -1; };
   globalThis.__fire = ()=>{ for(const iv of __ivals){ if(iv.done) continue;
       while(__now >= iv.next){ iv.fn(); if(iv.once){ iv.done=true; break; } iv.next += iv.ms; } } };
   globalThis.__out = [];
@@ -159,6 +167,8 @@ const HOOKS = (id) => `
   globalThis.__simTick = ()=> simTick;
   globalThis.__gdue    = ()=> _gDue;   // ticks until the next game-step boundary (the double-gesture budget gate, see fireOnce)
   globalThis.__rbBase  = ()=> _rbBase;
+  globalThis.__rbEpoch = ()=> (typeof _rbEpoch === 'number') ? _rbEpoch|0 : -1;   // the epoch of our TICK BASE: the two clients sharing this is what lockstep means
+  globalThis.__epoch   = ()=> _netSess ? (_netSess.epoch|0) : -1;                 // the session line, which runs ahead of the base between a halt and its start
   globalThis.__rbDepth = ()=> RB_DEPTH;   // immutability horizon: a tick this far back can no longer be rewritten by any accepted input
   globalThis.__rbDbg   = ()=> Object.assign({}, _rbDbg);
   globalThis.__netDbg  = ()=> Object.assign({}, _netDbg);
@@ -533,7 +543,7 @@ function runMatch(opts){
     // boundary (shared start_pts + bumped epoch -> beginOnlineDuelLevel on both). The wire
     // keeps flowing across it, so any pre-boundary 'in' packet still in flight arrives after
     // simTick has reset to 0 -- the exact stale-epoch condition F2 has to survive.
-    let levelEpoch = 1, levelUps = 0, lastBoundaryLevel = 0;
+    let levelEpoch = 1, levelUps = 0, lastBoundaryLevel = 0, eatArmed = false;
     const maybeLevelUp = (now)=>{
         const va = A.__view(), vb = B.__view();
         if(!(va && vb && va.waiting && vb.waiting)) return;
@@ -544,6 +554,8 @@ function runMatch(opts){
             // / doze is exercised for real -- the atomic __levelUp path could never reproduce it.
             if(va.level === lastBoundaryLevel) return;   // this boundary already fired; wait for it to land
             lastBoundaryLevel = va.level;
+            // opts.eatBegin = { who }: lose that client's begin one-shot at the FIRST boundary.
+            if(opts.eatBegin && !eatArmed){ eatArmed = true; (opts.eatBegin.who === 'B' ? B : A).__armEatBegin(); }
             bank('A', A.__rbDbg()); bank('B', B.__rbDbg());
             (opts.initJoiner ? B : A).__reqNextLevel();
             levelUps++;
@@ -595,7 +607,7 @@ function runMatch(opts){
     const wallStepAt = wallStep ? Math.round(wallStep.at * 1000) : -1;
     const wallStepWho = wallStep ? (wallStep.who || 'B') : null;
     let wallStepped = false;
-    let sawConnLost = false, maxSilentMs = 0;
+    let sawConnLost = false, maxSilentMs = 0, splitRun = 0, maxSplitMs = 0, splitBlind = false;
     const CL = 'CONNECTION LOST';
     let wireDown = false, nextLive = 0;
     let diedAt = 0;
@@ -649,6 +661,16 @@ function runMatch(opts){
         // under RB_PERSIST_KILL_MS for the match to be recoverable rather than killed).
         if(A.__warn() === CL || B.__warn() === CL) sawConnLost = true;
         maxSilentMs = Math.max(maxSilentMs, A.__silent(), B.__silent());
+        // EPOCH SPLIT: the two tick bases disagree, so the clients are simulating independent
+        // games. A boundary is legitimately one-sided while the start is in flight, so the
+        // LONGEST unbroken run is the measure, not the total. splitBlind records a split that
+        // ran past the ask deadline with no banner up -- the field failure exactly: two live
+        // sims, a link carrying packets, and not one detector saying a word.
+        if(A.__rbEpoch() !== B.__rbEpoch()){
+            splitRun++;
+            if(splitRun > maxSplitMs) maxSplitMs = splitRun;
+            if(splitRun > 1000 && !A.__warn() && !B.__warn()) splitBlind = true;
+        } else splitRun = 0;
         if(opts.onSample) opts.onSample(now, A, B);   // diagnostic tap (null in the suite): watch recovery over time
     }
     // Settle: stop authoring, deliver everything in flight losslessly, tick both to a common
@@ -692,6 +714,7 @@ function runMatch(opts){
     return {
         converged, firstDiverge, exitReason, diedAt,
         sawConnLost, maxSilentMs, endWarn: A.__warn() || B.__warn() || null,
+        maxSplitMs, splitBlind, epA: A.__rbEpoch(), epB: B.__rbEpoch(),
         levelReached, levelUps, localJumps, localJumpsA: localJumpsBy.A, localJumpsB: localJumpsBy.B, maxLocalJump, rematched: rematchDone,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,

@@ -115,6 +115,19 @@ compound across a boundary already blows level 1 (which has not bursted yet) -- 
 noBurst run at the same realistic drift converges too. The multi-boundary accumulation
 the burst bounds is a slow sweep in the on-demand netprofile.
 
+### duel-epoch.js  (REGRESSION tier -- the lost-begin / split guard)
+
+Swallows one client's one-shot boundary BEGIN timer (`eatBegin`), the way a throttled or
+backgrounded tab defers or drops it, and asserts the pair does not end up on separate
+tick bases. Both roles are driven: losing the host's begin and losing the joiner's need
+different repairs, since only the host can re-serve a start and only an `epq` lets a
+joiner ask. The fail gate is the DURATION of the split (a boundary is legitimately
+one-sided while the start is in flight) plus `splitBlind` -- a split that outlives the
+ask deadline with no banner showing. That blindness is the real finding: with the two
+clients on different bases the epoch gate drops the peer's hash one layer above the
+comparator, the link still carries packets so nothing reads as silent, and neither sim
+is frozen, so all three detectors go quiet at the same instant.
+
 ### duel-rematch.js  (REGRESSION tier -- the server-path restart guard)
 
 Same idea across a host-authored rematch/restart (a new `start_pts` moves tick zero):
