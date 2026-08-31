@@ -105,7 +105,8 @@ var _netInFlush = 0;
 // earliest tick that needs rewinding here; netTickPre does ONE rollback per tick covering
 // them all, so the expensive op is capped at the tick rate no matter the packet rate.
 var _rbRewindTo = Infinity;
-var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0 };
+function _rbDbgFresh(){ return { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, stbig:0, desyncAt:'' }; }
+var _rbDbg = _rbDbgFresh();
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
 // and it ticks through the menus. So two clients enter a duel with wildly different
 // values (one at 45000, the other at 3000) and their raw ticks mean nothing to each
@@ -133,6 +134,11 @@ function _rbSentPrune(){
     if(_rbSent.length && _rbFromWire(_rbSent[0].tk) <= simTick - RB_DEPTH)
         _rbSent = _rbSent.filter(r => _rbFromWire(r.tk) > simTick - RB_DEPTH);
 }
+// Append a freshly-authored record: pruned first, capped at the redundancy window.
+function _rbSentAdd(rec){
+    _rbSentPrune(); _rbSent.push(rec);
+    if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
+}
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
@@ -147,7 +153,7 @@ function _rbReset(){
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
     _rbEpoch = (typeof netEpoch === 'function') ? netEpoch() : 0;
-    _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, desyncAt:'' };
+    _rbDbg = _rbDbgFresh();
 }
 // Two identical sims fed identical inputs produce identical state, so a hash that
 // disagrees IS the divergence -- and, with no state on the wire to fake, it is also
@@ -204,8 +210,8 @@ function _rbDuelSnap(){
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
 // They turn an unactionable alarm into a field name, which is the only way to find a
 // divergence that only happens on real devices. On the wire they ride inside 'h' as a
-// positional 16-bit array (see _rbHashBoth); this named 32-bit map is the local half
-// of the mismatch diff and the tests' diagnostic view.
+// positional 16-bit array (see _rbHashBoth); this named 32-bit map is the tests'
+// diagnostic view (the product diff in _rbHashSettle reads _rbHashBoth's 16-bit array).
 function _rbHashFields(snap){
     const o = {};
     // JSON.stringify(undefined) is undefined, not a string: a field may legitimately be absent.
@@ -217,17 +223,9 @@ function _rbStrHash(s){
     for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
     return h >>> 0;
 }
-function _rbHash(snap){
-    let s;
-    try {
-        const o = {};
-        for(const k of RB_HASH_DUEL) o[k] = snap[k];
-        s = JSON.stringify(o);
-    } catch(e){ return 0; }
-    let h = 0x811c9dc5;
-    for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
-    return h >>> 0;
-}
+// Whole-state hash alone. _rbHashBoth builds the identical JSON bytes (see its comment),
+// so this is the same wire value from the same single serialization contract.
+function _rbHash(snap){ return _rbHashBoth(snap).h; }
 // Whole hash + per-field hashes from ONE serialization pass. JSON.stringify of the
 // whitelist object is byte-identical to '{' + the '"key":<field JSON>' parts joined by
 // ',' + '}' (insertion order; undefined fields omitted -- exactly what JSON.stringify
@@ -280,6 +278,12 @@ function _rbCheckHash(m){
     // 'in' packet flows; the packet-level detector in _netPeerInput is the primary (no built-in lag).
     _rbNoteBehindPeer(_rbFromWire(m.tk) + RB_HASH_LAG);
 }
+// Exact-tick ring lookup, newest-first. NOT for _rbRollback, which wants the nearest
+// entry at-or-BEFORE a tick -- a different predicate that stays inline there.
+function _rbRingFind(tk){
+    for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === tk) return _rbRing[j];
+    return null;
+}
 // Called each tick: compare whatever has settled and is still inside the ring.
 function _rbHashSettle(){
     if(!_rbHashQ.length) return;
@@ -287,10 +291,10 @@ function _rbHashSettle(){
         const q = _rbHashQ[i];
         if(simTick < q.tk + RB_SETTLE) continue;          // still in flight: leave it parked
         _rbHashQ.splice(i, 1);
-        let e = null;
-        for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === q.tk){ e = _rbRing[j]; break; }
+        const e = _rbRingFind(q.tk);
         if(!e) continue;                                   // aged out of the ring: not comparable
-        if(_rbHash(e.snap) === q.h){ _rbDbg.hashOk++; _rbBadSince = 0; continue; }   // agreement heals the escalation clock
+        const hb = _rbHashBoth(e.snap);   // one pass: the whole hash for the verdict, the field hashes for the diff
+        if(hb.h === q.h){ _rbDbg.hashOk++; _rbBadSince = 0; continue; }   // agreement heals the escalation clock
         // Deterministic sims do not drift back into agreement: this one is permanent.
         // NOT a connection warning -- the link is fine, the worlds are not.
         _rbDbg.desync++;
@@ -304,15 +308,13 @@ function _rbHashSettle(){
         // function of the verdict. A repair that failed simply mismatches again next
         // second and earns exactly one more shot; unknown fields fire both (safe).
         let where = '?', struct = true, snakes = true;
-        if(q.f){
-            // Positional diff against our own field hashes, masked to the wire's 16 bits.
+        if(q.f && hb.f){
+            // Positional diff, both sides already the wire's 16 bits (_rbHashBoth masks).
             // A short or malformed array reads undefined past its end, mismatches every
             // remaining field and lands in the fire-both-repairs fallback -- safe.
-            const mine = _rbHashFields(e.snap), bad = [];
-            for(let fi = 0; fi < RB_HASH_DUEL.length; fi++){
-                const k = RB_HASH_DUEL[fi];
-                if(q.f[fi] !== (mine[k] & 0xffff)) bad.push(k);
-            }
+            const bad = [];
+            for(let fi = 0; fi < RB_HASH_DUEL.length; fi++)
+                if(q.f[fi] !== hb.f[fi]) bad.push(RB_HASH_DUEL[fi]);
             if(bad.length){
                 where = bad.join(',');
                 snakes = bad.indexOf('players') >= 0;
@@ -471,8 +473,7 @@ function _rbApplyResync(m){
         return;
     }
     snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;   // ring convention: entry tk=T holds the state at simTick T-1
-    let e = null;
-    for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === T){ e = _rbRing[j]; break; }
+    const e = _rbRingFind(T);
     if(e){
         // IN-RING: keep OUR own snake as WE recorded it at T (the ring entry), not the host's copy
         // -- we own our snake. Only the shared world + the host's snake are the host's to correct.
@@ -521,8 +522,7 @@ function _rbStateSettle(){
         if(simTick < q.tk + RB_STATE_SETTLE) continue;   // authoritative: apply almost immediately (not the hash wait)
         _rbStateQ.splice(i, 1);
         if(q.i === mine) continue;                       // never let the peer overwrite our own snake
-        let e = null;
-        for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === q.tk){ e = _rbRing[j]; break; }
+        const e = _rbRingFind(q.tk);
         if(e && e.snap && e.snap.players && e.snap.players[q.i]){
             // Recent enough to be in the ring: patch the historical snapshot and roll forward, so
             // the correction lands seamlessly (no visible jump). Adopt the WHOLE snake (dir/boost/
@@ -592,6 +592,17 @@ function _rbEnsureSnap(t){
     _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
     if(_rbRing.length > RB_RING) _rbRing.shift();
 }
+// The full input flush: prune, ship the redundancy log, and run the cycle bookkeeping.
+// The repair resend and the 16-tick heartbeat are deliberate variants WITHOUT this
+// bookkeeping (they repeat, not author): those stay inline where they are.
+function _netInFlushNow(){
+    _rbSentPrune();
+    _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+    _netDbg.inTx++;
+    _netInDirty = false;
+    _netInFlush++;
+    _netInRepeat = 2;   // arm the repair countdown (see its declaration)
+}
 // Called by the game loop immediately BEFORE each update(). Records the state the
 // tick starts from, then feeds that tick its inputs -- local and remote alike, so
 // a re-simulation reproduces the tick exactly.
@@ -632,13 +643,8 @@ function netTickPre(){
     let _inFlushed = false;
     _netInFlush = 0;   // a new tick cycle: authored turns may ship at once again
     if(_netInDirty && !_replaying){
-        _rbSentPrune();
-        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
-        _netDbg.inTx++;
-        _netInDirty = false;
+        _netInFlushNow();
         _inFlushed = true;
-        _netInFlush++;
-        _netInRepeat = 2;   // arm the repair countdown (see its declaration)
     } else if(_netInRepeat && !_replaying){
         // Repair countdown (see the _netInRepeat declaration). Decrement FIRST so it
         // fires exactly once no matter what the send below does on a closed channel.
@@ -664,8 +670,7 @@ function netTickPre(){
             // deterministic tick and target the same tk. Skip if it has aged out of the ring
             // (only near a level start, before the ring is deep enough): nothing to compare yet.
             const hk = t - RB_HASH_LAG;
-            let he = null;
-            for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === hk){ he = _rbRing[j]; break; }
+            const he = _rbRingFind(hk);
             if(he){
                 const hb = _rbHashBoth(he.snap);
                 _netSend({ t:'h', tk:_rbToWire(hk), h:hb.h, f:hb.f });
@@ -707,14 +712,7 @@ function netTickPre(){
 // Idempotent with the pre-flush: _netInDirty clears on the first send, so an input never doubles.
 function netTickPost(){
     if(!netGameActive() || !inGame || _replaying) return;
-    if(_netInDirty){
-        _rbSentPrune();
-        _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
-        _netDbg.inTx++;
-        _netInDirty = false;
-        _netInFlush++;
-        _netInRepeat = 2;   // arm the repair countdown (see its declaration)
-    }
+    if(_netInDirty) _netInFlushNow();
 }
 // Rewind to `toTick` and re-simulate to where we were, now including the input
 // that arrived late. Silent: _replaying keeps the re-run from re-firing visuals
@@ -916,9 +914,7 @@ function netLocalInput(kind, p, d, now){
         if(log) for(let i = 0; i < log.length; i++){ const c = log[i]; if(c.t === 'dir' && c.p === myP && c.dir.x === d.x && c.dir.y === d.y) return true; }
         _lastLocalDir = { x:d.x, y:d.y };   // remember the intent we just authored (the gate's baseline)
         _rbAdd(S, { t:'dir', p:myP, dir:{x:d.x, y:d.y} });
-        const drec = { q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y} };
-        _rbSentPrune(); _rbSent.push(drec);
-        if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
+        _rbSentAdd({ q:++_rbSeq, tk:_rbToWire(S), k:'dir', d:{x:d.x, y:d.y} });
         _netInDirty = true;   // fallback: the next tick's flush carries it if the cap below hits
         // Leading-edge flush ("sent at once", as the HEADROOM contract above promises): the
         // wire record is complete right here, and the next netTickPre averages half a tick
@@ -926,14 +922,7 @@ function netLocalInput(kind, p, d, now){
         // matters. Ship the first TWO turns of a cycle immediately (a fast double gesture
         // must not defer its second record); _netInFlush caps it there, so anything past
         // two still coalesces into the next tick's flush.
-        if(_netInFlush < 2 && !_replaying){
-            _rbSentPrune();
-            _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
-            _netDbg.inTx++;
-            _netInDirty = false;
-            _netInFlush++;
-            _netInRepeat = 2;   // arm the repair countdown (see its declaration)
-        }
+        if(_netInFlush < 2 && !_replaying) _netInFlushNow();
         return true;
     }
     const cmd = kind === 'bs' ? { t:'boost', p:myP, dir:{x:d.x,y:d.y}, now:!!now }
@@ -946,10 +935,8 @@ function netLocalInput(kind, p, d, now){
     // same way both sides replay it removes the split, and there is no _live record left for a
     // deferred rollback to drop.
     _rbAdd(tk, cmd);
-    const rec = kind === 'bs' ? { q:++_rbSeq, tk:_rbToWire(tk), k:'bs', d:{x:d.x, y:d.y}, n: now?1:0 }
-                              : { q:++_rbSeq, tk:_rbToWire(tk), k:'be' };   // be carries no dir/now: the receiver reads neither
-    _rbSentPrune(); _rbSent.push(rec);
-    if(_rbSent.length > RB_REDUNDANCY) _rbSent.shift();
+    _rbSentAdd(kind === 'bs' ? { q:++_rbSeq, tk:_rbToWire(tk), k:'bs', d:{x:d.x, y:d.y}, n: now?1:0 }
+                             : { q:++_rbSeq, tk:_rbToWire(tk), k:'be' });   // be carries no dir/now: the receiver reads neither
     _netInDirty = true;   // flushed with the next tick's input packet (the redundancy log carries it)
     return true;
 }
