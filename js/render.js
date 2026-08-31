@@ -710,7 +710,7 @@ function drawAchPopups(now) {
     const DUR=3800, FADE_IN=280, FADE_OUT=500;
     achPopups=achPopups.filter(p=>now-p.at<DUR);
     achPopups.forEach((p,i)=>{
-        const a=ACHIEVEMENTS.find(ac=>ac.id===p.id)||EXPERT_ACHIEVEMENTS.find(ac=>ac.id===p.id); if(!a) return;
+        const a=ACHIEVEMENTS.find(ac=>ac.id===p.id)||EXPERT_ACHIEVEMENTS.find(ac=>ac.id===p.id)||EGG_ACHIEVEMENTS.find(ac=>ac.id===p.id); if(!a) return;
         const age=now-p.at;
         const alpha=Math.min(1,age/FADE_IN)*(age>DUR-FADE_OUT?Math.max(0,1-(age-(DUR-FADE_OUT))/FADE_OUT):1);
         const slide=Math.max(0,(1-age/FADE_IN)*70);

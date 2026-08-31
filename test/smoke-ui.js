@@ -92,6 +92,30 @@ runTest('SMOKE-UI', `
     drawNews(1000); press('ArrowLeft'); if(newsPage!==0) throw 'news: page flip did not wrap back';
     log('multi-page news ok: pages='+((ANNOUNCEMENT&&ANNOUNCEMENT.pages&&ANNOUNCEMENT.pages.length)||1));
 
+    // Achievements paging: expert lands on 2/2, L/R pages with wrap, the hidden egg
+    // page (0) opens only once a first egg is found, and reaching it IS an egg. The
+    // credits secret line is the other testable egg (the third rides a DOM click).
+    const _si0=cfg.shopItems;
+    cfg.shopItems={donate:true}; ACHIEVEMENTS.forEach(a=>achUnlocked[a.id]=achUnlocked[a.id]||1);
+    phase='menu'; menuSel=MENU_ITEMS.indexOf('ACHIEVEMENTS'); press('Enter');
+    if(phase!=='achievements'||achPage!==2) throw 'expert must land on page 2/2 (got '+achPage+')';
+    drawAchievements();
+    press('ArrowLeft'); if(achPage!==1) throw 'LEFT did not page to base';
+    drawAchievements();
+    press('ArrowLeft'); if(achPage===0) throw 'no egg found yet: the hidden page must stay unreachable';
+    achUnlocked.egg_ringtone=1;                    // a first egg opens the door
+    achPage=2; press('ArrowLeft'); press('ArrowLeft');   // 2 -> 1 -> 0
+    if(achPage!==0) throw 'a found egg must make page 0 swipeable';
+    if(!achUnlocked.egg_page) throw 'reaching the hidden page must unlock its own egg';
+    drawAchievements();
+    press('ArrowRight'); if(achPage!==1) throw 'RIGHT from the egg page must reach base';
+    phase='credits';
+    let _cy=0; for(const [t,v] of CRED){ if(t==='secret') break; _cy+=t==='gap'?v:(CRED_H[t]||22); }
+    creditsScroll=100-_cy; drawCredits();          // puts the secret line on screen
+    if(!achUnlocked.egg_credits) throw 'the on-screen NO EASTEREGGS line must unlock the credits egg';
+    achUnlocked={}; cfg.shopItems=_si0; phase='menu';
+    log('achievements paging + eggs ok: expert 2/2 default, hidden page 0, credits egg');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

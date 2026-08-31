@@ -145,9 +145,10 @@ function saveAch() { saveLater(ACH_KEY, JSON.stringify(achUnlocked)); }
 function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch (e){ return true; } }
 function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch (e){} }
 const EASY_ACHS = new Set(['first_gem','level1','level5','fokoins_1k','fokoins_10k','fokoins_1m']);
+const EGG_ACHS = new Set(EGG_ACHIEVEMENTS.map(a=>a.id));   // found outside a run: difficulty never gates them
 function unlockAch(id) {
     if(achUnlocked[id]) return;
-    if(cfg.diff === 0 && !EASY_ACHS.has(id)) return;
+    if(cfg.diff === 0 && !EASY_ACHS.has(id) && !EGG_ACHS.has(id)) return;
     achUnlocked[id] = Date.now(); saveAch();
     addFOKoins(1000);
     achPopups.push({ id, at: simNow });

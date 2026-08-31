@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.5.21';
+const APP_VERSION = 'v2.5.22';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -170,6 +170,21 @@ const EXPERT_ACHIEVEMENTS = [
     { id:'fokoins_100k', name:'DRAGON RICH',  desc:'Earn 5,000,000 total FOKoins',
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},
       d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
+];
+
+// The hidden page: each of these is an easter egg, and the page itself is one too --
+// it only becomes swipeable once a first egg is found, and swiping to it unlocks the
+// last. Never listed on the visible pages, so a fresh install cannot know they exist.
+const EGG_ACHIEVEMENTS = [
+    { id:'egg_ringtone', name:'RING RING',   desc:'Take the snake theme home',
+      icon:{p:{A:'#ffd700',B:'#cc8800'},
+      d:['...A....','..AAA...','..AAA...','.AAAAA..','.AAAAA..','AAAAAAA.','...B....','........']}},
+    { id:'egg_credits',  name:'TRUE ENDING', desc:'No easter eggs in the credits',
+      icon:{p:{A:'#ff5555',B:'#ffffff'},
+      d:['........','..BBBB..','.B....B.','B..AA..B','B..AA..B','.B....B.','..BBBB..','........']}},
+    { id:'egg_page',     name:'OFF THE MAP', desc:'Swipe to a page that is not there',
+      icon:{p:{A:'#ff4488',B:'#aa2255'},
+      d:['..AAAA..','.AA..AA.','.....AA.','....AA..','...AA...','........','...AA...','........']}},
 ];
 
 const SHOP_ITEMS = [

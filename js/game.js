@@ -102,7 +102,12 @@ function _fbSeedPhase(){
 }
 let _lastRAF = 0;                           // last RAF timestamp (worst-frame FPS recorder)
 let pauseReadyAt = 0;                       // pause input debounce gate
-let achPage = 0;
+// Achievement paging: 1 = base, 2 = expert, 0 = the hidden easter-egg page. Page 0 is
+// reachable only once a first egg has been found; the visible page count (the N of the
+// "p/N" indicator) never includes it, so its indicator reads 0/N -- a page off the map.
+let achPage = 1;
+function achExpert(){ return !!(cfg.shopItems&&cfg.shopItems['donate']) && ACHIEVEMENTS.every(a=>achUnlocked[a.id]); }
+function achEggFound(){ return EGG_ACHIEVEMENTS.some(a=>achUnlocked[a.id]); }
 let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
 // A run played with x10 (debug rare-event odds) is never ranked: the flag is
 // latched at game start so it survives regardless of later setting access.

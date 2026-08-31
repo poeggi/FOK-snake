@@ -550,19 +550,24 @@ function drawAchievements() {
     drawGrid(); drawOvBg(0.92);
     const donated=!!(cfg.shopItems&&cfg.shopItems['donate']);
     const allBase=ACHIEVEMENTS.every(a=>achUnlocked[a.id]);
-    const expert=donated&&allBase;
-    const onExpert=expert&&achPage===0;
-    const list=onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
-    const titleColor=onExpert?'#ff8800':'#7fff7f';
+    const expert=achExpert(), n=expert?2:1;
+    if(achPage>n||(achPage===0&&!achEggFound())) achPage=n;   // a page that no longer exists falls back
+    const onEggs=achPage===0, onExpert=achPage===2;
+    const list=onEggs?EGG_ACHIEVEMENTS:onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
+    const titleColor=onEggs?'#ff4488':onExpert?'#ff8800':'#7fff7f';
     ctg('ACHIEVEMENTS',CW/2,28,titleColor,FONT.TITLE, GLOW.TITLE);
-    if(expert){
-        ct(onExpert?'< EXPERT  1/2 >':'< BASE  2/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',FONT.HINT);
+    // The indicator never counts the egg page (its N is the visible pages only) and the
+    // visible pages never mention it: on it the position reads 0/N, off it nothing leaks.
+    if(onEggs){
+        ct(`< EGGS  0/${n} >`,CW/2,42,'#ff4488',FONT.HINT);
+    } else if(expert){
+        ct(onExpert?'< EXPERT  2/2 >':'< BASE  1/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',FONT.HINT);
     } else if(allBase&&!donated){
         ct('DONATE in SHOP to unlock EXPERT page',CW/2,42,'#ff4488',FONT.HINT);
     }
     const cols=3, aw=188, ah=68, gx=4, gy=4;
     const ox=(CW-(cols*aw+(cols-1)*gx))/2;
-    const oy=expert?54:64;
+    const oy=(onEggs||expert)?54:64;
     list.forEach((a,i)=>{
         const col=i%cols, row=Math.floor(i/cols);
         const x=ox+col*(aw+gx), y=oy+row*(ah+gy);
@@ -593,7 +598,7 @@ function drawAchievements() {
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
     ctg(`${total} / ${list.length} UNLOCKED`,CW/2,CH-30,'#6aaa6a',FONT.HINT, GLOW.FAINT);
-    const hint='A:back';
+    const hint=expert?'L/R:page   A:back':'A:back';
     ct(hint,CW/2,HINT_Y,'#888',FONT.HINT);
 }
 
@@ -806,7 +811,11 @@ function drawCredits() {
                 case 'secret':
                     ctx.shadowColor='#ff4444'; ctx.shadowBlur=14;
                     ct(val, CW/2, yc, '#ff5555', FONT.MENU);
-                    ctx.shadowBlur=0; break;
+                    ctx.shadowBlur=0;
+                    // The line denying easter eggs IS one: it sits far below PRESS A TO
+                    // EXIT, so only a viewer who kept watching ever gets it on screen.
+                    if(yc>0&&yc<CH-24) unlockAch('egg_credits');
+                    break;
             }
         }
         y += h;

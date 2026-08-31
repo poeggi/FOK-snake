@@ -123,7 +123,7 @@ const UI_INPUT = {
                 case 'PLAY':         beginGame(); break;
                 case '1VS1':         phase='duelMenu'; duelSel=0; break;
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
-                case 'ACHIEVEMENTS': phase='achievements'; achPage=0; break;
+                case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;
                 case 'SETTINGS':     phase='settings'; settingsCat=-1; settingsSel=0; break;
                 case 'CREDITS':      phase='credits'; creditsScroll=CH-20; creditsSpeed=0.8; _creditsNormal=0.8; break;
@@ -277,7 +277,14 @@ const UI_INPUT = {
         other(){ _backToMenu(); return true; },   // any other key leaves the board
     },
     achievements: {
-        nav(){},                                   // arrows are consumed, not acted on
+        nav(key){                                  // up/down are consumed, not acted on
+            if(key!=='ArrowLeft'&&key!=='ArrowRight') return;
+            const lo=achEggFound()?0:1, n=achExpert()?2:1, span=n-lo+1;
+            if(span<2) return;                     // one page, nowhere to go
+            achPage=lo+(achPage-lo+(key==='ArrowRight'?1:-1)+span)%span;
+            if(achPage===0) unlockAch('egg_page');   // reaching the hidden page IS an egg
+            Snd.sfxPlay('nav',cfg.music);
+        },
         back: _backToMenu,
         other(){ _backToMenu(); return true; },
     },
@@ -1214,6 +1221,7 @@ function ringOfferOpen(){
     const cl = document.createElement('button'); cl.className='sbtn'; cl.textContent='CLOSE';
     dl.addEventListener('click',()=>{
         Snd.sfxPlay('select',cfg.music);
+        unlockAch('egg_ringtone');   // before the branch: the share sheet and the plain save both count
         // Straight into the native sheet where there is one: SAVE TO FILES is a tap and the
         // preview screen never appears. A dismissed sheet is a decision, not a failure -- only a
         // refusal falls through to the plain save.
