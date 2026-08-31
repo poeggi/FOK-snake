@@ -1110,12 +1110,12 @@ const RING_PLAT = {
     // action. No third-party app in the way. Where the browser shares files for us (iOS 15+) the
     // button opens that sheet itself, which skips the preview and its MORE... menu entirely --
     // hence two step lists for the one platform, and the panel prints the one you will see.
-    ios: { ext:'.m4a',
+    ios: { ext:'.m4a', label:'IOS',
         steps:['DOWNLOAD, THEN MORE... > SAVE TO FILES','OPEN FILES, LONG-PRESS THE TONE','SHARE > RINGTONE'],
         shareSteps:['DOWNLOAD, THEN SAVE TO FILES','OPEN FILES, LONG-PRESS THE TONE','SHARE > RINGTONE'] },
-    android: { ext:'.m4a',
+    android: { ext:'.m4a', label:'ANDROID',
         steps:['DOWNLOAD - IT LANDS IN DOWNLOADS','SETTINGS > SOUND > PHONE RINGTONE','ADD RINGTONE, PICK SNAKE THEME'] },
-    desktop: { ext:'.m4r',
+    desktop: { ext:'.m4r', label:'A DESKTOP',
         steps:['DOWNLOAD THE .M4R','PLUG IN THE PHONE, OPEN FINDER/ITUNES','DROP IT ON THE DEVICE > GENERAL'] }
 };
 function _ringStyle(){ return RING_STYLE[cfg.musicStyle === 1 ? 1 : 0]; }
@@ -1201,8 +1201,12 @@ function ringOfferOpen(){
     const panel = document.createElement('div'); panel.className = 'panel';
     const h = document.createElement('h2'); h.textContent = 'SNAKE THEME RINGTONE';
     const lead = document.createElement('p');
+    // Name the platform the steps are for. They are picked from the user agent, and a guess
+    // the reader cannot see is a guess they cannot correct -- an Android reading iOS steps has
+    // no way to know why nothing matches. Saying ON IOS out loud makes a wrong detection obvious.
     lead.textContent = 'YOU FOUND IT. ONE LOOP OF THE '
-        + (cfg.musicStyle === 1 ? 'CLASSIC' : 'NEW') + ' THEME, AS A FILE YOUR PHONE CAN RING WITH:';
+        + (cfg.musicStyle === 1 ? 'CLASSIC' : 'NEW') + ' THEME, AS A FILE YOUR PHONE CAN RING WITH.'
+        + ' ON ' + p.label + ' YOU DO:';
     const ol = document.createElement('ol');
     steps.forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ol.appendChild(li); });
     const row = document.createElement('div'); row.className = 'row';

@@ -119,3 +119,22 @@ pre-commit hook. Enable it once after cloning:
 The hook derives MAJOR.MINOR from the latest git tag and bumps the PATCH on every
 commit, so installed PWA clients always pick up fresh assets. Do not edit the
 version/CACHE/ASSETS lines in sw.js by hand.
+
+## License
+
+Snake - FOK Edition is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your option)
+any later version. It is distributed WITHOUT ANY WARRANTY, without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+LICENSE for the full text.
+
+Copyright (C) 2026 Kai Poggensee
+
+The game is delivered to your browser, so AGPL section 13 applies: anyone who
+runs a modified version and lets others play it must offer those players the
+source of that version.
+
+The bundled font is not covered by the AGPL. Press Start 2P is Copyright 2012
+The Press Start 2P Project Authors, licensed under the SIL Open Font License
+1.1 -- see fonts/OFL.txt.
