@@ -32,8 +32,9 @@
 // and it only shows when latency is high.
 // Max JSON we will put in one DataChannel message. 1280 is the IPv6 minimum MTU (and a
 // safe IPv4 floor); ~70B goes to IP+UDP+DTLS+SCTP headers, so the payload budget is
-// what is left. Worst case today: an 'in' with a full 12-input redundant log (~711B)
-// and the 1Hz 'h' with its per-field hash array (~220B). Declared HERE (not net.js):
+// what is left. Worst case today: an 'in' with a full 8-record redundant log and the
+// 1Hz 'h' with its per-field hash array (~220B); smoke-net measures both against this
+// budget. Declared HERE (not net.js):
 // both the transport and the core enforce it, and the sim worker loads only the core.
 const NET_PKT_MAX = 1200;
 const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the nearest earlier
@@ -65,11 +66,11 @@ var _lastLocalDir = null;    // last dir we AUTHORED for our snake -- the intent
 // generates inside a round trip, and keeps the worst-case packet (~500 bytes) well inside both
 // the 1280-byte datagram budget and the relay's 2KB cap.
 const RB_REDUNDANCY = 8;
-// What we ACCEPT from a peer, kept above RB_REDUNDANCY: a peer on an older patch may still emit
-// the legacy 12 (patches interop), so rejecting at 8 would starve a mixed-version duel of the
-// other side's inputs. The guard exists only to refuse the clearly-abusive (a hostile peer could
-// pack tens of thousands into one `l`, each an unbounded _rbLog append + re-sim cost).
-const RB_RX_MAX = 12;
+// What we ACCEPT from a peer: exactly what an honest one can emit. Every gate-passing peer
+// sends at most RB_REDUNDANCY records (the version gate refuses cross-minor duels). The cap
+// exists to refuse the clearly-abusive: a hostile peer could pack tens of thousands into one
+// `l`, each an unbounded _rbLog append + a re-sim cost.
+const RB_RX_MAX = RB_REDUNDANCY;
 // Radio-warm keepalive cadence, in TICKS. The game's real send cadence in play is the
 // 16-tick input heartbeat (~267ms) plus sporadic turns -- sparse enough that an iOS WiFi
 // radio dozes between beats and pays ~150ms wake latency on the NEXT inbound packet

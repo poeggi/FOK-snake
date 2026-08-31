@@ -17,18 +17,17 @@
 // ============================================================================
 const NET_BASE = 'https://fok-server.poggensee.it';
 const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md: Versioning; v3 = t.txt clock, epoch-keyed starts + sync gate, remote debug flag, 3.1 = peer-net hint)
-// The server's `api` is a "MAJOR.MINOR" string (older servers sent the bare MAJOR as a
-// number). Only the MAJOR gates compatibility -- a newer MINOR on the same major is purely
-// additive. Returns the major integer, or null if unparseable.
+// The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
+// newer MINOR on the same major is purely additive. Returns the major integer, or null
+// if unparseable (a soft failure, like every network failure here: no flags raised).
 const NET_API_BUILT_MINOR = 4;   // built against 3.4 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag + `platform` tag on scores/profile; per-player stats.php available, not yet consumed)
 function _netApiMajor(a){
-    if(typeof a === 'number') return Math.floor(a);
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
 }
 function _netApiMinor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*\d+\.(\d+)/); return m ? +m[1] : 0; }
-    return 0;   // a bare integer (legacy) is x.0
+    return 0;
 }
 var _netDbgSrv = null;      // the server's last debug INSTRUCTION (null = never heard one); kept apart from cfg.debug, which is what we DO
 var _netApiNewer = false;   // server MAJOR is newer -> online features disable with a notice
@@ -2062,10 +2061,11 @@ function _netHandleMsg(txt){
     // Compared against _rbEpoch (the epoch of OUR tick base), not s.epoch: between a halt and
     // the scheduled start the session line is already bumped while the sim still ticks the old
     // timeline, and a packet from that window is only usable by a peer still on the SAME base.
-    // Guarded on m.ep being present so a peer from before the stamp existed is unaffected.
-    if(typeof m.ep === 'number' && _netSess
-       && (m.ep|0) !== ((typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess.epoch|0))
-       && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')) return;
+    // Every peer that passes the version gate stamps ep on these four types, so absence
+    // is not special-cased: a missing ep reads as epoch 0 and gates like any other.
+    if(_netSess
+       && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')
+       && (m.ep|0) !== ((typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess.epoch|0))) return;
     switch(m.t){
         case 'sched':
         case 'rst': {   // the match / rematch / level start moment, issued by the server, relayed by P0

@@ -351,7 +351,7 @@ runTest('SMOKE-NET', `
     if(_netApiNewer||_netApiOutdated) throw 'built against 3.4: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     _applyHello({api:'3.1'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER minor (server 3.1) must read as up to date';
-    _applyHello({api:3});     if(_netApiNewer||_netApiOutdated) throw 'a legacy integer api (3) must read as compatible';
+    _applyHello({api:3});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags (the bare-integer form is no longer parsed)';
     _applyHello({api:'3.5'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
