@@ -404,7 +404,9 @@ function netDebugQuad(){
         if(!_netSess.relay && _pn && _pn.ip) Nx.push(_pn.ip);
         Nx.push(d.path || 'path ?');
         Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
-        Nm.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : ''));
+        // RESHIP n = starts the peer missed and we re-served; non-zero without it is a dead pair.
+        Nm.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : '')
+            + (d.reship ? '  RESHIP ' + d.reship : ''));
         // pts live = the peer's one-way pts-delta (how late their inputs land) -- the number
         // that predicts rollbacks, so it takes the Level-2 slot the wall clock used to hold.
         Tm.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
@@ -521,7 +523,7 @@ function netMenuSeekSec(){ const p = netPts(); return p != null ? p/1000 : 0; }
 function netDebugInfo(){
     return { base:NET_BASE, offline:netOffline(), rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
              pts:simTick, peerTickOfs:_netDbg.peerTkOfs, rollbacks:_rbDbg.rb, resimTicks:_rbDbg.resim, maxRewindTicks:_rbDbg.maxRew,
-             inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, hashLost:_rbDbg.hashLost|0, fixes:_rbDbg.fix|0, epoch:_netSess?_netSess.epoch:null,
+             inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, hashLost:_rbDbg.hashLost|0, fixes:_rbDbg.fix|0, reships:_netDbg.reship|0, epoch:_netSess?_netSess.epoch:null,
              inRx:_netDbg.inRx, inTx:_netDbg.inTx, lastPeerInputs:_netDbg.inLog.slice(),
              peerLagMs:_netDbg.lag, peerPtsDeltaAvgMs:_netDbg.lagAvg, peerPtsDeltaMinMs:_netDbg.lagMin, peerPtsDeltaMaxMs:_netDbg.lagMax, peerPtsDeltaN:_netDbg.lagN, ptsSync:{ synced:_netSync.ofs!=null, offsetMs:_netSync.ofs, rttMs:_netSync.rtt, ageMs:_netSync.at?Date.now()-_netSync.at:null },
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,

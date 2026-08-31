@@ -161,6 +161,23 @@ const HOOKS = (myId) => `
   // so the receive future-gate is skipped.
   globalThis.__deliverCtl = (t, epoch)=>{ _netHandleMsg(JSON.stringify({ t, seed:0xBEEF, startPts:netPts()-10, epoch })); };
   globalThis.__ctlBeginsN = ()=> __ctlBegins;
+  // A HOST that has already opened a boundary: it shipped the start for that epoch and moved on.
+  // ageMs backdates the ship so the in-flight grace (a boundary is briefly one-sided by design)
+  // is past and a peer still behind counts as one that never got it.
+  globalThis.__hostAfterStart = (epoch, ageMs)=>{
+    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true;
+    _netSess.dc = { readyState:'open', send:(x)=>__wire.push(x), close(){} };
+    _netSync = { ofs:0, rtt:1, at:Date.now() };
+    _netSess.epoch = epoch|0;
+    _rbEpoch = epoch|0;   // we already BEGAN that level: our tick base carries the new epoch too
+    _netShipStart(_netSess, { t:'rst', seed:0xBEEF, startPts:netPts()-500, x10:false,
+                              epoch:epoch|0, lvl:1, bth:0 });
+    _netSess.lastStartAt -= (ageMs|0);
+    __wire.length = 0;   // the original ship is not what these tests are looking for
+  };
+  globalThis.__peerPkt = (t, ep)=>{ _netHandleMsg(JSON.stringify({ t, ep, tk:0, l:[] })); };
+  globalThis.__lastStartPts = ()=> _netSess.lastStart.startPts;
+  globalThis.__reshipReset  = ()=>{ _netSess.reshipAt = 0; };
   // Relay coalesce: a fetch that never resolves keeps the one POST 'in flight'.
   globalThis.__fetchN = 0;
   globalThis.__relaySetup = ()=>{
@@ -887,6 +904,40 @@ try {
     if(B.__ctlBeginsN() !== 2) throw new Error('a new-epoch rst did not start: ' + B.__ctlBeginsN());
     B.__deliverCtl('rst', 1); B.__deliverCtl('rst', 1);           // and ITS repeats
     if(B.__ctlBeginsN() !== 2) throw new Error('a duplicate rst restarted a running level: ' + B.__ctlBeginsN());
+  });
+
+  // A lost start is not a late boundary, it is a permanent split. The joiner's epoch has exactly
+  // ONE writer -- the sched/rst handler -- so a start that never lands leaves it on the old epoch
+  // for good: our gate refuses every tick packet it sends, its gate refuses every one of ours, and
+  // its OK press re-asks with the same stale number forever. Neither warning fires (packets flow,
+  // so silence never trips; the hash checks that would say OUT OF SYNC are what the gate drops),
+  // so both boards just stop with nothing on screen. The host can SEE the stale epoch on every
+  // packet, so it must re-serve the start rather than only drop.
+  check('a joiner stuck an epoch behind is re-served the start, not silently dropped', () => {
+    const A = mk(A_ID);
+    A.__hostAfterStart(1, 3000);
+    A.__peerPkt('in', 0);                       // the stuck joiner is still stamping the old epoch
+    const rs = A.__drain().map(x => JSON.parse(x)).filter(p => p.t === 'rst');
+    if(rs.length !== 1) throw new Error('a behind-epoch tick packet must re-serve the start, got ' + rs.length);
+    if(rs[0].epoch !== 1) throw new Error('the re-serve must carry OUR current epoch: ' + JSON.stringify(rs[0]));
+    if(rs[0].startPts !== A.__lastStartPts()) throw new Error('the re-serve must carry the ORIGINAL startPts -- a fresh one would put the joiner on a second, private timeline');
+    // Rate-limited: the trigger is the peer's own 60/s stream, not a one-shot.
+    for(let i = 0; i < 30; i++) A.__peerPkt('in', 0);
+    if(A.__drain().length !== 0) throw new Error('the re-serve must be rate-limited, not one per refused packet');
+    // The OK press path answers too: a reqlvl below our line is the same stuck joiner asking again.
+    A.__reshipReset();
+    A.__recv(JSON.stringify({ t:'reqlvl', epoch:0 }));
+    if(A.__drain().filter(x => JSON.parse(x).t === 'rst').length !== 1) throw new Error('a behind-epoch reqlvl must re-serve the start');
+  });
+
+  // The flip side: a boundary IS legitimately one-sided while it is in flight (we bump the epoch,
+  // burst, ship, and only then does the joiner adopt it). Packets from that window must not be
+  // read as a loss, or every normal level transition would re-ship.
+  check('a boundary still in flight does not re-serve (only a start that never landed does)', () => {
+    const A = mk(A_ID);
+    A.__hostAfterStart(1, 0);   // shipped just now: the joiner has not had time to adopt it
+    for(let i = 0; i < 30; i++) A.__peerPkt('in', 0);
+    if(A.__drain().length !== 0) throw new Error('a start still in flight must not be re-served');
   });
 
   // Relay outbound coalesce: a local steer POSTs an `in` immediately, so on a 200-400ms

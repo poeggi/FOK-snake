@@ -73,6 +73,7 @@ function _netMkSess(peer, role){
              relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
+             lastStart:null, lastStartAt:0, reshipAt:0,   // host: the start packet that opened the current epoch, when we shipped it, and when we last re-served it (see _netReshipStart)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
              bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,

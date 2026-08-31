@@ -301,6 +301,25 @@ function _netOnSignal(sig){
     } catch(e){ _netSigLog('< ERR ' + String(sig.type)); }
 }
 
+// Ship a start (sched/rst) AND keep it. The joiner's epoch has exactly ONE writer -- the 'rst'
+// handler below -- so a start that never lands is not a delayed boundary but a permanent split:
+// both sides then refuse each other's tick packets on epoch, and nothing in the stream heals it.
+function _netShipStart(s, pkt){ s.lastStart = pkt; s.lastStartAt = _wall(); _netSend(pkt); }
+// Re-serve that start to a joiner still on an older epoch. Idempotent: the receiver dedups by
+// ctlEpoch, and the ORIGINAL startPts is what lands it on our timeline instead of a private one.
+function _netReshipStart(s, peerEp){
+    if(!s || !s.game || s.role !== 'host' || !s.lastStart) return;   // only P0 authors a start
+    if((peerEp|0) >= (s.epoch|0)) return;
+    const now = _wall();
+    // A boundary is legitimately one-sided while it is in flight, so "behind" only means "lost"
+    // once our ship and its repeats (0/100/200ms) are well past.
+    if(now - (s.lastStartAt || 0) < 1000) return;
+    if(now - (s.reshipAt || 0) < 1000) return;         // the trigger is the peer's 60/s stream: one re-serve per second
+    s.reshipAt = now;
+    _netDbg.reship = (_netDbg.reship|0) + 1;
+    _netSigLog('! peer an epoch behind (' + (peerEp|0) + ' < ' + (s.epoch|0) + '): re-sending the start');
+    _netSend(s.lastStart);
+}
 // Server-issued start: both peers call start.php and receive the IDENTICAL
 // absolute start PTS (the server owns the clock, so it owns the start point).
 // A VERIFIED sync is a precondition, not a nicety: the two sims share one tick
@@ -373,7 +392,7 @@ async function _netRequestStart(s, reason){
         // 'sched' is the FIRST start and is refused while inGame (a stale one must not restart a
         // running match). Every later start -- rematch, respawn -- happens WHILE in game, so it must
         // ride 'rst' or the peer silently ignores it and only one client restarts.
-        if(s.role === 'host') _netSend({ t: (reason === 'first' || !reason) ? 'sched' : 'rst',
+        if(s.role === 'host') _netShipStart(s, { t: (reason === 'first' || !reason) ? 'sched' : 'rst',
                                          seed:s.seed, startPts:s.startPts, x10:s.x10, epoch:s.epoch|0,
                                          lvl:0, bth:Math.round(theta || 0) });
         // The HOST authors the begin moment; the joiner takes it from the sched/rst it receives --
@@ -419,7 +438,7 @@ function _netStartLevelP2P(s){
         const startPts = netPts() + NET_BURST_LEAD_MS;   // tick 0 of the new epoch, on the host's now-midpoint clock
         s.startPts = startPts;
         _netClockPush();            // anchor + startPts move together: the core must see both
-        _netSend({ t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1, bth:Math.round(theta) });
+        _netShipStart(s, { t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1, bth:Math.round(theta) });
         const go = () => {
             if(_netSess !== s || !s.game) return;
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
@@ -495,7 +514,12 @@ function _netHandleMsg(txt){
     // is not special-cased: a missing ep reads as epoch 0 and gates like any other.
     if(_netSess
        && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')
-       && (m.ep|0) !== ((typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess.epoch|0))) return;
+       && (m.ep|0) !== ((typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess.epoch|0))){
+        // A peer stamping an epoch BELOW our line announces a missed start on every packet it
+        // sends. Recover off that, not off the player pressing something.
+        _netReshipStart(_netSess, m.ep|0);
+        return;
+    }
     switch(m.t){
         case 'sched':
         case 'rst': {   // the match / rematch / level start moment, issued by the server, relayed by P0
@@ -548,9 +572,12 @@ function _netHandleMsg(txt){
             if(_netSess && _netSess.game){ _netSess.peerAgain = true; _netMaybeRestart(); _uiDirty = true; }
             break;
         case 'reqlvl':   // joiner asks P0 to open the next level; the epoch pins it to the boundary
-            if(_netSess && _netSess.game && _netSess.role === 'host'
-               && (typeof m.epoch !== 'number' || (m.epoch|0) === (_netSess.epoch|0)))
-                _netStartNextLevel(_netSess);
+            if(_netSess && _netSess.game && _netSess.role === 'host'){
+                if(typeof m.epoch !== 'number' || (m.epoch|0) === (_netSess.epoch|0)) _netStartNextLevel(_netSess);
+                // Behind our line: not an ask for the NEXT boundary, but a joiner that missed the
+                // one we already opened, re-asking with the only epoch it has.
+                else _netReshipStart(_netSess, m.epoch|0);
+            }
             break;
         case 'bye': _netSessionEnd('OPPONENT LEFT'); break;
         case 'pi': _netDbg.hbRx++; break;   // liveness ping: receiving it already refreshed lastRecv
