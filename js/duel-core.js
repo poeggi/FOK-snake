@@ -738,11 +738,11 @@ function _rbRollback(toTick){
     _replaying = false;
     simEvents.length = 0;
     if(_rbRing.length > RB_RING) _rbRing.splice(0, _rbRing.length - RB_RING);
-    if(_barsV !== preBarsV && typeof renderBarsOffscreen === 'function') renderBarsOffscreen();
-    if(keep === 'quitConfirm'){                  // the quit overlay survives a rewind
-        if(phase !== 'duelOver'){ prevPhase = phase; phase = keep; }
-        else Snd.duck(false);
-    }
+    // Presentation reconciliation is the HOME's business, not the core's: the main-thread
+    // home installs _rbPostRollback (game.js) to re-render moved bars and keep the quit
+    // overlay up; the worker home installs none (its bars re-render with the next posted
+    // frame, and quitConfirm is a main-thread phase its sim never holds).
+    if(typeof _rbPostRollback === 'function') _rbPostRollback(_barsV !== preBarsV, keep);
     _rbDbg.rb++; _rbDbg.resim += (target - from + 1);
     _rbDbg.maxRew = Math.max(_rbDbg.maxRew, target - from + 1);
     _uiDirty = true;

@@ -910,6 +910,16 @@ function beginGame(){
     if(typeof netNoteGameStart === 'function') netNoteGameStart(seed);
     _wsend({ t:'start', seed, bestScore:bestScore() });
 }
+// duel-core's rollback presentation hook (main-thread home only; the worker home has no
+// renderer and its sim phase never holds the quit overlay). Re-renders bars the re-sim
+// moved and keeps the quit overlay up across a rewind.
+function _rbPostRollback(barsChanged, keep){
+    if(barsChanged && typeof renderBarsOffscreen === 'function') renderBarsOffscreen();
+    if(keep === 'quitConfirm'){                  // the quit overlay survives a rewind
+        if(phase !== 'duelOver'){ prevPhase = phase; phase = keep; }
+        else Snd.duck(false);
+    }
+}
 // Online duel entry (called by net-session.js when the DataChannel opens on both ends).
 // BOTH clients start the same deterministic sim from the shared seed and run it
 // locally (in-process). There is no host and no authority: each side sends only
