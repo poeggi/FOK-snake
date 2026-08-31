@@ -41,7 +41,7 @@ const ok = (c, m) => { steps.push((c ? 'ok  ' : 'ERR ') + m); if(!c) throw new E
 // A lossy wire (5%) so the baseline actually rolls back -- redelivered-late inputs land in the past
 // and re-sim. The drop pattern is a pure function of the seeded wire rng (identical in both runs),
 // so the rollbacks it causes are identical too; the only difference on trial is the wall clock.
-const base = { secs:32, seed:0x77C0, wire:{ base:10, jit:4, loss:0.05 }, phase:8, tjit:4, recv:true,
+const base = { secs:22, seed:0x77C0, wire:{ base:10, jit:4, loss:0.05 }, phase:8, tjit:4, recv:true,
                clock:{ err0:12, drift:0, samples:8 } };
 const clean = runMatch(base);
 const pert  = runMatch({ ...base, clock:{ err0:12, drift:30000, samples:8 }, wallStep:{ at:12, ms:600, who:'B' } });

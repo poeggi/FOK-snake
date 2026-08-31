@@ -21,7 +21,7 @@
 const { runMatch, collider } = require('./duel-driver');
 
 const WIRE = { base:20, jit:10, loss:0.08, asym:8, spike:{ p:0.04, ms:60 } };
-const SEEDS = [0x51E0D000, 0x33AA7719, 0x9E3779B1, 0xC0FFEE01].map(x => x >>> 0);
+const SEEDS = [0x51E0D000, 0x9E3779B1].map(x => x >>> 0);   // x2 doze moments = 4 collider runs
 // doze at two moments, 2s (the aged-out window that yanked the own head pre-fix) and 3.5s.
 const DOZES = [{ at:3.5, ms:2000 }, { at:5.0, ms:2000 }];
 

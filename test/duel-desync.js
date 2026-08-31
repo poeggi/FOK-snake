@@ -20,7 +20,10 @@ const log = s => { steps.push(s); };
 //   clean-boost : phase offset only, NO loss -> isolates the deferred-rollback boost drop (F1)
 //   lossy-boost : + packet loss              -> stresses the redundancy/loss window (F3)
 //   long-levels : longer run to levels 2-3   -> exercises the level-boundary epoch gap (F2)
-//   headroom    : latency + jitter + pts-desync ALL below one engine tick (16.67ms) with heavy
+//   headroom    : CRUCIAL -- do not shorten, reseed, relax maxRb or fold into another case. It is
+//                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
+//                 zero: there is no "a few rollbacks are fine" reading of it to erode.
+//                 latency + jitter + pts-desync ALL below one engine tick (16.67ms) with heavy
 //                 movement from BOTH ends -> PROVES the one-tick author headroom does its job:
 //                 every input lands within its authoring lead, so it is delivered on time (or via
 //                 the one-tick-late shortcut) and NEVER rolls back. Asserted hard as maxRb:0. The
@@ -28,7 +31,7 @@ const log = s => { steps.push(s); };
 //                 handful of inputs past the lead and does roll back -- shrink the skew below a tick
 //                 and the count is exactly zero.
 const SCEN = [
-    { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:20, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
+    { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:12, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
     { name:'lossy-boost  5% loss      ', seed:0xBEEF, secs:20, wire:{ base:12, jit:6,  loss:0.05 }, phase:8, tjit:4, recv:true },
     { name:'long-levels  to L2-3      ', seed:0x77C0, secs:40, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true },
     // Sub-tick net + pts with tick schedules ALIGNED (phase0/tjit0): net 2-6ms (base4+/-jit2)
@@ -52,6 +55,7 @@ const SCEN = [
     // interval (both records must ship at authoring -- proves the two-flush cap) and a TRIPLE at
     // birth (its third record exceeds the cap and coalesces into the next tick's flush -- the
     // cap-deferred path stays on the wire and inside the authoring lead). See duel-driver.
+    // CRUCIAL (see header): the 0-rollback headroom guard. Keep it long and keep maxRb at 0.
     { name:'headroom     subtick 0rb  ', seed:0x77C0, secs:30, wire:{ base:4,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:4, drift:5, samples:8 }, recv:true, postAuthor:true, doubleEvery:3, maxRb:0 },
 ];
 

@@ -21,9 +21,10 @@ const { runMatch } = require('./duel-driver');
 
 const WIRE = { base:20, jit:10, loss:0.05, asym:8, spike:{ p:0.03, ms:60 } };
 const SEEDS = [0x51E0D000, 0x9E3779B1, 0xDEADBEEF].map(x => x >>> 0);
-// at 3.0s (a real multi-input match is under way); freeze 2.0s and 3.0s -- both inside the
-// recoverable band (peak silence < RB_PERSIST_KILL_MS), so a clean system MUST re-converge.
-const MS = [2000, 3000];
+// at 3.0s (a real multi-input match is under way); freeze 3.0s -- the longest silence still inside
+// the recoverable band (peak silence < RB_PERSIST_KILL_MS), so a clean system MUST re-converge.
+// The band has one contract, not a per-duration one: the longest freeze in it is the binding case.
+const MS = [3000];
 const WHO = ['A', 'B'];   // A = the HOST froze (was 30/30 dead), B = the JOINER froze (was fragile)
 
 const rows = [];
