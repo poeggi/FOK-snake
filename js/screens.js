@@ -539,6 +539,19 @@ function drawScores() {
     ct('L/R:tab   A/ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
 }
 
+// Achievement-page geometry, read from css/style.css (:root --ach-*) so BASE, EXPERT and
+// EGGS share ONE layout -- the pages used to carry their own top offsets and drifted apart.
+// Same CSS-token pattern as FONT/GLOW (js/text.js): defaults keep the headless harness,
+// which has no getComputedStyle, drawing the identical layout.
+const ACH = (() => {
+    let rt = null; try { rt = getComputedStyle(document.documentElement); } catch(_) {}
+    const v = (n, def) => { try { return parseInt(rt.getPropertyValue(n)) || def; } catch(_) { return def; } };
+    return {
+        TITLE_Y: v('--ach-title-y',26), SUB_Y: v('--ach-sub-y',53), TOP: v('--ach-top',72),
+        COLS: v('--ach-cols',3), CARD_W: v('--ach-card-w',188), CARD_H: v('--ach-card-h',66),
+        GAP_X: v('--ach-gap-x',4), GAP_Y: v('--ach-gap-y',4),
+    };
+})();
 function drawAchievements() {
     drawGrid(); drawOvBg(0.92);
     const donated=!!(cfg.shopItems&&cfg.shopItems['donate']);
@@ -548,19 +561,19 @@ function drawAchievements() {
     const onEggs=achPage===0, onExpert=achPage===2;
     const list=onEggs?EGG_ACHIEVEMENTS:onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
     const titleColor=onEggs?'#ff4488':onExpert?'#ff8800':'#7fff7f';
-    ctg('ACHIEVEMENTS',CW/2,28,titleColor,FONT.TITLE, GLOW.TITLE);
+    ctg('ACHIEVEMENTS',CW/2,ACH.TITLE_Y,titleColor,FONT.TITLE, GLOW.TITLE);
     // The indicator never counts the egg page (its N is the visible pages only) and the
     // visible pages never mention it: on it the position reads 0/N, off it nothing leaks.
     if(onEggs){
-        ct(`< EGGS  0/${n} >`,CW/2,42,'#ff4488',FONT.HINT);
+        ct(`< EGGS  0/${n} >`,CW/2,ACH.SUB_Y,'#ff4488',FONT.HINT);
     } else if(expert){
-        ct(onExpert?'< EXPERT  2/2 >':'< BASE  1/2 >',CW/2,42,onExpert?'#ffaa44':'#7fff7f',FONT.HINT);
+        ct(onExpert?'< EXPERT  2/2 >':'< BASE  1/2 >',CW/2,ACH.SUB_Y,onExpert?'#ffaa44':'#7fff7f',FONT.HINT);
     } else if(allBase&&!donated){
-        ct('DONATE in SHOP to unlock EXPERT page',CW/2,42,'#ff4488',FONT.HINT);
+        ct('DONATE in SHOP to unlock EXPERT page',CW/2,ACH.SUB_Y,'#ff4488',FONT.HINT);
     }
-    const cols=3, aw=188, ah=68, gx=4, gy=4;
+    const cols=ACH.COLS, aw=ACH.CARD_W, ah=ACH.CARD_H, gx=ACH.GAP_X, gy=ACH.GAP_Y;
     const ox=(CW-(cols*aw+(cols-1)*gx))/2;
-    const oy=(onEggs||expert)?54:64;
+    const oy=ACH.TOP;   // one top for every page: a short page just leaves the rest empty
     list.forEach((a,i)=>{
         const col=i%cols, row=Math.floor(i/cols);
         const x=ox+col*(aw+gx), y=oy+row*(ah+gy);

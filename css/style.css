@@ -1,4 +1,20 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Canvas ACHIEVEMENT-PAGE geometry -- SINGLE SOURCE OF TRUTH, read into the JS ACH
+   object (js/screens.js), the same CSS-token pattern the font/glow scales use. BASE,
+   EXPERT and EGGS all draw from these, so the three pages cannot drift apart: change
+   a position or a card size here, once, and every page follows.
+   Headline, indicator and first card row sit where SHOP puts its headline, tab row and
+   first item, so the two screens read as one family (achievements have no tabs). */
+:root {
+    --ach-title-y:  26px;   /* headline centre                                    */
+    --ach-sub-y:    53px;   /* page-indicator centre (SHOP's tab-row centre)       */
+    --ach-top:      72px;   /* top of the first card row                          */
+    --ach-cols:      3;     /* cards per row                                      */
+    --ach-card-w:  188px;   /* card width                                         */
+    --ach-card-h:   66px;   /* card height: 4 rows must still clear the tally line */
+    --ach-gap-x:     4px;
+    --ach-gap-y:     4px;
+}
 /* Layout in two rules:
    R1 (fit): the visible game (canvas + chrome that is actually shown) must fit the
              viewport. #wrap is flex:1 and takes whatever space the chrome leaves, so

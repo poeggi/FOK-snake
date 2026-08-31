@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.5.26';
+const APP_VERSION = 'v2.5.27';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -152,7 +152,7 @@ const EXPERT_ACHIEVEMENTS = [
     { id:'hard_champ',  name:'IRON SNAKE',    desc:'Beat all 10 levels on hard',
       icon:{p:{A:'#cccccc',B:'#888888'},
       d:['.AAAAAA.','AAAAAAAA','ABBBBBBA','ABBBBBBA','.AAAAAA.','..AAAA..','...AA...','........']}},
-    { id:'triple_perf', name:'TRIPLE ACE',    desc:'3 perfect levels in one game',
+    { id:'triple_perf', name:'TRIPLE ACE',    desc:'3 perfect levels in a run',
       icon:{p:{A:'#ffd700'},
       d:['......AA','....AAAA','..AAAAAA','AAAAAAAA','........','........','........','........']}},
     { id:'no_deaths',   name:'UNTOUCHABLE',   desc:'Beat level 10 with max lives',
@@ -172,6 +172,10 @@ const EXPERT_ACHIEVEMENTS = [
       d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
 ];
 
+// The blank an unbuilt egg wears: a grey question mark, shared so the reserved slots
+// cannot drift apart from each other.
+const EGG_BLANK_ICON = {p:{A:'#666666'},
+    d:['..AAAA..','.AA..AA.','.....AA.','....AA..','...AA...','........','...AA...','........']};
 // The hidden page: each of these is an easter egg, and the page itself is one too --
 // it only becomes swipeable once a first egg is found, and swiping to it unlocks the
 // last. Never listed on the visible pages, so a fresh install cannot know they exist.
@@ -182,9 +186,14 @@ const EGG_ACHIEVEMENTS = [
     { id:'egg_credits',  name:'TRUE ENDING', desc:'No easter eggs in the credits',
       icon:{p:{A:'#ff5555',B:'#ffffff'},
       d:['........','..BBBB..','.B....B.','B..AA..B','B..AA..B','.B....B.','..BBBB..','........']}},
-    { id:'egg_page',     name:'OFF THE MAP', desc:'Swipe to a page that is not there',
+    { id:'egg_page',     name:'OFF THE MAP', desc:'Swipe past the last page',
       icon:{p:{A:'#ff4488',B:'#aa2255'},
       d:['..AAAA..','.AA..AA.','.....AA.','....AA..','...AA...','........','...AA...','........']}},
+    // Reserved slots: the page is meant to read as incomplete, so the eggs still to be
+    // built are already on it as blanks. Name and desc get filled in when each one lands.
+    { id:'egg_tbd1',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
+    { id:'egg_tbd2',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
+    { id:'egg_tbd3',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
 ];
 
 const SHOP_ITEMS = [
