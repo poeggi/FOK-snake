@@ -35,10 +35,23 @@ const SCEN = [
     // plus a real independent-clock pts-desync (err0 4ms + small drift) sum to ~10ms, a safe
     // 6.67ms inside the 16.67ms tick. It is the SUM of net + pts + any schedule skew -- not any
     // one term -- that must stay under a tick; with skew zeroed this is a KNOWN-0rb condition, so
-    // maxRb:0 is exact. The +1 authoring headroom, delivered the same tick by netTickPost, absorbs
-    // every input. Any rb here is a real headroom leak to debug, and it holds across the seed sweep
-    // (not seed-sensitive). Schedule skew is a separate, >1-tick-capable stress -- see clean-boost.
-    { name:'headroom     subtick 0rb  ', seed:0x77C0, secs:30, wire:{ base:4,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:4, drift:5, samples:8 }, recv:true, maxRb:0 },
+    // maxRb:0 is exact. Any rb here is a real headroom leak to debug, and it holds across the
+    // seed sweep (not seed-sensitive). Schedule skew is a separate stress -- see clean-boost.
+    //
+    // postAuthor: worst-case input phase. Steers are authored AFTER their tick ran (a real touch
+    // lands mid-interval, after the boundary's flush already left) and each is HELD to the last
+    // interval before its target step boundary (_gDue==1; the target is the same from anywhere in
+    // the window, so the pilot loses nothing). A flush deferred to the next tick then has exactly
+    // ZERO wire budget: it arrives transit-late, a guaranteed rollback. Only the send-at-authoring
+    // contract (netLocalInput's leading-edge flush; netTickPost for boost) keeps a
+    // full-tick-minus-transit budget and holds rb at 0. A deferred-only flush fails this scenario
+    // with rb in the hundreds. The default authoring path is DOUBLY best-case -- pre-tick (the
+    // same boundary's flush ships the record, zero deferral) and at maximum _gDue (autopilot
+    // intents are born right after a game step) -- which is how that defect stayed green here.
+    // doubleEvery: every 3rd intent is a DOUBLE gesture (steer + its sim-rejected reverse in one
+    // interval), so the one-flush-per-tick cap's coalesce path is on the wire too -- the second
+    // record ships a tick later and must still arrive inside the authoring lead (see duel-driver).
+    { name:'headroom     subtick 0rb  ', seed:0x77C0, secs:30, wire:{ base:4,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:4, drift:5, samples:8 }, recv:true, postAuthor:true, doubleEvery:3, maxRb:0 },
 ];
 
 let failed = 0;

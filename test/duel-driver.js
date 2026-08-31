@@ -157,6 +157,7 @@ const HOOKS = (id) => `
   globalThis.__phase   = ()=> phase;
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__simTick = ()=> simTick;
+  globalThis.__gdue    = ()=> _gDue;   // ticks until the next game-step boundary (the double-gesture budget gate, see fireOnce)
   globalThis.__rbBase  = ()=> _rbBase;
   globalThis.__rbDepth = ()=> RB_DEPTH;   // immutability horizon: a tick this far back can no longer be rewritten by any accepted input
   globalThis.__rbDbg   = ()=> Object.assign({}, _rbDbg);
@@ -316,6 +317,26 @@ function applyDirective(C, out){
 //   opts.clock : { drift, err0, samples } | null            -- independent device clocks
 //   opts.clockLeadsFire : with a fixed offset (bursts off), err0 also leads B's fire schedule (bPhase)
 //   opts.director : (view)=>directive  (defaults to autopilot)
+//   opts.postAuthor : worst-case input phase. The default authors each steer BEFORE __tick1 --
+//                     the BEST case: the same boundary's netTickPre flush ships the record with
+//                     zero deferral. Worse, the autopilot's view only changes at game-step
+//                     boundaries, so every intent is born right after a step, at MAXIMUM _gDue --
+//                     the fattest wire budget there is. That double best-case is exactly how a
+//                     deferred-flush latency defect stays invisible here. postAuthor closes both
+//                     holes: steers are authored AFTER the tick runs (a real touch lands
+//                     mid-interval, after the boundary's flush already left) and each one is HELD
+//                     to the last interval before its target boundary (__gdue()==1; the target,
+//                     simTick + _gDue, is the same from anywhere in the window, so the pilot is
+//                     not degraded). A send deferred to the next tick's flush then has exactly
+//                     ZERO wire budget -- late by the transit time, a guaranteed rollback --
+//                     while a send at authoring keeps a full tick minus transit.
+//   opts.doubleEvery: with postAuthor, every Nth intent is instead authored at birth as a DOUBLE
+//                     gesture -- the steer plus its REVERSE back-to-back (two wire records in one
+//                     interval; the reverse passes the author gate but is dropped by the sim on
+//                     BOTH clients, so gameplay is untouched). The second record hits the
+//                     one-flush-per-tick cap and ships at the NEXT tick's flush, so doubles need
+//                     birth at __gdue()>=2 -- inside that budget a coalesced second record still
+//                     arrives in time and a 0rb assertion stays exact.
 function runMatch(opts){
     const secs = opts.secs || 20, W = opts.wire || {};
     const seed = (opts.seed >>> 0) || 0xD0E1;
@@ -353,8 +374,8 @@ function runMatch(opts){
     const bLead = (CK && opts.clockLeadsFire) ? e0 : 0;
     const bPhase = (opts.phase || 0) - bLead;
     const sch = {
-        A:{ c:A, dir:'AB', me:'A', pe:'B', k:0, next:0,      phase:0,      busyUntil:0 },
-        B:{ c:B, dir:'BA', me:'B', pe:'A', k:0, next:bPhase, phase:bPhase, busyUntil:0 },
+        A:{ c:A, dir:'AB', me:'A', pe:'B', k:0, next:0,      phase:0,      busyUntil:0, gest:0 },
+        B:{ c:B, dir:'BA', me:'B', pe:'A', k:0, next:bPhase, phase:bPhase, busyUntil:0, gest:0 },
     };
     // Continuous divergence: compare each client's ring snapshot at a settled PAST tick.
     let firstDiverge = null, maxLocalJump = 0, localJumps = 0;
@@ -430,10 +451,46 @@ function runMatch(opts){
     const fireOnce = (S)=>{
         S.c.__now = 0 | S.next;
         const v = S.c.__view();
-        if(v){ levelReached = Math.max(levelReached, v.level); applyDirective(S.c, dir(v)); }
+        if(v){
+            levelReached = Math.max(levelReached, v.level);
+            const out = Object.assign({}, dir(v));
+            if(opts.postAuthor && out.steer){
+                if(!S.pend) S.fresh = true;   // a brand-new intent (not a re-decide of the held one)
+                S.pend = out.steer;           // withhold it from the pre-tick path (see runMatch docs)
+                delete out.steer;
+            }
+            applyDirective(S.c, out);
+        }
+        if(v && !v.alive) S.pend = null;   // a death voids the held intent -- never steer the respawn blindly
         const r0 = opts.recv ? S.c.__rbDbg().resim : 0;
         S.c.__tick1();
         if(CATCHUP) S.c.__tickCatchup();
+        if(opts.postAuthor && S.pend){
+            // The held steer targets the same game-step boundary (simTick + _gDue) no matter which
+            // interval of the window authors it -- so holding costs the pilot nothing and lets the
+            // authoring phase be chosen adversarially. Two placements, both post-tick (the
+            // boundary's own flush is already gone, like a real mid-interval touch):
+            //   worst case (singles): the LAST interval before the target boundary (__gdue()==1).
+            //     A send deferred to the next tick's flush leaves at that boundary itself -- zero
+            //     wire budget, late by transit, a guaranteed rollback. Send-at-authoring keeps a
+            //     full tick minus transit.
+            //   at birth (every doubleEvery-th intent, needs __gdue()>=2): a DOUBLE gesture -- the
+            //     steer plus its sim-rejected reverse. The capped second record ships a tick later
+            //     and needs that extra boundary of budget to stay 0rb (which is the point: the
+            //     coalesce path must stay inside the authoring lead).
+            const gd = S.c.__gdue();
+            if(S.fresh && opts.doubleEvery && (S.gest + 1) % opts.doubleEvery === 0 && gd >= 2){
+                S.gest++;
+                S.c.__steer(S.pend);
+                S.c.__steer({ x:-S.pend.x, y:-S.pend.y });   // the game-neutral second gesture
+                S.pend = null;
+            } else if(gd === 1){
+                S.gest++;
+                S.c.__steer(S.pend);
+                S.pend = null;
+            }
+            S.fresh = false;
+        }
         if(opts.recv) S.busyUntil = (0 | S.next) + FRAME_BUSY + (S.c.__rbDbg().resim - r0) * RESIM_MS;
         noteHead(S, S.c.__view());
         S.k++;
