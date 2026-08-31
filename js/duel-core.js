@@ -105,7 +105,7 @@ var _netInFlush = 0;
 // earliest tick that needs rewinding here; netTickPre does ONE rollback per tick covering
 // them all, so the expensive op is capped at the tick rate no matter the packet rate.
 var _rbRewindTo = Infinity;
-function _rbDbgFresh(){ return { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, stbig:0, desyncAt:'' }; }
+function _rbDbgFresh(){ return { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, hashLost:0, lost:0, live:0, fix:0, stbig:0, desyncAt:'' }; }
 var _rbDbg = _rbDbgFresh();
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
 // and it ticks through the menus. So two clients enter a duel with wildly different
@@ -142,7 +142,7 @@ function _rbSentAdd(rec){
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
-    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
+    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = [];
     _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
     _netInRepeat = 0;
@@ -272,7 +272,7 @@ function _rbCheckHash(m){
     // mismatch diff (_rbHashSettle) to iterate.
     const f = Array.isArray(m.f) ? m.f.slice(0, RB_HASH_DUEL.length) : null;
     _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f });
-    if(_rbHashQ.length > 8) _rbHashQ.shift();
+    if(_rbHashQ.length > 8){ _rbHashQ.shift(); _rbDbg.hashLost++; }   // evicted before it could be judged: count it, never drop a verdict in silence
     // A hash rides RB_HASH_LAG behind its sender's live tick, so reconstruct that live tick to
     // tell "peer froze" from "hash is just old". Backup detector for a quiet straightaway where no
     // 'in' packet flows; the packet-level detector in _netPeerInput is the primary (no built-in lag).
@@ -284,16 +284,40 @@ function _rbRingFind(tk){
     for(let j = _rbRing.length - 1; j >= 0; j--) if(_rbRing[j].tk === tk) return _rbRing[j];
     return null;
 }
-// Called each tick: compare whatever has settled and is still inside the ring.
+// Our OWN frozen hash per hash tick, held independently of the snapshot ring. A verdict
+// compares the peer's hash for tick tk against ours for tk, so it can only be reached while a
+// settled copy of tk still exists on this side. Deriving that copy from the ring ties detection
+// to RB_RING: the ring spans RB_RING*RB_SNAP_EVERY ticks while the verdict sits RB_HASH_LAG
+// behind, leaving only a handful of ticks of arrival margin -- past it a peer hash has nothing
+// to compare against and yields NO verdict at all, and with no verdict there is no OUT OF SYNC
+// banner, no 'st'/'rs' repair and no escalation, so a real divergence stays permanent AND
+// silent. We already compute this exact value when we send our own hash for the same tick, so
+// keep it: RB_MYHASH_KEEP entries one hash-tick apart tolerate several seconds of arrival lag,
+// whatever the ring depth is tuned to.
+const RB_MYHASH_KEEP = 8;
+var _rbMyHash = [];          // [{tk,h,f}] oldest first, one per hash tick
+function _rbMyHashAdd(tk, hb){
+    if(_rbMyHash.length && _rbMyHash[_rbMyHash.length - 1].tk === tk) return;
+    _rbMyHash.push({ tk, h:hb.h, f:hb.f });
+    if(_rbMyHash.length > RB_MYHASH_KEEP) _rbMyHash.shift();
+}
+function _rbMyHashFind(tk){
+    for(let j = _rbMyHash.length - 1; j >= 0; j--) if(_rbMyHash[j].tk === tk) return _rbMyHash[j];
+    return null;
+}
+// Called each tick: judge whatever has settled and we still hold a comparable copy of.
 function _rbHashSettle(){
     if(!_rbHashQ.length) return;
     for(let i = _rbHashQ.length - 1; i >= 0; i--){
         const q = _rbHashQ[i];
         if(simTick < q.tk + RB_SETTLE) continue;          // still in flight: leave it parked
         _rbHashQ.splice(i, 1);
-        const e = _rbRingFind(q.tk);
-        if(!e) continue;                                   // aged out of the ring: not comparable
-        const hb = _rbHashBoth(e.snap);   // one pass: the whole hash for the verdict, the field hashes for the diff
+        // Our settled hash for that tick: the cache first (it outlives the ring), the ring
+        // second for a tk off the shared hash cadence. _rbHashBoth is one pass: the whole
+        // hash for the verdict, the field hashes for the diff.
+        let hb = _rbMyHashFind(q.tk);
+        if(!hb){ const e = _rbRingFind(q.tk); if(e) hb = _rbHashBoth(e.snap); }
+        if(!hb){ _rbDbg.hashLost++; continue; }             // no settled copy of that tick here: not comparable
         if(hb.h === q.h){ _rbDbg.hashOk++; _rbBadSince = 0; continue; }   // agreement heals the escalation clock
         // Deterministic sims do not drift back into agreement: this one is permanent.
         // NOT a connection warning -- the link is fine, the worlds are not.
@@ -673,6 +697,7 @@ function netTickPre(){
             const he = _rbRingFind(hk);
             if(he){
                 const hb = _rbHashBoth(he.snap);
+                _rbMyHashAdd(hk, hb);   // the peer's hash for hk is judged against THIS, however late it lands
                 _netSend({ t:'h', tk:_rbToWire(hk), h:hb.h, f:hb.f });
             }
         }

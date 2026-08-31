@@ -248,6 +248,29 @@ runTest('SMOKE-NET', `
     if(netDuelWarn()!==null) throw 'a healed desync must clear the banner';
     log('divergence detection ok: hash agrees, mismatch flagged, stale hash ignored, OUT OF SYNC tracks it');
 
+    // ---- a hash that outlives the snapshot ring must still be judged ----
+    // The ring spans RB_RING*RB_SNAP_EVERY ticks while the verdict sits RB_HASH_LAG behind it,
+    // so deriving our side of the compare from the ring leaves only a handful of ticks of
+    // arrival margin -- on any link slower than a LAN the peer's hash lands after the ring
+    // dropped its tick. That produced NO verdict at all: no OUT OF SYNC, no 'st'/'rs' repair,
+    // no escalation, so a real divergence ran on forever and neither side ever said a word.
+    // _rbMyHash is what keeps the tick comparable; hashLost is what makes any remaining
+    // un-judgeable hash visible instead of silent.
+    const _mh=_rbMyHash[_rbMyHash.length-1];
+    if(!_mh) throw 'sending our hash for a tick must cache our own copy of it';
+    for(let i=0;i<RB_RING*RB_SNAP_EVERY+8;i++){ netTickPre(); update(); }
+    if(_rbRingFind(_mh.tk)) throw 'setup: that tick must have aged out of the ring -- it is the case this guards';
+    const _dz1=_rbDbg.desync, _ok1=_rbDbg.hashOk, _hl1=_rbDbg.hashLost|0;
+    _netHandleMsg(JSON.stringify({t:'h', tk:_rbToWire(_mh.tk), h:_mh.h}));
+    netTickPre(); update();
+    if(_rbDbg.hashOk!==_ok1+1||_rbDbg.desync!==_dz1) throw 'an agreeing hash must still be judged after its tick left the ring';
+    _netHandleMsg(JSON.stringify({t:'h', tk:_rbToWire(_mh.tk), h:(_mh.h^0xdeadbeef)>>>0}));
+    netTickPre(); update();
+    if(_rbDbg.desync!==_dz1+1) throw 'a mismatched hash must still be reported after its tick left the ring';
+    if((_rbDbg.hashLost|0)!==_hl1) throw 'a comparable hash must not be counted as un-judgeable';
+    _rbBadSince=0; _rbResyncSend=0;
+    log('late-hash detection ok: a hash outliving the ring is judged, not dropped in silence');
+
     // ---- in-game warning: CONNECTION LOST is a PURE silence detector ----
     // Nothing on the wire for ~2 heartbeats is the ONLY thing that flashes it. A refused
     // input is not silence (the packet still arrived), so it must NOT warn.
