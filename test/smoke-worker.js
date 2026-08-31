@@ -55,9 +55,11 @@ try {
         { q:3, tk:tk-1, k:'be' } ] } });
     step(50);
 
-    // Forced hash mismatch for a settled ring tick -> a desync verdict + one repair.
+    // Forced hash mismatch for a settled ring tick -> a desync verdict + repair. The
+    // per-field hashes are a positional array (RB_HASH_DUEL order); every slot wrong
+    // means the diff names every field and fires both repairs (st + rs).
     const ringTk = g('_rbRing[Math.max(0,_rbRing.length-8)].tk');
-    send({ t:'peerPkt', m:{ t:'h', tk:ringTk, h:12345, f:{ players:1 } } });
+    send({ t:'peerPkt', m:{ t:'h', tk:ringTk, h:12345, f: new Array(g('RB_HASH_DUEL.length')).fill(0x10000) } });
     step(10);
 
     // Transport-triggered full resync (host) -> a wire 'rs'.

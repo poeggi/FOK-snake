@@ -163,12 +163,21 @@ runTest('SMOKE-NET', `
     const _big=Math.max(...sent.map(x=>x.length));
     if(_big > NET_PKT_MAX) throw 'an input packet exceeds the datagram budget: '+_big+'B > '+NET_PKT_MAX;
     sent.length=0;
-    _netSend({ t:'h', tk:_rbToWire(simTick), h:_rbHash(simSnapshot()), f:_rbHashFields(simSnapshot()) });
+    const _hb=_rbHashBoth(simSnapshot());
+    _netSend({ t:'h', tk:_rbToWire(simTick), h:_hb.h, f:_hb.f });
     if(!sent.length) throw 'setup: the hash packet did not send';
     if(sent[0].length > NET_PKT_MAX) throw 'a hash packet exceeds the datagram budget: '+sent[0].length+'B > '+NET_PKT_MAX;
+    // The per-field hashes ride as a positional 16-bit array (RB_HASH_DUEL order) -- the
+    // names are shared code. 300B bounds the whole packet so the object shape (~575B)
+    // cannot silently come back.
+    const _hp=JSON.parse(sent[0]);
+    if(!Array.isArray(_hp.f)||_hp.f.length!==RB_HASH_DUEL.length) throw 'per-field hashes must be a full positional array';
+    if(_hp.f.some(x=>x!==(x&0xffff))) throw 'a per-field hash exceeds 16 bits';
+    if(sent[0].length > 300) throw 'the hash packet regressed past its array-shape budget: '+sent[0].length+'B > 300B';
     if(NET_PKT_MAX > 1210) throw 'the budget must leave ~70B of IP+UDP+DTLS+SCTP headers under a 1280 MTU';
-    _netSync={ofs:null, rtt:-1, at:0}; sent.length=0;
-    log('packet budget ok: worst-case input + hash both fit one datagram');
+    _netSync={ofs:null, rtt:-1, at:0};
+    log('packet budget ok: worst-case input '+_big+'B + hash '+sent[0].length+'B fit one datagram');
+    sent.length=0;
 
     // ---- version gate: MAJOR.MINOR only ----
     // The patch auto-bumps on EVERY commit, so an exact match meant two devices

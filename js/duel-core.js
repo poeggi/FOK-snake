@@ -33,7 +33,7 @@
 // Max JSON we will put in one DataChannel message. 1280 is the IPv6 minimum MTU (and a
 // safe IPv4 floor); ~70B goes to IP+UDP+DTLS+SCTP headers, so the payload budget is
 // what is left. Worst case today: an 'in' with a full 12-input redundant log (~711B)
-// and the 1Hz 'h' with per-field hashes (~575B). Declared HERE (not net.js):
+// and the 1Hz 'h' with its per-field hash array (~220B). Declared HERE (not net.js):
 // both the transport and the core enforce it, and the sim worker loads only the core.
 const NET_PKT_MAX = 1200;
 const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the nearest earlier
@@ -178,6 +178,10 @@ function _rbReset(){
 // I last sent"), not game state -- a monotonic counter over every bars change since
 // page load, so two devices carry different bases and it can never match. `bars`
 // itself is here, which is the actual state; the ticker says nothing extra.
+// ALSO the 'h' wire contract: the per-field hashes ride as a positional array in THIS
+// order (see _rbHashBoth), so reordering or extending the list changes the wire format.
+// That is a sim-minor bump -- the version gate refuses cross-minor duels, so both ends
+// of any match always share one list.
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
     'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
     '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner','_duelX10',
@@ -201,8 +205,10 @@ function _rbDuelSnap(){
 }
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
-// These cost ~600 bytes/s and turn an unactionable alarm into a field name, which is
-// the only way to find a divergence that only happens on real devices.
+// They turn an unactionable alarm into a field name, which is the only way to find a
+// divergence that only happens on real devices. On the wire they ride inside 'h' as a
+// positional 16-bit array (see _rbHashBoth); this named 32-bit map is the local half
+// of the mismatch diff and the tests' diagnostic view.
 function _rbHashFields(snap){
     const o = {};
     // JSON.stringify(undefined) is undefined, not a string: a field may legitimately be absent.
@@ -228,15 +234,21 @@ function _rbHash(snap){
 // Whole hash + per-field hashes from ONE serialization pass. JSON.stringify of the
 // whitelist object is byte-identical to '{' + the '"key":<field JSON>' parts joined by
 // ',' + '}' (insertion order; undefined fields omitted -- exactly what JSON.stringify
-// does), so both hashes come out wire-identical to _rbHash/_rbHashFields while the
-// state is only walked once. This is the 64-tick boundary's hot path: the separate
-// calls were the single biggest recurring main-thread spike.
+// does), so the whole-state hash comes out wire-identical to _rbHash while the state
+// is only walked once. This is the 64-tick boundary's hot path: the separate calls
+// were the single biggest recurring main-thread spike.
+// The per-field hashes ship as a positional 16-bit array in RB_HASH_DUEL order: the
+// field NAMES are shared code, so spelling them out once a second bought nothing, and
+// 16 bits still make a false per-field agreement a 1/65536 fluke -- behind a 32-bit
+// whole-state mismatch that already proved SOMETHING diverged. If every field collides
+// its way out of the diff, the verdict names none and fires both repairs (the safe
+// fallback in _rbHashSettle), so a collision can delay a targeted repair, not sync.
 function _rbHashBoth(snap){
     try {
-        const f = {}, parts = [];
+        const f = [], parts = [];
         for(const k of RB_HASH_DUEL){
             const s = JSON.stringify(snap[k]);   // undefined when the field is absent
-            f[k] = _rbStrHash(s === undefined ? 'u' : s);
+            f.push(_rbStrHash(s === undefined ? 'u' : s) & 0xffff);
             if(s !== undefined) parts.push('"' + k + '":' + s);
         }
         return { h: _rbStrHash('{' + parts.join(',') + '}'), f };
@@ -260,10 +272,10 @@ const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORIT
                              // simTick) still parks here until we reach its tick.
 var _rbHashQ = [];           // [{tk, h}] peer hashes waiting for their tick to settle
 function _rbCheckHash(m){
-    // Keep ONLY the known field-hash keys: a hostile peer could otherwise ship an `f`
-    // with tens of thousands of keys that the mismatch diff (_rbHashSettle) then iterates.
-    let f = null;
-    if(m.f && typeof m.f === 'object'){ f = {}; for(const k of RB_HASH_DUEL) if(k in m.f) f[k] = m.f[k]; }
+    // The per-field hashes are positional (RB_HASH_DUEL order): clamp to the known
+    // length so a hostile peer cannot ship tens of thousands of entries for the
+    // mismatch diff (_rbHashSettle) to iterate.
+    const f = Array.isArray(m.f) ? m.f.slice(0, RB_HASH_DUEL.length) : null;
     _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f });
     if(_rbHashQ.length > 8) _rbHashQ.shift();
     // A hash rides RB_HASH_LAG behind its sender's live tick, so reconstruct that live tick to
@@ -296,9 +308,14 @@ function _rbHashSettle(){
         // second and earns exactly one more shot; unknown fields fire both (safe).
         let where = '?', struct = true, snakes = true;
         if(q.f){
+            // Positional diff against our own field hashes, masked to the wire's 16 bits.
+            // A short or malformed array reads undefined past its end, mismatches every
+            // remaining field and lands in the fire-both-repairs fallback -- safe.
             const mine = _rbHashFields(e.snap), bad = [];
-            for(const k in mine) if(q.f[k] !== undefined && q.f[k] !== mine[k]) bad.push(k);
-            for(const k in q.f) if(mine[k] === undefined) bad.push(k + '(absent)');
+            for(let fi = 0; fi < RB_HASH_DUEL.length; fi++){
+                const k = RB_HASH_DUEL[fi];
+                if(q.f[fi] !== (mine[k] & 0xffff)) bad.push(k);
+            }
             if(bad.length){
                 where = bad.join(',');
                 snakes = bad.indexOf('players') >= 0;
