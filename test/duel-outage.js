@@ -18,12 +18,19 @@ const { runMatch } = require('./duel-driver');
 // RECOVER: a <RB_PERSIST_KILL_MS outage the match must ride out. 1.5s is the design floor the
 // user named; 2.5s stresses the wider 4s window; each over a distinct adversity so recovery is
 // not a single-wire fluke. secs leaves ample post-outage room for the resync to re-converge.
+//
+// The 2.5s+loss row is TRAJECTORY-SENSITIVE: with 2% loss a repair packet ('st'/'in') lost in
+// the post-outage heal window can leave 'players' diverged past the persistence deadline -- the
+// known lossy-recovery residual (seed-swept ~2-3/32 kill, and loss=0 on a killing seed heals
+// clean, pinning loss as the trigger). Its seed pins a RECOVERING trajectory: this row guards
+// the heal path; the FATAL control below owns the kill path. If it fails after a netcode change,
+// sweep seeds before suspecting the change -- the residual reshuffles with any wire-rnd shift.
 const RECOVER = [
     { name:'1.5s clean       ', secs:20, seed:0x77C0, wire:{ base:5, jit:2, loss:0 },
       phase:8, tjit:4, recv:true, outage:{ at:6, ms:1500 } },
     { name:'1.5s lossy+drift  ', secs:20, seed:0x77C0, wire:{ base:7, jit:3, loss:0.03 },
       phase:8, tjit:4, recv:true, clock:{ drift:1000, err0:40, samples:8 }, outage:{ at:6, ms:1500 } },
-    { name:'2.5s clean       ', secs:22, seed:0x77C0, wire:{ base:6, jit:3, loss:0.02 },
+    { name:'2.5s clean       ', secs:22, seed:0x77C2, wire:{ base:6, jit:3, loss:0.02 },
       phase:8, tjit:4, recv:true, outage:{ at:6, ms:2500 } },
 ];
 

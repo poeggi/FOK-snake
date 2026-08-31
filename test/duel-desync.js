@@ -48,9 +48,10 @@ const SCEN = [
     // with rb in the hundreds. The default authoring path is DOUBLY best-case -- pre-tick (the
     // same boundary's flush ships the record, zero deferral) and at maximum _gDue (autopilot
     // intents are born right after a game step) -- which is how that defect stayed green here.
-    // doubleEvery: every 3rd intent is a DOUBLE gesture (steer + its sim-rejected reverse in one
-    // interval), so the one-flush-per-tick cap's coalesce path is on the wire too -- the second
-    // record ships a tick later and must still arrive inside the authoring lead (see duel-driver).
+    // doubleEvery: every 3rd intent is a MULTI gesture, alternating between a DOUBLE in the last
+    // interval (both records must ship at authoring -- proves the two-flush cap) and a TRIPLE at
+    // birth (its third record exceeds the cap and coalesces into the next tick's flush -- the
+    // cap-deferred path stays on the wire and inside the authoring lead). See duel-driver.
     { name:'headroom     subtick 0rb  ', seed:0x77C0, secs:30, wire:{ base:4,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:4, drift:5, samples:8 }, recv:true, postAuthor:true, doubleEvery:3, maxRb:0 },
 ];
 

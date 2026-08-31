@@ -10,9 +10,11 @@
 // simulated wire and asserts lockstep with NO drops.
 //
 // The last pair is a FALSIFICATION: the same rematch-across-an-offset holds WITH the burst but,
-// with the burst nudge neutered (noBurst), the joiner begins the new match on its stale clock and
-// the peer's inputs are refused -- drops (CONNECTION LOST). That the control reliably drops is what
-// proves the burst, not mere latency slack, is doing the work.
+// with the burst nudge neutered (noBurst), the two clients restart ~err0 apart and STAY skewed:
+// every input from the ahead side lands ticks late on the behind side -- a per-input rollback
+// storm with half-second silent gaps (the CONNECTION LOST jank; under field loss it decays to
+// OUT OF SYNC). That the control reliably storms is what proves the burst, not mere latency
+// slack, is doing the work.
 const { runMatch } = require('./duel-driver');
 
 // A rematch fires mid-run (opts.rematch.at seconds). err0 is the initial relative clock offset the
@@ -26,8 +28,9 @@ const CONVERGE = [
       phase:8, tjit:4, recv:true, clock:{ drift:1200, err0:150, samples:8 }, rematch:{ at:14 } },
 ];
 
-// Falsification pair: a rematch across err0=150. The burst corrects it at the restart (drop=0);
-// without it the offset carries uncorrected and the peer's current-tick inputs are refused.
+// Falsification pair: a rematch across err0=150. The burst corrects it at the restart; without
+// it the offset carries uncorrected into the new match as a permanent tick skew, and the behind
+// side rolls back on virtually every peer input (rb in the hundreds over the run).
 const LB = { secs:34, seed:0x77C0, p2pBoundary:true, wire:{ base:6, jit:3, loss:0.02 },
     phase:8, tjit:4, recv:true, clock:{ drift:600, err0:150, samples:8 }, rematch:{ at:14 } };
 
@@ -53,16 +56,19 @@ for(const sc of CONVERGE){
     if(bad) failed++;
 }
 
-// Load-bearing: WITH the burst the rematch must hold (drop=0); the noBurst control must drop (the
-// CONNECTION LOST symptom) -- else the scenario no longer isolates the restart burst and the
-// guard is worthless, so fail it to force a re-examination.
+// Load-bearing: WITH the burst the rematch must hold (drop=0); the noBurst control must show
+// the skew storm. Both runs share the FIRST match (and its err0-skew rollbacks, ~97), so the
+// discriminator is the rb the control ADDS on top of the with-burst run (observed 217 vs 97) --
+// an absolute floor would ride on the shared first match and go stale with any unrelated shift.
+// If the gap collapses the scenario no longer isolates the restart burst and the guard is
+// worthless, so fail it to force a re-examination.
 const withBurst = runMatch(Object.assign({}, LB));
 const noBurst   = runMatch(Object.assign({}, LB, { noBurst:true }));
 const lbBad = withBurst.drop > 0 || !withBurst.converged || !!withBurst.firstDiverge
-    || !withBurst.rematched || noBurst.drop === 0;
+    || !withBurst.rematched || noBurst.rb < withBurst.rb + 80;
 steps.push('burst load-bearing'.padEnd(18)
-    + ' WITH: drop=' + withBurst.drop + ' conv=' + (withBurst.converged ? 'yes' : 'NO')
-    + '  | noBurst(ctrl): drop=' + noBurst.drop
+    + ' WITH: drop=' + withBurst.drop + ' rb=' + withBurst.rb + ' conv=' + (withBurst.converged ? 'yes' : 'NO')
+    + '  | noBurst(ctrl): rb=' + noBurst.rb
     + '   ' + (lbBad ? 'FAIL' : 'ok'));
 if(lbBad) failed++;
 

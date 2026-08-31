@@ -1422,7 +1422,13 @@ function _netSend(o, pre){
     // rollback tick-base reset at every level boundary, so stamp the epoch this copy was
     // authored under. The receiver drops a copy that crossed a boundary instead of mapping
     // its pre-reset ticks onto the new timeline. None of these types ever carry `pre`.
-    if((o.t === 'in' || o.t === 'h' || o.t === 'st' || o.t === 'rs') && o.ep === undefined){ o.ep = s.epoch|0; pre = undefined; }
+    if((o.t === 'in' || o.t === 'h' || o.t === 'st' || o.t === 'rs') && o.ep === undefined){
+        // Stamp the epoch of the TICK BASE the ticks are measured on (_rbEpoch), not the live
+        // session line: a halt bumps s.epoch while both sims keep ticking the old timeline until
+        // the scheduled start, and a packet from that window stamped with the bumped epoch walks
+        // through the receive gate onto a reset receiver -- whole-log refusals on every boundary.
+        o.ep = (typeof _rbEpoch === 'number') ? _rbEpoch|0 : (s.epoch|0); pre = undefined;
+    }
     if(o.w){
         // The radio-warm ping only needs SOMETHING on the wire within the doze interval, so if
         // real traffic (a turn, boost or heartbeat) already went out this window the ping is
@@ -2053,8 +2059,12 @@ function _netHandleMsg(txt){
     // in the "future" and _netPeerInput refuses them -- harmless now (a refusal never warns),
     // but still pure noise on every level transition. Drop a stale-epoch
     // tick packet silently here; sched/rst/reqlvl carry and check their own epoch already.
+    // Compared against _rbEpoch (the epoch of OUR tick base), not s.epoch: between a halt and
+    // the scheduled start the session line is already bumped while the sim still ticks the old
+    // timeline, and a packet from that window is only usable by a peer still on the SAME base.
     // Guarded on m.ep being present so a peer from before the stamp existed is unaffected.
-    if(typeof m.ep === 'number' && _netSess && (m.ep|0) !== (_netSess.epoch|0)
+    if(typeof m.ep === 'number' && _netSess
+       && (m.ep|0) !== ((typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_netSess.epoch|0))
        && (m.t === 'in' || m.t === 'h' || m.t === 'st' || m.t === 'rs')) return;
     switch(m.t){
         case 'sched':
@@ -2139,6 +2149,9 @@ function netDuelWarn(){
 // Which snake is ours. The offerer is P0 and the answerer P1 -- an index, not a
 // rank: neither client can touch the other's snake, and there is no authority.
 function netMyIndex(){ return (_netSess && _netSess.role === 'host') ? 0 : 1; }
+// The pair's current epoch line (halts so far this connection); _rbReset captures it as the
+// epoch of the tick base it is starting (see _rbEpoch).
+function netEpoch(){ return _netSess ? _netSess.epoch|0 : 0; }
 // The tick the SHARED CLOCK says we should be on, or null when there is no match
 // to pace (local play keeps its frame-time accumulator untouched).
 //

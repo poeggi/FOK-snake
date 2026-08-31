@@ -109,19 +109,23 @@ runTest('SMOKE-NET', `
     update();
     // OUR OWN steer is authored at its EFFECTIVE moment -- the next game-tick
     // boundary -- and applied from the shared input log there, exactly like the
-    // remote copy of the same record: local is a peer with zero latency. The FIRST
-    // turn of a tick ships the moment it is authored (leading-edge flush: waiting
-    // for netTickPre averaged half a tick of pure latency); any further turn in the
-    // same tick only marks the dirty flag and coalesces into the next tick's flush,
-    // so a touch burst still costs one packet per tick, not one per event.
+    // remote copy of the same record: local is a peer with zero latency. The first
+    // TWO turns of a tick ship the moment they are authored (leading-edge flush,
+    // capped at two: a fast double gesture lands two distinct turns inside one tick,
+    // and deferring the second made it a guaranteed-late flush); any further turn in
+    // the same tick only marks the dirty flag and coalesces into the next tick's
+    // flush, so a touch burst still costs bounded packets, not one per event.
     const w0=sent.length, q0h=players[0].dirQueue.length;
     gameSteer(0, GDIRS.ArrowUp);
     if(sent.length!==w0+1) throw 'the first steer of a tick must ship at once (leading-edge flush)';
-    gameSteer(0, GDIRS.ArrowDown);   // distinct turn, same tick: capped, only marks dirty (the sim later drops it as reverse-of-queued)
-    if(sent.length!==w0+1) throw 'a second steer in the same tick must not send -- capped at one input flush per tick';
+    gameSteer(0, GDIRS.ArrowDown);   // second distinct turn, same tick (the sim later drops it as reverse-of-queued)
+    if(sent.length!==w0+2) throw 'the second steer of a tick must ship at once too (the cap is two)';
+    gameSteer(0, GDIRS.ArrowRight);  // a third distinct turn: past the cap, only marks dirty
+    if(sent.length!==w0+2) throw 'a third steer in the same tick must not send -- capped at two input flushes per tick';
+    const wCap=sent.length;
     for(let i=0;i<20 && players[0].dirQueue.length===q0h;i++){ netTickPre(); update(); }
-    if(players[0].dirQueue.length!==q0h+1) throw 'own steer never reached our snake at its boundary';
-    if(sent.length<=w0) throw 'the tick must flush the pending steer to the wire';
+    if(players[0].dirQueue.length===q0h) throw 'own steer never reached our snake at its boundary';
+    if(sent.length<=wCap) throw 'the tick must flush the capped third steer to the wire';
     const pk=JSON.parse(sent[w0]);
     if(pk.t!=='in'||!Array.isArray(pk.l)||!pk.l.length) throw 'own steer must reach the peer as an input log';
     if(pk.s!==undefined||pk.snake!==undefined) throw 'no state may ride the wire';

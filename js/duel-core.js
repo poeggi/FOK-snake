@@ -78,24 +78,28 @@ const RB_RX_MAX = 12;
 // a real PC+iOS pair: raise it if the trickle is enough, lower it (~33ms at 2) if it dozes.
 const NET_WARM_EVERY = 4;
 var _rbSent = [];            // recent local inputs, resent for redundancy
-// Outgoing input is rate-limited to one packet per tick: authoring marks this, netTickPre
-// flushes it once (latest-valid, since _rbSent already holds the most recent records). A burst
-// of touches or key-repeats between two ticks collapses to a single send, not one packet each.
+// Deferred-input marker: authoring past the leading-edge cap sets this; netTickPre flushes
+// it once (latest-valid, since _rbSent already holds the most recent records). A burst of
+// touches or key-repeats beyond the cap collapses to a single send, not one packet each.
 var _netInDirty = false;
-// One-shot repair resend: armed by every input-carrying flush, fired by the NEXT tick's
-// netTickPre only if no fresh input flushed the ring again by then (that flush already
-// repeats the record -- the redundancy log rides every 'in'). Repairs a single lost
-// datagram from a player who then goes quiet in ~17ms instead of the 16-tick heartbeat's
-// ~267ms -- the difference between an invisible shallow rollback on the peer and a deep
-// one. Fires at most once per armed flush, never doubles a tick that already sent input.
+// One-shot repair resend, as a countdown: every input-carrying flush arms it to 2, each
+// input-free netTickPre counts it down, and the resend fires when it reaches 0 -- two tick
+// boundaries (~27-33ms) after the flush, not one. Real loss is bursty (a radio stall, a
+// full queue), so a repair only ~10-17ms behind the original tends to die with it; the
+// extra tick decorrelates the pair. A fresh input flush re-arms the countdown: that packet
+// already carries the whole redundancy log, so it IS the superseding repair. Still repairs
+// a lost datagram from a player who then goes quiet far inside the 16-tick heartbeat's
+// ~267ms, and still fires at most once per armed flush.
 var _netInRepeat = 0;
-// Cap for the leading-edge flush: true once an input-authored flush has gone out in the
-// current tick cycle (set by the immediate, netTickPre and netTickPost flushes, cleared
-// when netTickPre opens the next cycle). The FIRST turn of a cycle ships the moment it
-// is authored; anything further only marks _netInDirty and coalesces into the next
-// tick's flush -- so a touchmove storm still costs one packet per tick, not one per
-// event (the spam collapse that motivated the one-per-tick rate limit survives).
-var _netInSent = false;
+// Cap for the leading-edge flush: counts the input-authored flushes of the current tick
+// cycle (bumped by the immediate, netTickPre and netTickPost flushes, zeroed when
+// netTickPre opens the next cycle). The first TWO turns of a cycle ship the moment they
+// are authored -- a fast double gesture lands two distinct turns inside one tick, and
+// deferring the second turned it into a guaranteed-late flush whenever it was authored
+// on the last interval before its boundary. Anything past two only marks _netInDirty and
+// coalesces into the next tick's flush, so a touchmove storm still costs bounded packets
+// per tick, not one per event (the spam collapse the cap exists for survives).
+var _netInFlush = 0;
 // A received input that lands AFTER its own tick needs a rollback re-sim (the clone-heavy
 // path). Many packets draining together after a busy frame would each trigger their own --
 // a rollback flood on the single main thread. Instead every _netPeerInput only RECORDS the
@@ -111,6 +115,11 @@ var _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live
 // is the same instant on both. Without it every input lands outside the accept
 // window and is dropped -- which looks exactly like "nothing ever gets through".
 var _rbBase = 0;
+// The session epoch _rbBase belongs to, captured at the same reset that captures the base.
+// Tick-stream packets ('in'/'h'/'st'/'rs') are stamped and gated with THIS (see _netSend and
+// the epoch gate in _netHandleMsg), because s.epoch advances at the HALT while the sims keep
+// ticking the old timeline until the scheduled start -- the two disagree for that whole window.
+var _rbEpoch = 0;
 var _rbPhase = '';   // last seen duel phase: drives the re-anchor at level/respawn breaks
 var _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = healthy): repeated
                           // failed repairs escalate to a session end on the persistence deadline
@@ -133,12 +142,13 @@ function _rbReset(){
     _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
     _netInRepeat = 0;
-    _netInSent = false;
+    _netInFlush = 0;
     _rbResyncSend = 0;
     _rbRewindTo = Infinity;
     _rbBadSince = 0;
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
+    _rbEpoch = (typeof netEpoch === 'function') ? netEpoch() : 0;
     _rbPhase = '';
     _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, desyncAt:'' };
 }
@@ -600,30 +610,31 @@ function netTickPre(){
     // the only place allowed to. When the per-level/respawn starts land, they get their
     // re-anchor for free by going through it.
     if(!_replaying) _rbPhase = phase;
-    // Coalescing input flush: the FIRST turn of a cycle already shipped at authoring (the
-    // leading-edge flush in netLocalInput); everything authored after it under the
-    // one-flush-per-tick cap only marked _netInDirty and collapses here into a single
-    // latest-valid packet -- a burst of touches or key-repeats costs one send, not one per
-    // event. It carries the whole recent log (_rbSent) for redundancy, so a heartbeat this
-    // same tick would only repeat it: skip it.
+    // Coalescing input flush: the first turns of a cycle already shipped at authoring (the
+    // leading-edge flush in netLocalInput, capped at two); everything authored past the
+    // cap only marked _netInDirty and collapses here into a single latest-valid packet --
+    // a burst of touches or key-repeats costs one send, not one per event. It carries the
+    // whole recent log (_rbSent) for redundancy, so a heartbeat this same tick would only
+    // repeat it: skip it.
     let _inFlushed = false;
-    _netInSent = false;   // a new tick cycle: the next authored turn may ship at once again
+    _netInFlush = 0;   // a new tick cycle: authored turns may ship at once again
     if(_netInDirty && !_replaying){
         _rbSentPrune();
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
         _netDbg.inTx++;
         _netInDirty = false;
         _inFlushed = true;
-        _netInSent = true;
-        _netInRepeat = 1;   // arm the one-shot repair resend for the next input-free tick
+        _netInFlush++;
+        _netInRepeat = 2;   // arm the repair countdown (see its declaration)
     } else if(_netInRepeat && !_replaying){
-        // One-shot repair resend (see the _netInRepeat declaration). Disarm FIRST so it
+        // Repair countdown (see the _netInRepeat declaration). Decrement FIRST so it
         // fires exactly once no matter what the send below does on a closed channel.
-        _netInRepeat = 0;
-        _rbSentPrune();
-        if(_rbSent.length){
-            _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
-            _inFlushed = true;
+        if(--_netInRepeat === 0){
+            _rbSentPrune();
+            if(_rbSent.length){
+                _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+                _inFlushed = true;
+            }
         }
     }
     if((t & 63) === 0){
@@ -688,8 +699,8 @@ function netTickPost(){
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
         _netDbg.inTx++;
         _netInDirty = false;
-        _netInSent = true;
-        _netInRepeat = 1;   // arm the one-shot repair resend (fires in the next netTickPre)
+        _netInFlush++;
+        _netInRepeat = 2;   // arm the repair countdown (see its declaration)
     }
 }
 // Rewind to `toTick` and re-simulate to where we were, now including the input
@@ -899,15 +910,16 @@ function netLocalInput(kind, p, d, now){
         // Leading-edge flush ("sent at once", as the HEADROOM contract above promises): the
         // wire record is complete right here, and the next netTickPre averages half a tick
         // away -- pure added latency on a real link, where every ms of the authoring lead
-        // matters. Ship the FIRST turn of a cycle immediately; _netInSent caps this at one
-        // input flush per tick, so a burst coalesces into the next flush exactly as before.
-        if(!_netInSent && !_replaying){
+        // matters. Ship the first TWO turns of a cycle immediately (a fast double gesture
+        // must not defer its second record); _netInFlush caps it there, so anything past
+        // two still coalesces into the next tick's flush.
+        if(_netInFlush < 2 && !_replaying){
             _rbSentPrune();
             _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
             _netDbg.inTx++;
             _netInDirty = false;
-            _netInSent = true;
-            _netInRepeat = 1;   // arm the one-shot repair resend for the next input-free tick
+            _netInFlush++;
+            _netInRepeat = 2;   // arm the repair countdown (see its declaration)
         }
         return true;
     }

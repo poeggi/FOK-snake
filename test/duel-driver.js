@@ -330,13 +330,18 @@ function applyDirective(C, out){
 //                     not degraded). A send deferred to the next tick's flush then has exactly
 //                     ZERO wire budget -- late by the transit time, a guaranteed rollback --
 //                     while a send at authoring keeps a full tick minus transit.
-//   opts.doubleEvery: with postAuthor, every Nth intent is instead authored at birth as a DOUBLE
-//                     gesture -- the steer plus its REVERSE back-to-back (two wire records in one
-//                     interval; the reverse passes the author gate but is dropped by the sim on
-//                     BOTH clients, so gameplay is untouched). The second record hits the
-//                     one-flush-per-tick cap and ships at the NEXT tick's flush, so doubles need
-//                     birth at __gdue()>=2 -- inside that budget a coalesced second record still
-//                     arrives in time and a 0rb assertion stays exact.
+//   opts.doubleEvery: with postAuthor, every Nth intent is a MULTI gesture, alternating between
+//                     two forms (per-side S.multi parity). DOUBLE at __gdue()==1: the held steer
+//                     plus its reverse in the last interval -- both records must ship at
+//                     authoring (the two-flush cap), because a capped-deferred second record
+//                     would leave at the boundary itself with zero wire budget, a guaranteed
+//                     rollback; maxRb:0 thus proves the cap is at least two. TRIPLE at birth
+//                     (__gdue()>=2): reverse-of-heading + steer + reverse-of-steer in one
+//                     interval; the third record exceeds the cap and coalesces into the NEXT
+//                     tick's flush with a boundary of budget left, keeping the cap-deferred path
+//                     on the wire and in time. Every rejected gesture passes the author gate but
+//                     is dropped by the sim's enqueue check on BOTH clients, so gameplay is
+//                     untouched.
 function runMatch(opts){
     const secs = opts.secs || 20, W = opts.wire || {};
     const seed = (opts.seed >>> 0) || 0xD0E1;
@@ -374,8 +379,8 @@ function runMatch(opts){
     const bLead = (CK && opts.clockLeadsFire) ? e0 : 0;
     const bPhase = (opts.phase || 0) - bLead;
     const sch = {
-        A:{ c:A, dir:'AB', me:'A', pe:'B', k:0, next:0,      phase:0,      busyUntil:0, gest:0 },
-        B:{ c:B, dir:'BA', me:'B', pe:'A', k:0, next:bPhase, phase:bPhase, busyUntil:0, gest:0 },
+        A:{ c:A, dir:'AB', me:'A', pe:'B', k:0, next:0,      phase:0,      busyUntil:0, gest:0, multi:0 },
+        B:{ c:B, dir:'BA', me:'B', pe:'A', k:0, next:bPhase, phase:bPhase, busyUntil:0, gest:0, multi:0 },
     };
     // Continuous divergence: compare each client's ring snapshot at a settled PAST tick.
     let firstDiverge = null, maxLocalJump = 0, localJumps = 0;
@@ -474,19 +479,25 @@ function runMatch(opts){
             //     A send deferred to the next tick's flush leaves at that boundary itself -- zero
             //     wire budget, late by transit, a guaranteed rollback. Send-at-authoring keeps a
             //     full tick minus transit.
-            //   at birth (every doubleEvery-th intent, needs __gdue()>=2): a DOUBLE gesture -- the
-            //     steer plus its sim-rejected reverse. The capped second record ships a tick later
-            //     and needs that extra boundary of budget to stay 0rb (which is the point: the
-            //     coalesce path must stay inside the authoring lead).
+            //   every doubleEvery-th intent is a MULTI gesture, alternating (S.multi parity)
+            //     between a DOUBLE at __gdue()==1 (steer + sim-rejected reverse; BOTH must ship at
+            //     authoring, proving the two-flush cap) and a TRIPLE at birth (__gdue()>=2;
+            //     heading-reverse + steer + steer-reverse, all game-neutral) whose third record
+            //     exceeds the cap and coalesces into the NEXT tick's flush -- the cap-deferred
+            //     path, shipped with a boundary of budget left so 0rb stays exact.
             const gd = S.c.__gdue();
-            if(S.fresh && opts.doubleEvery && (S.gest + 1) % opts.doubleEvery === 0 && gd >= 2){
-                S.gest++;
+            const multi = opts.doubleEvery && (S.gest + 1) % opts.doubleEvery === 0;
+            const hv = S.fresh && multi && (S.multi & 1) && gd >= 2 ? S.c.__view() : null;
+            if(hv && S.pend.x * hv.dx + S.pend.y * hv.dy === 0){
+                S.gest++; S.multi++;
+                S.c.__steer({ x:-hv.dx, y:-hv.dy });         // rejected against the live heading
                 S.c.__steer(S.pend);
-                S.c.__steer({ x:-S.pend.x, y:-S.pend.y });   // the game-neutral second gesture
+                S.c.__steer({ x:-S.pend.x, y:-S.pend.y });   // rejected against the just-queued steer
                 S.pend = null;
             } else if(gd === 1){
                 S.gest++;
                 S.c.__steer(S.pend);
+                if(multi){ S.multi++; S.c.__steer({ x:-S.pend.x, y:-S.pend.y }); }
                 S.pend = null;
             }
             S.fresh = false;
