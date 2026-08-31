@@ -604,7 +604,7 @@ if(typeof window !== 'undefined' && window.addEventListener){
 // Mouse/stylus only: touch devices use the touchstart handler below so that
 // triggerSplashExit() calls Snd.audioResume() inside a touchstart, not a pointerdown
 // (iOS Safari only honours AudioContext unlock from touchstart, not pointerdown).
-canvas.addEventListener('pointerdown', e => {
+const _canvasDown = e => {
     if (e.pointerType === 'touch') return;
     e.preventDefault();
     // A camera-viewfinder click cycles the camera (on pointerup) -- it must NOT also add a
@@ -615,12 +615,25 @@ canvas.addEventListener('pointerdown', e => {
     if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
     else if (phase === 'nameEntry') { handleKey('NameAdd', null); }
     else if (!_inPlay()) { handleKey('Enter', null); }
-});
-canvas.addEventListener('pointerup', e => {
+};
+const _canvasUp = e => {
     if (e.pointerType === 'touch') return;
     if (phase === 'nameEntry' && entryMode === 'friend' && _scanTapAt(e.clientX, e.clientY)) return;
     if (phase === 'splash') { triggerSplashExit(); }
-});
+};
+if (typeof window !== 'undefined' && window.PointerEvent) {
+    canvas.addEventListener('pointerdown', _canvasDown);
+    canvas.addEventListener('pointerup', _canvasUp);
+} else {
+    // Pre-Pointer-Events engines (Safari < 13, Firefox < 59, older TV browsers) reach the same
+    // two handlers through the mouse pair -- without it every canvas menu is unclickable there,
+    // and the whole game is menus. Safe to leave unfiltered on a touch device: the document
+    // touchstart above preventDefault()s the tap, and a prevented touchstart is a gesture the
+    // browser never replays as synthetic mouse events. pointerType is undefined on a mouse
+    // event, so the touch bail at the top of each handler is simply inert here.
+    canvas.addEventListener('mousedown', _canvasDown);
+    canvas.addEventListener('mouseup', _canvasUp);
+}
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must

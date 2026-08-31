@@ -179,7 +179,7 @@ function _qrFinderCenters(g, W, H) {
     for (const r of raw) {
         const hit = out.find(o => Math.abs(o.x - r.x) < 4 * o.u && Math.abs(o.y - r.y) < 4 * o.u);
         if (hit) { hit.x = (hit.x * hit.n + r.x) / (hit.n + 1); hit.y = (hit.y * hit.n + r.y) / (hit.n + 1); hit.n++; }
-        else out.push({ ...r });
+        else out.push(Object.assign({}, r));   // not {...r}: object spread is Chrome 60+, and a parse error here kills the whole module
     }
     return out.filter(o => o.n >= 2).sort((p, q) => q.n - p.n);
 }

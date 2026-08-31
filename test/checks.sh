@@ -53,6 +53,9 @@ for f in js/*.js; do node --check "$f"; done
 echo "[checks] ASCII-only sources"
 node test/check-ascii.js
 
+echo "[checks] shipped sources stay on the supported browser floor"
+node test/check-compat.js
+
 echo "[checks] worker snapshot mirrors all sim state"
 node test/check-snapshot.js
 

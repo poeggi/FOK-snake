@@ -1282,6 +1282,23 @@ function _syncSafeArea(){
     if(side){ b.classList.add(side === 'left' ? 'notch-left' : 'notch-right'); _notchSide = side === 'left' ? 'L' : 'R'; }
     else _notchSide = '?';
 }
+// Flex `gap` (Chrome 84 / Safari 14.1) is the newest thing css/style.css asks for, and an engine
+// without it drops the spacing silently -- the property parses, it just does nothing, so a version
+// sniff or @supports cannot see it (@supports (gap:1px) is true from Chrome 57 on, where only GRID
+// gap exists). Measure it instead, once, and tag <html>; the .no-flexgap rules then restore the
+// spacing with margins. Every guard here is for the headless harness, which has no real layout.
+(function _flexGapCheck(){
+    try {
+        if(typeof document === 'undefined' || !document.body) return;
+        const p = document.createElement('div');
+        p.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;display:flex;flex-direction:column;row-gap:10px';
+        for(let i = 0; i < 2; i++){ const k = document.createElement('i'); k.style.cssText = 'width:1px;height:1px'; p.appendChild(k); }
+        document.body.appendChild(p);
+        const h = p.offsetHeight;
+        p.remove();
+        if(h >= 2 && h < 11) document.documentElement.classList.add('no-flexgap');   // 12 with the gap, 2 without; a 0 means no layout at all (harness) -> leave it alone
+    } catch(_) {}
+})();
 const _reflow = () => { _syncSafeArea(); layout(); };
 window.addEventListener('resize', () => requestAnimationFrame(_reflow));
 // React the moment the orientation actually changes (the precise signal), plus a short burst

@@ -46,7 +46,11 @@ body {
     /* 2x2 grid: cells a b / c d. Classic: LIVES SCORE / GEMS LEVEL. Duel: P1-lives
        P2-lives / P1-score P2-score (what each cell SHOWS is swapped by updateHUD). */
     display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
-    width: var(--stage-w, min(600px, 100vw));
+    /* width+max-width, not min(): a var() whose fallback the engine cannot parse is invalid at
+       COMPUTED-value time, so a pre-min() engine (Chrome < 79) would not fall back to an earlier
+       declaration -- it would take the width to auto. The pair is the same result, ES5-era CSS.
+       (--stage-w is a plain px value set by layout() within the first frame.) */
+    width: var(--stage-w, 600px); max-width: 100vw;
     font-size: var(--fs-menu-px, 14px); letter-spacing: 0;
     opacity: 1; transition: opacity 0.15s;
     order: 1;
@@ -59,7 +63,7 @@ body {
 #hv-lives-cv, #hv-lives2-cv { flex: none; image-rendering: pixelated; height: var(--lives-h-px, 12px); width: auto; }
 .hv-wrap { display: inline-flex; align-items: baseline; }
 #topbar {
-    width: var(--stage-w, min(600px, 100vw));
+    width: var(--stage-w, 600px); max-width: 100vw;
     display: flex; justify-content: space-between; align-items: center; padding: 0 2px;
     order: 2;
 }
@@ -156,7 +160,7 @@ body.cursor-hidden #c { cursor: none; }
     #gamepad { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     #btn-esc   { grid-column: 1; grid-row: 1; }
     #btn-pause { grid-column: 2; grid-row: 1; }
-    #dpad-c    { grid-column: 1 / span 2; grid-row: 2; width: min(150px, 45vw); height: min(150px, 45vw); }
+    #dpad-c    { grid-column: 1 / span 2; grid-row: 2; width: 45vw; max-width: 150px; height: 45vw; max-height: 150px; }
     #btn-start { grid-column: 1; grid-row: 3; }
     #btn-ok    { grid-column: 2; grid-row: 3; }
     body.lefty #btn-pause { grid-column: 1; }
@@ -195,8 +199,11 @@ body.cursor-hidden #c { cursor: none; }
        (no control may hide under the Island) and trim the opposite edge -- a rounded corner
        only -- to a few px, handing that width back to #wrap. JS tags the notch side; untagged
        (symmetric insets + unknown orientation) leaves both full: safe, just no reclaim. */
-    body.notch-left  { padding-right: calc(3px * var(--ui-scale, 1) + min(env(safe-area-inset-right, 0px), 8px)); }
-    body.notch-right { padding-left:  calc(3px * var(--ui-scale, 1) + min(env(safe-area-inset-left, 0px), 8px)); }
+    /* The two min() calls below are the one place this stylesheet may sit above the browser
+       floor: an engine that cannot parse them drops the declaration and falls back to the
+       untrimmed rule above, which is exactly the "no reclaim: safe" case just described. */
+    body.notch-left  { padding-right: calc(3px * var(--ui-scale, 1) + min(env(safe-area-inset-right, 0px), 8px)); }  /* compat-ok */
+    body.notch-right { padding-left:  calc(3px * var(--ui-scale, 1) + min(env(safe-area-inset-left, 0px), 8px)); }   /* compat-ok */
     #wrap { flex: 1 1 0; }   /* landscape fits the canvas into the flex region between panels */
     /* Side info panel -- floats left or right depending on handed setting. Width scales
        with the chrome (--ui-scale): its content (mute/FPS boxes, HUD text) is sized off
@@ -227,14 +234,16 @@ body.cursor-hidden #c { cursor: none; }
     /* Right controls panel -- ESC, PAUSE, dpad, A:OK, START stacked top to bottom */
     #gamepad {
         display: flex; flex-direction: column; flex-shrink: 0;
-        width: min(120px, 28vw); align-items: center; justify-content: center; gap: 12px;
+        width: 28vw; max-width: 120px; align-items: center; justify-content: center; gap: 12px;
     }
     #btn-esc   { order: 1; }
     #btn-pause { order: 2; }
-    #dpad-c    { order: 3; width: min(120px, 28vw); height: min(120px, 28vw); }
+    #dpad-c    { order: 3; width: 28vw; max-width: 120px; height: 28vw; max-height: 120px; }
     #btn-ok    { order: 4; }
     #btn-start { order: 5; }
-    .sbtn { width: min(120px, 28vw); height: 40px; }
+    /* Scoped to #gamepad: max-width DOES cap a flex item's growth where the width it replaces
+       did not, and .sbtn is shared with the ring-egg panel, whose buttons flex to fill the row. */
+    #gamepad .sbtn { width: 28vw; max-width: 120px; height: 40px; }
     /* Left-handed: controls move to left panel, info to right; canvas leans right */
     body.lefty #gamepad   { order: 1; }
     body.lefty #wrap      { order: 2; }
@@ -250,5 +259,28 @@ body.cursor-hidden #c { cursor: none; }
     opacity: 0; font-size: 16px; border: 0; padding: 0; margin: 0;
     background: transparent; color: transparent; caret-color: transparent;
     z-index: -1;   /* behind the canvas: never intercepts taps, focus is programmatic */
+}
+/* ---------------------------------------------------------------------------
+   FLEX-GAP FALLBACK -- the one modern thing this stylesheet cannot express any
+   other way. `gap` on a FLEX container is Chrome 84 / Safari 14.1 (grid gap, used
+   for the HUD and the portrait pad, is far older and needs nothing), and an engine
+   without it collapses the spacing SILENTLY -- no error, just a HUD and a button
+   column glued together. @supports cannot tell the two gaps apart, so game.js
+   measures flex gap once at boot and tags <html>; only a failing engine gets these
+   rules, so the modern path is byte-for-byte what it was.
+   Half-margins on the children, not `+ sibling` margins: several of these containers
+   reorder with `order:`, which a sibling selector cannot follow. Margins never
+   collapse inside a flex container, so the space BETWEEN two items is exact; the
+   only difference from gap is a half-gap left at each end of the container. */
+html.no-flexgap body > *,
+html.no-flexgap #side-info > *   { margin: 4px 0; }   /* body column gap: 8px */
+html.no-flexgap .hud-cell > *    { margin: 0 2px; }   /* label/value row: 4px */
+html.no-flexgap #ring-egg .row > * { margin: 0 4px; } /* panel button row: 8px */
+@media (pointer: coarse) and (orientation: landscape) {
+    html.no-flexgap body > *      { margin: 0 calc(3px * var(--ui-scale, 1)); }
+    html.no-flexgap #side-info > * { margin: 7px 0; }
+    html.no-flexgap #topbar > *   { margin: 0 4px; }
+    html.no-flexgap .hud-cell > * { margin: 1px 0; }
+    html.no-flexgap #gamepad > *  { margin: 6px 0; }
 }
 
