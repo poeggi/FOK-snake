@@ -949,6 +949,12 @@ function beginOnlineDuel(seed, hosting){
             my: hosting ? 0 : 1,
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
+        // The epoch stamp + receive gate live on MAIN (_netSend/_netHandleMsg read
+        // _rbEpoch), and the worker cannot compute it (netEpoch needs _netSess). The
+        // message above rebases the worker, so main's dormant core must adopt the same
+        // base epoch HERE -- a frozen mirror stamps/gates a stale epoch and splits the
+        // pair onto separate tick bases against a peer whose epoch advances.
+        if(typeof _rbReset === 'function') _rbReset();
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
@@ -971,6 +977,9 @@ function beginOnlineDuelLevel(hosting){
             my: hosting ? 0 : 1,
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
+        // Main must mirror the worker's rebase (see beginOnlineDuel): the epoch
+        // stamp/gate read main's _rbEpoch.
+        if(typeof _rbReset === 'function') _rbReset();
         return;
     }
     _fbAcc = 0;

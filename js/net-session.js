@@ -801,9 +801,12 @@ function _netSessionEnd(msg, remoteBye){
     } else if(phase === 'lobby'){ _netLb.msg = msg; _uiDirty = true; }
 }
 function _netTeardown(){
-    _rbReset();
     if(typeof _wDuelEnd === 'function') _wDuelEnd();   // worker-hosted core: deactivate + reset there too
     const s = _netSess; _netSess = null;   // nulling this stops the relay loop + liveness (both check _netSess === s)
+    // AFTER _netSess is nulled: netEpoch() then reads 0, the line a fresh pair opens on.
+    // Resetting while the session is still visible would keep its final epoch in the
+    // mirror, and the next match's packets would be epoch-gated from tick one.
+    _rbReset();
     if(!s) return;
     if(s.peer) delete _netPeerNet[s.peer];   // the IP hint was for THIS match's path; a new match (or a network switch) gets a fresh one
     s.game = false; s.relay = false;

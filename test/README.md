@@ -128,6 +128,17 @@ clients on different bases the epoch gate drops the peer's hash one layer above 
 comparator, the link still carries packets so nothing reads as silent, and neither sim
 is frozen, so all three detectors go quiet at the same instant.
 
+### smoke-epoch-mirror.js  (FAST tier -- the main-thread epoch-mirror guard)
+
+The wire stamps and gates epochs on MAIN (`_netSend` writes `o.ep` from `_rbEpoch`,
+`_netHandleMsg` compares against it), while the DEFAULT browser runtime hosts duel-core
+in `sim-worker.js` -- where `netEpoch()` does not exist. This guard proves main's
+dormant core adopts the base epoch at every begin in BOTH homes, that outbound tick
+packets carry it, and that a teardown returns the mirror to 0 (a fresh pair's line).
+A frozen mirror is invisible to every duel-* sweep -- the driver boots the in-process
+home only -- yet in the field it splits a worker-mode client from any peer whose epoch
+advances (FORCE SINGLE THREADED, file://, a demoted worker) at the FIRST boundary.
+
 ### duel-rematch.js  (REGRESSION tier -- the server-path restart guard)
 
 Same idea across a host-authored rematch/restart (a new `start_pts` moves tick zero):
