@@ -1250,7 +1250,7 @@ async function _netSignalIce(to, payload){
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
+    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.cloudflare.com:3478' }] });
     _netSess.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignalIce(peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => {
@@ -1824,7 +1824,7 @@ function _netRtcRebuild(s){
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null;
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
+    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.cloudflare.com:3478' }] });
     s.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignalIce(s.peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => { /* a failed rebuild is owned by the liveness timeout */ };
