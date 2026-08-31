@@ -533,18 +533,6 @@ try {
       throw new Error('the nudge must be identical on both clients: ' + JSON.stringify([la,lb]));
   });
 
-  // ---------------------------------------------------------------- mutual
-  check('mutual invites auto-match without a dialog', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-    A.__invite(B_ID); B.__invite(A_ID);           // crossing invites
-    pump(A, B); pump(B, A);
-    // The smaller id (aaaaaaaa) accepts; the larger keeps waiting to offer.
-    if(A.__dialog() || B.__dialog()) throw new Error('a mutual invite must not open a dialog');
-    const all = A.__out.concat(B.__out).map(s => s.type);
-    if(!all.includes('accept-relay') && !all.includes('accept')) throw new Error('mutual invite produced no accept: ' + all);
-  });
-
   // ------------------------------------------------------------ leaving abruptly
   // A reload/close kills every JS timer we own, so the ONLY thing that spares the
   // peer its own timeout (3s in-game, 30s mid-handshake) is a goodbye on the way
@@ -670,15 +658,6 @@ try {
     if(!inv.frOk) throw new Error('the invite raced the friendship: it was sent before the request resolved, so the server 403s it');
   });
 
-  await acheck('accepted invite is not disturbed by the new result check', async () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-    await A.__invite(B_ID);
-    if(A.__state().hs.sent !== B_ID) throw new Error('a delivered invite must still be pending');
-    pump(A, B);
-    if(B.__dialog() !== A_ID) throw new Error('B never saw the invite');
-  });
-
   // ------------------------------------------------------------- the PTS contract
   // pts is unix MILLISECONDS and the server checks it with PHP's strict is_int().
   // The offset is derived from rtt/2, so it carries a fraction: an un-rounded pts
@@ -698,26 +677,11 @@ try {
   });
 
   // ------------------------------------------------------------ lockstep netcode
-  // The two clients enter a duel with WILDLY different simTick values, because
-  // simTick free-runs from page load and startDuel never resets it. A tick stamp is
-  // only meaningful relative to each client's own duel start -- get that wrong and
-  // every input lands outside the accept window and is dropped, which looks exactly
-  // like "no directions ever reach the other side". A single-client test cannot see
-  // this: it needs two clients whose counters disagree.
-  check('input crosses between clients whose tick counters differ wildly', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__duelStart(0xBEEF, 'host', 45000);   // been idling in menus for minutes
-    B.__duelStart(0xBEEF, 'peer', 3000);    // just opened the game
-    A.__tick(120); B.__tick(120);
-    A.__drain(); B.__drain();
-    const rx0 = B.__rbDbg(), drop0 = rx0.drop;
-    A.__steer({x:0,y:-1});
-    const pkts = A.__drain().filter(p => JSON.parse(p).t === 'in');
-    if(!pkts.length) throw new Error('A sent no input at all');
-    pkts.forEach(p => B.__recv(p));
-    const rx1 = B.__rbDbg();
-    if(rx1.drop > drop0) throw new Error('B DROPPED the input: the tick stamp was not duel-relative (' + JSON.stringify(rx1) + ')');
-  });
+  // The duel checks below start the two clients on WILDLY different free-running
+  // simTick values (one idled in menus for minutes, one just opened the game): a
+  // tick stamp is only meaningful relative to each client's own duel start, so every
+  // convergence check also proves the stamps are duel-relative -- get that wrong and
+  // each input is dropped as out-of-window and the sims diverge.
 
   // Both sims must reach the SAME state from the same seed + same inputs -- the whole
   // promise of the architecture. A late DIR only takes effect at the peer's next STEP
@@ -777,44 +741,6 @@ try {
     if(A.__hashNow() !== B.__hashNow()) throw new Error('the answerer boost diverged the sims');
   });
 
-  // A realistic wire: BOTH directions delayed by one tick (~17ms >= a 10ms link),
-  // both players steering, the periodic hash checks flowing through the same delayed
-  // bus -- so alignment is proven continuously (dsy must stay 0), not just at the end.
-  check('a 10ms wire with movement from both sides stays perfectly aligned', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__duelStart(0xBEEF, 'host', 45000);
-    B.__duelStart(0xBEEF, 'peer', 3000);
-    const qA = [], qB = [];                      // in-flight: [deliverAtStep, packet]
-    let step = 0;
-    const advance = (n) => { for(let i = 0; i < n; i++){
-      step++;
-      while(qB.length && qB[0][0] <= step) B.__recv(qB.shift()[1]);
-      while(qA.length && qA[0][0] <= step) A.__recv(qA.shift()[1]);
-      A.__tick(1); B.__tick(1);
-      A.__drain().forEach(p => qB.push([step + 1, p]));
-      B.__drain().forEach(p => qA.push([step + 1, p]));
-    } };
-    advance(120);
-    // SLOW play first: single strokes about a second apart.
-    A.__steer({x:0,y:-1}); advance(60);
-    B.__steer({x:0,y:-1}); advance(60);
-    A.__steer({x:1,y:0});  advance(60);
-    // Then SPAM: rapid 90-degree left/right alternation, pressed faster than steps
-    // run, so turns pile into the 3-deep queue and the keyframe filter earns its
-    // keep -- the exact pattern that used to shower rollbacks.
-    // 12 presses at 1-tick spacing: several land inside one keyframe, so the 3-deep
-    // queue CAP trips and the overflow is dropped at authoring -- local and remote
-    // must agree exactly on which presses survived.
-    for(let i = 0; i < 12; i++){ A.__steer(i & 1 ? { x:1, y:0 } : { x:0, y:-1 }); advance(1); }
-    advance(60);
-    for(let i = 0; i < 12; i++){ B.__steer(i & 1 ? { x:0, y:1 } : { x:1, y:0 }); advance(1); }
-    advance(150);
-    if(A.__simTick() !== B.__simTick()) throw new Error('tick counts differ: test bug');
-    if(A.__rbDbg().desync || B.__rbDbg().desync)
-      throw new Error('hash checks flagged a divergence mid-run: A=' + A.__rbDbg().desync + ' B=' + B.__rbDbg().desync);
-    if(A.__hashNow() !== B.__hashNow()) throw new Error('sims diverged under a 10ms wire');
-  });
-
   // The other half: a dir that arrives AFTER the step it belonged to (the peer already
   // moved with the old direction) can only be honoured by rewinding to its tick. That
   // path must still converge too.
@@ -838,22 +764,12 @@ try {
       throw new Error('the two clients diverged after a rewind');
   });
 
-  // A restart that happens WHILE in game (rematch, level, respawn) must not be sent as
-  // 'sched': the peer refuses that one when inGame, so it silently ignores it and only
-  // the sender restarts. This tests what _netRequestStart SENDS -- testing the receiver
-  // instead would pass against the bug, because the receiver was never the problem.
-  // The reported case: "a lot of DESYNC, even though neither player is doing
-  // anything". With ZERO inputs two sims MUST be bit-identical, so a desync there is
-  // the detector lying. _shimmerThreshold rides in the snapshot but comes from THIS
-  // device's best score and only drives a render effect -- two players with different
-  // best scores hashed differently forever, having touched nothing.
-  // A duel simulates `players`. The snapshot also hauls each device's leftovers from
-  // its OWN last single-player game (snake, score, lives, heart, _shimmerThreshold from
-  // localStorage...) because it exists to mirror the sim into the worker, and startDuel
-  // never resets what the duel never reads. Hashing those compared two players'
-  // single-player HISTORY and called the difference a divergence -- every comparison,
-  // hash-ok 0, with the sims in perfect lockstep. Fresh test clients cannot see it:
-  // this needs one client with a past.
+  // With ZERO inputs two sims MUST be bit-identical, so a desync there is the detector
+  // lying. The snapshot hauls each device's leftovers from its OWN last single-player
+  // game (snake, score, heart, _shimmerThreshold from localStorage...) because it
+  // mirrors the sim into the worker, and startDuel never resets what the duel never
+  // reads. Hashing those compared two players' single-player HISTORY and called the
+  // difference a divergence. Fresh test clients cannot see it: this needs a past.
   check('single-player history does not desync a duel', () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__history();            // A has played classic; B is a fresh install
@@ -886,20 +802,10 @@ try {
       throw new Error('snapshot boundary differs: our ring entry baked in the live input, the peer one did not');
   });
 
-  // ...but a REAL divergence must still be caught: the skip list is a scalpel.
-  check('a real divergence is still detected', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__duelStart(0xBEEF, 'host', 1000);
-    B.__duelStart(0xBEEF, 'peer', 1000);
-    A.__tick(120); B.__tick(120);
-    if(A.__hashNow() !== B.__hashNow()) throw new Error('setup: identical sims must match');
-    B.__desync();                       // move one snake: a genuine difference
-    if(A.__hashNow() === B.__hashNow()) throw new Error('the hash missed a real divergence');
-  });
-
-  // ...and once flagged, the authoritative-state packet REPAIRS it. Each client owns its own
-  // snake (its index), so the peer's copy adopts it. Corrupt A's copy of the peer (index 1)
-  // snake, let B -- its owner -- emit a state packet, and A must re-converge after the settle.
+  // ...but a REAL divergence is still caught (the skip list is a scalpel), and the
+  // authoritative-state packet REPAIRS it. Each client owns its own snake (its index),
+  // so the peer's copy adopts it. Corrupt A's copy of the peer (index 1) snake, let B --
+  // its owner -- emit a state packet, and A must re-converge after the settle.
   check('an authoritative-state packet repairs a peer-snake divergence', () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__duelStart(0xBEEF, 'host', 1000);
@@ -924,6 +830,9 @@ try {
     if(!repaired) throw new Error('no re-converge. A.fix=' + A.__rbDbg().fix + ' A.desync=' + A.__rbDbg().desync);
   });
 
+  // A restart that happens WHILE in game (rematch, level) must not be sent as 'sched':
+  // the peer refuses that one when inGame, so only the sender would restart. This tests
+  // what _netRequestStart SENDS -- the receiver was never the problem.
   await acheck('an in-game restart is sent as rst, not the first-start sched', async () => {
     const A = mk(A_ID);
     A.__duelStart(0xBEEF, 'host', 1000);

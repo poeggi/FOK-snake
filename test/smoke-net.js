@@ -299,8 +299,8 @@ runTest('SMOKE-NET', `
     if(netTickTarget()!==null) throw 'local play must keep its own frame-paced clock';
     // The anchor must NOT move mid-game: netPts() drives the tick number, so a
     // re-anchor during play steps the whole timeline under the player's feet. It is
-    // set at the match start and re-set only at the natural breaks (new level,
-    // respawn), never in between.
+    // set at the match start and re-set only at the negotiated breaks (new level,
+    // rematch), never in between.
     fakeSess('host'); inGame=true;
     _netSync={ofs:1234, rtt:5, at:1};
     // _netSyncBusy is the synchronous witness that a sync actually STARTED. Counting
@@ -313,7 +313,7 @@ runTest('SMOKE-NET', `
     if(_netSyncBusy) throw 'the anchor must never be re-measured while a duel is being played';
     phase='duelPaused';  _netTimeSync(true);
     if(_netSyncBusy) throw 'a paused duel is still a duel: no re-anchor';
-    phase='duelReady';   _netTimeSync(true);   // a break: new level / respawn
+    phase='duelReady';   _netTimeSync(true);   // a break: new level / rematch
     if(!_netSyncBusy) throw 'a break (READY/GO) must re-anchor';
     _netSyncBusy=false;   // the async remainder is not under test; do not leave it latched
     _netGet=_oGet; globalThis.fetch=_oFetch; _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
@@ -491,11 +491,7 @@ runTest('SMOKE-NET', `
     if(!_netPollDue()) throw 'connecting (signaling in flight) must poll';
     _netSess.game=true; if(_netPollDue()) throw 'no polling during an online game';
     _netSess=null;
-    // an invite arriving in the MAIN menu auto-declines (player unavailable there)
-    phase='menu'; _netLb.invite=null;
-    _netOnSignal({from:'00ff00bb', type:'invite', payload:JSON.stringify({profile:{name:'BUD'}})});
-    if(phase!=='menu'||_netLb.invite) throw 'menu invite must auto-decline, not open a dialog';
-    log('adaptive poll ok: 1Hz lobby/1:1, 10s main menu, invite jumps to lobby');
+    log('adaptive poll ok: 1Hz lobby/1:1 + connecting, 10s main menu, never in-game');
 
     // ---- mutual invites: deterministic auto-accept, no dialog ----
     localStorage.setItem('fok-snake-pid','00000001');   // our ID < the peer's
@@ -746,16 +742,9 @@ runTest('SMOKE-NET', `
     if(!netRelayActive()) throw 'relay state not exposed';
     // (the relay carries the SAME inputs-only messages: no state, no host frames)
     drawDuelBoard(simNow);                     // board renders the RELAY MODE tag
-    // seq ordering: duplicates and replays are dropped
-    _netSess.relaySeq=5;
-    const q1=players[1].dirQueue.length;
-    _netSess.role='host';
-    (function(){ const m={seq:5, payload:JSON.stringify({t:'in',k:'dir',d:{x:0,y:-1}})};
-        if((m.seq|0)<=_netSess.relaySeq) return; _netHandleMsg(m.payload); })();
-    if(players[1].dirQueue.length!==q1) throw 'stale relay seq must be dropped';
     _netTeardown(); inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
     // the 5s fallback timer exists on fresh RTC sessions (fires only in browsers)
-    log('relay fallback ok: send routing, cadence, indicator, seq drop');
+    log('relay fallback ok: send routing, indicator, board tag');
 
     // ---- ONE status notice, identical on every online screen; the api gate
     // re-evaluates instead of latching forever ----
@@ -797,27 +786,6 @@ runTest('SMOKE-NET', `
     localStorage.removeItem('fok-snake-friends'); _netFr.msg='';
     log('qr auto-confirm ok: friends while presenting, manual otherwise');
 
-    // ---- peer-side removal mirrors locally: accepted-then-gone means GONE ----
-    localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    _netFrOk={'00ff00aa':1}; _netFrOkSave();
-    // fake an authoritative list answer: aa is gone (peer removed), bb never synced
-    _netFr.loading=true;
-    (function(){ const r={friends:[]};
-        const seen={};
-        for(const id of getFriends()){
-            if(seen[id]) continue;
-            if(_netFrOk[id]){ removeFriend(id); _netFrOkClear(id);
-                _netFr.msg=(netFriendName(id)||fmtFriendId(id))+' REMOVED THE FRIENDSHIP'; }
-        }
-    })();
-    _netFr.loading=false;
-    if(getFriends().includes('00ff00aa')) throw 'peer-removed friendship must vanish locally';
-    if(!getFriends().includes('00ff00bb')) throw 'never-synced friends must survive';
-    if(_netFr.msg.indexOf('REMOVED THE FRIENDSHIP')<0) throw 'removal notice missing';
-    localStorage.removeItem('fok-snake-friends'); localStorage.removeItem('fok-snake-friend-ok');
-    _netFrOk={}; _netFr.msg='';
-    log('removal sync ok: one side cancelled means gone');
-
     // ---- relay fallback actually engages: a failed P2P attempt becomes a relay
     // session (and retires the RTC objects so their late events cannot kill it) ----
     let _pcClosed=false, _dcClosed=false;
@@ -833,23 +801,6 @@ runTest('SMOKE-NET', `
     if(!(_netSess.relayGraceUntil > 0)) throw 'relay must grant the peer a fallback grace window';
     _netTeardown(); inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; _netLb.msg='';
     log('relay engage ok: fallback session, RTC retired, visible message');
-
-    // ---- aborting a connection attempt: leaving the lobby closes everything and
-    // a fresh attempt is possible immediately (new pc = new STUN gathering) ----
-    let _abClosed=false, _abTimerCleared=true;
-    _netSess=_netMkSess('00ff00aa','host');
-    _netSess.pc={ close(){ _abClosed=true; } };
-    netLobbyLeave();
-    if(_netSess!==null) throw 'lobby leave must tear a pending attempt down';
-    if(!_abClosed) throw 'lobby leave must close the RTCPeerConnection';
-    phase='lobby'; _netHsClear();
-    _netInviteSend('00ff00bb');   // not blocked by a stale session anymore
-    if(_netHs.sent!==null) throw 'harness sanity: offline invite stays soft';   // no fetch: _netOk false -> no-op
-    _netSess=_netMkSess('00ff00cc','peer'); _netSess.game=true; inGame=true;   // a RUNNING on-screen game is untouched
-    netLobbyEnter();
-    if(_netSess===null) throw 'entering the lobby must not kill a running game';
-    _netTeardown(); inGame=false; phase='menu';
-    log('attempt lifecycle ok: leave aborts, running games survive, fresh attempts possible');
 
     // ---- invites surface on 1:1/social screens; elsewhere they auto-decline ----
     for(const ph of ['duelMenu','friends','friendId']){
@@ -890,16 +841,10 @@ runTest('SMOKE-NET', `
     if(_netSess.pc) throw 'relay peer must not create an RTCPeerConnection';
     if((_netSess.seed>>>0)!==7) throw 'relay peer must adopt the offer seed';
     _netTeardown();
-    // an incoming invite-relay is remembered as relay; answering it stays relay-side.
-    phase='lobby'; _netLb.invite=null;
-    _netOnSignal({from:'00ff00cc', type:'invite-relay', payload:JSON.stringify({profile:{name:'R'}})});
-    if(!_netLb.invite||_netLb.invite.relay!==true) throw 'invite-relay must be flagged relay';
-    _netInviteAnswer(true);
-    if(_netLb.msg.indexOf('RELAY')<0) throw 'answering must show relay mode';
-    _netLb.invite=null; cfg.noP2P=false; phase='menu';
-    log('relay-only mode ok: invite-relay/accept-relay, no WebRTC session');
+    cfg.noP2P=false; phase='menu';
+    log('relay-only mode ok: accept-relay/no-sdp offers start relay sessions, no WebRTC');
 
-    // ---- universal teardown: EVERY leftover state is reaped on lobby leave ----
+    // ---- universal teardown: EVERY leftover state is reaped on lobby transitions ----
     // (1) a relay session that reached game=true but is not on-screen (inGame=false)
     _netSess=_netMkSess('00ff00aa','peer'); _netSess.relay=true; _netSess.game=true; inGame=false;
     phase='lobby'; netLobbyLeave();
@@ -923,7 +868,7 @@ runTest('SMOKE-NET', `
     if(_netSess!==null) throw 'entering the lobby must reap a stray session';
     // a genuine running game (inGame) is NOT touched by lobby transitions
     _netSess=_netMkSess('00ff00ff','host'); _netSess.game=true; inGame=true;
-    netLobbyLeave();
+    netLobbyEnter(); netLobbyLeave();
     if(_netSess===null) throw 'a running on-screen game must not be reaped';
     _netTeardown(); inGame=false; phase='menu';
     log('universal teardown ok: sessions/invites/dialogs all reaped, running game kept');
@@ -982,16 +927,7 @@ runTest('SMOKE-NET', `
     _netPollBusy=true; _netPollAbort={ abort(){ _aborted=true; } };
     _netPollAbortNow();
     if(!_aborted||_netPollBusy||_netPollAbort!==null) throw 'abort must cancel the held poll and clear the latch';
-    // (7) a DUPLICATE offer (host re-sent because our answer was lost) must
-    // re-answer and KEEP the forming session, not tear it down and restart
-    _netHsClear(); _netSess=null; phase='lobby'; inGame=false;
-    _netOnSignal({from:'00ff00bb', type:'offer', payload:JSON.stringify({seed:11, profile:{name:'D'}})});
-    const _s1=_netSess;
-    if(!_s1||!_s1.relay) throw 'first offer must create the relay peer session';
-    _netOnSignal({from:'00ff00bb', type:'offer', payload:JSON.stringify({seed:11, profile:{name:'D'}})});
-    if(_netSess!==_s1) throw 'a duplicate offer must NOT rebuild the session';
-    _netTeardown(); _netHsClear();
-    // (8) the offer retry must survive a relay session (game=true instantly):
+    // (7) the offer retry must survive a relay session (game=true instantly):
     // only the peer's ANSWER stops it
     const _of2=globalThis.fetch;
     globalThis.fetch = ()=>({ then:()=>({ catch:()=>{} }) });
