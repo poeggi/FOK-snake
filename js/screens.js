@@ -314,6 +314,10 @@ function drawMenu(now) {
 // Settings are grouped into sub-menus. Each leaf carries a live label plus
 // optional act() (Enter), adj(right) (Left/Right), and a render hint (bar/preview).
 // Audio leaves keep their exact original Snd.* call sequences -- relocated, not changed.
+// Plain ON/OFF leaf: a label plus a boolean cfg key Enter simply flips (the settings
+// handler saveCfg()s after every act, so persisting needs nothing extra here).
+const _tog=(label,key)=>({ lbl:()=>label+': '+(cfg[key]?'ON':'OFF'),
+    act:()=>{cfg[key]=!cfg[key];Snd.sfxPlay('select',cfg.music);} });
 const SETTINGS_CATS = [
     { label:'USER', items:[
         { lbl:()=>{ let n=''; try{ n=localStorage.getItem('lastSName')||''; }catch(e){} return 'NAME: '+(n||'---'); },
@@ -336,8 +340,7 @@ const SETTINGS_CATS = [
         { lbl:()=>'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
           act:()=>{cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.handed=r?1:0;applyHandedness();} },
-        { lbl:()=>'TOUCH AUTOSELECT: '+(cfg.touchSelect?'ON':'OFF'),
-          act:()=>{cfg.touchSelect=!cfg.touchSelect;Snd.sfxPlay('select',cfg.music);} },
+        _tog('TOUCH AUTOSELECT','touchSelect'),
         { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; also scales menu scroll travel
           act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
@@ -359,14 +362,10 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.gfxMode=cfg.gfxMode===0?1:0;} },
         { lbl:()=>'GRAPHICS MODE: FABULOUS', dis:()=>true,   // greyed: not yet implemented
           act:()=>{Snd.sfxPlay('fail',cfg.music);} },
-        { lbl:()=>'REDUCE MOTION: '+(cfg.reduceMotion?'ON':'OFF'),   // suppress decorative motion (near-miss shake, future FX)
-          act:()=>{cfg.reduceMotion=!cfg.reduceMotion;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'LIMIT 30 FPS: '+(cfg.fps30?'ON':'OFF'),
-          act:()=>{cfg.fps30=!cfg.fps30;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'DISABLE GLOW: '+(cfg.disableGlow?'ON':'OFF'),
-          act:()=>{cfg.disableGlow=!cfg.disableGlow;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'DEFER DRAW: '+(cfg.deferDraw?'ON':'OFF'),
-          act:()=>{cfg.deferDraw=!cfg.deferDraw;Snd.sfxPlay('select',cfg.music);} },
+        _tog('REDUCE MOTION','reduceMotion'),   // suppress decorative motion (near-miss shake, future FX)
+        _tog('LIMIT 30 FPS','fps30'),
+        _tog('DISABLE GLOW','disableGlow'),
+        _tog('DEFER DRAW','deferDraw'),
         { lbl:()=>'FORCE SINGLE THREADED: '+(netSingleThread()?'ON':'OFF'),   // whole app sim on main; applies at the NEXT game/duel start
           dis:()=>_runFromFile()||!_worker,   // forced (greyed) with no Worker or on file://
           act:()=>{cfg.singleThreaded=!cfg.singleThreaded;Snd.sfxPlay('select',cfg.music);} },
@@ -375,10 +374,8 @@ const SETTINGS_CATS = [
         { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
           dis:()=>_runFromFile(),   // file:// has a null origin: the server is unreachable, so offline is forced (greyed)
           act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline&&typeof netOfflineClear==='function')netOfflineClear();} },
-        { lbl:()=>'RELAY ONLY (NO P2P): '+(cfg.noP2P?'ON':'OFF'),
-          act:()=>{cfg.noP2P=!cfg.noP2P;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'HIDE REMOTE COSMETICS: '+(cfg.noRemoteCosmetics?'ON':'OFF'),
-          act:()=>{cfg.noRemoteCosmetics=!cfg.noRemoteCosmetics;Snd.sfxPlay('select',cfg.music);} },
+        _tog('RELAY ONLY (NO P2P)','noP2P'),
+        _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
     ]},
     { label:'DATA', items:[
         { lbl:()=>'BACKUP CONFIG TO FILE', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
@@ -404,8 +401,7 @@ const DEBUG_CAT = { label:'DEBUGGING', items:[
       act:()=>{ cfg.debug=((cfg.debug||0)+1)%4; requestAnimationFrame(layout); Snd.sfxPlay('select',cfg.music); },   // level 2+ shows the on-canvas overlays
       adj:(r)=>{ cfg.debug=Math.max(0,Math.min(3,(cfg.debug||0)+(r?1:-1))); requestAnimationFrame(layout); } },
     { lbl:()=>'EXPORT DEBUG INFO', act:()=>{ Snd.sfxPlay('select',cfg.music); exportDebugInfo(); } },
-    { lbl:()=>'X10 RARE EVENTS: '+(cfg.x10?'ON':'OFF'),
-      act:()=>{ cfg.x10=!cfg.x10; Snd.sfxPlay('select',cfg.music); } },   // persisted: the settings handler saveCfg()s after act (also resends the worker cfg)
+    _tog('X10 RARE EVENTS','x10'),   // persisted: the post-act saveCfg also resends the worker cfg
     { lbl:()=> _dbgSending ? 'SENDING SNAPSHOT...' : 'SEND DEBUG SNAPSHOT'+(_dbgSnap?'':' (CAPTURE FIRST)'),
       act:()=>{ if(_dbgSending) return; Snd.sfxPlay('select',cfg.music); sendDebugSnapshot(); } },
     { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
@@ -460,12 +456,11 @@ function drawSettings() {
     ct(hint,CW/2,HINT_Y,'#888',FONT.HINT);
 }
 
-function _drawScoreTabs(){
-    const labels=['LOCAL','GLOBAL'];
-    const hi=['#7fff7f','#ffd24a'], fill=['rgba(28,60,20,0.85)','rgba(60,48,16,0.85)'], txt=['#bfffbf','#ffe9b0'];
-    const m=6, tabH=20, tabY=44, tabW=(CW-2*m)/labels.length;
+// Retro tab strip: every page visible at once, the active one lit in its own colour.
+function _drawTabs(labels, hi, fill, txt, sel, tabY){
+    const m=6, tabH=20, tabW=(CW-2*m)/labels.length;
     for(let i=0;i<labels.length;i++){
-        const tx=m+i*tabW, active=(i===scoresTab);
+        const tx=m+i*tabW, active=(i===sel);
         ctx.fillStyle=active?fill[i]:'rgba(16,16,16,0.6)';
         rr(tx+2,tabY,tabW-4,tabH,4); ctx.fill();
         ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi[i]:'#3a3a3a';
@@ -473,6 +468,10 @@ function _drawScoreTabs(){
         rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
         ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', FONT.HINT);
     }
+}
+function _drawScoreTabs(){
+    _drawTabs(['LOCAL','GLOBAL'], ['#7fff7f','#ffd24a'],
+        ['rgba(28,60,20,0.85)','rgba(60,48,16,0.85)'], ['#bfffbf','#ffe9b0'], scoresTab, 44);
 }
 // A gold star in the left margin of a board row: this run finished (cleared level 10),
 // as opposed to one that only reached its level before dying.
@@ -487,6 +486,21 @@ function drawWinStar(cx, cy, r){
     ctx.closePath();
     ctx.fillStyle='#ffd700'; ctx.shadowColor='#ffd700'; ctx.shadowBlur=6; ctx.fill();
     ctx.restore();
+}
+// One scoreboard row, shared by the LOCAL and GLOBAL tabs (g = global). The hardening
+// casts (|0, %, typeof) exist for the untrusted server fields and are identity on
+// well-formed local rows; only score keeps a split, |0 would truncate past 2^31.
+function _drawScoreRow(s, i, g){
+    const y=90+i*28;
+    ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
+    const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
+    ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
+    if(g?s.completed:s.won) drawWinStar(11,y,6);
+    ctx.textAlign='right'; ctx.fillText(String(g?s.score|0:s.score), 334, y);
+    ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level|0}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
+    ctx.fillText(String(s.date||'--.--.--').slice(0,8), 418, y);
+    drawScoreHead(568, y, (s.color|0)%SNAKE_COLORS.length, (s.shopItems&&typeof s.shopItems==='object')?s.shopItems:{});
+    if(s.platform) drawPlatformIcon(588, y, s.platform, '#8fa6b8');   // device the run was played on
 }
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
@@ -508,18 +522,7 @@ function drawScores() {
                 ct('NO GLOBAL SCORES YET - BE THE FIRST!',CW/2,CH/2,'#aaa',FONT.HINT);
             } else {
                 ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
-                gs.slice(0,8).forEach((s,i)=>{
-                    const y=90+i*28;
-                    ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
-                    const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
-                    ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
-                    if(s.completed) drawWinStar(11,y,6);
-                    ctx.textAlign='right'; ctx.fillText(String(s.score|0), 334, y);
-                    ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level|0}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
-                    ctx.textAlign='left';  ctx.fillText(String(s.date||'--.--.--').slice(0,8), 418, y);
-                    drawScoreHead(568, y, (s.color|0)%SNAKE_COLORS.length, (s.shopItems&&typeof s.shopItems==='object')?s.shopItems:{});
-                    if(s.platform) drawPlatformIcon(588, y, s.platform, '#8fa6b8');   // device the run was played on
-                });
+                gs.slice(0,8).forEach((s,i)=>_drawScoreRow(s,i,true));
                 ctx.textAlign='center';
             }
         }
@@ -530,17 +533,7 @@ function drawScores() {
     if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',FONT.HINT); }
     else {
         ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
-        scores.slice(0,8).forEach((s,i)=>{
-            const y=90+i*28;
-            ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
-            const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
-            ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
-            if(s.won) drawWinStar(11,y,6);
-            ctx.textAlign='right'; ctx.fillText(String(s.score), 334, y);
-            ctx.textAlign='left';  ctx.fillText(`${diff}/${s.level}`, 346, y);   // shifted 1 char left so level 10 (2 digits) clears the date
-            ctx.textAlign='left';  ctx.fillText(s.date||'--.--.--', 418, y);
-            drawScoreHead(568, y, s.color||0, s.shopItems||{});
-        });
+        scores.slice(0,8).forEach((s,i)=>_drawScoreRow(s,i,false));
         ctx.textAlign='center';
     }
     ct('L/R:tab   A/ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
@@ -681,22 +674,11 @@ function _drawBoxReveal(){
         ct(it?it.name:r.id,CW/2,CH/2+30,'#ffffff',FONT.MENU); }
     ctx.shadowBlur=0; ctx.restore();
 }
-// Retro tab strip: all four shop pages visible at once, active one lit.
 function _drawShopTabs(){
-    const labels=['COSMETICS 1','COSMETICS 2','BOX GEAR','MYSTERY BOXES'];
-    const hi   =['#7fff7f','#7fff7f','#4ad0ff','#c48af0'];
-    const fill =['rgba(28,60,20,0.85)','rgba(28,60,20,0.85)','rgba(16,44,60,0.85)','rgba(68,40,96,0.85)'];
-    const txt  =['#bfffbf','#bfffbf','#bfe8ff','#e6c0ff'];
-    const m=6, tabH=20, tabY=42, tabW=(CW-2*m)/labels.length;
-    for(let i=0;i<labels.length;i++){
-        const tx=m+i*tabW, active=(i===shopPage);
-        ctx.fillStyle=active?fill[i]:'rgba(16,16,16,0.6)';
-        rr(tx+2,tabY,tabW-4,tabH,4); ctx.fill();
-        ctx.lineWidth=active?2:1; ctx.strokeStyle=active?hi[i]:'#3a3a3a';
-        if(active){ ctx.shadowColor=hi[i]; ctx.shadowBlur=8; }
-        rr(tx+2,tabY,tabW-4,tabH,4); ctx.stroke(); ctx.shadowBlur=0;
-        ct(labels[i], tx+tabW/2, tabY+tabH/2+1, active?txt[i]:'#666666', FONT.HINT);
-    }
+    _drawTabs(['COSMETICS 1','COSMETICS 2','BOX GEAR','MYSTERY BOXES'],
+        ['#7fff7f','#7fff7f','#4ad0ff','#c48af0'],
+        ['rgba(28,60,20,0.85)','rgba(28,60,20,0.85)','rgba(16,44,60,0.85)','rgba(68,40,96,0.85)'],
+        ['#bfffbf','#bfffbf','#bfe8ff','#e6c0ff'], shopPage, 42);
 }
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
@@ -1106,6 +1088,12 @@ function drawDeathFx(now){
     else{ctx.shadowBlur=GLOW.TITLE;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.TITLE);}
     ctx.restore();
 }
+// The one paused overlay: classic 'paused' and duel 'duelPaused' draw the same thing.
+function _drawPausedOv(){
+    drawOvBg(0.55);
+    ctg('PAUSED',CW/2,CH/2+10,'#7fff7f',FONT.JUMBO, GLOW.BIG);
+    ctx.save(); ctx.shadowBlur=0; ct('||:resume  ESC:quit',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
+}
 function drawGameBoard(now) {
     drawWorld(now);
     if(phase==='levelDone') drawLevelDoneFx(now);
@@ -1114,11 +1102,7 @@ function drawGameBoard(now) {
         ct('GET READY',CW/2,CH/2+38,'#aaa',FONT.MENU);
     });
     if(phase==='dying') drawDeathFx(now);
-    if(phase==='paused'){
-        drawOvBg(0.55);
-                ctg('PAUSED',CW/2,CH/2+10,'#7fff7f',FONT.JUMBO, GLOW.BIG);
-        ctx.save(); ctx.shadowBlur=0; ct('||:resume  ESC:quit',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
-    }
+    if(phase==='paused') _drawPausedOv();
     // Bonus flash (duration and colour vary by tier)
     const bonusAge=now-bonusAt;
     const isGouranga=bonusLabel==='GOURANGA!';
@@ -1197,6 +1181,17 @@ function drawConfirmYesNo(title, sel) {
     ct(sel===1?'> NO <':'  NO   ',NO_X,CH/2+38,'#ff5555',FONT.MENU);
     ctx.globalAlpha=1; ctx.shadowBlur=0;
     ctx.save(); ctx.shadowBlur=0; ct('L/R:choose  A:ok  ESC:cancel',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
+}
+// YES/NO row for the full-screen lobby/friends modals -- NOT drawConfirmYesNo,
+// whose fixed geometry (y = CH/2+38) collided with the text above these.
+function _drawModalYesNo(sel){
+    const s0=sel===0, s1=sel===1;
+    ctx.save();
+    ctx.globalAlpha=s0?1:0.35; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=s0?12:1;
+    ct(s0?'> YES <':'  YES  ', CW/2-80, CH/2+28, '#7fff7f', FONT.MENU);
+    ctx.globalAlpha=s1?1:0.35; ctx.shadowColor='#ff5555'; ctx.shadowBlur=s1?12:1;
+    ct(s1?'> NO <':'  NO   ', CW/2+80, CH/2+28, '#ff5555', FONT.MENU);
+    ctx.restore();
 }
 function drawQuitConfirm() {
     // LIVE board behind the dialog -- the game keeps running while the player decides
@@ -1290,21 +1285,14 @@ function drawLobby(){
     else if(_netHs.sent) drawStatus('INVITED '+fmtFriendId(_netHs.sent)+' - WAITING'+dots);
     if(_netLb.invite){
         // Incoming invite: full-screen modal on a SOLID background (a transparent
-        // layer over the lobby read as a mess). Its own YES/NO row -- NOT
-        // drawConfirmYesNo, whose fixed geometry collided with the text above.
+        // layer over the lobby read as a mess).
         // Profile fields are untrusted (clamped in net-api.js, canvas text only).
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
         ctg('INVITE',CW/2,CH/2-84,'#ffd700',FONT.TITLE, GLOW.TITLE);
         ct(_netLb.invite.profile.name+'  ('+fmtFriendId(_netLb.invite.from)+')', CW/2, CH/2-48, '#aaa', FONT.MENU);
         ct('WANTS TO PLAY 1:1', CW/2, CH/2-22, '#7fff7f', FONT.HINT);
-        const s0=_netLb.inviteSel===0, s1=_netLb.inviteSel===1;
-        ctx.save();
-        ctx.globalAlpha=s0?1:0.35; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=s0?12:1;
-        ct(s0?'> YES <':'  YES  ', CW/2-80, CH/2+28, '#7fff7f', FONT.MENU);
-        ctx.globalAlpha=s1?1:0.35; ctx.shadowColor='#ff5555'; ctx.shadowBlur=s1?12:1;
-        ct(s1?'> NO <':'  NO   ', CW/2+80, CH/2+28, '#ff5555', FONT.MENU);
-        ctx.restore();
+        _drawModalYesNo(_netLb.inviteSel);
         ct('L/R:choose  A:ok  ESC:decline', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
@@ -1361,13 +1349,7 @@ function drawFriends(){
         const nm=(typeof netFriendName==='function')?netFriendName(_netFr.confirm):null;
         ct((nm?nm+'  ':'')+fmtFriendId(_netFr.confirm), CW/2, CH/2-48, '#aaa', FONT.MENU);
         ct('THE SERVER FORGETS THE RELATION TOO', CW/2, CH/2-22, '#888', FONT.HINT);
-        const s0=_netFr.confirmSel===0, s1=_netFr.confirmSel===1;
-        ctx.save();
-        ctx.globalAlpha=s0?1:0.35; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=s0?12:1;
-        ct(s0?'> YES <':'  YES  ', CW/2-80, CH/2+28, '#7fff7f', FONT.MENU);
-        ctx.globalAlpha=s1?1:0.35; ctx.shadowColor='#ff5555'; ctx.shadowBlur=s1?12:1;
-        ct(s1?'> NO <':'  NO   ', CW/2+80, CH/2+28, '#ff5555', FONT.MENU);
-        ctx.restore();
+        _drawModalYesNo(_netFr.confirmSel);
         ct('L/R:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
@@ -1438,12 +1420,7 @@ function drawDuelBoard(now) {
     }
     else if(phase==='levelDone') drawLevelDoneFx(now);
     if(phase==='dying') drawDeathFx(now);
-    if(phase==='duelPaused'){
-        // Identical to the classic paused overlay, incl. the bottom hint.
-        drawOvBg(0.55);
-                ctg('PAUSED', CW/2, CH/2+10, '#7fff7f', FONT.JUMBO, GLOW.BIG);
-        ctx.save(); ctx.shadowBlur=0; ct('||:resume  ESC:quit',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
-    }
+    if(phase==='duelPaused') _drawPausedOv();
     if(phase==='duelOver' && now-phaseAt >= FX_SETTLE_MS){   // hold the winner banner 2 ticks, same as the death message: a mispredicted final kill rolled back never flashes "X WINS!"
         // Match over: winner banner + final score, then a PLAY AGAIN? dialog in the
         // quit-dialog skeleton (YES pre-selected via the loop's phase-change hook).

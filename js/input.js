@@ -110,13 +110,24 @@ function _duelExit(){
     showHUD(false); Snd.musicStop(); Snd.sfxPlay('nav',cfg.music);
 }
 function _backToMenu(){ phase='menu'; Snd.sfxPlay('nav',cfg.music); }
+// Shared UP/DOWN menu stepper: returns the new selection, with the nav blip only
+// when the key really was one of the two arrows.
+function _navStep(key, sel, count){
+    if(key==='ArrowUp')  { sel=(sel-1+count)%count; Snd.sfxPlay('nav',cfg.music); }
+    if(key==='ArrowDown'){ sel=(sel+1)%count; Snd.sfxPlay('nav',cfg.music); }
+    return sel;
+}
+// Shared LEFT/RIGHT two-way chooser: 0=left, 1=right, -1 = not an arrow (no blip).
+function _navLR(key){
+    if(key==='ArrowLeft'){ Snd.sfxPlay('nav',cfg.music); return 0; }
+    if(key==='ArrowRight'){ Snd.sfxPlay('nav',cfg.music); return 1; }
+    return -1;
+}
+// The three YES/NO dialogs riding quitConfirmSel share one nav.
+function _navQC(key){ const s=_navLR(key); if(s>=0) quitConfirmSel=s; }
 const UI_INPUT = {
     menu: {
-        nav(key){
-            const menuCount=MENU_ITEMS.length+(ANNOUNCEMENT?1:0);
-            if(key==='ArrowUp')  {menuSel=(menuSel-1+menuCount)%menuCount;Snd.sfxPlay('nav',cfg.music);}
-            if(key==='ArrowDown'){menuSel=(menuSel+1)%menuCount;Snd.sfxPlay('nav',cfg.music);}
-        },
+        nav(key){ menuSel=_navStep(key, menuSel, MENU_ITEMS.length+(ANNOUNCEMENT?1:0)); },
         confirm(){
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
@@ -132,10 +143,7 @@ const UI_INPUT = {
         },
     },
     duelMenu: {
-        nav(key){
-            if(key==='ArrowUp')  {duelSel=(duelSel+5)%6;Snd.sfxPlay('nav',cfg.music);}
-            if(key==='ArrowDown'){duelSel=(duelSel+1)%6;Snd.sfxPlay('nav',cfg.music);}
-        },
+        nav(key){ duelSel=_navStep(key, duelSel, 6); },
         confirm(){
             if(duelSel===0){
                 if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
@@ -155,14 +163,8 @@ const UI_INPUT = {
     },
     friends: {
         nav(key){
-            if(_netFr.confirm){
-                if(key==='ArrowLeft'){ _netFr.confirmSel=0; Snd.sfxPlay('nav',cfg.music); }
-                if(key==='ArrowRight'){ _netFr.confirmSel=1; Snd.sfxPlay('nav',cfg.music); }
-                return;
-            }
-            const count=_netFrRows().length+1;   // rows + BACK
-            if(key==='ArrowUp')  { _netFr.sel=(_netFr.sel+count-1)%count; Snd.sfxPlay('nav',cfg.music); }
-            if(key==='ArrowDown'){ _netFr.sel=(_netFr.sel+1)%count; Snd.sfxPlay('nav',cfg.music); }
+            if(_netFr.confirm){ const s=_navLR(key); if(s>=0) _netFr.confirmSel=s; return; }
+            _netFr.sel=_navStep(key, _netFr.sel, _netFrRows().length+1);   // rows + BACK
         },
         confirm(){
             if(_netFr.confirm){
@@ -189,14 +191,8 @@ const UI_INPUT = {
     },
     lobby: {
         nav(key){
-            if(_netLb.invite){
-                if(key==='ArrowLeft'){ _netLb.inviteSel=0; Snd.sfxPlay('nav',cfg.music); }
-                if(key==='ArrowRight'){ _netLb.inviteSel=1; Snd.sfxPlay('nav',cfg.music); }
-                return;
-            }
-            const count=getFriends().length+2;   // QUICK MATCH + friends + BACK
-            if(key==='ArrowUp')  { _netLb.sel=(_netLb.sel+count-1)%count; Snd.sfxPlay('nav',cfg.music); }
-            if(key==='ArrowDown'){ _netLb.sel=(_netLb.sel+1)%count; Snd.sfxPlay('nav',cfg.music); }
+            if(_netLb.invite){ const s=_navLR(key); if(s>=0) _netLb.inviteSel=s; return; }
+            _netLb.sel=_navStep(key, _netLb.sel, getFriends().length+2);   // QUICK MATCH + friends + BACK
         },
         confirm(){
             if(_netLb.invite){ Snd.sfxPlay('select',cfg.music); _netInviteAnswer(_netLb.inviteSel===0); return; }
@@ -229,8 +225,7 @@ const UI_INPUT = {
             _dbgPinShow=false;   // any movement dismisses a held debug PIN
             const inCat=settingsCat>=0, list=_settingsList(), count=list.length+1;   // +1 for BACK
             const onBack=settingsSel===list.length;
-            if(key==='ArrowUp')  {settingsSel=(settingsSel-1+count)%count;Snd.sfxPlay('nav',cfg.music);}
-            if(key==='ArrowDown'){settingsSel=(settingsSel+1)%count;Snd.sfxPlay('nav',cfg.music);}
+            settingsSel=_navStep(key, settingsSel, count);
             if((key==='ArrowLeft'||key==='ArrowRight') && inCat && !onBack){
                 const it=list[settingsSel];
                 if(it.adj){ it.adj(key==='ArrowRight'); Snd.sfxPlay('nav',cfg.music); saveCfg(); }
@@ -267,12 +262,7 @@ const UI_INPUT = {
         back: _backToMenu,
     },
     scores: {
-        nav(key){
-            if(key==='ArrowLeft'||key==='ArrowRight'){
-                scoresTab=(scoresTab+(key==='ArrowRight'?1:-1)+2)%2;   // 2 tabs (LOCAL/GLOBAL): wrap like the shop
-                Snd.sfxPlay('nav',cfg.music);
-            }
-        },
+        nav(key){ if(_navLR(key)>=0) scoresTab=1-scoresTab; },   // 2 tabs (LOCAL/GLOBAL): either arrow flips, wrapping like the shop
         back: _backToMenu,
         other(){ _backToMenu(); return true; },   // any other key leaves the board
     },
@@ -302,9 +292,8 @@ const UI_INPUT = {
         nav(key){
             const onBoxes = shopPage===BOX_PAGE, onGear = shopPage===GEAR_PAGE;
             const items = onBoxes ? _boxList() : onGear ? _gearList() : SHOP_ITEMS.filter(it=>(it.page||0)===shopPage);
-            if(key==='ArrowUp'){ if(items.length){ shopSel=(shopSel-1+items.length)%items.length; Snd.sfxPlay('nav',cfg.music); } }
-            else if(key==='ArrowDown'){ if(items.length){ shopSel=(shopSel+1)%items.length; Snd.sfxPlay('nav',cfg.music); } }
-            else if(key==='ArrowLeft'){ shopPage=(shopPage-1+SHOP_PAGES)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
+            if(items.length) shopSel=_navStep(key, shopSel, items.length);
+            if(key==='ArrowLeft'){ shopPage=(shopPage-1+SHOP_PAGES)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
             else if(key==='ArrowRight'){ shopPage=(shopPage+1)%SHOP_PAGES; shopSel=0; Snd.sfxPlay('nav',cfg.music); }
         },
         // ONE control path for every tab: a box opens; an OWNED wearable toggles wear/unwear
@@ -337,10 +326,7 @@ const UI_INPUT = {
         back: _backToMenu,
     },
     quitConfirm: {
-        nav(key){
-            if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfxPlay('nav',cfg.music); }
-            if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfxPlay('nav',cfg.music); }
-        },
+        nav: _navQC,
         confirm(){
             Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){
@@ -363,10 +349,7 @@ const UI_INPUT = {
         other(key){ if(key==='y'||key==='Y'){ this.confirm(); return true; } return false; },
     },
     resetConfirm: {
-        nav(key){
-            if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfxPlay('nav',cfg.music); }
-            if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfxPlay('nav',cfg.music); }
-        },
+        nav: _navQC,
         confirm(){
             Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){
@@ -379,10 +362,7 @@ const UI_INPUT = {
         back(){ phase='settings'; },
     },
     duelOver: {   // PLAY AGAIN? dialog -- YES pre-selected (see the phase-change hook)
-        nav(key){
-            if(key==='ArrowLeft'){ quitConfirmSel=0; Snd.sfxPlay('nav',cfg.music); }
-            if(key==='ArrowRight'){ quitConfirmSel=1; Snd.sfxPlay('nav',cfg.music); }
-        },
+        nav: _navQC,
         confirm(){
             Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){
@@ -396,8 +376,7 @@ const UI_INPUT = {
     },
     nameEntry: {
         nav(key){
-            if(key==='ArrowUp')  {nameCharIdx=(nameCharIdx-1+_entryChars().length)%_entryChars().length;Snd.sfxPlay('nav',cfg.music);}
-            else if(key==='ArrowDown'){nameCharIdx=(nameCharIdx+1)%_entryChars().length;Snd.sfxPlay('nav',cfg.music);}
+            if(key==='ArrowUp'||key==='ArrowDown'){ nameCharIdx=_navStep(key, nameCharIdx, _entryChars().length); }
             else if(key==='ArrowLeft'){ _placeName(); if(nameCursorPos>0)nameCursorPos--; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
             else if(key==='ArrowRight'){ _placeName(); if(nameCursorPos<_entryMax()-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
         },
