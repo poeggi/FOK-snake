@@ -755,20 +755,6 @@ runTest('SMOKE-NET', `
     confetti.length=0; localStorage.removeItem('fok-snake-friends'); _netFr.msg=''; _duelMsg='';
     log('friend notifications ok: request + accepted celebrate, bogus ignored');
 
-    // ---- relay fallback: routing, low-rate corrections, indicator ----
-    simTick=0; simNow=0; startDuel(0xFACE); bars=[];
-    for(let i=0;i<400;i++) update();
-    fakeSess('host'); sent.length=0;
-    _netSess.relay=true;                       // relay mode: nothing may use the DataChannel
-    _netSend({t:'pi'});
-    if(sent.length!==0) throw 'relay mode must not send over the DataChannel';
-    if(!netRelayActive()) throw 'relay state not exposed';
-    // (the relay carries the SAME inputs-only messages: no state, no host frames)
-    drawDuelBoard(simNow);                     // board renders the RELAY MODE tag
-    _netTeardown(); inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
-    // the 5s fallback timer exists on fresh RTC sessions (fires only in browsers)
-    log('relay fallback ok: send routing, indicator, board tag');
-
     // ---- ONE status notice, identical on every online screen; the api gate
     // re-evaluates instead of latching forever ----
     cfg.offline=true;
@@ -809,22 +795,6 @@ runTest('SMOKE-NET', `
     localStorage.removeItem('fok-snake-friends'); _netFr.msg='';
     log('qr auto-confirm ok: friends while presenting, manual otherwise');
 
-    // ---- relay fallback actually engages: a failed P2P attempt becomes a relay
-    // session (and retires the RTC objects so their late events cannot kill it) ----
-    let _pcClosed=false, _dcClosed=false;
-    _netSess=_netMkSess('00ff00aa','host'); _netSess.seed=0xFA11;
-    _netSess.pc={ close(){ _pcClosed=true; } };
-    _netSess.dc={ close(){ _dcClosed=true; }, readyState:'open', send(){} };
-    _netRelayStart(_netSess);
-    if(!_netSess.relay||!_netSess.game) throw 'relay session did not engage';
-    if(!_pcClosed||!_dcClosed) throw 'the failed RTC attempt must be retired';
-    if(_netSess.pc!==null||_netSess.dc!==null) throw 'RTC handles must be dropped';
-    if(_netLb.msg.indexOf('RELAY')<0) throw 'fallback must be visible while connecting';
-    if(!netRelayActive()) throw 'relay state not active';
-    if(!(_netSess.relayGraceUntil > 0)) throw 'relay must grant the peer a fallback grace window';
-    _netTeardown(); inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; _netLb.msg='';
-    log('relay engage ok: fallback session, RTC retired, visible message');
-
     // ---- invites surface on 1:1/social screens; elsewhere they auto-decline ----
     for(const ph of ['duelMenu','friends','friendId']){
         phase=ph; _netLb.invite=null; _netSess=null;
@@ -848,24 +818,6 @@ runTest('SMOKE-NET', `
     if(_netLb.msg.indexOf('WITHDRAWN')<0) throw 'withdrawn invite needs a notice';
     _netLb.msg=''; phase='menu';
     log('invite withdraw ok: bye closes the dialog, re-invite unblocked');
-
-    // ---- relay-only mode (no-P2P bit): invite-relay/accept-relay, no WebRTC ----
-    cfg.noP2P=true; phase='lobby'; _netLb.invite=null; _netHsClear(); _netSess=null;
-    // INVITER: an accept-relay reply starts a relay HOST session, no WebRTC.
-    _netHs.sent='00ff00aa'; _netHs.sentRelay=true;
-    _netOnSignal({from:'00ff00aa', type:'accept-relay', payload:JSON.stringify({profile:{name:'P'}})});
-    if(!_netSess||!_netSess.relay||_netSess.role!=='host') throw 'accept-relay must start a relay host session';
-    if(_netSess.pc) throw 'relay mode must not create an RTCPeerConnection';
-    _netTeardown();
-    // ACCEPTOR: a no-sdp offer starts a relay PEER session, no WebRTC.
-    phase='lobby'; _netSess=null;
-    _netOnSignal({from:'00ff00bb', type:'offer', payload:JSON.stringify({seed:7, profile:{name:'Q'}})});
-    if(!_netSess||!_netSess.relay||_netSess.role!=='peer') throw 'no-sdp offer must start a relay peer session';
-    if(_netSess.pc) throw 'relay peer must not create an RTCPeerConnection';
-    if((_netSess.seed>>>0)!==7) throw 'relay peer must adopt the offer seed';
-    _netTeardown();
-    cfg.noP2P=false; phase='menu';
-    log('relay-only mode ok: accept-relay/no-sdp offers start relay sessions, no WebRTC');
 
     // ---- universal teardown: EVERY leftover state is reaped on lobby transitions ----
     // (1) a relay session that reached game=true but is not on-screen (inGame=false)

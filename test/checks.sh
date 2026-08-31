@@ -71,7 +71,6 @@ suite test/sw-cache.js
 echo "[checks] two-client handshake (invite / connect over a signal bus)"
 suite test/net-handshake.js
 suite test/smoke-worker.js
-suite test/relay-sim.js
 
 echo "[checks] P2P boundary clock burst: both sides agree on the peer offset and nudge to the shared midpoint"
 suite test/duel-sync.js

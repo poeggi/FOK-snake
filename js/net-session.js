@@ -15,7 +15,7 @@
 // stepping into/out of a menu). Only an explicit abort (BACK/quit) or a timeout
 // clears it. Putting these in _netLb is what silently killed handshakes before:
 // every screen change reset the object and the peer's reply was then discarded.
-var _netHs = { sent:null, sentAt:0, sentRelay:false,     // we invited; awaiting accept
+var _netHs = { sent:null, sentAt:0, sentRelay:false,     // we invited; awaiting accept (sentRelay: DEPRECATED(relay))
                accepting:null, acceptingAt:0,            // we accepted; awaiting their offer
                offerTo:null, offerPayload:null, offeredAt:0, offerTries:0 };   // we offered; awaiting answer
 function _netHsClear(){ _netHs = { sent:null, sentAt:0, sentRelay:false, accepting:null, acceptingAt:0,
@@ -63,7 +63,7 @@ async function _netInviteSend(to){
     if(inGame) return;
     if(_netSess) _netTeardown();          // debris from a dead attempt: drop it silently, never bye the new target
     if(!_netOk()) return;
-    const relay = !!cfg.noP2P;
+    const relay = !!cfg.noP2P;   // DEPRECATED(relay): with net-relay.js gone this is always false and the branches below collapse
     if(!relay && !_netRtcAvail()){ _netLb.msg = 'WEBRTC NOT SUPPORTED'; return; }   // relay mode needs no WebRTC
     if(_netHs.sent && _netHs.sent !== to) _netSignal(_netHs.sent, 'bye', '');       // switching targets: withdraw the old one
     _netHsClear();
@@ -104,7 +104,7 @@ async function _netInviteSend(to){
 function _netInviteAnswer(acc){
     const inv = _netLb.invite; if(!inv) return;
     _netLb.invite = null; _uiDirty = true;
-    // Relay mode when EITHER side wants it (our setting, or the invite carried the bit).
+    // Relay mode when EITHER side wants it (our setting, or the invite carried the bit). DEPRECATED(relay)
     const relay = !!cfg.noP2P || !!inv.relay;
     if(_netSess && !inGame) _netTeardown();   // debris must not block an accept
     if(!acc || inGame || (!relay && !_netRtcAvail())){ _netSignal(inv.from, 'decline', ''); return; }
@@ -117,7 +117,7 @@ function _netInviteAnswer(acc){
 let _netSeekT = null;
 function _netSeekStart(){
     if(_netSeekT || _netSess || !_netOk() || !_netTimers) return;
-    if(!cfg.noP2P && !_netRtcAvail()){ _netLb.msg = 'WEBRTC NOT SUPPORTED'; return; }   // relay mode needs no WebRTC
+    if(!cfg.noP2P && !_netRtcAvail()){ _netLb.msg = 'WEBRTC NOT SUPPORTED'; return; }   // relay mode needs no WebRTC -- DEPRECATED(relay)
     _netLb.seeking = true; _netLb.msg = '';
     _netSeekT = setInterval(async ()=>{
         if(!_netLb.seeking || _netSess){ _netSeekStop(); return; }
@@ -125,7 +125,7 @@ function _netSeekStart(){
         if(!r || !r.matched) return;
         _netSeekStop();
         if(r.peer_name) _netNameSeen(String(r.matched), r.peer_name);   // strangers: the pairing is the entitlement
-        if(r.role === 'offerer'){ cfg.noP2P ? _netRelayOffer(String(r.matched)) : _netRtcOffer(String(r.matched)); }
+        if(r.role === 'offerer'){ cfg.noP2P ? _netRelayOffer(String(r.matched)) : _netRtcOffer(String(r.matched)); }   // DEPRECATED(relay) fork
         else _netLb.msg = 'MATCHED - CONNECTING...';   // the offer arrives as a signal
         _uiDirty = true;
     }, 1000);
@@ -144,7 +144,7 @@ function _netOnSignal(sig){
         const pl = String(sig.payload||'');
         switch(sig.type){
             case 'invite':
-            case 'invite-relay': {
+            case 'invite-relay': {   // DEPRECATED(relay) signal type
                 if(_netSess || _netLb.invite){ _netSignal(from, 'decline', ''); return; }   // busy: tell them right away
                 if(_netHs.sent === from){
                     // MUTUAL invite: both pressed INVITE -- both already said yes, so no
@@ -170,7 +170,7 @@ function _netOnSignal(sig){
                 break;
             }
             case 'accept':
-            case 'accept-relay': {
+            case 'accept-relay': {   // DEPRECATED(relay) signal type
                 if(_netHs.sent !== from){ _netSigLog('< accept UNEXPECTED'); return; }   // not ours: visible, not silent
                 const relayNow = _netHs.sentRelay || sig.type === 'accept-relay';
                 _netHs.sent = null;
@@ -195,7 +195,7 @@ function _netOnSignal(sig){
                 // (_netInviteAnswer). Quick match has no invite to carry the bit, so an
                 // offerer without the setting sends a normal sdp offer; routing on that
                 // alone silently ignored OUR relay setting and played full P2P.
-                if(od.sdp && !cfg.noP2P) _netRtcAnswer(from, od); else _netRelayAnswer(from, od);
+                if(od.sdp && !cfg.noP2P) _netRtcAnswer(from, od); else _netRelayAnswer(from, od);   // DEPRECATED(relay) fork
                 break;
             }
             case 'answer': {
@@ -215,13 +215,16 @@ function _netOnSignal(sig){
                         _netSess.peerProfile = _netClampProfile(d.profile);
                         _netNameSeen(from, _netSess.peerProfile.name);
                     }
-                    if(d.relay && _netSess.pc && !_netSess.game){
+                    if(d.relay && _netSess.pc && !_netSess.game){   // DEPRECATED(relay): whole branch
                         // They answered in relay mode (their setting, not ours). Switch
                         // this attempt over at once rather than letting the pc time out.
                         _netRelayStart(_netSess);
                         _netLb.msg = 'RELAY MODE - CONNECTING...';   // nothing failed here: their choice
                     }
-                    else if(_netSess.pc && d.sdp){
+                    // rc is the offer generation: an answer only fits the pc built for THAT offer.
+                    // Signals are one-shot but not ordered, so an answer to a superseded offer can
+                    // still land, and setting it on the current pc wedges the connect for good.
+                    else if(_netSess.pc && d.sdp && (d.rc|0) === (_netSess.rc|0)){
                         const s = _netSess;
                         s.pc.setRemoteDescription(d.sdp)
                             .then(()=>{ if(_netSess === s){ s.rdOk = true; _netIceFlush(s); } })
@@ -458,7 +461,16 @@ function _netHandleMsg(txt){
     // the gate would drop the samples that matter most. They carry only NTP-style stamps and never
     // touch the tick stream or the lag stats. 'bsync' is the host's trigger to open OUR burst so both
     // sides measure over the same window; 'bs' is one measured datagram.
-    if(m.t === 'bsync'){ if(_netSess && _netSess.role !== 'host') _netBurstRun(_netSess); return; }
+    if(m.t === 'bsync'){
+        // The trigger is repeated (reliable control) and retried, so one attempt arrives many times.
+        // (epoch,n) keys it: a late repeat must not open a second run and wipe the samples the host
+        // is still collecting on.
+        if(_netSess && _netSess.role !== 'host'){
+            const id = (m.epoch|0) + ':' + (m.n|0);
+            if(_netSess.bsSyncId !== id){ _netSess.bsSyncId = id; _netBurstRun(_netSess); }
+        }
+        return;
+    }
     if(m.t === 'bs'){ _netBurstRecv(_netSess, m); return; }
     // The stamp is CHECKED, not just logged. A peer cannot have sent from our
     // future; a packet claiming otherwise is bogus and is dropped. The tolerance
@@ -593,7 +605,7 @@ function netDuelWarn(){
     // (RB_WARN_MS). Every inbound datagram -- the minimal 'pi' liveness ping included --
     // refreshes lastRecvWall before dispatch, so a link still carrying ANYTHING never
     // flashes; a refused input is not a fault (it still arrived). Relay arrivals ride
-    // jittered HTTP round trips, so relay warns at DOUBLE the p2p bar.
+    // jittered HTTP round trips, so relay warns at DOUBLE the p2p bar. DEPRECATED(relay)
     if(Date.now() - s.lastRecvWall > (s.relay ? RB_WARN_MS * 2 : RB_WARN_MS) && !(s.relay && performance.now() < s.relayGraceUntil)) return 'CONNECTION LOST';
     // OUT OF SYNC is the OTHER fault: the link is fine, the worlds diverged (a hash
     // disagreed). duel-core fires one targeted repair per verdict; this banner is its live
@@ -740,7 +752,7 @@ function _netTeardown(){
     s.game = false; s.relay = false;
     if(s.connT) clearTimeout(s.connT);
     if(s.liveT) clearInterval(s.liveT);
-    if(s.relayAbort){ try{ s.relayAbort.abort(); }catch(e){} s.relayAbort = null; }   // close the held relay socket now
+    if(s.relayAbort){ try{ s.relayAbort.abort(); }catch(e){} s.relayAbort = null; }   // DEPRECATED(relay): close the held relay socket now
     try{ if(s.dc){ s.dc.onopen=s.dc.onmessage=s.dc.onclose=null; s.dc.close(); } }catch(e){}
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null; s.pc = null; s.rdOk = false; s.iceQ = [];   // a deferred ICE-holdback timer then sees s.pc !== its captured pc and skips

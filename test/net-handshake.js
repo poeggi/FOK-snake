@@ -138,14 +138,17 @@ const HOOKS = (myId) => `
       json:{ ok:true, start_pts:netPts()+50, epoch:epoch|0, now:netPts() } });
     __ctlBegins = 0;
     beginOnlineDuel = ()=>{ __ctlBegins++; };   // count begins; probe the wire, not the duel setup
-    // EVERY server-authored start -- the first start and a rematch alike -- now runs a short paced
+    // EVERY server-authored start -- the first start and a rematch alike -- runs a short paced
     // clock-burst (bsync + a few 'bs') on timers before the host authors and ships its sched/rst.
-    // Run those paced pings inline so the deferred start packet is on the wire when we drain. With no
-    // peer here the burst starves -> theta 0 -> bth 0, but the bsync/bs still prove the path ran.
-    const realST = setTimeout;
+    // Run those paced pings inline so the deferred start packet is on the wire when we drain, and
+    // answer each one with a zero-offset return: there is no peer in this test, and an unanswered
+    // burst is retried until the match ends (duel-sync.js owns that path). These tests are about
+    // what the start SENDS, so the burst has to converge.
+    const realST = setTimeout, realPing = _netBurstPing;
     globalThis.setTimeout = (fn)=>{ fn(); return -1; };
+    _netBurstPing = (s)=>{ realPing(s); _netHandleMsg(JSON.stringify({ t:'bs', pts:netPts(), sq:0, mr:0, mn:NET_BURST_MIN })); };
     try { await _realReqStart(_netSess, reason); }
-    finally { globalThis.setTimeout = realST; }
+    finally { globalThis.setTimeout = realST; _netBurstPing = realPing; }
   };
   // Reliable-control dedup + relay-coalesce probes. beginOnlineDuel is stubbed to a
   // counter so a repeated start is OBSERVABLE without running the whole duel setup --
@@ -178,17 +181,6 @@ const HOOKS = (myId) => `
   globalThis.__peerPkt = (t, ep)=>{ _netHandleMsg(JSON.stringify({ t, ep, tk:0, l:[] })); };
   globalThis.__lastStartPts = ()=> _netSess.lastStart.startPts;
   globalThis.__reshipReset  = ()=>{ _netSess.reshipAt = 0; };
-  // Relay coalesce: a fetch that never resolves keeps the one POST 'in flight'.
-  globalThis.__fetchN = 0;
-  globalThis.__relaySetup = ()=>{
-    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true; _netSess.relay = true;
-    _netSync = { ofs:0, rtt:1, at:Date.now() };
-    globalThis.fetch = ()=>{ __fetchN++; return { then:()=>({ catch:()=>{} }) }; };
-  };
-  globalThis.__relaySend  = (o)=>{ _netRelaySend(_netSess, o); };
-  globalThis.__pendingN   = ()=> (_netSess && _netSess.relayPending) ? _netSess.relayPending.n : null;
-  globalThis.__fetchCount = ()=> __fetchN;
-  globalThis.__relayOnReply = (r)=> _netRelayOnReply(_netSess, r);   // API 3.3 gone-handling, without running the poll loop
   // Post-suspend hard-snap probes: put the clock target gap ticks ahead of simTick.
   globalThis.__breakSetup = (gap)=>{
     _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true;
@@ -198,28 +190,6 @@ const HOOKS = (myId) => `
   };
   globalThis.__breakRecover = ()=> _netBreakRecover(_netSess);
   globalThis.__tickGap = ()=> Math.abs(Math.floor((netPts() - _netSess.startPts) / TICK_MS) - simTick);
-  // 'store full, resend' on the FIRST POST, then 200: proves the refused input is re-slotted
-  // and resent, not dropped. A resolving fetch (unlike the never-resolving coalesce stub).
-  globalThis.__relayFullThenOk = ()=>{
-    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true; _netSess.relay = true;
-    _netSync = { ofs:0, rtt:1, at:Date.now() }; __fetchN = 0;
-    globalThis.fetch = async ()=>{ __fetchN++; return (__fetchN === 1)
-      ? { status:429, json: async ()=>({ ok:false, error:'relay store full, resend' }) }
-      : { status:200, json: async ()=>({ ok:true }) }; };
-  };
-  // API 3.2: the POST reply piggybacks the sender's own inbound (pull). Capture the request
-  // body and hand back one message so a test can prove pull was set and the reply consumed.
-  globalThis.__lastBody = null;
-  globalThis.__relayPullResp = ()=>{
-    _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true; _netSess.relay = true;
-    _netSync = { ofs:0, rtt:1, at:Date.now() }; __fetchN = 0; __lastBody = null;
-    globalThis.fetch = async (url, opts)=>{ __fetchN++; try{ __lastBody = JSON.parse(opts.body); }catch(e){ __lastBody = null; }
-      return { status:200, json: async ()=>({ ok:true, messages:[{ seq:5, payload:JSON.stringify({ t:'pi' }), age:12 }] }) }; };
-  };
-  globalThis.__lastBodyGet = ()=> __lastBody;
-  globalThis.__relaySeq    = ()=> _netSess ? _netSess.relaySeq : null;
-  globalThis.__relayAge    = ()=> _netDbg.relayAge;
-  globalThis.__deliver2    = (msgs)=>{ _netRelayDeliver(_netSess, msgs); };
   // Unload: sendBeacon is the only send that survives page teardown, so capture it.
   globalThis.__beacons = [];
   globalThis.Blob = function(parts, opts){ this.parts = parts; this.type = opts && opts.type; };
@@ -261,36 +231,6 @@ async function acheck(name, fn){
 
 (async () => {
 try {
-  // ---------------------------------------------------------------- relay mode
-  // (cfg.noP2P default ON): invite-relay -> accept-relay -> offer(no sdp) -> answer
-  check('relay: full invite handshake connects both clients', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-
-    A.__invite(B_ID);
-    if(A.__state().hs.sent !== B_ID) throw new Error('A did not record the sent invite');
-    const t1 = pump(A, B);
-    if(!t1.includes('invite-relay')) throw new Error('A must send invite-relay, got ' + t1);
-    if(B.__dialog() !== A_ID) throw new Error('B did not surface the invite dialog');
-
-    B.__answer(true);
-    const t2 = pump(B, A);
-    if(!t2.includes('accept-relay')) throw new Error('B must answer accept-relay, got ' + t2);
-    if(B.__state().hs.accepting !== A_ID) throw new Error('B must await the offer');
-
-    const t3 = pump(A, B);   // A's offer (seed, no sdp)
-    if(!t3.includes('offer')) throw new Error('A must send an offer on accept, got ' + t3);
-    const as = A.__state(), bs = B.__state();
-    if(!as.sess || as.sess.role !== 'host' || !as.sess.relay) throw new Error('A has no relay host session');
-    if(!bs.sess || bs.sess.role !== 'peer' || !bs.sess.relay) throw new Error('B has no relay peer session');
-    if(as.sess.seed !== bs.sess.seed) throw new Error('seed mismatch: ' + as.sess.seed + ' vs ' + bs.sess.seed);
-    if(bs.hs.accepting !== null) throw new Error('B still waiting after the offer');
-
-    const t4 = pump(B, A);   // B's answer stops A's offer retry
-    if(!t4.includes('answer')) throw new Error('B must answer the offer, got ' + t4);
-    if(A.__state().hs.offerTo !== null) throw new Error('the answer must end A\s offer retry');
-  });
-
   // ---------------------------------------------------------------- P2P mode
   // No RTCPeerConnection in the harness, so the SIGNALS are what we verify: the
   // relay bit must NOT appear and the invite/accept types must be the plain ones.
@@ -391,42 +331,6 @@ try {
       throw new Error('reconnect must NOT reset the peer session (seed/epoch changed)');
     const ans = B.__out.find(s=>s.type==='answer');
     if(!ans || !JSON.parse(ans.payload).rc) throw new Error('peer did not send an rc reconnect answer');
-  });
-
-  // One side demanding relay drags the other along (contract: honored if EITHER set).
-  check('mixed: a relay-only acceptor forces relay on a p2p inviter', () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false);   // inviter wants p2p
-    B.__setRelay(true);    // acceptor demands relay
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true);
-    const t2 = pump(B, A);
-    if(!t2.includes('accept-relay')) throw new Error('B must upgrade to accept-relay, got ' + t2);
-    pump(A, B);            // A's offer must now be relay-mode (no sdp)
-    const as = A.__state(), bs = B.__state();
-    if(!as.sess || !as.sess.relay) throw new Error('A must honour the peer relay demand');
-    if(!bs.sess || !bs.sess.relay) throw new Error('B must be in relay');
-    if(as.sess.seed !== bs.sess.seed) throw new Error('seed mismatch in mixed mode');
-  });
-
-  // Quick match has no invite to carry the relay bit, so the answerer's own setting is
-  // the only thing that can force relay -- it used to be ignored entirely and the pair
-  // played p2p against the acceptor's wishes. Same EITHER-side rule as the invite path.
-  await acheck('mixed quick match: a relay-only answerer forces relay on a p2p offerer', async () => {
-    const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false);   // match.php made A the offerer; A wants p2p, so it sends an sdp offer
-    B.__setRelay(true);    // B demands relay
-    await A.__qmOffer(B_ID);   // the p2p offer awaits createOffer/setLocalDescription
-    const t1 = pump(A, B);
-    if(!t1.includes('offer')) throw new Error('A must send an offer, got ' + t1);
-    const ans = B.__out.find(s => s.type === 'answer');
-    if(!ans) throw new Error('B sent no answer');
-    if(!JSON.parse(ans.payload).relay) throw new Error('B must declare relay in the answer');
-    pump(B, A);
-    const as = A.__state(), bs = B.__state();
-    if(!bs.sess || !bs.sess.relay) throw new Error('B must honour its OWN relay setting');
-    if(!as.sess || !as.sess.relay) throw new Error('A must switch to relay on the relay answer');
-    if(as.sess.seed !== bs.sess.seed) throw new Error('seed mismatch in mixed quick match');
   });
 
   // ---------------------------------------------------------------- decline
@@ -940,75 +844,18 @@ try {
     if(A.__drain().length !== 0) throw new Error('a start still in flight must not be re-served');
   });
 
-  // Relay outbound coalesce: a local steer POSTs an `in` immediately, so on a 200-400ms
-  // relay RTT a key burst would pile up as concurrent fetches (and trip the rate cap).
-  // Each `in` carries the whole redundant log, so newer strictly supersedes older: keep ONE
-  // POST in flight and let the latest win the slot -- nothing is lost, the rate self-limits.
-  check('relay outbound coalesces to one in-flight, latest `in` wins the slot', () => {
-    const B = mk(B_ID);
-    B.__relaySetup();
-    B.__relaySend({ t:'in', n:1 });
-    B.__relaySend({ t:'in', n:2 });
-    B.__relaySend({ t:'in', n:3 });
-    if(B.__fetchCount() !== 1) throw new Error('expected exactly one in-flight POST, got ' + B.__fetchCount());
-    if(B.__pendingN() !== 3) throw new Error('the latest `in` must win the coalesce slot, got ' + B.__pendingN());
-  });
-
-  // API 3.3 'gone': relay has no DataChannel-close, so when the peer leaves (bye/decline) the
-  // server marks the pairing torn down and the held GET answers {gone:true}. The client must end
-  // the session at once instead of sitting in the game until its own liveness timeout.
-  check('relay gone (API 3.3): a torn-down pairing on the GET ends the session immediately', () => {
-    const B = mk(B_ID);
-    B.__relaySetup();
-    if(!B.__state().sess) throw new Error('setup: expected a relay session');
-    B.__relayOnReply({ ok:true, gone:true });
-    if(B.__state().sess) throw new Error('a gone reply must end the relay session (no waiting on the liveness timeout)');
-  });
-
-  // The APCu hub answers 429 "store full, resend" when its shared memory is momentarily full:
-  // the input was REFUSED, not delivered, and a dropped input is exactly what desyncs relay
-  // into the burst. So the pump must re-slot and resend it -- NOT drop it like the back-off
-  // 429s (rate limit / backlog full), which would hot-loop against a "slow down".
-  await acheck('relay store-full 429 resends the refused input instead of dropping it', async () => {
-    const B = mk(B_ID);
-    B.__relayFullThenOk();
-    B.__relaySend({ t:'in', n:7 });
-    await new Promise(r => setTimeout(r, 40));   // let the 20ms-paced resend fire
-    if(B.__fetchCount() < 2) throw new Error('the refused input was not resent, fetches=' + B.__fetchCount());
-    if(B.__pendingN() !== null) throw new Error('after a successful resend the slot must be empty, got ' + B.__pendingN());
-  });
-
-  // API 3.2 piggyback: a relayed duel POSTs constantly, so it can collect its OWN inbound on
-  // those replies (pull) instead of leaning entirely on the held GET, which stalls if the FPM
-  // pool saturates. The reply is DRAINED, so the POST must consume messages[] -- through the
-  // SAME exactly-once seq dedup as the GET, or a message delivered on both paths double-applies.
-  await acheck('relay POST pull: piggybacked inbound is consumed via the shared dedup (API 3.2)', async () => {
-    const B = mk(B_ID);
-    B.__relayPullResp();
-    B.__relaySend({ t:'in', n:1 });                 // pump -> _netRelayPost with pull -> consumes the reply
-    await new Promise(r => setTimeout(r, 15));
-    if(!B.__lastBodyGet() || B.__lastBodyGet().pull !== true) throw new Error('the POST did not set pull:true');
-    if(B.__relaySeq() !== 5) throw new Error('the piggybacked message was not consumed (relaySeq=' + B.__relaySeq() + ')');
-    if(B.__relayAge() !== 12) throw new Error('the age diagnostic was not recorded');
-    // The SAME seq must dedup no matter which path it arrives on (POST-pull or GET); a fresh
-    // seq must still advance.
-    B.__deliver2([{ seq:5, payload:JSON.stringify({ t:'pi' }) }, { seq:6, payload:JSON.stringify({ t:'pi' }) }]);
-    if(B.__relaySeq() !== 6) throw new Error('stale seq must dedup and a fresh one must advance, got ' + B.__relaySeq());
-  });
-
-  // Post-suspend hard-snap: a sim frozen >600 ticks behind the shared clock (a long device/tab
-  // suspend) can never catch up, and relay keeps feeding data on wake so the silence timeout never
-  // ends it -- without a re-anchor it hangs in a permanent false CONNECTION LOST. Re-anchor
-  // startPts to the sim's real position so the tick target snaps back to simTick; a small,
-  // catch-up-able gap must NOT fire (that is the normal ladder's job).
-  check('post-suspend hard-snap: a sim far behind the clock re-anchors; a small gap does not', () => {
+  // A sim frozen >600 ticks (~10s) behind the shared clock can never catch up, and the peer heard
+  // nothing from us for far longer than RB_PERSIST_KILL_MS -- it dropped the pairing long ago, so
+  // there is nothing left to resume against. End the match; a small, catch-up-able gap must NOT
+  // fire (that is the normal ladder's job).
+  check('a >600-tick timeline break ends the match; a small gap does not', () => {
     const A = mk(A_ID);
     A.__breakSetup(5000);
     if(A.__tickGap() < 600) throw new Error('setup: expected a >600-tick break, got ' + A.__tickGap());
-    if(!A.__breakRecover()) throw new Error('a >600-tick break must re-anchor');
-    if(A.__tickGap() > 1) throw new Error('after re-anchor the target must equal simTick, gap=' + A.__tickGap());
+    if(!A.__breakRecover()) throw new Error('a >600-tick break must end the match');
+    if(A.__rcDbg().has) throw new Error('the session must be torn down after a >600-tick break');
     A.__breakSetup(120);
-    if(A.__breakRecover()) throw new Error('a small gap (120t) must NOT re-anchor -- the catch-up ladder handles it');
+    if(A.__breakRecover()) throw new Error('a small gap (120t) must NOT end the match -- the catch-up ladder handles it');
   });
 
   console.log(results.join('\n'));

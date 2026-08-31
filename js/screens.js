@@ -347,7 +347,8 @@ const SETTINGS_CATS = [
     ]},
     { label:'GAME', items:[
         { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
-          act:()=>{cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);} },
+          act:()=>{cfg.diff=(cfg.diff+1)%DIFF.length;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.diff=(cfg.diff+(r?1:-1)+DIFF.length)%DIFF.length;} },
         { lbl:()=>'SNAKE COLOR: '+SNAKE_COLORS[cfg.snakeColor||0].name, preview:'color',
           act:()=>{cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
@@ -1401,7 +1402,7 @@ function _drawDuelWarn(){
     ctg(w, CW/2, 22, sync ? '#ffe066' : '#ff6666', FONT.HINT, GLOW.TEXT);
 }
 function drawDuelBoard(now) {
-    if(typeof netRelayActive==='function' && netRelayActive())
+    if(typeof netRelayActive==='function' && netRelayActive())   // DEPRECATED(relay)
         ct('RELAY MODE', CW/2, 8, '#ffd24a', FONT.HINT);   // latency self-explains
     const _sh=shakeOffset(now);   // arming happens sim-side via the 'nearmiss' event (see armNearMiss)
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board

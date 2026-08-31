@@ -1,8 +1,10 @@
 // ============================================================================
 // net-rtc.js -- the duel wire: WebRTC P2P DataChannel (the server only relays
-// SDP/ICE), mDNS candidate de-obfuscation, the relay fallback transport, path
-// stats, liveness checks and mid-game reconnect. Loads after net-api.js,
-// before net-session.js. Offline-first contract: see net-api.js.
+// SDP/ICE), mDNS candidate de-obfuscation, path stats, liveness checks and
+// mid-game reconnect. Loads after net-api.js, before net-session.js.
+// Offline-first contract: see net-api.js.
+// The HTTP server-relay fallback is DEPRECATED and lives in net-relay.js; what
+// remains here are the hooks that hand it the session (docs/DEPRECATED-relay.md).
 // ============================================================================
 // ---- WebRTC session: P2P DataChannel; the server only relays SDP/ICE ----
 var _netSess = null;   // {peer, role:'host'|'peer', pc, dc, ...} -- var: hoisted callers must see undefined, never TDZ
@@ -69,13 +71,15 @@ function _netIceFlush(s){
 function _netMkSess(peer, role){
     return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
+             // DEPRECATED(relay): session slots owned by net-relay.js -- drop with it.
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
              relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
+             rc:0,   // offer GENERATION: bumped per re-offer, echoed by the answerer, checked on receive (a stale answer must not poison a fresh pc)
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              lastStart:null, lastStartAt:0, reshipAt:0,   // host: the start packet that opened the current epoch, when we shipped it, and when we last re-served it (see _netReshipStart)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
-             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
+             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false, bsSyncId:'',   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress, the last bsync attempt we opened a burst for
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
@@ -100,67 +104,16 @@ function _netRtcInit(peer, role){
     pc.onicecandidate = e => { if(e.candidate) _netSignalIce(peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => {
         const s = _netSess;
+        // DEPRECATED(relay): the fallback hook -- without net-relay.js a failed P2P just ends the attempt.
         if(!s || s.pc !== pc || s.relay) return;   // relay mode: the RTC attempt no longer owns the session
         if(pc.connectionState === 'failed' || pc.connectionState === 'closed'){
             if(!s.game) _netRelayStart(s);              // P2P never came up: fall back NOW (earlier than the 6s timer)
             else if(!s.reconnectAt) _netReconnect(s);   // an established game lost its channel: rebuild it, do NOT end
         }
     };
-    // P2P gets 6 seconds; then the match falls back to the server relay.
+    // P2P gets 6 seconds; then the match falls back to the server relay. DEPRECATED(relay)
     if(_netTimers) _netSess.connT = setTimeout(()=>{ if(_netSess && _netSess.pc === pc && !_netSess.game) _netRelayStart(_netSess); }, 6000);
     return pc;
-}
-// Relay-mode handshake (no-P2P bit set): no RTCPeerConnection at all -- the
-// offer carries the seed but NO sdp, the answer only the profile, then both
-// sides start.php + relay.php immediately.
-function _netRelaySessionStart(peer, role, seed, x10, peerProfile){
-    if(_netSess) _netTeardown();   // never silently skip: the offer/answer is already out
-    _netSess = _netMkSess(peer, role);
-    _netSess.seed = (seed>>>0) || 1;
-    _netSess.x10 = !!x10;
-    if(peerProfile) _netSess.peerProfile = peerProfile;
-    _netSess.relay = true;
-    _netSeekStop();
-    _netSess.game = true; _netMarkRecv(_netSess);
-    _netSess.relayGraceUntil = performance.now() + 12000;
-    _netLb.msg = 'RELAY MODE - CONNECTING...';
-    _duelMsg = 'RELAY MODE - VIA SERVER'; _duelMsgAt = _msgNow(); _uiDirty = true;
-    _netLiveStart();
-    _netRelayLoop(_netSess);
-    _netRequestStart(_netSess);
-}
-function _netRelayOffer(peer, peerProfile){   // inviter/offerer in relay mode: make the seed, offer with no sdp
-    if(inGame){ _netSigLog('> offer SKIP(ingame)'); return; }
-    if(_netSess) _netTeardown();          // debris: replace it, never silently skip the offer
-    const seed = (Math.random()*0x100000000)>>>0;
-    _netTimeSync();
-    const payload = JSON.stringify({ seed, profile:_netProfile(), v:_swVersion, x10:!!cfg.x10 });
-    _netHs.offerTo = peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
-    _netSignal(peer, 'offer', payload);
-    _netRelaySessionStart(peer, 'host', seed, !!cfg.x10, peerProfile);
-}
-function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer with just the profile
-    if(d && !_netVerOk(d.v)){
-        _netLb.msg = 'VERSION MISMATCH - BOTH PLEASE RELOAD'; _uiDirty = true;
-        _netSignal(peer, 'bye', ''); return;
-    }
-    // No phase guard: an offer is a legitimate reply wherever the user stands
-    // (and quick match delivers one unsolicited). Only a running game refuses.
-    if(inGame){ _netSigLog('< offer SKIP(ingame)'); return; }
-    if(_netSess && _netSess.peer === peer){
-        // Duplicate offer: the host re-sent because our answer was lost. Re-answer
-        // and KEEP the session -- tearing it down would restart the whole connect.
-        _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion, relay:true }));
-        return;
-    }
-    if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
-    _netHs.accepting = null;
-    _netTimeSync();
-    // `relay:true` tells an offerer that DID build a peer connection to come over now.
-    // Without it, it waits out the full 6s P2P timer before falling back to the mode
-    // we already committed to -- 6s of dead air on every mixed-setting pairing.
-    _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion, relay:true }));
-    _netRelaySessionStart(peer, 'peer', d.seed, d.x10, _netClampProfile(d.profile));
 }
 async function _netRtcOffer(peer, peerProfile){   // we invited / we are the quick-match offerer: we make the seed
     if(!_netRtcAvail() || inGame){ _netSigLog('> offer SKIP'); return; }
@@ -189,7 +142,7 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     if(_netSess && _netSess.peer === peer){
         // Duplicate offer: the host re-sent because our answer was lost. Answer
         // again; tearing the forming session down here would break the connect.
-        _netSignal(peer, 'answer', JSON.stringify({ sdp: _netSess.pc && _netSess.pc.localDescription, profile:_netProfile(), v:_swVersion }));
+        _netSignal(peer, 'answer', JSON.stringify({ sdp: _netSess.pc && _netSess.pc.localDescription, profile:_netProfile(), v:_swVersion, rc:(d && d.rc)|0 }));
         return;
     }
     if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
@@ -206,7 +159,7 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
         if(_netSess && _netSess.pc === pc){ _netSess.rdOk = true; _netIceFlush(_netSess); }
         const an = await pc.createAnswer();
         await pc.setLocalDescription(an);
-        _netSignal(peer, 'answer', JSON.stringify({ sdp:pc.localDescription, profile:_netProfile(), v:_swVersion }));
+        _netSignal(peer, 'answer', JSON.stringify({ sdp:pc.localDescription, profile:_netProfile(), v:_swVersion, rc:(d && d.rc)|0 }));
         _netLb.msg = 'CONNECTING (P2P)...'; _uiDirty = true;
     } catch(e){ _netSessionEnd('CONNECTION FAILED'); }
 }
@@ -221,7 +174,7 @@ function _netWire(dc){
             _duelMsg = 'RECONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
             return;
         }
-        if(s.relay){   // P2P completed AFTER the relay fallback: upgrade to the direct path
+        if(s.relay){   // DEPRECATED(relay): P2P completed AFTER the fallback -- upgrade to the direct path
             s.relay = false;
             _netLb.msg = 'P2P CONNECTED'; _duelMsg = 'P2P CONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
             _netMarkRecv(s);
@@ -235,14 +188,14 @@ function _netWire(dc){
         // the shared start (seed + start_pts) arrives via this request; no state frames
     };
     dc.onmessage = e => { if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(String(e.data)); } };
-    dc.onclose = () => { const s = _netSess; if(s && s.game && !s.relay && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end
+    dc.onclose = () => { const s = _netSess; if(s && s.game && !s.relay && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end (!s.relay: DEPRECATED(relay))
 }
 // A message type that is a one-shot CONTROL transition (a phase change), as opposed to the
 // self-healing input/liveness stream. Control has no redundancy and the peer DEPENDS on it
 // -- a lost `rst` hangs the guest -- so both transports make it reliable: the relay retries
 // (_netRelayCtl), the DataChannel repeats (_netCtlRepeat). The receiver dedups by epoch
 // (rst/sched) or is idempotent (start/again/bye).
-function _netIsCtl(t){ return t === 'sched' || t === 'rst' || t === 'start' || t === 'again' || t === 'bye' || t === 'reqlvl'; }
+function _netIsCtl(t){ return t === 'sched' || t === 'rst' || t === 'start' || t === 'again' || t === 'bye' || t === 'reqlvl' || t === 'bsync'; }
 // Repeat a pre-serialized control message twice more over the DataChannel, spaced, to
 // survive the unreliable channel's occasional drop without an ack protocol. Stops early if
 // the session or channel is gone. Same j (its original pts) each time -- a repeat is always
@@ -280,10 +233,10 @@ function _netSend(o, pre){
         // redundant -- skip it. p2p-only regardless: an HTTP-polled relay cannot doze, and 20Hz
         // posts would hammer it. Threshold sits one tick under the warm cadence so the idle beat
         // itself is never suppressed by frame jitter -- only genuinely recent real traffic is.
-        if(s.relay || performance.now() - s.lastSent < (NET_WARM_EVERY - 1) * TICK_MS) return;
+        if(s.relay || performance.now() - s.lastSent < (NET_WARM_EVERY - 1) * TICK_MS) return;   // s.relay: DEPRECATED(relay)
     }
     if(o.t === 'in' || o.t === 'pi') _netDbg.hbTx++;   // input-channel packets sent (incl. idle keepalives)
-    if(s.relay){ _netRelaySend(s, o); return; }
+    if(s.relay){ _netRelaySend(s, o); return; }   // DEPRECATED(relay): the transport fork -- drop this line with net-relay.js
     if(!s.dc || s.dc.readyState !== 'open') return;
     try{
         const j = pre !== undefined ? pre : JSON.stringify(o);
@@ -380,6 +333,7 @@ function _netBurstApply(s, theta){
 function _netBurstRun(s, done){
     s = s || _netSess;
     if(!s || !s.game){ if(done) done(); return; }
+    if(s.bsRunning){ if(done) done(); return; }   // a second trigger must not _netBurstReset the run already collecting
     _netBurstReset(s);
     s.bsRunning = true;
     if(typeof setTimeout !== 'function'){ _netBurstPing(s); s.bsRunning = false; if(done) done(); return; }
@@ -397,173 +351,38 @@ function _netBurstRun(s, done){
     step();
 }
 // Host side of a boundary: open the joiner's burst ('bsync'), run our own, then hand `then` the
-// agreed peer offset (theta; 0 if the burst was unusable). The caller applies OUR half, authors the
+// agreed peer offset (theta). The caller applies OUR half, authors the
 // start PTS on the nudged clock, and ships theta on the start packet as `bth` for the joiner's half.
+// A starved window is retried, never accepted: theta 0 would open the level on unmeasured clocks
+// and carry the standing offset into it, silently. After NET_BURST_TRIES the peer is not answering
+// at all, so the match ends rather than plays on unsynced.
 function _netBurstThenStart(s, then){
     s = s || _netSess;
     if(!s || !s.game || s.role !== 'host'){ if(then) then(0); return; }
-    _netSend({ t:'bsync', epoch:(s.epoch|0) });   // trigger the joiner's burst; both measure over the same window
-    _netBurstRun(s, ()=>{
+    let tries = 0;
+    const attempt = ()=>{
         if(_netSess !== s || !s.game) return;
-        const bt = _netBurstTheta(s);
-        const theta = bt ? bt.theta : 0;
-        _netBurstApply(s, theta);   // host applies -theta/2 here; the joiner applies +theta/2 from bth
-        then(theta);
-    });
-}
-// Fall back to the server relay: same messages, ~200-400ms one-way -- the local
-// snake stays instant (prediction), corrections just arrive slower. The user
-// sees why: a short message now and a RELAY MODE tag on the board.
-function netRelayActive(){ return !!(_netSess && _netSess.game && _netSess.relay); }
-// TODO(netcode, long-term): replace this HTTP relay with TURN (coturn) as the p2p-failed
-// path. A coturn entry in iceServers keeps the IDENTICAL DataChannel (same unreliable-
-// unordered netcode, one forwarding hop) and retires relay.php entirely. This is infra,
-// not logic: coturn needs a host with open UDP, which the shared webhost cannot provide
-// (the STUN-only iceServers in _netRtcInit). ACCEPTED as long-term; until then this relay
-// IS the real fallback path -- its floor is ~RTT plus a few ms server-side, but verify on
-// live devices before trusting it for play.
-function _netRelayStart(s){
-    if(_netSess !== s || s.game) return;
-    s.relay = true;
-    if(s.connT){ clearTimeout(s.connT); s.connT = null; }
-    // Retire the failed RTC attempt: its late close/failed events must not
-    // touch the relay session (both handlers also check s.relay).
-    try{ if(s.dc) s.dc.close(); }catch(e){}
-    try{ if(s.pc) s.pc.close(); }catch(e){}
-    s.dc = null; s.pc = null;
-    _netSeekStop();
-    s.game = true; _netMarkRecv(s);
-    s.relayGraceUntil = performance.now() + 12000;   // the peer may fall back up to ~5s later; let it arrive
-    _netLb.msg = 'P2P FAILED - CONNECTING VIA RELAY...';
-    _duelMsg = 'RELAY MODE - VIA SERVER'; _duelMsgAt = _msgNow(); _uiDirty = true;
-    _netLiveStart();
-    _netRelayLoop(s);
-    _netRequestStart(s);
-}
-// Deliver a batch of relayed messages exactly once, in seq order. Shared by the held GET and
-// the pull-piggyback POST reply (API 3.2): the server drains each message to whichever of the
-// two arrives first, so both paths MUST run the same seq dedup + recv-mark or they drift.
-function _netRelayDeliver(s, msgs){
-    if(!Array.isArray(msgs)) return;
-    for(const m of msgs){
-        if((m.seq|0) <= s.relaySeq) continue;   // exactly-once, in order
-        s.relaySeq = m.seq|0;
-        if(typeof m.age === 'number') _netDbg.relayAge = m.age|0;   // diag: ms it sat on the server (mailbox wait vs pool-queue delay)
-        _netMarkRecv(s);
-        _netHandleMsg(String(m.payload||''));
-    }
-}
-// One relay POST. Returns 'ok' when the message is off our hands (a clean send, or a 503
-// that ended the session), 'resend' when the hub REFUSED it and asks for a retry (store
-// full), or 'drop' on a self-healing failure (back-off 429s, a 400 clock, transport error).
-async function _netRelayPost(s, o){
-    if(!_netOk()) return 'drop';
-    try {
-        const _t0 = performance.now();
-        // The ENVELOPE pts is backdated like every other PTS we send: the server
-        // rejects a future one outright (zero tolerance), and stamping it raw made
-        // an asymmetric-link clock bias 400 every packet of the match -- silently,
-        // since nothing below looked at the status. The payload keeps the true pts,
-        // so the peer's lag math is untouched.
-        // pull (API 3.2): piggyback our OWN inbound onto this reply, so receive survives a
-        // saturated FPM pool that stalls the held GET. Harmless on a 3.1 server (ignored),
-        // but the reply is DRAINED, so we MUST consume messages[] below -- which we do.
-        const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
-                                   pts: o.pts != null ? o.pts - 50 : undefined, pull: true }),
-            cache:'no-store', priority:'high' });
-        s.lastSent = performance.now();
-        _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
-        if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return 'ok'; }   // capped: honest busy, end the attempt
-        if(r.status === 400 || r.status === 429){
-            // 429 = the per-second rate block, a full peer backlog, or a momentarily-full hub
-            // store; 400 is almost always our clock. All used to look like a healthy send and
-            // surfaced 4s later as CONNECTION LOST, blaming the network.
-            let j = null; try{ j = await r.json(); }catch(e){}
-            const err = (j && j.error) ? String(j.error) : '';
-            _netDbg.relayDrop = (_netDbg.relayDrop|0) + 1;
-            _netSigLog('! relay ' + r.status + (err ? ' ' + err : ''));
-            if(r.status === 400 && /future/.test(err)) _netTimeSync(true);
-            // 'store full' = the hub's shared memory was momentarily full and REFUSED the
-            // message (not delivered), so the server asks us to resend -- a dropped input is
-            // exactly what desyncs relay into the burst. The other 429s (rate limit, backlog
-            // full) mean back OFF, and a 400 is our clock: those self-heal via the next packet.
-            return (r.status === 429 && /store full/.test(err)) ? 'resend' : 'drop';
-        }
-        // 2xx: consume any inbound piggybacked on this reply (pull). The server drained it on
-        // return, so this is the ONLY chance to read it -- same dedup as the GET.
-        try{ const j = await r.json(); if(j && j.messages) _netRelayDeliver(s, j.messages); }catch(e){}
-        return 'ok';
-    } catch(e){ return 'drop'; }
-}
-// Drain the coalesce slot: keep ONE POST in flight, always sending the freshest pending
-// input packet. A local steer POSTs an `in` immediately, so on a 200-400ms relay RTT a key
-// burst would otherwise pile up as concurrent fetches (and trip the rate cap). Each `in`
-// carries the whole _rbSent redundant log, so a newer one strictly supersedes an older:
-// dropping the ones between loses nothing, and the send rate self-limits to the round trip.
-async function _netRelayPump(s){
-    if(s.relayBusy) return;
-    s.relayBusy = true;
-    while(_netSess === s && s.game && s.relay && s.relayPending){
-        const o = s.relayPending; s.relayPending = null;
-        const code = await _netRelayPost(s, o);
-        // 'store full' REFUSED the input (not delivered); dropping it is what desyncs relay
-        // into the burst, so re-slot for a resend -- UNLESS a newer `in` already took the slot
-        // (it carries the same redundant log, so it supersedes). Pace it so a persistently full
-        // hub is not hot-looped; in real play the next tick's `in` supersedes it anyway.
-        if(code === 'resend' && !s.relayPending){
-            s.relayPending = o;
-            if(typeof setTimeout === 'function') await new Promise(res => setTimeout(res, 20));
-        }
-    }
-    s.relayBusy = false;
-}
-// A one-shot control transition, retried with backoff so a single lost POST cannot hang a
-// phase change. 'ok' (a clean send, or a 503 that ended the session) stops it; 'resend' (hub
-// store full) and 'drop' both retry. The receiver dedups (epoch / idempotent), so a duplicate
-// that DID land is harmless.
-async function _netRelayCtl(s, o){
-    for(let i = 0; i < 3; i++){
-        if(_netSess !== s || !s.game || !s.relay) return;
-        if((await _netRelayPost(s, o)) === 'ok') return;
-        if(typeof setTimeout === 'function') await new Promise(res => setTimeout(res, 120 * (i + 1)));
-    }
-}
-function _netRelaySend(s, o){
-    if(!_netOk()) return;
-    if(o.t === 'in'){ s.relayPending = o; _netRelayPump(s); return; }   // coalesce: latest wins, one in flight
-    if(_netIsCtl(o.t)){ _netRelayCtl(s, o); return; }                   // reliable: retry with backoff
-    _netRelayPost(s, o);                                               // pi/h/st/rs: low-rate, self-healing, send once
-}
-// Act on one relay GET reply. `gone` (API 3.3) is the server telling us the pairing was torn
-// down (the peer sent a bye/decline): relay has no DataChannel-close, so without this the peer
-// sat in the game until its own liveness timeout -- exactly the reported bug. Treat it like an
-// in-band bye (remoteBye: the server already knows, no need to say it back). Otherwise deliver
-// any messages through the shared exactly-once dedup.
-function _netRelayOnReply(s, r){
-    if(!r) return false;
-    if(r.gone){ _netSessionEnd('OPPONENT LEFT', true); return true; }
-    _netRelayDeliver(s, r.messages);
-    return false;
-}
-async function _netRelayLoop(s){
-    while(_netSess === s && s.game && s.relay){
-        if(!_netOk()) return;
-        // Abortable: without this the held socket lingers up to 8s after a teardown
-        // (leaving a match, or unload), long after we stopped caring about it.
-        s.relayAbort = (typeof AbortController === 'function') ? new AbortController() : null;
-        const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=9',
-                                s.relayAbort ? s.relayAbort.signal : undefined);
-        s.relayAbort = null;
-        if(_netSess !== s || !s.game || !s.relay) return;
-        if(!r && _netTimers) await new Promise(res => setTimeout(res, 1000));   // transport error: back off
-        if(_netRelayOnReply(s, r)) return;   // 'gone' ended the session -> stop polling
-    }
+        _netSend({ t:'bsync', epoch:(s.epoch|0), n:++tries });   // n dedups the reliable repeats on the joiner
+        _netBurstRun(s, ()=>{
+            if(_netSess !== s || !s.game) return;
+            const bt = _netBurstTheta(s);
+            if(!bt){
+                console.error('starve r='+s.role+' try='+tries+' nf='+s.bsNf+' revN='+s.bsRevN+' fwd='+s.bsFwd+' rev='+s.bsRev);
+                if(tries < NET_BURST_TRIES){ _netSigLog('! burst starved -> retry ' + tries); attempt(); return; }
+                _netSessionEnd('CLOCK SYNC FAILED - MATCH ENDED');
+                return;
+            }
+            _netBurstApply(s, bt.theta);   // host applies -theta/2 here; the joiner applies +theta/2 from bth
+            then(bt.theta);
+        });
+    };
+    attempt();
 }
 // Read the SELECTED ICE candidate pair so we KNOW the real path: host = direct LAN (~1ms),
 // srflx/prflx = reflexive -- hairpins out through the router/internet even on one LAN, the usual
 // cause of "same-Wifi but 100ms jitter" -- relay = via a TURN server. Plus the true P2P RTT.
 function _netPathStat(s){
+    // DEPRECATED(relay): the relay branch reports the server RTT; without it this is a plain `if(!s) return`.
     if(!s || s.relay){ if(s && s.relay){ _netDbg.path = 'relay  srv ' + (_netDbg.relayRtt>=0 ? Math.round(_netDbg.relayRtt)+'ms' : '--'); _netDbg.p2pRtt = -1; } return; }
     if(!s.pc || typeof s.pc.getStats !== 'function') return;
     s.pc.getStats().then(st => {
@@ -585,20 +404,17 @@ function _netPathStat(s){
         _netDbg.path = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob + '  p2p-rtt ' + rtt;
     }).catch(()=>{});
 }
-// TIMELINE BREAK RECOVERY (post-suspend hard-snap): a wall clock >600 ticks past the sim means
-// the sim was FROZEN (a long device/tab suspend) while the clock ran on. It can never catch that
-// up, and relay keeps feeding data on wake so the silence timeout never fires -- leaving a
-// permanent false CONNECTION LOST with no recovery. Re-anchor startPts to where the sim actually
-// is: both peers froze at ~the same tick and share the clock, so both snap to ~the same origin and
-// resume IN SYNC (the frozen span is simply skipped; any few-tick residual is left to the normal
-// rollback/resync). Small gaps self-heal via the catch-up ladder and never reach the >600 guard.
+// TIMELINE BREAK (the tick target >600 ticks, ~10s, AHEAD of our sim): the sim was FROZEN while
+// the clock ran on. That is well past RB_PERSIST_KILL_MS, so the peer saw nothing from us for long
+// enough to have killed the session on its side already -- there is nobody left to resume against.
+// Only that direction counts: a target BEHIND the sim is a boundary whose origin was authored in
+// the future, which is how every level starts. Small gaps self-heal via the catch-up ladder.
 function _netBreakRecover(s){
-    if(!inGame || !s || !s.startPts) return false;
+    if(!inGame || !s || !s.startPts || s.lvlPending) return false;
     const p = netPts();
-    if(p == null || Math.abs(Math.floor((p - s.startPts) / TICK_MS) - simTick) <= 600) return false;
-    s.startPts = p - simTick * TICK_MS;   // origin := the sim's real position on the shared clock
-    _netClockPush();                      // main + worker core must both re-anchor
-    _netSigLog('! timeline break -> re-anchored (suspend recovery)');
+    if(p == null || Math.floor((p - s.startPts) / TICK_MS) - simTick <= 600) return false;
+    _netSigLog('! timeline break >600t -> ending (the peer timed us out long ago)');
+    _netSessionEnd('CONNECTION LOST');
     return true;
 }
 // In-game liveness: the DataChannel is the session -- ping when idle, 4s silence = dead.
@@ -618,7 +434,7 @@ function _netLiveCheck(){
     // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
     const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
     if(inGame && _dsyFor > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return; }
-    _netBreakRecover(s);   // post-suspend hard-snap: re-anchor a sim frozen far behind the clock
+    if(_netBreakRecover(s)) return;   // sim frozen ~10s behind the shared clock: the match is over, stop here
     // The idle keepalive carries the recent input log, so it doubles as repair:
     // a lost LAST input would otherwise sit unfixed until the player pressed
     // something else. An empty log is just an alive check, as before.
@@ -640,7 +456,7 @@ function _netLiveCheck(){
     // the timers, so only real elapsed time reveals the gap on the side that was asleep.
     const nowW = Date.now();
     const silent = nowW - s.lastRecvWall;
-    if(s.relay){
+    if(s.relay){   // DEPRECATED(relay): whole branch
         if(nowMs < s.relayGraceUntil) return;                             // relay just engaged: let the peer catch up
         if(silent > RB_PERSIST_KILL_MS) _netSessionEnd('CONNECTION LOST'); // relay has no transport to rebuild -> silence past the deadline ends it
         return;
@@ -657,7 +473,7 @@ function _netLiveCheck(){
 // packets flow again the periodic state+hash recovery re-converges them. We only rebuild the
 // dead RTCPeerConnection/DataChannel; epoch, seed and sim state are untouched.
 function _netReconnect(s){
-    if(!s || s.reconnectAt || s.relay || !_netRtcAvail()) return;
+    if(!s || s.reconnectAt || s.relay || !_netRtcAvail()) return;   // s.relay: DEPRECATED(relay)
     s.reconnectAt = Date.now();   // wall clock: the timeout must survive a suspend too
     s.reconnecting = true;             // _netPollDue() polls again so the re-handshake signals flow
     _netPollAbortNow();                // start a fresh poll immediately, don't wait out a held one
@@ -688,7 +504,7 @@ async function _netRtcReoffer(s){
     try {
         const of = await pc.createOffer();
         await pc.setLocalDescription(of);
-        const payload = JSON.stringify({ sdp:pc.localDescription, rc:1, v:_swVersion });
+        const payload = JSON.stringify({ sdp:pc.localDescription, rc:(s.rc = (s.rc|0) + 1), v:_swVersion });
         _netHs.offerTo = s.peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
         _netSignal(s.peer, 'offer', payload);
     } catch(e){}
@@ -701,7 +517,7 @@ async function _netRtcReanswer(from, d){
     // NOT tear down and rebuild the pc we are already answering on -- re-send the answer and
     // keep the forming connection (mirrors the initial-handshake duplicate-offer path).
     if(s.reconnecting && s.pc && s.rcOfferSdp === sdpStr){
-        if(s.pc.localDescription) _netSignal(from, 'answer', JSON.stringify({ sdp:s.pc.localDescription, rc:1, v:_swVersion }));
+        if(s.pc.localDescription) _netSignal(from, 'answer', JSON.stringify({ sdp:s.pc.localDescription, rc:(d.rc|0), v:_swVersion }));
         return;
     }
     if(!s.reconnectAt){ s.reconnectAt = Date.now(); s.reconnecting = true; _duelMsg = 'RECONNECTING...'; _duelMsgAt = _msgNow(); _uiDirty = true; }
@@ -713,6 +529,6 @@ async function _netRtcReanswer(from, d){
         if(s.pc === pc){ s.rdOk = true; _netIceFlush(s); }
         const an = await pc.createAnswer();
         await pc.setLocalDescription(an);
-        _netSignal(from, 'answer', JSON.stringify({ sdp:pc.localDescription, rc:1, v:_swVersion }));
+        _netSignal(from, 'answer', JSON.stringify({ sdp:pc.localDescription, rc:(d.rc|0), v:_swVersion }));
     } catch(e){}
 }

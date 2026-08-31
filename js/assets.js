@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.5.30';
+const APP_VERSION = 'v2.5.31';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -118,9 +118,9 @@ const SNAKE_COLORS = [
 const ACHIEVEMENTS = [
     { id:'first_gem',     name:'FIRST BITE',    desc:'Collect your first gem',
       icon:{p:{A:'#44ccff',B:'#00ffff',C:'#aaffff'},d:['...A....','..ABA...','.ABCBA..','ABCCCBA.','.ABCBA..','..ABA...','...A....','........']}},
-    { id:'level1',        name:'RISING SNAKE',  desc:'Complete level 1',
+    { id:'level1',        name:'RISING SNAKE',  desc:'Complete level 2',
       icon:{p:{A:'#7fff7f',B:'#001500'},d:['.AAAAAA.','AAAAAAAA','AAAAAAAA','ABAAAAAB','AAAAAAAA','AAAAAAAA','.AAAAAA.','........']}},
-    { id:'fokoins_1k',    name:'POCKET CHANGE', desc:'Earn 5,000 FOKoins',
+    { id:'fokoins_1k',    name:'POCKET CHANGE', desc:'Earn 25,000 FOKoins',
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['...BB...','..AAAA..', '.ABBBBA.','.ABBBBA.','AABBBBA.','.ABBBBA.','..AAAA..','........']}},
     { id:'lucky_gem',     name:'LUCKY CATCH',   desc:'Collect a lucky gem',
       icon:{p:{A:'#ffd700',B:'#ffee88',C:'#cc8800'},d:['...A....','..ABA...','.ABCBA..','ABCCCBA.','.ABCBA..','..ABA...','...A....','........']}},
@@ -138,12 +138,12 @@ const ACHIEVEMENTS = [
       icon:{p:{A:'#ffd700',B:'#cc8800'},d:['.AAAAA..','AAAAAAA.','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','BBBBBBB.','........']}},
     { id:'fokoins_1m',    name:'MILLIONAIRE',   desc:'Earn 1,000,000 total FOKoins',
       icon:{p:{A:'#00ddff'},d:['...A....','..AAA...','.AAAAA..','AAAAAAA.','.AAAAA..','..AAA...','...A....','........']}},
-    { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 64,000 in one game',
+    { id:'score_25k',     name:'HIGH ROLLER',   desc:'Score 100,000 in one game',
       icon:{p:{A:'#ff4400',B:'#ff9900',C:'#ffdd00'},d:['...A....','..ABA...','.ABBBA..','ABBBBA..','ABCBBBA.','ABCCCBA.','.AAAAAA.','........']}},
 ];
 
 const EXPERT_ACHIEVEMENTS = [
-    { id:'score_100k',  name:'SCORE HUNTER',  desc:'Score 100,000 in one game',
+    { id:'score_100k',  name:'SCORE HUNTER',  desc:'Score 200,000 in one game',
       icon:{p:{A:'#ff8800',B:'#cc5500'},
       d:['A.AA.AA.','AAAAAAAA','ABBBBBBA','ABBBBBBA','ABBBBBBA','AAAAAAAA','.AAAAAA.','........']}},
     { id:'perfect_level', name:'PERFECTIONIST', desc:'Complete a level perfectly',
@@ -167,7 +167,7 @@ const EXPERT_ACHIEVEMENTS = [
     { id:'epic_double', name:'EPIC DOUBLE',   desc:'2 epic gems in one level',
       icon:{p:{A:'#cc44ff',B:'#9900cc'},
       d:['.A..A...','AAA.AAA.','.A..A...','........','........','........','........','........']}},
-    { id:'fokoins_100k', name:'DRAGON RICH',  desc:'Earn 5,000,000 total FOKoins',
+    { id:'fokoins_100k', name:'DRAGON RICH',  desc:'Earn 100,000,000 total FOKoins',
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},
       d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
 ];

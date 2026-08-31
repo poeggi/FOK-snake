@@ -93,6 +93,9 @@ const NET_BURST_WAIT_MS = 100;    // after the last ping, hold the collection wi
 const NET_BURST_MIN = 3;          // accept-gate: fewest usable samples per direction before we trust the estimate
 const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
 const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
+const NET_BURST_TRIES = 12;       // starved-burst retries before the match ends: no boundary may open on unmeasured clocks.
+                                  // 12 x ~250ms stays inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer
+                                  // ends the match through the normal liveness path rather than here.
 // How long a pending invite (sent, received, or accepting) lingers before it goes stale.
 // The server drops undelivered signals at 30s; we give up a touch sooner so the UI resolves
 // to NO ANSWER / clears the dialog while the peer could, in theory, still collect it.
