@@ -109,12 +109,16 @@ runTest('SMOKE-NET', `
     update();
     // OUR OWN steer is authored at its EFFECTIVE moment -- the next game-tick
     // boundary -- and applied from the shared input log there, exactly like the
-    // remote copy of the same record: local is a peer with zero latency. Authoring
-    // only MARKS the wire send: outgoing input is rate-limited to one packet per tick,
-    // flushed by netTickPre (a turn had no effect before that tick anyway).
+    // remote copy of the same record: local is a peer with zero latency. The FIRST
+    // turn of a tick ships the moment it is authored (leading-edge flush: waiting
+    // for netTickPre averaged half a tick of pure latency); any further turn in the
+    // same tick only marks the dirty flag and coalesces into the next tick's flush,
+    // so a touch burst still costs one packet per tick, not one per event.
     const w0=sent.length, q0h=players[0].dirQueue.length;
     gameSteer(0, GDIRS.ArrowUp);
-    if(sent.length!==w0) throw 'a steer must not send at once -- outgoing input is rate-limited to one packet per tick';
+    if(sent.length!==w0+1) throw 'the first steer of a tick must ship at once (leading-edge flush)';
+    gameSteer(0, GDIRS.ArrowDown);   // distinct turn, same tick: capped, only marks dirty (the sim later drops it as reverse-of-queued)
+    if(sent.length!==w0+1) throw 'a second steer in the same tick must not send -- capped at one input flush per tick';
     for(let i=0;i<20 && players[0].dirQueue.length===q0h;i++){ netTickPre(); update(); }
     if(players[0].dirQueue.length!==q0h+1) throw 'own steer never reached our snake at its boundary';
     if(sent.length<=w0) throw 'the tick must flush the pending steer to the wire';
