@@ -82,6 +82,13 @@ var _rbSent = [];            // recent local inputs, resent for redundancy
 // flushes it once (latest-valid, since _rbSent already holds the most recent records). A burst
 // of touches or key-repeats between two ticks collapses to a single send, not one packet each.
 var _netInDirty = false;
+// One-shot repair resend: armed by every input-carrying flush, fired by the NEXT tick's
+// netTickPre only if no fresh input flushed the ring again by then (that flush already
+// repeats the record -- the redundancy log rides every 'in'). Repairs a single lost
+// datagram from a player who then goes quiet in ~17ms instead of the 16-tick heartbeat's
+// ~267ms -- the difference between an invisible shallow rollback on the peer and a deep
+// one. Fires at most once per armed flush, never doubles a tick that already sent input.
+var _netInRepeat = 0;
 // A received input that lands AFTER its own tick needs a rollback re-sim (the clone-heavy
 // path). Many packets draining together after a busy frame would each trigger their own --
 // a rollback flood on the single main thread. Instead every _netPeerInput only RECORDS the
@@ -118,6 +125,7 @@ function _rbReset(){
     _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbStateQ = [];
     _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
+    _netInRepeat = 0;
     _rbResyncSend = 0;
     _rbRewindTo = Infinity;
     _rbBadSince = 0;
@@ -596,6 +604,16 @@ function netTickPre(){
         _netDbg.inTx++;
         _netInDirty = false;
         _inFlushed = true;
+        _netInRepeat = 1;   // arm the one-shot repair resend for the next input-free tick
+    } else if(_netInRepeat && !_replaying){
+        // One-shot repair resend (see the _netInRepeat declaration). Disarm FIRST so it
+        // fires exactly once no matter what the send below does on a closed channel.
+        _netInRepeat = 0;
+        _rbSentPrune();
+        if(_rbSent.length){
+            _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
+            _inFlushed = true;
+        }
     }
     if((t & 63) === 0){
         for(const k of _rbLog.keys()) if(k < t - RB_DEPTH - 8) _rbLog.delete(k);
@@ -659,6 +677,7 @@ function netTickPost(){
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
         _netDbg.inTx++;
         _netInDirty = false;
+        _netInRepeat = 1;   // arm the one-shot repair resend (fires in the next netTickPre)
     }
 }
 // Rewind to `toTick` and re-simulate to where we were, now including the input
