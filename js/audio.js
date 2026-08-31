@@ -347,7 +347,7 @@ const Snd = (() => {
     // affected device getOutputTimestamp is blind (contextTime<=0 -> this returns null / the fallback
     // fires), so the probe FALSELY reads ~0 while the speaker is off by ~the output latency (BT/mobile
     // ~100-300ms). Also check: a discrete look-ahead/anchor snap, or a no-seek path (netPts null at
-    // musicPlay). Look here + _seekChannels (outLat/_musicAnchor) + _applyMusic; net.js netMenuSeekSec.
+    // musicPlay). Look here + _seekChannels (outLat/_musicAnchor) + _applyMusic; net-api.js netMenuSeekSec.
     function musicDriftMs(){
         if(!_ctx || !_currentTrack || !_musicAnchor || !_seekProvider) return null;
         const ts = _ctx.getOutputTimestamp ? _ctx.getOutputTimestamp() : null;

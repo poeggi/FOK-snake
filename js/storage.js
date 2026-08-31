@@ -335,7 +335,7 @@ function backupStats() {
 // so a pre-2017 engine (a ~10-year-old phone that never updated its browser) throws a
 // SyntaxError parsing the WHOLE file -> single-player black-screens. Regressed in v2.2.0
 // (cloud config). This + the other 3 async fns below/in game.js are the only ES2017 syntax
-// in core. FIX (decide later): ISOLATE these into an optional online-tier file (like net.js,
+// in core. FIX (decide later): ISOLATE these into an optional online-tier file (like the net files,
 // which is already async and which single-player survives failing to parse) -- preferred, a
 // verbatim move, no logic risk; OR rewrite to .then() chains (touches working, under-tested
 // network code). Until then, old engines cannot run the game at all.

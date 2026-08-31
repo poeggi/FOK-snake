@@ -99,7 +99,7 @@ const HOOKS = (id) => `
 })();`;
 
 const NET_BASE = 1784500000000;   // the fixed Date.now epoch the HOOKS clock is built on
-// The ONE-TIME min-RTT clock anchor a real client takes before a duel (net.js:1770) and then FREEZES
+// The ONE-TIME min-RTT clock anchor a real client takes before a duel (net-api.js _netTimeSync) and then FREEZES
 // for the match -- it never re-syncs mid-duel. Over a jittery, possibly asymmetric wire the min-RTT
 // sample still leaves the classic NTP (dBA-dAB)/2 residual, so two peers that sync INDEPENDENTLY land
 // on different offsets. That frozen residual is the peer's standing pts-delta bias; once it reaches a
@@ -177,7 +177,7 @@ function run(name, secs, prof){
         // pushed off the critical path via a MessageChannel in game.js, so it is NOT counted), plus the
         // re-sim work of any rollback this frame ran (each re-simmed tick reruns update()). While the
         // thread is busy, dc.onmessage cannot fire -- the packet has ARRIVED but netPts() is not sampled
-        // until the frame yields (net.js:1358). That deferral, not the wire, is what inflates pts live.
+        // until the frame yields (net-session.js _netHandleMsg). That deferral, not the wire, is what inflates pts live.
         const r0 = prof.recv ? S.c.__rbDbg().resim : 0;
         S.c.__tick1();
         if(CK) S.c.__tickCatchup();   // clock STEERS the sim (game.js:809): a full-tick anchor gap -> extra tick -> standing simTick offset -> rollbacks
@@ -249,7 +249,7 @@ function run(name, secs, prof){
         lost:   a.lost + b.lost,
         warnPc: warnT / (secsRun*1000) * 100,
         conv:   converged,
-        // pts live, measured EXACTLY as the game does (net.js:1827) -- mine (netPts at processing) minus
+        // pts live, measured EXACTLY as the game does (net-session.js _netHandleMsg) -- mine (netPts at processing) minus
         // the peer send-stamp. avg/max over each client's last-64 window; report the worse of the two.
         ptsAvg: Math.max(na.lagAvg, nb.lagAvg),
         ptsMax: Math.max(na.lagMax, nb.lagMax),

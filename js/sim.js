@@ -897,7 +897,7 @@ var simArmIssue = function(p, kind, d){
     if(players) return;
     // Classic score submissions replay the input log server-side: the ENGAGE (not the
     // keypress) is the input now, so it is what gets logged, at its authored tick.
-    // The log lives on the main thread: log directly where net.js shares the scope
+    // The log lives on the main thread: log directly where net-api.js shares the scope
     // (in-process + headless), ride a tick-stamped event out of the worker otherwise.
     if(typeof netLogBoost === 'function'){ if(kind === 'bs') netLogBoost(d, simTick); else netLogBoostEnd(simTick); }
     else simEvents.push(kind === 'bs' ? { t:'blog', k:'bs', d:{ x:d.x, y:d.y }, tk:simTick } : { t:'blog', k:'be', tk:simTick });

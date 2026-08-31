@@ -1008,7 +1008,7 @@ function _duelLook(){
 }
 // The per-player controls line under the 1:1 DUEL title. Local 1:1 shows both schemes
 // (P1 arrows, P2 WASD, one keyboard). An ONLINE duel drives ONE snake from this device --
-// always arrows or the d-pad, whichever the device has (net.js swallows WASD, remaps arrows
+// always arrows or the d-pad, whichever the device has (input.js swallows WASD, remaps arrows
 // to netMyIndex) -- so it shows only the local player's scheme, in that player's colour.
 function _drawDuelControls(lk){
     ctx.save(); ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
@@ -1237,7 +1237,7 @@ function drawDuelMenu() {
 }
 // MY ID: this player's identity + the friend-link QR (moved here from SETTINGS).
 function drawFriendId() {
-    _netMyIdAt = Date.now();   // an incoming request while our QR shows auto-accepts (see net.js)
+    _netMyIdAt = Date.now();   // an incoming request while our QR shows auto-accepts (see net-session.js)
     drawGrid(); drawOvBg(0.92);
     ctg('MY ID',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     ct(fmtPlayerId()+'   FRIENDS: '+getFriends().length, CW/2, 50, '#ffd700', FONT.MENU);
@@ -1255,7 +1255,7 @@ function drawFriendId() {
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // ONLINE 1:1 lobby: quick match, friends with online status, incoming invites.
-// All state lives in net.js (_netLb / _netCounts / _netFriendsOnline).
+// All state lives in the net files (_netLb / _netCounts / _netFriendsOnline).
 function drawLobby(){
     drawGrid(); drawOvBg(0.92);
     ctg('ONLINE 1:1',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
@@ -1292,7 +1292,7 @@ function drawLobby(){
         // Incoming invite: full-screen modal on a SOLID background (a transparent
         // layer over the lobby read as a mess). Its own YES/NO row -- NOT
         // drawConfirmYesNo, whose fixed geometry collided with the text above.
-        // Profile fields are untrusted (clamped in net.js, canvas text only).
+        // Profile fields are untrusted (clamped in net-api.js, canvas text only).
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
         ctg('INVITE',CW/2,CH/2-84,'#ffd700',FONT.TITLE, GLOW.TITLE);

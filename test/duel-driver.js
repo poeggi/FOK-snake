@@ -30,7 +30,7 @@ const HOOKS = (id) => `
   // time (frame domain); Date.now is this client's WALL clock, carrying a frozen anchor error
   // (__clkE0) + relative drift (__clkDr). Both default 0 (perfect sync).
   //
-  // The lockstep timeline now reads the MONOTONIC clock (net.js _wall() = timeOrigin +
+  // The lockstep timeline now reads the MONOTONIC clock (net-api.js _wall() = timeOrigin +
   // performance.now()), NOT Date.now(). So the model splits cleanly here:
   //   * timeOrigin carries the real inter-device anchor error (__clkE0) and NOTHING else --
   //     the standing offset the boundary burst must still measure and correct, and the lead
@@ -95,7 +95,7 @@ const HOOKS = (id) => `
   globalThis.__steer   = (d)=>{ gameSteer(0, d); };              // author a turn for MY snake
   globalThis.__boost   = (d, now)=>{ gameBoostStart(0, d, !!now); };  // ARM boost (simArmTick issues the real bs)
   globalThis.__boostEnd= ()=>{ gameBoostEnd(0); };              // ARM release -> real be
-  // Level-up: replay the RECEIVE end of the real online boundary (net.js: adopt epoch +
+  // Level-up: replay the RECEIVE end of the real online boundary (net-session.js: adopt epoch +
   // start_pts, then beginOnlineDuelLevel -> startDuelLevel -> _rbReset). The server POST /
   // rst relay is transport, not sim, so the driver supplies the shared start_pts + epoch
   // both sides agree on; the SIM side (simTick->0, _gAt->0, ring reset) is the REAL code.

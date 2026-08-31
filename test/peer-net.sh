@@ -9,7 +9,7 @@
 # yields no server-reflexive candidate either (with no NAT the reflexive
 # address equals the host address, so ICE prunes it as redundant). The server
 # hint is therefore the ONLY source of a peer's real IPv6 -- _netDeobfuscateCand
-# in js/net.js grafts it onto the peer's mDNS candidate to obtain an address
+# in js/net-rtc.js grafts it onto the peer's mDNS candidate to obtain an address
 # that is actually connectable. If the hint ever stops carrying a true observed
 # address, every direct IPv6 duel silently degrades to the server relay, with
 # nothing in any log to say why.
@@ -28,7 +28,7 @@ cd "$(dirname "$0")/.."
 
 # Default to whatever the CLIENT talks to, read from the source, so the test
 # target cannot drift away from the app's.
-BASE="${1:-$(grep -oE "const NET_BASE = '[^']+'" js/net.js | cut -d"'" -f2)}"
+BASE="${1:-$(grep -oE "const NET_BASE = '[^']+'" js/net-api.js | cut -d"'" -f2)}"
 BASE="${BASE%/}"
 [ -n "$BASE" ] || { echo "could not determine NET_BASE"; exit 2; }
 

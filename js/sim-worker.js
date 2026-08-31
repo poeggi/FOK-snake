@@ -26,7 +26,7 @@ importScripts('assets.js', 'sim.js', 'duel-core.js');
 self.cfg = { diff: 1, turbo: true };
 
 // ---- ONLINE DUEL MODE: duel-core.js (rollback ring, input log, hashes, resync)
-// runs HERE, off the render thread. net.js stays on main and forwards wire packets
+// runs HERE, off the render thread. The net files stay on main and forward wire packets
 // in ({t:'peerPkt'}) and local inputs ({t:'lin'}); the core's outbound packets and
 // debug go back over postMessage. duel-core references a handful of main-thread
 // globals -- this prelude gives them worker-appropriate homes.
@@ -42,9 +42,9 @@ self._duelMsg = ''; self._duelMsgAt = 0;
 self._msgNow = () => performance.now();
 self.netGameActive = () => _dcOn;
 self.netMyIndex = () => _dcMy;
-// Monotonic wall reading -- see net.js _wall(): the lockstep timeline must not ride the
+// Monotonic wall reading -- see net-api.js _wall(): the lockstep timeline must not ride the
 // OS-adjustable Date.now(), or NTP slews leak in as drift. timeOrigin pins performance.now()
-// to a one-time wall capture. The worker twin MUST match net.js exactly.
+// to a one-time wall capture. The worker twin MUST match net-api.js exactly.
 self._wall = () => (typeof performance !== 'undefined' && performance.now && performance.timeOrigin != null)
     ? performance.timeOrigin + performance.now()
     : Date.now();
@@ -83,7 +83,7 @@ function _dcSeedPhase(){
     _acc = Math.max(-TICK_MS, Math.min(TICK_MS, (ft0 - simTick - 0.5) * TICK_MS));
     _dcSnapN++; _dcSnapAt = performance.now();
 }
-// The shared-clock tick target (net.js netTickTarget's worker twin, same 600-tick
+// The shared-clock tick target (net-session.js netTickTarget's worker twin, same 600-tick
 // origin sanity window). null = steer nowhere, free-run at 60Hz.
 function _dcTarget(){
     if(!_dcOn || !_dcStartPts || _dcOfs == null) return null;
@@ -193,7 +193,7 @@ onmessage = (e) => {
     const m = e.data;
     switch (m.t) {
         case 'cfg':      self.cfg = m.cfg; break;
-        // ---- online duel (net.js on main forwards; duel-core here simulates) ----
+        // ---- online duel (net-session.js on main forwards; duel-core here simulates) ----
         case 'duelStartNet':   // a (re)start: fresh seed/startPts, rollback state rebased
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? null : m.ofs); _dcStartPts = m.startPts || 0;
             _dcOn = true; self.inGame = true;

@@ -35,7 +35,7 @@ let settingsCat = -1;              // -1 = category list; else index into SETTIN
 let _dataMsg = '', _dataMsgAt = 0; // transient DATA-menu status line (backup/restore/reset)
 let _resetKind = 'stats';          // which reset the confirm screen is arming: 'stats'|'settings'|'id'
 let _scoreboardCache = null;
-let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net.js)
+let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net-api.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['PLAY', '1VS1', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
 let duelSel = 0;   // 1:1 submenu selection (0 = PLAY ONLINE, 1 = PLAY LOCAL, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
@@ -910,11 +910,11 @@ function beginGame(){
     if(typeof netNoteGameStart === 'function') netNoteGameStart(seed);
     _wsend({ t:'start', seed, bestScore:bestScore() });
 }
-// Online duel entry (called by net.js when the DataChannel opens on both ends).
+// Online duel entry (called by net-session.js when the DataChannel opens on both ends).
 // BOTH clients start the same deterministic sim from the shared seed and run it
 // locally (in-process). There is no host and no authority: each side sends only
 // its own tick-stamped inputs and rolls back to re-simulate when a late one
-// arrives (net.js). The shared seed + start_pts keep both timelines in step.
+// arrives (net-session.js). The shared seed + start_pts keep both timelines in step.
 function beginOnlineDuel(seed, hosting){
     inGame = true; Snd.musicFadeOut(0.5);
     _musicHoldUntil = performance.now() + 1500;
@@ -1024,8 +1024,8 @@ function _initWorker(){
 }
 let _pendingSnap = null, _pendingEvents = [];
 // ---- worker-hosted ONLINE duel: sim + rollback (duel-core.js) run in sim-worker.js;
-// main keeps transport (net.js), input capture and render. These helpers are the
-// main-side seam net.js and duel-core call through (typeof-guarded there).
+// main keeps transport (the net files), input capture and render. These helpers are
+// the main-side seam the net files and duel-core call through (typeof-guarded there).
 let _wDuel = false, _pendingDuel = null;
 // Presentation-only: holds the get-ready splash over the board while the level-up start_pts is negotiated.
 let _lvlCover = false;

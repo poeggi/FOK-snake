@@ -31,10 +31,10 @@ runTest('SMOKE-NET', `
 
     // Classic play must be untouched by the net layer: seed + input log ride along.
     beginGame();
-    if(phase!=='levelReady'&&phase!=='playing') throw 'beginGame broken with net.js loaded';
+    if(phase!=='levelReady'&&phase!=='playing') throw 'beginGame broken with the net files loaded';
     if(!(_netSeed>0)) throw 'main-made seed not registered for score replay';
     for(let i=0;i<400;i++) update();
-    if(phase!=='playing') throw 'classic game did not reach playing with net.js loaded';
+    if(phase!=='playing') throw 'classic game did not reach playing with the net files loaded';
     gameSteer(0, GDIRS.ArrowUp);
     if(_netInputs.length!==1||_netInputs[0][1]!==0) throw 'input log did not record the steer';
     // Boost transitions log at their real ENGAGE/END (issued by the arming stage

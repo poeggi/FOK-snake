@@ -3,7 +3,7 @@
 // an NTP slew, or the step a phone takes when it foregrounds -- so anchoring the shared PTS to it
 // let those adjustments leak straight into the timeline as drift. The field saw ~10ms in a minute
 // (~167ppm), far past any crystal error; the cause was netPts()/the tick target reading Date.now().
-// The fix (net.js/sim-worker.js _wall() = performance.timeOrigin + performance.now()) reads a wall
+// The fix (net-api.js/sim-worker.js _wall() = performance.timeOrigin + performance.now()) reads a wall
 // value captured ONCE at context start and advanced by a monotonic clock that is never adjusted,
 // so a later wall slew or step cannot move the timeline. This test proves that immunity two ways.
 //

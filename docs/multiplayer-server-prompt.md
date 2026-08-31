@@ -10,7 +10,7 @@
 > What actually shipped, in short: a PHP backend over plain HTTP (client polls;
 > no WebSocket). Realtime duels are DETERMINISTIC ROLLBACK, inputs-only on the
 > wire, no host and no authority -- see the netcode note below and the client's
-> `js/net.js`. Transport is WebRTC DataChannel (unreliable+unordered) peer-to-
+> `js/net-*.js` files. Transport is WebRTC DataChannel (unreliable+unordered) peer-to-
 > peer, STUN only, with an app-level `relay.php` passthrough as the NAT fallback.
 
 ## Context

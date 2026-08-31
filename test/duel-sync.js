@@ -4,7 +4,7 @@
 // forward-min so both end holding the SAME two numbers, and each nudges its OWN clock half of the
 // agreed offset onto the shared midpoint. Neither side is the master.
 //
-// This drives the real net.js burst primitive directly (no full match), over a modelled wire with
+// This drives the real net-rtc.js burst primitive directly (no full match), over a modelled wire with
 // a frozen clock offset (e0) + path asymmetry (asym) + jitter, and proves the four properties the
 // lockstep boundary depends on:
 //   1. IDENTICAL theta   -- both sides compute the same offset (the invariant the nudge relies on;
@@ -127,7 +127,7 @@ function runBurst({ e0 = 0, half = 20, asym = 0, jit = 0, N = 10, spike = 0, dro
 console.log(steps.join('\n'));
 if(failed){
     console.log('\nDUEL-SYNC FAIL: ' + failed + '/5 -- the boundary clock burst did not agree on/recover the peer'
-        + ' offset symmetrically (or failed to reject a doze/starved burst). See js/net.js _netBurst*.');
+        + ' offset symmetrically (or failed to reject a doze/starved burst). See js/net-rtc.js _netBurst*.');
     process.exit(1);
 }
 console.log('\nDUEL-SYNC PASSED');

@@ -1,15 +1,16 @@
 // ============================================================================
 // duel-core.js -- the DETERMINISTIC ROLLBACK CORE of the online 1:1 duel: the
 // snapshot ring, the input log, live-apply vs rewind, hashes, state recovery and
-// the full resync. Split out of net.js so the same code runs in TWO homes:
+// the full resync. Split out of the net layer so the same code runs in TWO homes:
 //   - the SIM WORKER (the default wherever Worker exists): sim-worker.js
-//     importScripts this file and drives it off its own clock; net.js forwards
-//     wire packets in ({t:'peerPkt'}) and local inputs ({t:'lin'}), and the
-//     core's sends/debug ride postMessage back out;
+//     importScripts this file and drives it off its own clock; net-session.js
+//     forwards wire packets in ({t:'peerPkt'}) and local inputs ({t:'lin'}), and
+//     the core's sends/debug ride postMessage back out;
 //   - the MAIN thread (no-Worker browsers + the headless test harness), driven
-//     by game.js loop() via netTickPre(), talking to net.js directly.
-// net.js keeps everything transport: sessions, signaling, WebRTC, the clock
-// sync, netDuelWarn/netMyIndex/netTickTarget (they read session state).
+//     by game.js loop() via netTickPre(), talking to the net files directly.
+// The net files (net-api/net-rtc/net-session.js) keep everything transport:
+// sessions, signaling, WebRTC, the clock sync, netDuelWarn/netMyIndex/
+// netTickTarget (they read session state).
 // ============================================================================
 // ================================================================
 // DETERMINISTIC ROLLBACK NETCODE  -- no host, no authority
@@ -34,7 +35,7 @@
 // safe IPv4 floor); ~70B goes to IP+UDP+DTLS+SCTP headers, so the payload budget is
 // what is left. Worst case today: an 'in' with a full 8-record redundant log and the
 // 1Hz 'h' with its per-field hash array (~220B); smoke-net measures both against this
-// budget. Declared HERE (not net.js):
+// budget. Declared HERE (not the net files):
 // both the transport and the core enforce it, and the sim worker loads only the core.
 const NET_PKT_MAX = 1200;
 const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the nearest earlier
@@ -123,7 +124,7 @@ var _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = heal
 // A refused packet is normal jitter under independent clocks: the redundant resend
 // re-delivers that input at a usable tick and the two worlds never actually diverge (the
 // hash stays equal). It is NOT a connection fault -- the packet DID arrive -- and NOT a
-// warning of any kind. Only genuine SILENCE (net.js, nothing on the wire) raises CONNECTION
+// warning of any kind. Only genuine SILENCE (net-rtc.js, nothing on the wire) raises CONNECTION
 // LOST, and only a disagreeing hash raises OUT OF SYNC; a refusal just counts as a drop.
 function _rbRefused(){ _rbDbg.drop++; }
 // A redundant-log record older than the rewind window is undeliverable (the peer

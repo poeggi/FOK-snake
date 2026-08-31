@@ -13,7 +13,7 @@ if (fields.length < 40) { console.error(`only ${fields.length} snapshot fields p
 
 const SHARED = new Set(['phase']);   // main sets phase for menu navigation by design
 const violations = [];
-for (const file of ['storage.js', 'game.js', 'text.js', 'qr.js', 'render.js', 'screens.js', 'input.js', 'net.js']) {
+for (const file of ['storage.js', 'game.js', 'text.js', 'qr.js', 'render.js', 'screens.js', 'input.js', 'net-api.js', 'net-rtc.js', 'net-session.js']) {
     J(file).split('\n').forEach((line, i) => {
         const code = line.replace(/\/\/.*$/, '');   // ignore line comments
         for (const v of fields) {
