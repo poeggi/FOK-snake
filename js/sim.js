@@ -637,8 +637,8 @@ function step(now) {
             emit({t:'ach',id:'first_gem'});
             if(bonus){ levelBonusCount++; if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'}); } else levelBonusCount=0;
         }
-        if(score>=64000)  emit({t:'ach',id:'score_25k'});
-        if(score>=100000) emit({t:'ach',id:'score_100k'});
+        if(score>=100000) emit({t:'ach',id:'score_25k'});
+        if(score>=200000) emit({t:'ach',id:'score_100k'});
         if(gemsDone>=GEMS_PER_LEVEL){
             gem=null; score+=level*500;
             if(perfectLevel){
@@ -647,7 +647,7 @@ function step(now) {
                 emit({t:'ach',id:'perfect_level'});
                 perfectCount++; if(perfectCount>=3) emit({t:'ach',id:'triple_perf'});
             } else emit({t:'sfx',name:'levelUp'});
-            emit({t:'ach',id:'level1'});
+            if(level>=2)  emit({t:'ach',id:'level1'});
             if(level>=5)  emit({t:'ach',id:'level5'});
             if(level>=10){
                 emit({t:'ach',id:'level10'});

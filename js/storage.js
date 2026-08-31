@@ -45,10 +45,10 @@ let _cachedFOKoins = getFOKoins();
 function addFOKoins(n) {
     _cachedFOKoins += n;
     saveLater(FK_KEY, String(_cachedFOKoins));
-    if(_cachedFOKoins >= 5000)    unlockAch('fokoins_1k');
+    if(_cachedFOKoins >= 25000)   unlockAch('fokoins_1k');
     if(_cachedFOKoins >= 100000)  unlockAch('fokoins_10k');
     if(_cachedFOKoins >= 1000000) unlockAch('fokoins_1m');
-    if(_cachedFOKoins >= 5000000) unlockAch('fokoins_100k');
+    if(_cachedFOKoins >= 100000000) unlockAch('fokoins_100k');
 }
 function addScore(name, sc, lvl, won) {
     const s = getScores();

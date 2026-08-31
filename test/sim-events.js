@@ -6,7 +6,7 @@
 // inline (old) or via drainSimEvents() (new). Run: node test/sim-events.js
 const { runTest } = require('./harness');
 
-const GOLDEN = 'c3a78772:80';   // ordered side-effect signature of the 12000-tick replay (perfect levels bank via score, so they emit no coin)
+const GOLDEN = 'd49ca723:78';   // ordered side-effect signature of the 12000-tick replay (perfect levels bank via score, so they emit no coin)
 
 const driver = `
 ;(function(){
