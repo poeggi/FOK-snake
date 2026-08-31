@@ -112,9 +112,9 @@ runTest('SMOKE-NET', `
     // remote copy of the same record: local is a peer with zero latency. The first
     // TWO turns of a tick ship the moment they are authored (leading-edge flush,
     // capped at two: a fast double gesture lands two distinct turns inside one tick,
-    // and deferring the second made it a guaranteed-late flush); any further turn in
-    // the same tick only marks the dirty flag and coalesces into the next tick's
-    // flush, so a touch burst still costs bounded packets, not one per event.
+    // and a deferred second record leaves at the boundary with zero wire budget); any
+    // further turn in the same tick only marks the dirty flag and coalesces into the
+    // next tick's flush, so a touch burst costs bounded packets, not one per event.
     const w0=sent.length, q0h=players[0].dirQueue.length;
     gameSteer(0, GDIRS.ArrowUp);
     if(sent.length!==w0+1) throw 'the first steer of a tick must ship at once (leading-edge flush)';
@@ -168,8 +168,8 @@ runTest('SMOKE-NET', `
     if(!sent.length) throw 'setup: the hash packet did not send';
     if(sent[0].length > NET_PKT_MAX) throw 'a hash packet exceeds the datagram budget: '+sent[0].length+'B > '+NET_PKT_MAX;
     // The per-field hashes ride as a positional 16-bit array (RB_HASH_DUEL order) -- the
-    // names are shared code. 300B bounds the whole packet so the object shape (~575B)
-    // cannot silently come back.
+    // names are shared code and stay off the wire. 300B bounds the whole packet; a
+    // keyed-object shape (~575B) fails it.
     const _hp=JSON.parse(sent[0]);
     if(!Array.isArray(_hp.f)||_hp.f.length!==RB_HASH_DUEL.length) throw 'per-field hashes must be a full positional array';
     if(_hp.f.some(x=>x!==(x&0xffff))) throw 'a per-field hash exceeds 16 bits';
@@ -351,7 +351,7 @@ runTest('SMOKE-NET', `
     if(_netApiNewer||_netApiOutdated) throw 'built against 3.4: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     _applyHello({api:'3.1'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER minor (server 3.1) must read as up to date';
-    _applyHello({api:3});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags (the bare-integer form is no longer parsed)';
+    _applyHello({api:3});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags';
     _applyHello({api:'3.5'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';

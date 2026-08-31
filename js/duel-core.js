@@ -83,23 +83,20 @@ var _rbSent = [];            // recent local inputs, resent for redundancy
 // it once (latest-valid, since _rbSent already holds the most recent records). A burst of
 // touches or key-repeats beyond the cap collapses to a single send, not one packet each.
 var _netInDirty = false;
-// One-shot repair resend, as a countdown: every input-carrying flush arms it to 2, each
-// input-free netTickPre counts it down, and the resend fires when it reaches 0 -- two tick
-// boundaries (~27-33ms) after the flush, not one. Real loss is bursty (a radio stall, a
-// full queue), so a repair only ~10-17ms behind the original tends to die with it; the
-// extra tick decorrelates the pair. A fresh input flush re-arms the countdown: that packet
-// already carries the whole redundancy log, so it IS the superseding repair. Still repairs
-// a lost datagram from a player who then goes quiet far inside the 16-tick heartbeat's
-// ~267ms, and still fires at most once per armed flush.
+// One-shot repair resend, as a countdown: an input-carrying flush arms it to 2, each
+// input-free netTickPre counts it down, and the resend fires at 0 -- two tick boundaries
+// (~27-33ms) behind the flush. Real loss is bursty (a radio stall, a full queue), so the
+// gap decorrelates the repair from the burst that ate the original. A fresh input flush
+// re-arms it (that packet carries the whole redundancy log, so it IS the repair); fires
+// at most once per armed flush, well inside the 16-tick heartbeat's ~267ms.
 var _netInRepeat = 0;
 // Cap for the leading-edge flush: counts the input-authored flushes of the current tick
 // cycle (bumped by the immediate, netTickPre and netTickPost flushes, zeroed when
 // netTickPre opens the next cycle). The first TWO turns of a cycle ship the moment they
-// are authored -- a fast double gesture lands two distinct turns inside one tick, and
-// deferring the second turned it into a guaranteed-late flush whenever it was authored
-// on the last interval before its boundary. Anything past two only marks _netInDirty and
-// coalesces into the next tick's flush, so a touchmove storm still costs bounded packets
-// per tick, not one per event (the spam collapse the cap exists for survives).
+// are authored -- a fast double gesture lands two distinct turns inside one tick, and a
+// second record deferred to the boundary leaves with zero wire budget. Anything past two
+// only marks _netInDirty and coalesces into the next tick's flush, so a touchmove storm
+// costs bounded packets per tick, not one per event.
 var _netInFlush = 0;
 // A received input that lands AFTER its own tick needs a rollback re-sim (the clone-heavy
 // path). Many packets draining together after a busy frame would each trigger their own --
@@ -121,7 +118,6 @@ var _rbBase = 0;
 // the epoch gate in _netHandleMsg), because s.epoch advances at the HALT while the sims keep
 // ticking the old timeline until the scheduled start -- the two disagree for that whole window.
 var _rbEpoch = 0;
-var _rbPhase = '';   // last seen duel phase: drives the re-anchor at level/respawn breaks
 var _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = healthy): repeated
                           // failed repairs escalate to a session end on the persistence deadline
 // A refused packet is normal jitter under independent clocks: the redundant resend
@@ -150,7 +146,6 @@ function _rbReset(){
     _netLagN = [];   // a new match is a new path: do not average across the old one
     _rbBase = simTick;
     _rbEpoch = (typeof netEpoch === 'function') ? netEpoch() : 0;
-    _rbPhase = '';
     _rbDbg = { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, lost:0, live:0, fix:0, desyncAt:'' };
 }
 // Two identical sims fed identical inputs produce identical state, so a hash that
@@ -239,11 +234,11 @@ function _rbHash(snap){
 // is only walked once. This is the 64-tick boundary's hot path: the separate calls
 // were the single biggest recurring main-thread spike.
 // The per-field hashes ship as a positional 16-bit array in RB_HASH_DUEL order: the
-// field NAMES are shared code, so spelling them out once a second bought nothing, and
-// 16 bits still make a false per-field agreement a 1/65536 fluke -- behind a 32-bit
-// whole-state mismatch that already proved SOMETHING diverged. If every field collides
-// its way out of the diff, the verdict names none and fires both repairs (the safe
-// fallback in _rbHashSettle), so a collision can delay a targeted repair, not sync.
+// field NAMES are shared code and stay off the wire. 16 bits make a false per-field
+// agreement a 1/65536 fluke -- behind a 32-bit whole-state mismatch that already proved
+// SOMETHING diverged. If every field collides its way out of the diff, the verdict names
+// none and fires both repairs (the safe fallback in _rbHashSettle), so a collision can
+// delay a targeted repair, not sync.
 function _rbHashBoth(snap){
     try {
         const f = [], parts = [];
@@ -625,9 +620,8 @@ function netTickPre(){
     // That is why the contract pairs them: "a fresh sync ALWAYS precedes a new start
     // PTS". A re-anchor is only safe together with a new start_pts, which re-bases the
     // timeline to match. _netRequestStart already does exactly that pairing, and it is
-    // the only place allowed to. When the per-level/respawn starts land, they get their
-    // re-anchor for free by going through it.
-    if(!_replaying) _rbPhase = phase;
+    // the only place allowed to. The per-level and rematch starts get their re-anchor
+    // for free by going through it.
     // Coalescing input flush: the first turns of a cycle already shipped at authoring (the
     // leading-edge flush in netLocalInput, capped at two); everything authored past the
     // cap only marked _netInDirty and collapses here into a single latest-valid packet --

@@ -479,12 +479,8 @@ function runMatch(opts){
             //     A send deferred to the next tick's flush leaves at that boundary itself -- zero
             //     wire budget, late by transit, a guaranteed rollback. Send-at-authoring keeps a
             //     full tick minus transit.
-            //   every doubleEvery-th intent is a MULTI gesture, alternating (S.multi parity)
-            //     between a DOUBLE at __gdue()==1 (steer + sim-rejected reverse; BOTH must ship at
-            //     authoring, proving the two-flush cap) and a TRIPLE at birth (__gdue()>=2;
-            //     heading-reverse + steer + steer-reverse, all game-neutral) whose third record
-            //     exceeds the cap and coalesces into the NEXT tick's flush -- the cap-deferred
-            //     path, shipped with a boundary of budget left so 0rb stays exact.
+            //   every doubleEvery-th intent is a MULTI gesture -- DOUBLE vs TRIPLE alternating
+            //     on S.multi parity (see opts.doubleEvery in the header doc).
             const gd = S.c.__gdue();
             const multi = opts.doubleEvery && (S.gest + 1) % opts.doubleEvery === 0;
             const hv = S.fresh && multi && (S.multi & 1) && gd >= 2 ? S.c.__view() : null;

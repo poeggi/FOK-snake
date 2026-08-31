@@ -63,7 +63,7 @@ const NET_PTS_TOL = 250;
 // thing being watched for has to arrive faster than the watcher's patience -- and
 // in-game the 16-tick input heartbeat (~267ms) is the real cadence anyway.
 const NET_KEEPALIVE_MS = 300;
-// Time budget for the clock re-sync at a MID-MATCH re-anchor (level-up / rematch / respawn).
+// Time budget for the clock re-sync at a MID-MATCH re-anchor (level-up / rematch).
 // The full-quality sweep is 5 samples at a 200ms spread (~800ms) -- too long to sit on the
 // RE-SYNCING cover every level. Bounded, _netTimeSync adopts the best min-RTT sample so far
 // and start.php's `now` gives it a final min-RTT refinement, so the anchor stays clean while
@@ -312,10 +312,10 @@ async function _netClockMs(){
 }
 async function _netTimeSync(force, budgetMs){
     if(_netSyncBusy || !_netOk()) return;
-    // NEVER re-anchor while a duel is being played. netPts() now DRIVES the tick
+    // NEVER re-anchor while a duel is being played. netPts() DRIVES the tick
     // number, so moving the anchor moves the whole timeline under our feet -- a
     // periodic self-inflicted desync. The anchor is set at the match start and
-    // re-set only at the natural breaks (new level, respawn); in between it stays
+    // re-set only with a negotiated start (new level, rematch); in between it stays
     // exactly where it was, drift and all. A few ms of drift across one level is
     // invisible; a step mid-game is not.
     if((phase === 'duel' || phase === 'duelPaused') && !_netSyncBreak()) return;
