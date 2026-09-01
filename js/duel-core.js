@@ -538,7 +538,7 @@ function _rbApplyResync(m){
         // final-only, so no visible jump). Adopting the host's stale copy here is what re-yanked
         // our head after a preceding hard-apply had wiped the log the replay needs.
         if(e.snap && e.snap.players && e.snap.players[1]) snap.players[1] = e.snap.players[1];
-        e.snap = _rbClone(snap); _rbRollback(T);
+        e.snap = _rbCloneSnap(snap); _rbRollback(T);
     } else {
         // AGED OUT (a long doze / far clock drift): T is gone from the ring, so there is NO log to
         // replay and a hard apply of the host's STALE copy of our snake would yank our own head to
@@ -607,18 +607,48 @@ function _rbStateSettle(){
 }
 // The ring must own its states: _rbDuelSnap() hands out LIVE references (the sim
 // mutates players[i].snake in place), so an un-cloned entry would rot as the game runs.
-// A duel snapshot is pure JSON data -- numbers, strings, bools, null, {x,y} cells, arrays
-// and the two snake bodies, no Set/Map/Date -- so this tight recursive copy is exact
-// (byte-identical to structuredClone) and ~8x cheaper on this shape (measured). That
-// matters: a clone runs every 2nd tick AND again through every rollback re-sim, so it is
-// the dominant duel-only main-thread cost -- and on the single-thread path it competes
-// with touch and render, where structuredClone's overhead was starving touchmove delivery.
-function _rbClone(o){
-    if(o === null || typeof o !== 'object') return o;
-    if(Array.isArray(o)){ const n = new Array(o.length); for(let i = 0; i < o.length; i++) n[i] = _rbClone(o[i]); return n; }
+// SHAPE-SPECIALIZED cloner (measured 6-12x over the previous generic recursion, which
+// was the dominant duel-only main-thread cost: a clone runs on every snapshot tick AND
+// through every rollback re-record). Knowing the layout removes all per-key reflection;
+// the price is a CONTRACT: a clone must serialize byte-identical to its source, because
+// JSON.stringify of the pinned snapshots feeds the duel hash and a rollback replaces
+// live state on ONE side only -- so nested key ORDER and key PRESENCE must be
+// reproduced exactly, or identical logical states hash apart after a repair.
+// Snake cells, dir/dirQueue/boostDir, powerPellet/heart are always {x,y}; a player
+// always carries _mkDuelPlayer's field set in its order. Two shapes are NOT fixed and
+// are cloned by the flat one-level walker instead of a literal: bars (three construction
+// sites -- the _placeBars base {x,y,fragile}, its paired extension {x,y,paired,fragile},
+// the resync wire rebuild {x,y,fragile,paired} -- plus pairEnd/gd/gdUntil appended in
+// play) and the gem ({x,y} from freeCell with tier/spawnAt appended, and it also crosses
+// the rs/st wire verbatim). KEEP IN SYNC with _rbDuelSnap / _mkDuelPlayer.
+function _rbCloneFlat(b){
     const n = {};
-    for(const k in o) if(Object.prototype.hasOwnProperty.call(o, k)) n[k] = _rbClone(o[k]);
+    for(const k in b){ const v = b[k]; n[k] = (v && typeof v === 'object') ? { x:v.x, y:v.y } : v; }
     return n;
+}
+function _rbClonePlayer(p){
+    const sn = p.snake, s = new Array(sn.length);
+    for(let i = 0; i < sn.length; i++){ const c = sn[i]; s[i] = { x:c.x, y:c.y }; }
+    const dq = p.dirQueue || [], q = new Array(dq.length);
+    for(let i = 0; i < dq.length; i++){ const d = dq[i]; q[i] = { x:d.x, y:d.y }; }
+    return { snake:s, dir:p.dir ? { x:p.dir.x, y:p.dir.y } : p.dir, dirQueue:q,
+             boostDir:p.boostDir ? { x:p.boostDir.x, y:p.boostDir.y } : p.boostDir,
+             boosting:p.boosting, stepAccum:p.stepAccum, score:p.score, lives:p.lives,
+             alive:p.alive, slowUntil:p.slowUntil };
+}
+function _rbCloneSnap(s){
+    const bs = s.bars || [], bars = new Array(bs.length);
+    for(let i = 0; i < bs.length; i++) bars[i] = _rbCloneFlat(bs[i]);
+    return { phase:s.phase, level:s.level, gem:s.gem ? _rbCloneFlat(s.gem) : s.gem,
+        gemsDone:s.gemsDone, bars, _barsV:s._barsV, simTick:s.simTick, simNow:s.simNow,
+        gPer:s.gPer, _gDue:s._gDue, _gAt:s._gAt, phaseAt:s.phaseAt, gemAt:s.gemAt,
+        deathMsg:s.deathMsg, spawnAt:s.spawnAt, levelDoneWaiting:s.levelDoneWaiting,
+        powerPellet:s.powerPellet ? { x:s.powerPellet.x, y:s.powerPellet.y } : s.powerPellet,
+        powerPelletAt:s.powerPelletAt, _powerMode:s._powerMode, _powerModeAt:s._powerModeAt,
+        heart:s.heart ? { x:s.heart.x, y:s.heart.y } : s.heart, heartAt:s.heartAt,
+        _barMoveTick:s._barMoveTick,
+        players:s.players ? [ _rbClonePlayer(s.players[0]), _rbClonePlayer(s.players[1]) ] : s.players,
+        duelWinner:s.duelWinner, _speedRound:s._speedRound, _rngState:s._rngState };
 }
 function _rbAdd(tk, cmd){
     let a = _rbLog.get(tk);
@@ -648,7 +678,7 @@ function _rbEnsureSnap(t){
                                               // off the step: the 1Hz freeze and the settle fallback
                                               // look t-RB_HASH_LAG up EXACTLY, and 64 % RB_SNAP_EVERY != 0.
     if(_rbRing.length && _rbRing[_rbRing.length-1].tk === t) return;   // already have it
-    _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
+    _rbRing.push({ tk:t, snap:_rbCloneSnap(_rbDuelSnap()) });
     if(_rbRing.length > RB_RING) _rbRing.shift();
 }
 // The full input flush: prune, ship the redundancy log, and run the cycle bookkeeping.
@@ -815,7 +845,7 @@ function _rbRollback(toTick){
     for(let i = _rbRing.length - 1; i >= 0; i--) if(_rbRing[i].tk <= toTick){ idx = i; break; }
     if(idx < 0) return false;                    // older than the ring: unrecoverable
     const from = _rbRing[idx].tk, target = simTick, keep = phase, preBarsV = _barsV;
-    simApplyDuel(_rbClone(_rbRing[idx].snap));   // clone: the ring entry stays pristine
+    simApplyDuel(_rbCloneSnap(_rbRing[idx].snap));   // clone: the ring entry stays pristine
     _sfxQ = _sfxQ.filter(q => q.tk <= simTick);  // sounds predicted past the rewind: cancelled...
     _fxQ  = _fxQ.filter(q => q.tk <= simTick);   // ...same for visual effects (bonus/crush/fireworks)
     _rbRing.length = idx;                        // these states are void; re-recorded below
@@ -823,7 +853,7 @@ function _rbRollback(toTick){
     for(let t = from; t <= target; t++){
         _rbNoteHeads(t, true);                   // re-record: the corrected past can move heads
         if(t % RB_SNAP_EVERY === 0 || (t & 63) === 0)   // same grid as _rbEnsureSnap, pinned hash ticks included
-            _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
+            _rbRing.push({ tk:t, snap:_rbCloneSnap(_rbDuelSnap()) });
         const cmds = _rbLog.get(t);
         if(cmds) for(const c of cmds) simCommand(c);
         update();
