@@ -57,11 +57,13 @@ const RB_HASH_LAG = RB_DEPTH;// the 1Hz detector freezes the hash of a tick this
                              // the peer compare its settled copy against our stale hash: a phantom desync
                              // that scaled with latency. Both clients emit on the same deterministic tick
                              // and freeze the SAME immutable tick, so the compare is apples-to-apples.
-const RB_RING = 27;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY (+ the pinned hash ticks).
-                             // Worst-case span 72 ticks -- RB_DEPTH of rewind history plus headroom so
+const RB_RING = 26;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY (+ the pinned hash ticks).
+                             // Worst-case span 69 ticks -- RB_DEPTH of rewind history plus headroom so
                              // the immutable hash tick (RB_HASH_LAG old) is always still in the ring to
-                             // hash and compare; the same span 36 entries gave at the old 2-tick step.
-                             // A divergence older than the ring gets a full resync, not a rollback.
+                             // hash and compare. The deepest exact lookup is the 1Hz freeze at
+                             // RB_HASH_LAG+1 back: at most 23 newer pushes land in that window, so the
+                             // pinned entry survives with 3 entries to spare. A divergence older than
+                             // the ring gets a full resync, not a rollback.
 const RB_FUTURE = 32;        // honest inputs are authored up to a GAME tick ahead (dir stamps its
                              // effective boundary, simTick + _gDue <= gPer) plus start-time skew;
                              // beyond half a second ahead is a connection problem -- refuse it

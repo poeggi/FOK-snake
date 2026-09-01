@@ -899,7 +899,7 @@ function netNoteGameStart(seed){ _netSeed = seed>>>0; _netInputs = []; }
 // tk (optional) pins the authored tick: boost transitions are issued beside the sim
 // (worker home included) and arrive here via a tick-stamped event, while the mirror's
 // simTick lags a frame behind.
-function _netLog(code, tk){ if(inGame && !players && _netInputs.length < 20000) _netInputs.push([(tk == null ? simTick : tk)|0, code]); }
+function _netLog(code, tk){ if(inGame && !players && _netInputs.length < 16384) _netInputs.push([(tk == null ? simTick : tk)|0, code]); }
 function netLogDir(d){ _netLog(_netDirCode(d)); }
 function netLogBoost(d, tk){ _netLog(4 + _netDirCode(d), tk); }
 function netLogBoostEnd(tk){ _netLog(8, tk); }
