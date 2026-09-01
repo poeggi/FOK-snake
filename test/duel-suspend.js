@@ -26,38 +26,50 @@ const SEEDS = [0x51E0D000, 0x9E3779B1, 0xDEADBEEF].map(x => x >>> 0);
 // The band has one contract, not a per-duration one: the longest freeze in it is the binding case.
 const MS = [3000];
 const WHO = ['A', 'B'];   // A = the HOST froze (was 30/30 dead), B = the JOINER froze (was fragile)
+// PINNED repair-eats-input seeds: with these, the catch-up burst's trailing 'rs' (parked, then
+// drained by netTickPre) -- or a later hash/'st' repair -- used to land on exactly the tick the
+// pass had just fed an input for. The repair rebuilt the world from the ring (replay reaches only
+// simTick; the pending tick's records are not part of any replay), so the just-fed record was
+// dropped from the world while staying in BOTH logs: identical logs, silently split worlds, and
+// every later repair re-opened the split the same way until the 4s desync deadline ended the
+// match. Guarded by netTickPre's order contract: every repair runs BEFORE the tick's log-feed.
+const PINNED = [
+    { who:'B', ms:2500, seed:0xcb7ca15d >>> 0 },
+    { who:'B', ms:2500, seed:0xad9b7bdf >>> 0 },
+    { who:'B', ms:3000, seed:0xc6ddbf1e >>> 0 },
+];
+
+const cases = [];
+for(const who of WHO) for(const ms of MS) for(const seed of SEEDS) cases.push({ who, ms, seed });
+cases.push(...PINNED);
 
 const rows = [];
 let fails = 0, total = 0, sessionEnds = 0, jumps = 0;
-for(const who of WHO){
-    for(const ms of MS){
-        for(const seed of SEEDS){
-            total++;
-            // catchup:true models the fixed-timestep integer-lag close every real duel client runs
-            // per tick (sim-worker._step): after the resync re-anchors the frozen side to the sender's
-            // ring tick, this closes the final tick-or-two residual toward the shared clock. Without
-            // it the frozen side would sit permanently a tick behind (a modelling gap, not a bug).
-            const r = runMatch({ seed, secs: 3 + Math.ceil(ms/1000) + 7, wire:WIRE, phase:8, tjit:4,
-                recv:true, catchup:true, doze:{ at:3.0, ms, who } });
-            // A frozen client MUST snap its own head exactly once when the resync re-anchors its tick
-            // forward across the dozed span (the "connection re-established" reconcile the field shows
-            // -- rendered final-only, so it is one redraw, not an animated slide). That single snap on
-            // the FROZEN side is legitimate; the LIVE side must never see its own head teleport, and
-            // neither side may session-end or fail to re-converge.
-            const frozeJumps = who === 'A' ? r.localJumpsA : r.localJumpsB;
-            const liveJumps  = who === 'A' ? r.localJumpsB : r.localJumpsA;
-            const ok = r.converged && r.exitReason == null && liveJumps === 0 && frozeJumps <= 1;
-            if(!ok){
-                fails++;
-                if(r.exitReason === 'session-end') sessionEnds++;
-                jumps += r.localJumps;
-                const div = r.firstDiverge ? (r.firstDiverge.tick + ':' + (r.firstDiverge.fields||[]).join(',')) : '-';
-                rows.push((who === 'A' ? 'HOST' : 'JOINER') + ' froze ' + ms + 'ms seed ' + seed.toString(16)
-                    + ': conv=' + r.converged + ' exit=' + (r.exitReason || '-')
-                    + ' frozeJumps=' + frozeJumps + ' liveJumps=' + liveJumps
-                    + ' desync=' + r.desyncA + '/' + r.desyncB + ' 1stDiv=' + div);
-            }
-        }
+for(const { who, ms, seed } of cases){
+    total++;
+    // catchup:true models the fixed-timestep integer-lag close every real duel client runs
+    // per tick (sim-worker._step): after the resync re-anchors the frozen side to the sender's
+    // ring tick, this closes the final tick-or-two residual toward the shared clock. Without
+    // it the frozen side would sit permanently a tick behind (a modelling gap, not a bug).
+    const r = runMatch({ seed, secs: 3 + Math.ceil(ms/1000) + 7, wire:WIRE, phase:8, tjit:4,
+        recv:true, catchup:true, doze:{ at:3.0, ms, who } });
+    // A frozen client MUST snap its own head exactly once when the resync re-anchors its tick
+    // forward across the dozed span (the "connection re-established" reconcile the field shows
+    // -- rendered final-only, so it is one redraw, not an animated slide). That single snap on
+    // the FROZEN side is legitimate; the LIVE side must never see its own head teleport, and
+    // neither side may session-end or fail to re-converge.
+    const frozeJumps = who === 'A' ? r.localJumpsA : r.localJumpsB;
+    const liveJumps  = who === 'A' ? r.localJumpsB : r.localJumpsA;
+    const ok = r.converged && r.exitReason == null && liveJumps === 0 && frozeJumps <= 1;
+    if(!ok){
+        fails++;
+        if(r.exitReason === 'session-end') sessionEnds++;
+        jumps += r.localJumps;
+        const div = r.firstDiverge ? (r.firstDiverge.tick + ':' + (r.firstDiverge.fields||[]).join(',')) : '-';
+        rows.push((who === 'A' ? 'HOST' : 'JOINER') + ' froze ' + ms + 'ms seed ' + seed.toString(16)
+            + ': conv=' + r.converged + ' exit=' + (r.exitReason || '-')
+            + ' frozeJumps=' + frozeJumps + ' liveJumps=' + liveJumps
+            + ' desync=' + r.desyncA + '/' + r.desyncB + ' 1stDiv=' + div);
     }
 }
 

@@ -702,6 +702,24 @@ function netTickPre(){
     // so the re-sim corrects history before this tick's snapshot, inputs and hash settle.
     if(_rbRewindTo !== Infinity){ _rbRollback(_rbRewindTo); _rbRewindTo = Infinity; }
     const t = simTick + 1;                       // update() increments first: this is the tick about to run
+    if(!_replaying){
+        // EVERY repair that can rebuild the world -- a parked 'rs' draining, a hash-verdict
+        // repair, a settled peer 'st' patch -- MUST run BEFORE this tick's snapshot and log-feed
+        // below. Each rebuilds from a ring entry and replays the log only up to simTick; tick t
+        // has not run yet, so its records are NOT part of any replay. When a repair ran AFTER
+        // the log-feed (the old order), it silently discarded the records just fed for t: the
+        // pass then stepped t without them while they stayed in the log, so both clients' logs
+        // matched and the worlds diverged anyway -- unhealably, because every later repair ate
+        // that pass's fresh records the same way and re-opened the split it had just closed.
+        // (The doze residual: the catch-up burst's trailing 'rs' parks, drains one pass later,
+        // and lands exactly on a tick just fed a boost -- 'players' splits ~7 ticks after wake.)
+        // Parked early 'rs' first (see _rbResyncQ): once the sim reaches its tick it applies
+        // through the normal in-ring path, before this tick's hash/state verdicts settle.
+        if(_rbResyncQ && _rbFromWire(_rbResyncQ.tk) <= simTick){
+            const rq = _rbResyncQ; _rbResyncQ = null; _rbApplyResync(rq);
+        }
+        _rbHashSettle(); _rbStateSettle();
+    }
     _rbEnsureSnap(t);
     // Our own input was applied the moment it happened (netLocalInput), at exactly this
     // point in the tick order -- so skip it here or it lands twice. A ROLLBACK re-sim
@@ -709,18 +727,6 @@ function netTickPre(){
     // live pass.
     const cmds = _rbLog.get(t);
     if(cmds) for(const c of cmds){ if(!c._live) simCommand(c); }
-    if(!_replaying){
-        // Parked early 'rs' first (see _rbResyncQ): once the sim reaches its tick it applies
-        // through the normal in-ring path, before this tick's hash/state verdicts settle.
-        if(_rbResyncQ && _rbFromWire(_rbResyncQ.tk) <= simTick){
-            const rq = _rbResyncQ; _rbResyncQ = null; _rbApplyResync(rq);
-        }
-        _rbHashSettle(); _rbStateSettle();
-        // A settle-path repair rolls back and truncates the ring to simTick, dropping the
-        // entry pushed for THIS tick above -- re-pin it (idempotent when nothing happened),
-        // or a repair landing exactly on a 64-grid tick would cost that hash cycle its pin.
-        _rbEnsureSnap(t);
-    }
     // NO re-anchor here. The tick is floor((netPts() - startPts) / TICK_MS), so moving
     // the anchor while startPts stays put SHIFTS THE WHOLE TIMELINE: the target jumps by
     // however far the clock moved, and if it jumps backwards simTick is suddenly ahead
@@ -1016,18 +1022,23 @@ function netLocalInput(kind, p, d, now){
         if(!P) return true;
         const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;   // <- authored one step boundary ahead
         // Intent-change gate (source-agnostic: keyboard, dpad and free-touch swipe all funnel here).
-        // A turn onto the heading the snake already holds is dropped by the sim on BOTH clients, so
-        // authoring a wire record for it is pure waste -- one peer rollback/live-apply for a snake
-        // that never turned. A held dpad key and keyboard auto-repeat already suppress this at the
-        // source; a continuous same-direction swipe does not, so it re-emits one no-op turn per
-        // ~48px of slide. Suppress ONLY when it is PROVABLY a no-op: the new dir equals BOTH our last
-        // AUTHORED dir (so no distinct turn is queued behind it in the not-yet-applied window -- this
-        // is what the caution below forbids predicting, so we read a committed fact, not a forecast)
-        // AND our snake's CURRENT heading (so a respawn/level heading reset -- which changes P.dir
-        // without an authored record -- is never mis-suppressed; that turn goes through). Both true
-        // means same-as-heading now and through S: the sim would discard it either way.
-        if(_lastLocalDir && _lastLocalDir.x === d.x && _lastLocalDir.y === d.y &&
-           P.dir && P.dir.x === d.x && P.dir.y === d.y) return true;
+        // A turn onto the heading the snake already holds -- or its exact REVERSE -- is dropped by
+        // the sim on BOTH clients, so authoring a wire record for it is pure waste: one peer
+        // rollback/live-apply for a snake that never turned. A held dpad key and keyboard
+        // auto-repeat already suppress this at the source; a continuous swipe does not, so a slide
+        // along the travel axis (with or against it) re-emits one no-op turn per ~48px.
+        // Suppress ONLY when it is PROVABLY a no-op. The sim's dir handler judges a record against
+        // the LAST ACCEPTED dir (the dirQueue tail, or P.dir when the queue is empty), and that
+        // anchor only ever changes when a record is ACCEPTED. So when BOTH our last AUTHORED dir
+        // (a committed fact -- nothing distinct is queued behind it) AND our snake's CURRENT
+        // heading lie on the press's axis (equal or opposite), the judging anchor is provably on
+        // that axis too, and the sim discards the record on both clients -- as same-as-last or as
+        // a reverse. Requiring the LIVE heading keeps a respawn/level heading reset -- which
+        // changes P.dir without an authored record -- from ever being mis-suppressed: a turn off
+        // the new spawn axis always goes through. (Unit dirs: nonzero dot product == same axis.)
+        if(_lastLocalDir && P.dir &&
+           (_lastLocalDir.x * d.x + _lastLocalDir.y * d.y) !== 0 &&
+           (P.dir.x * d.x + P.dir.y * d.y) !== 0) return true;
         // The sim's dir handler is the SOLE authority on which turns count (same-as-heading,
         // reverse, queue full), applied identically on both clients and every rollback re-sim.
         // Do NOT re-judge that here against a predicted queue: a correction can change dir/dirQueue

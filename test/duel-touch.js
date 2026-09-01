@@ -140,9 +140,65 @@ function runTurnSwipe(len) {
     return { dir, up, turned: A.__view().hy !== y0 };
 }
 
+// ---------------------------------------------------------------------------
+// SWIPE in REVERSE: a continuous slide OPPOSITE the heading. The sim discards a reverse turn
+// (sim.js dir handler) exactly like a same-direction one, so this too must collapse onto a
+// single authored no-op -- not one record per game step. This was the gate's blind spot: its
+// same-direction check (dir == last authored == current heading) can never match a reverse
+// press, so every new step boundary re-authored the discarded turn for as long as the finger
+// slid. After the reverse leg, a REAL perpendicular turn must still author and turn the snake
+// (guards against over-suppression).
+function runReverseSwipe(moves) {
+    const { A, adv } = boot(0xD0E1);
+    const heading = (() => { const v = A.__view(); return { x: v.dx, y: v.dy }; })();   // {1,0}: heading RIGHT
+    const rev = { x: -heading.x, y: -heading.y };
+    const t0 = A.__simTick();
+    const y0 = A.__view().hy;
+    const cx = 300, cy = 200; let px = cx;
+    A.__now += 5; A.document.__emit('touchstart', ev(px, cy));
+    for (let m = 1; m <= moves; m++) adv(1, () => { px = cx - m * 16; A.document.__emit('touchmove', ev(px, cy)); });
+    adv(1, () => A.document.__emit('touchend', ev(px, cy)));
+    // Count before the wire drain -- same retention-horizon rule as runSwipe above.
+    let dir = 0, revd = 0;
+    for (const [, cmds] of A.__logRange(t0 - 2, A.__simTick() + 5)) for (const c of cmds)
+        if (c.startsWith('dir')) { dir++; if (c.includes('(' + rev.x + ',' + rev.y + ')')) revd++; }
+    const slid = A.__view().hy !== y0;   // read BEFORE the turn below moves the head
+    // Now a genuine 90-degree turn: press UP through the real steer funnel and let it apply.
+    const upBefore = A.__view().hy;
+    A.__steer({ x: 0, y: -1 });
+    adv(30);
+    return { dir, revd, slid, upTurned: A.__view().hy !== upBefore };
+}
+
+// ---------------------------------------------------------------------------
+// BRAKE via reverse swipe: slide WITH the heading long enough to engage boost (the input
+// layer's BOOST_GATE_MS panic-flick gate), then slide back AGAINST it. The first reverse
+// commit is the touch brake (input.js: an opposite key ends the boost) -- that boost-end is a
+// 'be' record on a different authoring path, and the dir gate must never swallow it. Asserts
+// the engage ('bs') and the brake ('be') both author, and our snake really stops boosting.
+function runBrakeSwipe() {
+    const { A, adv } = boot(0xD0E1);
+    const t0 = A.__simTick();
+    const cx = 300, cy = 200; let px = cx;
+    A.__now += 5; A.document.__emit('touchstart', ev(px, cy));
+    for (let m = 1; m <= 20; m++) adv(1, () => { px = cx + m * 16; A.document.__emit('touchmove', ev(px, cy)); });
+    const boostOn = A.__view().boosting;   // engaged by the sustained same-direction slide
+    for (let k = 1; k <= 10; k++) adv(1, () => { px = cx + 20 * 16 - k * 16; A.document.__emit('touchmove', ev(px, cy)); });
+    adv(1, () => A.document.__emit('touchend', ev(px, cy)));
+    let bs = 0, be = 0;
+    for (const [, cmds] of A.__logRange(t0 - 2, A.__simTick() + 5)) for (const c of cmds) {
+        if (c.startsWith('boostend')) be++; else if (c.startsWith('boost')) bs++;
+    }
+    adv(10);
+    return { bs, be, boostOn, boostOff: !A.__view().boosting };
+}
+
 const dpad = runDpad();
 const sw30 = runSwipe(30);
 const sw60 = runSwipe(60);
+const rv30 = runReverseSwipe(30);
+const rv60 = runReverseSwipe(60);
+const brake = runBrakeSwipe();
 const turn15 = runTurnSwipe(15);
 const turn60 = runTurnSwipe(60);
 
@@ -150,6 +206,7 @@ steps.push(`DPAD          : authored ${dpad.authored.total} (dir ${dpad.authored
 steps.push(`SWIPE 30 moves: authored ${sw30.authored.total} (dir ${sw30.authored.dir}, boost ${sw30.authored.boost})  -> peer live+rb ${sw30.applied}`);
 steps.push(`SWIPE 60 moves: authored ${sw60.authored.total} (dir ${sw60.authored.dir}, boost ${sw60.authored.boost})  -> peer live+rb ${sw60.applied}`);
 steps.push(`SWIPE turn 15+15 / 60+60: dir ${turn15.dir} / ${turn60.dir} (real UP turn ${turn15.up} / ${turn60.up}, turned ${turn15.turned}/${turn60.turned})`);
+steps.push(`REVERSE 30 / 60 moves: dir ${rv30.dir} / ${rv60.dir} (reverse ${rv30.revd} / ${rv60.revd}, slid ${rv30.slid}/${rv60.slid}, UP after ${rv30.upTurned}/${rv60.upTurned})`);
 
 // The clean baseline: dpad's whole gesture is 3 records (1 no-op steer + boost start/end), and
 // the peer applies exactly those 3 -- the "3 live applies" the player saw.
@@ -173,6 +230,24 @@ ok(sw60.authored.dir === sw30.authored.dir, `the count is bounded by intent, not
 ok(turn15.up >= 1 && turn15.turned === true, 'a real turn in a swipe is authored and turns the snake');
 ok(turn60.up >= 1 && turn60.turned === true, 'the real turn survives at 4x the slide length too');
 ok(turn60.dir <= turn15.dir + 1, `turn records are bounded by the turn, not the slide length (60+60 ${turn60.dir} ~ 15+15 ${turn15.dir})`);
+
+// REVERSE flood: the sim discards a reverse turn on both clients just like a same-direction
+// one, so a reverse slide must author at most ONE record (the first press, before the gate has
+// an authored baseline) -- never one per game step -- and must not scale with slide length.
+// The snake must never move backwards, and a real turn pressed right after must still work.
+ok(rv30.dir <= 1, `a reverse slide authors at most one record, not one per step (got ${rv30.dir})`);
+ok(rv60.dir === rv30.dir, `the reverse count is bounded by intent, not slide length (60-move ${rv60.dir} == 30-move ${rv30.dir})`);
+ok(rv30.slid === false && rv60.slid === false, 'the reverse slide never turned the snake (the sim discards a reverse)');
+ok(rv30.upTurned === true && rv60.upTurned === true, 'a real turn right after the reverse slide still authors and turns');
+
+// BRAKE-ON-REVERSE: the dir gate must never swallow the touch brake. The same-direction slide
+// engages boost (a 'boost' record past the input layer's touchdown gate), the reverse slide's
+// first commit is the brake -- its 'boostend' is a separate record kind on an ungated authoring
+// path, and the snake must actually stop boosting.
+ok(brake.boostOn === true, 'the sustained same-direction slide engaged boost before the brake');
+ok(brake.bs >= 1, `the boost engage authored a 'boost' record (got ${brake.bs})`);
+ok(brake.be >= 1, `the reverse-slide brake authored its 'boostend' -- the dir gate did not swallow it (got ${brake.be})`);
+ok(brake.boostOff === true, 'our snake stopped boosting after the reverse-slide brake');
 
 console.log(steps.join('\n'));
 console.log('\nduel-touch (swipe redundancy suppressed, real turns preserved) PASSED');

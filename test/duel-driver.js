@@ -224,7 +224,10 @@ function anchor(prof, rnd){
     return e0 + ((prof.clock && prof.clock.err0) || 0);
 }
 
-function mk(id, seed, role){ const c = runInGame(HOOKS(id)); c.__p2pStart(seed, role); return c; }
+// `extra` (optional): scenario-specific instrumentation appended AFTER the standard hooks,
+// so a debug run can wrap product internals (bare-name reassignment, like the hooks above)
+// without the driver growing per-bug tracing.
+function mk(id, seed, role, extra){ const c = runInGame(HOOKS(id) + (extra || '')); c.__p2pStart(seed, role); return c; }
 
 // ---- torus geometry (shared by the autopilot) ----
 function torusDelta(a, b, n){ let d = b - a; if(d > n/2) d -= n; if(d < -n/2) d += n; return d; }
@@ -361,7 +364,7 @@ function runMatch(opts){
     const seed = (opts.seed >>> 0) || 0xD0E1;
     const dir = opts.director || autopilot;
     _rover[0] = 0; _rover[1] = 0;   // fresh circuit each match, so scenarios do not inherit progress
-    const A = mk('aaaaaaaa', seed, 'host'), B = mk('bbbbbbbb', seed, 'peer');
+    const A = mk('aaaaaaaa', seed, 'host', opts.hookA), B = mk('bbbbbbbb', seed, 'peer', opts.hookB);
     if(opts.noBurst){ A.__disableBurst(); B.__disableBurst(); }   // falsification control (see __disableBurst)
     const TICK = A.__TICK;
     const wire = { AB:[], BA:[] };
@@ -761,6 +764,8 @@ function runMatch(opts){
         desyncProbe: opts.desyncProbe ? classifyDesyncs() : null,
         startSync,
         rbTrace: { A: A.__rbTraceDump(), B: B.__rbTraceDump() },
+        sig: { A: A.__sigDump(), B: B.__sigDump() },
+        clients: { A, B },
     };
 }
 
