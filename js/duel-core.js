@@ -40,9 +40,14 @@
 // budget. Declared HERE (not the net files):
 // both the transport and the core enforce it, and the sim worker loads only the core.
 const NET_PKT_MAX = 1200;
-const RB_SNAP_EVERY = 2;     // snapshot every 2nd tick: a rollback lands on the nearest earlier
-                             // entry and re-sims at most one extra tick -- a sub-microsecond tick
-                             // against a full clone saved on every other tick.
+const RB_SNAP_EVERY = LEVEL_CFG[9].normal;   // = 3, ONE game step at the fastest duel pace
+                             // (level-10 normal gPer -- the speed-round rate, js/sim.js): between
+                             // snapshots the snakes move at most one cell. A rollback lands on the
+                             // nearest earlier entry and re-sims at most two extra ticks -- sub-
+                             // microsecond ticks against a full clone every 3rd tick, not every 2nd.
+                             // _rbEnsureSnap also PINS an entry on every 64-tick hash tick: 64 is
+                             // not a multiple of the step, and the 1Hz freeze looks its tick up
+                             // EXACTLY (_rbRingFind), on this side and on the peer's.
 const RB_DEPTH = 64;         // rewind window in TICKS (~1067ms at 60Hz): the oldest input we still
                              // accept and roll back to. An input older than this is REFUSED, so a
                              // tick that ran RB_DEPTH ago can no longer be rewritten -- it is immutable.
@@ -52,9 +57,10 @@ const RB_HASH_LAG = RB_DEPTH;// the 1Hz detector freezes the hash of a tick this
                              // the peer compare its settled copy against our stale hash: a phantom desync
                              // that scaled with latency. Both clients emit on the same deterministic tick
                              // and freeze the SAME immutable tick, so the compare is apples-to-apples.
-const RB_RING = 36;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY. Spans RB_DEPTH ticks of
-                             // rewind history plus a few entries of headroom so the immutable hash tick
-                             // (RB_HASH_LAG old) is always still in the ring to hash and compare.
+const RB_RING = 27;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY (+ the pinned hash ticks).
+                             // Worst-case span 72 ticks -- RB_DEPTH of rewind history plus headroom so
+                             // the immutable hash tick (RB_HASH_LAG old) is always still in the ring to
+                             // hash and compare; the same span 36 entries gave at the old 2-tick step.
                              // A divergence older than the ring gets a full resync, not a rollback.
 const RB_FUTURE = 32;        // honest inputs are authored up to a GAME tick ahead (dir stamps its
                              // effective boundary, simTick + _gDue <= gPer) plus start-time skew;
@@ -144,7 +150,7 @@ function _rbSentAdd(rec){
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
-    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = [];
+    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = []; _rbResyncQ = null;
     _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
     _netInRepeat = 0;
@@ -263,11 +269,13 @@ function _rbHashBoth(snap){
 // every time either player steers -- a false desync once a second, which is not a
 // divergence at all, just a race. So park the peer's hash and check it only after
 // enough ticks have passed for any in-flight input for t to have landed.
-const RB_SETTLE = RB_HASH_LAG;  // HASH settle: judge a tick only once BOTH clients' snapshots of it
-                             // are immutable. The sender already froze it at RB_HASH_LAG old; our own
-                             // copy stops moving once no accepted input can still rewrite it, which is
-                             // RB_DEPTH ticks after the tick ran -- the SAME margin. Comparing sooner
-                             // races an in-flight late input and reads a phantom desync once a second.
+const RB_SETTLE = RB_HASH_LAG + 2;  // HASH settle: judge a tick only once BOTH clients' snapshots
+                             // of it are immutable. Our own copy stops moving once no accepted input
+                             // can still rewrite it -- RB_DEPTH ticks after the tick ran; the sender
+                             // froze it at RB_HASH_LAG+1 old (its emit tick -- the schedule in
+                             // netTickPre). Comparing sooner races an in-flight late input and reads
+                             // a phantom desync once a second. The +2 also gives the typical verdict
+                             // its OWN tick phase (2 mod 64): freeze (0), emit (1), judge (2) never stack.
 const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORITATIVE and does not
                              // depend on our inputs settling, so apply it the moment its tick is in
                              // the past (simTick >= tk) -- no wait. Applying immediately keeps the
@@ -281,10 +289,11 @@ function _rbCheckHash(m){
     const f = Array.isArray(m.f) ? m.f.slice(0, RB_HASH_DUEL.length) : null;
     _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f });
     if(_rbHashQ.length > 8){ _rbHashQ.shift(); _rbDbg.hashLost++; }   // evicted before it could be judged: count it, never drop a verdict in silence
-    // A hash rides RB_HASH_LAG behind its sender's live tick, so reconstruct that live tick to
-    // tell "peer froze" from "hash is just old". Backup detector for a quiet straightaway where no
-    // 'in' packet flows; the packet-level detector in _netPeerInput is the primary (no built-in lag).
-    _rbNoteBehindPeer(_rbFromWire(m.tk) + RB_HASH_LAG);
+    // A hash rides RB_HASH_LAG+1 behind its sender's live tick (the emit tick, see the schedule
+    // in netTickPre), so reconstruct that live tick to tell "peer froze" from "hash is just old".
+    // Backup detector for a quiet straightaway where no 'in' packet flows; the packet-level
+    // detector in _netPeerInput is the primary (no built-in lag).
+    _rbNoteBehindPeer(_rbFromWire(m.tk) + RB_HASH_LAG + 1);
 }
 // Exact-tick ring lookup, newest-first. NOT for _rbRollback, which wants the nearest
 // entry at-or-BEFORE a tick -- a different predicate that stays inline there.
@@ -417,6 +426,14 @@ var _rbResyncSend = 0;       // full-resync sends still owed (whoever is ahead o
 // boundary (fresh burst + anchor + epoch, no rebuild). A one-packet repair must NOT open a
 // boundary every time a hash disagrees -- that would be a re-anchor storm under jitter.
 var _rbResyncFull = false;
+// An ORDINARY 'rs' stamped a little AHEAD of our sim, parked until the sim reaches its tick.
+// The sender's frontier legitimately sits a tick or two past a peer whose loop fires later,
+// so the ring entry for T does not exist here YET -- that is an EARLY packet, not an aged-out
+// divergence. Falling through to the aged-out branch wiped the whole ring, and with it the
+// pinned 64-grid hash snapshots: the next 1Hz emit then silently skipped a full verdict
+// cycle, which under a running escalation clock is the difference between healing and the
+// OUT OF SYNC deadline. Newest wins if another arrives before the drain.
+var _rbResyncQ = null;
 function _rbArmFullResync(){ _rbResyncSend = RB_RESYNC_BURST; _rbResyncFull = true; }
 // A peer packet stamped a full RB_DEPTH behind our sim can only mean the peer FROZE (backgrounded)
 // while we ran on: arm an authoritative resync burst so it can catch its tick base forward. Gated
@@ -470,6 +487,7 @@ function _rbApplyResync(m){
     //     world (both snakes/level/rng/winner), bypassing the per-owner 'st' ownership guard.
     const catchUp = T > simTick + RB_DEPTH;
     if(!catchUp && netMyIndex() !== 1) return;
+    if(!catchUp && T > simTick){ _rbResyncQ = m; return; }   // early, not aged-out: park (see _rbResyncQ)
     // The FULL authoritative snapshot AT tick T: the whole SHARED world (level/gems/rng/bars/
     // power/heart/timers) plus the HOST's own snake (p0). How we treat OUR snake (p1) depends on
     // the branch below.
@@ -504,6 +522,7 @@ function _rbApplyResync(m){
         snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;
         simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
         _rbStateQ = []; _rbHashQ = [];
+        _rbResyncQ = null;   // parked pre-jump, it is now an OLD state that would regress this adoption
         _rbResyncSend = 0; _rbResyncFull = false;   // adopting a catch-up cancels our own owed burst: a stale full-flag must not fire a later bogus recovery
         _rbDbg.fix = (_rbDbg.fix|0) + 1;
         _netSigLog('~ RESYNC-CATCHUP @' + T);
@@ -624,7 +643,10 @@ function _rbNoteHeads(t, force){
 }
 function _rbEnsureSnap(t){
     _rbNoteHeads(t);                          // every tick, including the thinned ones
-    if(t % RB_SNAP_EVERY) return;             // thinned: this tick rewinds via the previous entry
+    if(t % RB_SNAP_EVERY && (t & 63)) return; // thinned: this tick rewinds via the previous entry.
+                                              // The 64-grid hash ticks are PINNED into the ring even
+                                              // off the step: the 1Hz freeze and the settle fallback
+                                              // look t-RB_HASH_LAG up EXACTLY, and 64 % RB_SNAP_EVERY != 0.
     if(_rbRing.length && _rbRing[_rbRing.length-1].tk === t) return;   // already have it
     _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
     if(_rbRing.length > RB_RING) _rbRing.shift();
@@ -657,7 +679,18 @@ function netTickPre(){
     // live pass.
     const cmds = _rbLog.get(t);
     if(cmds) for(const c of cmds){ if(!c._live) simCommand(c); }
-    if(!_replaying){ _rbHashSettle(); _rbStateSettle(); }
+    if(!_replaying){
+        // Parked early 'rs' first (see _rbResyncQ): once the sim reaches its tick it applies
+        // through the normal in-ring path, before this tick's hash/state verdicts settle.
+        if(_rbResyncQ && _rbFromWire(_rbResyncQ.tk) <= simTick){
+            const rq = _rbResyncQ; _rbResyncQ = null; _rbApplyResync(rq);
+        }
+        _rbHashSettle(); _rbStateSettle();
+        // A settle-path repair rolls back and truncates the ring to simTick, dropping the
+        // entry pushed for THIS tick above -- re-pin it (idempotent when nothing happened),
+        // or a repair landing exactly on a 64-grid tick would cost that hash cycle its pin.
+        _rbEnsureSnap(t);
+    }
     // NO re-anchor here. The tick is floor((netPts() - startPts) / TICK_MS), so moving
     // the anchor while startPts stays put SHIFTS THE WHOLE TIMELINE: the target jumps by
     // however far the clock moved, and if it jumps backwards simTick is suddenly ahead
@@ -693,20 +726,33 @@ function netTickPre(){
             }
         }
     }
-    if((t & 63) === 0){
+    // ---- The recurring-job tick schedule: one job per phase -- a staircase, not a spike ----
+    // t mod 64:  0 = pinned snapshot clone (_rbEnsureSnap)   1 = hash freeze+emit (hk = t-65)
+    //            2 = typical verdict tick (RB_SETTLE)       17 = log/heads prune
+    // t mod 16:  5 = heartbeat           t mod 4: 0 = warm ping (else-if'd, ~15B)
+    // The 3-tick snapshot grid is coprime to these and drifts through them (1/3 coincidence),
+    // so no tick ever stacks more than TWO jobs. Every phase is a pure function of the shared
+    // simTick. The FROZEN tick grid (0 mod 64) is the only one with a wire contract, and it is
+    // exactly the grid the ring PINS -- on this side and on the peer's; the emit and judge
+    // phases are each side's local business, so old-patch peers lose nothing.
+    if((t & 63) === 17){
         for(const k of _rbLog.keys()) if(k < t - RB_DEPTH - 8) _rbLog.delete(k);
         for(const k of _rbHeads.keys()) if(k < t - RB_DEPTH - 8) _rbHeads.delete(k);
+    }
+    if((t & 63) === 1){
         // The 1Hz detector, keyed to the deterministic tick so both clients emit on the
         // same tick. It ALWAYS carries the per-field hashes (~575B): a mismatch verdict
         // lands with its diagnosis in hand and the targeted repair fires right there in
         // _rbHashSettle -- no request round trip, no repair cadence of its own. Fires on its
         // own cadence even when an input flush already went out this tick (they carry different data).
         if(!_replaying && _rbRing.length){
-            // Freeze the hash of the tick RB_HASH_LAG in the past -- immutable, so no later
-            // rollback can re-record it after we send. Both clients run this on the same
-            // deterministic tick and target the same tk. Skip if it has aged out of the ring
-            // (only near a level start, before the ring is deep enough): nothing to compare yet.
-            const hk = t - RB_HASH_LAG;
+            // Freeze the hash of the PINNED tick one past RB_HASH_LAG -- immutable, so no
+            // later rollback can re-record it after we send, and one tick AFTER its clone was
+            // taken, so the clone and this hash+send never share a tick. Both clients run this
+            // on the same deterministic tick and target the same tk. Skip if it has aged out of
+            // the ring (only near a level start, before the ring is deep enough): nothing to
+            // compare yet.
+            const hk = t - RB_HASH_LAG - 1;
             const he = _rbRingFind(hk);
             if(he){
                 const hb = _rbHashBoth(he.snap);
@@ -714,10 +760,10 @@ function netTickPre(){
                 _netSend({ t:'h', tk:_rbToWire(hk), h:hb.h, f:hb.f });
             }
         }
-    } else if(!_inFlushed && (t & 15) === 0 && !_replaying){
-        // 16-tick heartbeat (~267ms), on the OFF-64 ticks so it never doubles up with the
-        // full state. Carries the recent input log = free input-redundancy repair, and keeps
-        // SOMETHING on the wire every 16 ticks for liveness.
+    } else if(!_inFlushed && (t & 15) === 5 && !_replaying){
+        // 16-tick heartbeat (~267ms), phased off every other job's tick. Carries the recent
+        // input log = free input-redundancy repair, and keeps SOMETHING on the wire every
+        // 16 ticks for liveness.
         _rbSentPrune();
         _netSend({ t:'in', tk:_rbToWire(simTick), l:_rbSent });
     } else if(!_inFlushed && (t % NET_WARM_EVERY) === 0 && !_replaying){
@@ -776,7 +822,8 @@ function _rbRollback(toTick){
     _replaying = true;
     for(let t = from; t <= target; t++){
         _rbNoteHeads(t, true);                   // re-record: the corrected past can move heads
-        if(t % RB_SNAP_EVERY === 0) _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
+        if(t % RB_SNAP_EVERY === 0 || (t & 63) === 0)   // same grid as _rbEnsureSnap, pinned hash ticks included
+            _rbRing.push({ tk:t, snap:_rbClone(_rbDuelSnap()) });
         const cmds = _rbLog.get(t);
         if(cmds) for(const c of cmds) simCommand(c);
         update();

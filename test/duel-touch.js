@@ -106,9 +106,12 @@ function runSwipe(moves) {
     A.__now += 5; A.document.__emit('touchstart', ev(px, cy));
     for (let m = 1; m <= moves; m++) adv(1, () => { px = cx + m * 16; A.document.__emit('touchmove', ev(px, cy)); });
     adv(1, () => A.document.__emit('touchend', ev(px, cy)));
+    // Count the authored records BEFORE the wire drain: the log keeps only RB_DEPTH+8 ticks
+    // (the 1Hz prune), so scanning after the drain reads a 60-move gesture past its retention
+    // horizon -- whether the oldest record was still there depended on the prune's tick phase.
+    const a = authored(A, t0 - 2, A.__simTick() + 5, heading);
     adv(30);
     const b1 = B.__rbDbg(); const lr1 = b1.live + b1.rb;
-    const a = authored(A, t0 - 2, A.__simTick() + 5, heading);
     return { authored: a, applied: lr1 - lr0, turned: A.__view().hy !== y0 };
 }
 
@@ -127,10 +130,13 @@ function runTurnSwipe(len) {
     for (let m = 1; m <= len; m++) adv(1, () => { px = cx + m * 16; A.document.__emit('touchmove', ev(px, cy)); });
     for (let k = 1; k <= len; k++) adv(1, () => { py = cy - k * 16; A.document.__emit('touchmove', ev(px, py)); });
     adv(1, () => A.document.__emit('touchend', ev(px, py)));
-    adv(30);
+    // Scan before the drain -- same retention-horizon rule as runSwipe above. (A 60+60 gesture
+    // outlives the horizon anyway; the asserts on it are upper bounds, so an aged-out leg-1
+    // record can only undercount, never false-pass.)
     let dir = 0, up = 0;
     for (const [, cmds] of A.__logRange(t0 - 2, A.__simTick() + 5)) for (const c of cmds)
         if (c.startsWith('dir')) { dir++; if (c.includes('(0,-1)')) up++; }   // {0,-1} == UP, the real turn
+    adv(30);
     return { dir, up, turned: A.__view().hy !== y0 };
 }
 

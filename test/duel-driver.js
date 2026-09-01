@@ -173,12 +173,13 @@ const HOOKS = (id) => `
   globalThis.__rbEpoch = ()=> (typeof _rbEpoch === 'number') ? _rbEpoch|0 : -1;   // the epoch of our TICK BASE: the two clients sharing this is what lockstep means
   globalThis.__epoch   = ()=> _netSess ? (_netSess.epoch|0) : -1;                 // the session line, which runs ahead of the base between a halt and its start
   globalThis.__rbDepth = ()=> RB_DEPTH;   // immutability horizon: a tick this far back can no longer be rewritten by any accepted input
+  globalThis.__rbSnap  = ()=> RB_SNAP_EVERY;   // ring grid step: ring ticks are multiples of this (plus the pinned 64-grid hash ticks)
   globalThis.__rbDbg   = ()=> Object.assign({}, _rbDbg);
   globalThis.__netDbg  = ()=> Object.assign({}, _netDbg);
   globalThis.__badSince= ()=> _rbBadSince;                      // 0 = healthy; else wall clock of the first unhealed mismatch
   globalThis.__setBad  = (age)=>{ _rbBadSince = age > 0 ? Date.now() - age : 0; };   // force an unhealed-divergence age (ms), or 0 to heal, for the OUT OF SYNC banner test
   // Ring-snapshot hashes at a PAST tick: the settled-history equality test the continuous
-  // detector uses. The ring is thinned to even ticks (RB_SNAP_EVERY), so pass an even tk.
+  // detector uses. The ring is thinned to the RB_SNAP_EVERY grid, so pass a grid tk (__rbSnap).
   globalThis.__ringTicks   = ()=> _rbRing.map(e=>e.tk);
   globalThis.__ringHashAt  = (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return _rbHash(_rbRing[i].snap); return null; };
   globalThis.__ringFieldsAt= (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return _rbHashFields(_rbRing[i].snap); return null; };
@@ -407,10 +408,11 @@ function runMatch(opts){
     // redelivers an input dozens of ticks late (the same stale-read the product's own detector
     // avoids by freezing its 1Hz hash at RB_HASH_LAG). The product guarantees this tick is in-ring.
     const DIVERGE_LAG = opts.settleLag || A.__rbDepth();
+    const SNAP = A.__rbSnap();   // ring grid step: only multiples of this are reliably in-ring
     const checkDiverge = ()=>{
         const st = Math.min(A.__simTick(), B.__simTick()) - DIVERGE_LAG;
-        const tk = st - (st & 1);   // even tick (ring is thinned to RB_SNAP_EVERY=2)
-        if(tk < 2) return;
+        const tk = st - (st % SNAP);   // ring-grid tick (the ring is thinned to RB_SNAP_EVERY)
+        if(tk < SNAP) return;
         const ha = A.__ringHashAt(tk), hb = B.__ringHashAt(tk);
         if(ha == null || hb == null || ha === hb) return;
         if(firstDiverge) return;
@@ -426,15 +428,16 @@ function runMatch(opts){
     // the disputed tick it just logged and compare the two clients' LIVE ring hash there. If
     // they AGREE, the verdict was false -- the peer's 1Hz hash was frozen before a rollback
     // rewrote its ring entry (stale), not a real divergence. `stale` counts those.
-    // Ring-agreement history: for each settled even tick, record ONCE whether A's and B's
+    // Ring-agreement history: for each settled ring-grid tick, record ONCE whether A's and B's
     // ring snapshots agree. Sampled a few ticks behind both sims so it is settled but still
     // in-ring on both. A product desync for tick T is then FALSE (stale frozen peer hash) if
     // the two rings actually agreed at T, REAL if they disagreed.
     const ringAgree = new Map();
     const sampleRingAgree = ()=>{
         const top = Math.min(A.__simTick(), B.__simTick()) - 4;
-        // Backfill every settled even tick still in-ring on both sides (min ring reach ~= 2*RB_RING).
-        for(let tk = top - (top & 1); tk >= top - 60 && tk >= 2; tk -= 2){
+        // Backfill every settled ring-grid tick still in-ring on both sides (the ring spans
+        // ~RB_RING*RB_SNAP_EVERY ticks).
+        for(let tk = top - (top % SNAP); tk >= top - 60 && tk >= SNAP; tk -= SNAP){
             if(ringAgree.has(tk)) continue;
             const ha = A.__ringHashAt(tk), hb = B.__ringHashAt(tk);
             if(ha == null || hb == null) continue;
@@ -732,7 +735,7 @@ function runMatch(opts){
     const classifyDesyncs = ()=>{
         const out = { total:0, stale:0, real:0, unknown:0, samples:[] };
         const scan = (sig, me)=>{ for(const s of sig){ if(typeof s !== 'string' || s.indexOf('! DESYNC @') !== 0) continue;
-            const mm = s.match(/@(\d+)/); if(!mm) continue; const tk = +mm[1]; const et = tk - (tk & 1);
+            const mm = s.match(/@(\d+)/); if(!mm) continue; const tk = +mm[1]; const et = tk - (tk % SNAP);
             out.total++;
             const ag = ringAgree.get(et);
             if(ag === undefined){ out.unknown++; if(out.samples.length < 10) out.samples.push(me + '@' + et + '?'); }
