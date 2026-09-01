@@ -197,6 +197,7 @@ function _duelBeginLevel(reseed) {
 // entry sets it), constant for the whole match, never hashed and never snapshotted --
 // local duels and single player keep the immediate rebuild.
 let _duelNetHold = false;
+const _HALT_RE = 6;   // held-death re-announce period in engine ticks (100ms) -- see the dying hold in update()
 function startDuel(seed) {
     // Tick zero. simTick free-runs from page load, so without this two online
     // clients would start a duel with wildly different counters -- and every piece
@@ -733,15 +734,21 @@ function update() {
         if(players){   // duel: out-of-hearts already went to duelOver, so this is always a respawn
             if(_duelNetHold){
                 // ONLINE: hold in 'dying' and hand the respawn to the net layer as a boundary
-                // (the host answers with go {why:'respawn'} -> 'startDuelRespawn'). Both sims
-                // cross this line on the same deterministic tick, so the emit fires once per
-                // death on each client -- the crossing test below keeps later held ticks quiet.
+                // (the host answers with go {why:'respawn'} -> 'startDuelRespawn'). The halt is
+                // LEVEL-triggered, not edge-triggered: the hold re-announces itself every
+                // _HALT_RE ticks for as long as it stands -- the same retried-until-answered
+                // rule every other 2.6 transition follows. A one-shot emit here wedged BOTH
+                // clients in 'dying' for good whenever the host missed the single edge:
+                // refused because another boundary (a recovery resume) held the one-boundary
+                // guard, or never crossed because a full resync adopted a state already past
+                // DEATH_DUR. Repeats are free: netDuelHalt is host-gated and _netStartRespawn
+                // folds them into the one open boundary.
                 // Residual: an input up to RB_DEPTH(64) ticks late can still UNDO this death by
                 // rollback after the crossing (DEATH_DUR is 54 ticks), so a go {why:'respawn'}
                 // may arrive for a death that no longer exists -- both clients then run the same
                 // phantom respawn, consistently and with no heart wrongly lost. Accepted: the
                 // ~167ms window makes it rare, and consistency is what lockstep must protect.
-                if(now-TICK_MS-phaseAt<DEATH_DUR) emit({t:'duelHalt'});
+                if(Math.round((now-phaseAt-DEATH_DUR)/TICK_MS)%_HALT_RE===0) emit({t:'duelHalt'});
             }
             else _duelBeginLevel(false);   // local duel: rebuild at once -- keep the rng flowing for a fresh board
         }

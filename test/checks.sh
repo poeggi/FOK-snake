@@ -10,8 +10,8 @@
 #
 #   bash test/checks.sh --full     REGRESSION tier (CI + after any significant
 #     (or --regression)            netcode/sim rework, before a release): FAST plus
-#                                  the five heavy duel sweeps (duel-desync/-boundary/
-#                                  -rematch/-respawn/-outage). Those play many full
+#                                  the six heavy duel sweeps (duel-desync/-boundary/
+#                                  -epoch/-rematch/-respawn/-outage). Those play many full
 #                                  20-40s lockstep matches over lossy/dozing/dropped
 #                                  wires to shake out rare, slow-accumulation
 #                                  divergence and prove interruption recovery. ~2min.

@@ -331,7 +331,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){
                 if(typeof netEndSession==='function') netEndSession();   // online duel: bye + teardown (no-op otherwise)
-                const wasDuel = prevPhase && prevPhase.indexOf('duel')===0;   // quitting a 1:1 returns to the 1:1 menu, not main
+                const wasDuel = (prevPhase && prevPhase.indexOf('duel')===0) || !!players;   // quitting a 1:1 returns to the 1:1 menu, not main ('dying' needs the players marker)
                 inGame=false; showHUD(false);
                 Snd.musicFadeOut(0.25); Snd.duck(false);   // leave: fade the game track 0.25s, sfx back to normal (fadeOut cleared the track, so duck skips music)
                 _musicHoldUntil = performance.now()+250;   // menu music starts after the fade
@@ -468,9 +468,11 @@ function handleKey(key, pde) {
     if(key==='Backspace' && (phase==='settings'||phase==='shop')) key='Escape';
 
     // Escape during live gameplay opens the quit overlay; the game keeps RUNNING behind
-    // it (a paused game stays paused) -- only confirming YES terminates. Online duels
-    // will need exactly this. All UI screens handle Escape via their table row instead.
-    if(key==='Escape' && (phase==='playing'||phase==='paused'||phase==='duel'||phase==='duelReady'||phase==='duelPaused')){
+    // it (a paused game stays paused) -- only confirming YES terminates. 'dying' counts:
+    // the online death HOLD parks there while the respawn boundary negotiates, and no
+    // live phase may be one the player cannot quit from. All UI screens handle Escape
+    // via their table row instead.
+    if(key==='Escape' && (phase==='playing'||phase==='paused'||phase==='dying'||phase==='duel'||phase==='duelReady'||phase==='duelPaused')){
         prevPhase=phase; quitConfirmSel=1;
         Snd.duck(true);   // dialog up: music + sfx at 50% while the game runs behind it
         phase='quitConfirm'; if(pde)pde(); return;

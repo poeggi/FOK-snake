@@ -58,9 +58,9 @@ self._netDbg = { inRx:0, inTx:0, inLog:[], peerTkOfs:0, lag:0, hbRx:0, hbTx:0 };
 self.drainSimEvents = () => {
     for(const e of simEvents){
         // Replay re-queues cosmetics only -- EXCEPT duelHalt: a death introduced BY a rollback
-        // crosses DEATH_DUR inside the replay, and swallowing that one-shot would strand both
-        // clients holding in 'dying' with no respawn boundary ever opened. A duplicate halt is
-        // folded by the host's one-boundary guard, so passing it through is always safe.
+        // crosses DEATH_DUR inside the replay, and swallowing it would delay the respawn
+        // boundary by a full re-announce period (_HALT_RE). A duplicate halt is folded by
+        // the host's one-boundary guard, so passing it through is always safe.
         if(_replaying && !(e.t==='sfx'||e.t==='bonus'||e.t==='fw'||e.t==='crush'||e.t==='duelHalt')) continue;
         _dcEvents.push({ tk: simTick, e });
     }

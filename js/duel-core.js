@@ -13,10 +13,12 @@
 // netTickTarget (they read session state).
 // ============================================================================
 // ================================================================
-// DETERMINISTIC ROLLBACK NETCODE  -- no host, no authority
+// DETERMINISTIC ROLLBACK NETCODE  -- nobody owns the state
 // ================================================================
 // Both clients run the SAME deterministic sim from the same seed and the same
-// server-issued start moment, so nobody has to be told what the world looks like.
+// agreed start moment (the server issues the match/rematch one, the HOST authors
+// every later boundary's -- see net-session.js), so nobody has to be told what
+// the world looks like.
 // ONLY INPUTS cross the wire, each stamped with the tick it was authored on, and
 // every client applies every input at its authored tick. Two sims fed identical
 // inputs at identical ticks stay identical -- that is what the golden-hash tests

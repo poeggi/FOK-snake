@@ -18,7 +18,7 @@ full regression coverage still gates every deploy:
                                  all smoke tests, and the single-scenario netcode paths
                                  (net-handshake, smoke-worker, relay-sim, duel-sync,
                                  duel-warn).
-    bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the five heavy duel
+    bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the six heavy duel
                                  sweeps below. CI runs this on every push/PR, so it gates
                                  the auto-deploy to Pages.
 
@@ -60,7 +60,14 @@ One place that:
    with the wire still flowing so a pre-boundary packet lands after `simTick` reset
    to 0.
 
-4. DETECTS divergence continuously and honestly: it compares each client's rollback
+4. Optionally runs the PRODUCTION first-start clock burst before play
+   (`opts.startBurst`): the host's real `_netBurstThenStart` and the joiner's
+   'bs'-triggered run measure over the same delayed wire, the apply nudges both
+   clocks onto the shared midpoint, and the report's `startSync {gap0, gap1,
+   residual, ms}` records the raw pts gap before/after -- the surface the
+   duel-desync headroom lanes assert with `expectSync`.
+
+5. DETECTS divergence continuously and honestly: it compares each client's rollback
    ring snapshot at an IMMUTABLE past tick -- RB_DEPTH ticks behind the slower sim.
    An accepted input reaches at most RB_DEPTH ticks back, so a tick that ran that long
    ago can no longer be rewritten by any late arrival; a healthy pair is byte-identical
@@ -90,17 +97,25 @@ this banner, so the debounce drops no real signal.
 
 ### duel-desync.js  (REGRESSION tier -- the boost-lockstep guard)
 
-Runs four scenarios through the driver and FAILS if a boosting duel does not stay
+Runs five scenarios through the driver and FAILS if a boosting duel does not stay
 in lockstep. This is the coverage the dir-only convergence test (`relay-sim.js`)
 never had: it never boosts, so the boost path shipped a desync no test could see.
 
-    clean-boost   phase offset only, no loss   -- isolates the boost/rollback path
-    lossy-boost   + 5% packet loss             -- stresses the redundancy/loss window
-    long-levels   longer run to levels 2-3     -- exercises the level-boundary path
-    headroom      sub-tick clock, 0 rollbacks  -- proves the 1-tick input headroom holds
+    clean-boost      phase offset only, no loss -- isolates the boost/rollback path
+    lossy-boost      + 5% packet loss           -- stresses the redundancy/loss window
+    long-levels      longer run to levels 2-3   -- exercises the level-boundary path
+    headroom burst   clocks start >20ms apart   -- the CRUCIAL 0-rollback lane: the
+                                                   production first-start clock burst
+                                                   (startBurst) must close the pts gap
+                                                   to <=3ms and the match must then
+                                                   hold ZERO rollbacks (maxRb 0)
+    headroom noburst same gap, apply disabled   -- RED control: rollbacks MUST appear
+                                                   (minRb), proving the burst lane is
+                                                   load-bearing, not vacuously green
 
 Fail gate (any one trips it): a local-head jump, a first-divergence, non-convergence
-at the end, a product desync verdict on either client, or a session-end exit.
+at the end, a product desync verdict on either client, a session-end exit, the
+per-lane rollback bounds (maxRb / minRb), or the start-sync gates (expectSync).
 
 ### duel-boundary.js  (REGRESSION tier -- the level-boundary guard)
 
@@ -156,17 +171,23 @@ worlds from one boundary ("barricades different"), detectable only after the fac
 ### smoke-respawn-halt.js  (FAST tier -- the online death-boundary guard)
 
 An ONLINE duel death is a negotiated boundary, not a local rebuild: the sim (armed with
-`net:true` at the online entry) holds in `dying` after the death animation and emits ONE
-`duelHalt`; the host answers with an epoch bump + clock burst + `go {why:'respawn'}`, and
-both clients rebuild the same level at tick 0 from the fresh shared start_pts -- so every
+`net:true` at the online entry) holds in `dying` after the death animation and announces
+`duelHalt` -- LEVEL-triggered, re-announced every `_HALT_RE` ticks (100ms) for as long as
+the hold stands, the same retried-until-answered rule every other 2.6 transition follows;
+the host answers with an epoch bump + clock burst + `go {why:'respawn'}`, and both
+clients rebuild the same level at tick 0 from the fresh shared start_pts -- so every
 respawn re-cancels clock drift exactly like a level-up. The guard proves the hold + the
-one-shot emit, the host's one-boundary dedup (duplicate halts fold), that a `duelHalt`
-surfacing inside a rollback REPLAY still dispatches (a death introduced by a late input
-crosses DEATH_DUR only in the replay -- swallowed, both clients would hold forever), that
-the joiner's `go {why:'respawn'}` rebuild keeps level/players and the hold armed, and that
-a LOCAL duel still rebuilds immediately (control). The driver-based sweeps below stay on
-the local-rebuild path by design (they boot the sim directly, not through the online
-entry), so this guard is the coverage for the held path.
+re-announce cadence, the host's one-boundary dedup (duplicate halts fold), that a
+`duelHalt` surfacing inside a rollback REPLAY still dispatches (a death introduced by a
+late input crosses DEATH_DUR only in the replay), the FIELD FREEZE regression (a halt
+refused because a recovery-resume boundary held the one-boundary guard was, one-shot,
+never retried -- both clients sat in `dying` forever; the re-announce must open the
+respawn once the guard clears), that the joiner's `go {why:'respawn'}` rebuild keeps
+level/players and the hold armed, and that a LOCAL duel still rebuilds immediately
+(control). Escape now routes in `dying` too (the quit overlay), so even a held client is
+never input-dead. The driver-based sweeps below stay on the local-rebuild path by design
+(they boot the sim directly, not through the online entry), so this guard is the
+coverage for the held path.
 
 ### smoke-recovery-resume.js  (FAST tier -- the outage recovery-resume guard)
 
@@ -218,7 +239,7 @@ cells), so recovery no longer stalls once the outage outlasts the redundant inpu
 Run any of them directly, or the whole regression tier:
 
     node test/duel-desync.js         # one suite
-    bash test/checks.sh --full       # fast tier + all five heavy sweeps (what CI runs)
+    bash test/checks.sh --full       # fast tier + all six heavy sweeps (what CI runs)
 
 ### duel-profile.js  (on-demand -- latency/rollback profiler)
 

@@ -1,13 +1,16 @@
 // An ONLINE duel death is a negotiated boundary, not a local rebuild: the sim (armed with
 // net:true at the online entry, _duelNetHold) HOLDS in 'dying' once the death animation has
-// run and emits ONE 'duelHalt'; the host answers by opening a respawn boundary (epoch bump +
-// clock burst + go {why:'respawn'}) and BOTH clients rebuild the same level at tick 0 from
-// the fresh shared start_pts. If each sim rebuilt on its own (the local-duel path), the two
-// boards would re-anchor on unsynchronized clocks -- the exact drift the boundary burst
-// exists to cancel. Local duels keep the immediate rebuild (no flag), and a duelHalt fired
-// inside a rollback REPLAY must still dispatch: a death introduced by a late input crosses
-// DEATH_DUR only in the replay, and swallowing that one-shot would strand both clients in
-// 'dying' forever. Run: node test/smoke-respawn-halt.js
+// run and emits 'duelHalt' -- LEVEL-triggered, re-announced every _HALT_RE ticks for as
+// long as the hold stands, because the host can miss any single edge (a halt landing while
+// a recovery-resume boundary held the one-boundary guard was refused once and, one-shot,
+// never retried: both clients sat in 'dying' forever -- the field freeze regressed below).
+// The host answers by opening a respawn boundary (epoch bump + clock burst +
+// go {why:'respawn'}) and BOTH clients rebuild the same level at tick 0 from the fresh
+// shared start_pts. If each sim rebuilt on its own (the local-duel path), the two boards
+// would re-anchor on unsynchronized clocks -- the exact drift the boundary burst exists to
+// cancel. Local duels keep the immediate rebuild (no flag), and a duelHalt fired inside a
+// rollback REPLAY must still dispatch: a death introduced by a late input crosses
+// DEATH_DUR only in the replay. Run: node test/smoke-respawn-halt.js
 const { runTest } = require('./harness');
 
 runTest('SMOKE-RESPAWN-HALT', `
@@ -23,17 +26,18 @@ try {
     _netSync = { ofs: 100000 - _wall(), rtt: 10, at: Date.now() };   // netPts() ~ 100000
 
     // JOINER: the online entry arms the hold, a death crosses DEATH_DUR, and the sim
-    // parks in 'dying' with exactly one duelHalt -- no local rebuild, however long the
-    // boundary negotiation takes.
+    // parks in 'dying', re-announcing duelHalt every _HALT_RE ticks -- no local
+    // rebuild however long the negotiation takes, and no single edge to miss.
     beginOnlineDuel(0xABCD, false);
     if(!_duelNetHold) fail('online entry did not arm the net hold');
     phase = 'dying'; phaseAt = simNow; deathMsg = 'X';   // the duelStep death outcome, minus the collision
-    for(let i=0;i<80;i++) update();                      // DEATH_DUR is 54 ticks: well past the crossing
+    for(let i=0;i<80;i++) update();                      // crossing at tick 54 (DEATH_DUR), held 26 since
     if(phase !== 'dying') fail('held sim left dying -> ' + phase + ' (rebuilt locally)');
-    if(halts() !== 1) fail('crossing emitted ' + halts() + ' duelHalt != 1');
-    for(let i=0;i<20;i++) update();
-    if(halts() !== 1) fail('held ticks re-emitted duelHalt (' + halts() + ')');
-    ok('online death holds in dying and emits exactly one duelHalt');
+    const exp1 = 1 + Math.floor(26/_HALT_RE);            // the crossing announce + one per period held
+    if(halts() !== exp1) fail('held 26 ticks emitted ' + halts() + ' duelHalt != ' + exp1);
+    for(let i=0;i<2*_HALT_RE;i++) update();              // two more full periods
+    if(halts() !== exp1+2) fail('re-announce cadence off (halts ' + halts() + ' != ' + (exp1+2) + ')');
+    ok('online death holds in dying and re-announces duelHalt every _HALT_RE ticks');
 
     // The host's go {why:'respawn'} begins the rebuild: same level, tick 0, players kept.
     sent.length = 0; simEvents.length = 0;
@@ -74,6 +78,22 @@ try {
     _replaying = false;
     if(sent.filter(m=>m.t==='go' && !m.a).length !== 2) fail('replay-borne duelHalt was swallowed (no boundary opened)');
     ok('a duelHalt emitted inside a rollback replay still opens the boundary');
+
+    // THE FIELD FREEZE (regression): a halt landing while ANOTHER boundary holds the
+    // one-boundary guard (a recovery resume mid-flight) is refused -- with a one-shot
+    // halt that refusal was final and both clients held in 'dying' forever. The
+    // re-announced halt must open the respawn as soon as the guard clears.
+    _netSess.lvlPending = true;    // a resume boundary is mid-flight
+    const epW = _netSess.epoch|0; sent.length = 0;
+    simEvents.push({ t:'duelHalt' }); drainSimEvents();
+    if(sent.some(m=>m.t==='go' && !m.a)) fail('halt under a pending boundary opened a second one');
+    if((_netSess.epoch|0) !== epW) fail('refused halt still bumped the epoch');
+    _netSess.lvlPending = false;   // the resume boundary completed
+    simEvents.push({ t:'duelHalt' }); drainSimEvents();   // the hold re-announces
+    const gW = sent.filter(m=>m.t==='go' && !m.a);
+    if(gW.length !== 1 || gW[0].why !== 'respawn') fail('re-announced halt did not open the respawn boundary');
+    if((_netSess.epoch|0) !== epW+1) fail('retried respawn epoch ' + _netSess.epoch + ' != ' + (epW+1));
+    ok('a halt refused under a pending boundary is retried by the re-announce (field freeze)');
 
     // Control -- LOCAL duel (no net flag): the death rebuilds immediately, no halt event.
     simCommand({ t:'startDuel', seed:77 });

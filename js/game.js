@@ -210,8 +210,8 @@ function drainSimEvents(){
     for(const e of simEvents){
         // Non-cosmetic side effects already ran live during prediction -- EXCEPT duelHalt: a
         // death introduced BY a rollback crosses DEATH_DUR inside the replay only, and
-        // swallowing that one-shot would strand both clients in 'dying' with no respawn
-        // boundary ever opened. Duplicates are folded by the host's one-boundary guard.
+        // swallowing it would delay the respawn boundary by a full re-announce period
+        // (_HALT_RE). Duplicates are folded by the host's one-boundary guard.
         if(_replaying && !_FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
         switch(e.t){
             case 'sfx':      _sfxQ.push({ tk:simTick, name:e.name }); break;
