@@ -1,16 +1,19 @@
-// P2P boundary clock-BURST primitive (DEFAULT suite). Replaces the old continuous joiner->host
-// align ping with a short, symmetric burst run at every boundary: BOTH sides fire a few
-// stamped datagrams, each keeps the MINIMUM one-way delta per direction, piggybacks its own
-// forward-min so both end holding the SAME two numbers, and each nudges its OWN clock half of the
-// agreed offset onto the shared midpoint. Neither side is the master.
+// P2P boundary clock-BURST primitive (DEFAULT suite). At every boundary BOTH sides fire a few
+// datagrams stamped with the RAW clock (rts: the un-nudged monotonic reading -- stationary
+// across boundaries, so the host's low-pass over it is sound), each keeps the MINIMUM raw
+// one-way delta per direction (sq 0 is the pre-warm: delivery counts, timing does not) and
+// piggybacks its own forward-min, so both end holding the SAME two numbers. pts - rts on any
+// datagram hands each side the peer's clock correction, which converts the raw offset into the
+// SHARED-clock residual -- how far the two NET clocks actually sit apart. The host applies
+// -R/2 and ships R as bth; the joiner applies +R/2. Neither side is the master.
 //
 // This drives the real net-rtc.js burst primitive directly (no full match), over a modelled wire with
 // a frozen clock offset (e0) + path asymmetry (asym) + jitter, and proves the four properties the
-// lockstep boundary depends on:
-//   1. IDENTICAL theta   -- both sides compute the same offset (the invariant the nudge relies on;
-//                           if they differed, the two sims would derive different ticks at tick 0).
-//   2. correct offset    -- theta has the right sign + magnitude (peer clock recovered).
-//   3. midpoint, no master -- each side applies ~theta/2 with OPPOSITE sign; after both apply, the
+// lockstep boundary depends on (the __burstTheta hook returns each side's LOCAL residual):
+//   1. IDENTICAL residual -- both sides derive the same offset from their mirrored views (if they
+//                           differed, the two sims would derive different ticks at tick 0).
+//   2. correct offset    -- the residual has the right sign + magnitude (peer clock recovered).
+//   3. midpoint, no master -- each side applies ~R/2 with OPPOSITE sign; after both apply, the
 //                           two clocks agree to under one tick (residual = the fundamental path
 //                           asymmetry/2, the same floor the old one-directional scheme had).
 //   4. doze-robust + gated -- an injected heavy-delay sample never moves the min; a starved burst
@@ -116,9 +119,9 @@ function runBurst({ e0 = 0, half = 20, asym = 0, jit = 0, N = 10, spike = 0, dro
 }
 
 // 5. Accept-gate: starve the B->A direction (only 2 samples). Below NET_BURST_MIN the estimate is
-//    untrustworthy, so theta must be null and apply a no-op -- the previous clock is kept.
+//    untrustworthy, so the verdict must be null and apply a no-op -- the previous clock is kept.
 {
-    const r = runBurst({ e0: 40, half: 20, N: 10, dropBA: 8 });   // 10-8 = 2 B->A samples < MIN(3)
+    const r = runBurst({ e0: 40, half: 20, N: 10, dropBA: 8 });   // 10-8 = 2 B->A samples < MIN(5)
     const gated = r.thetaA === null && r.appliedA === 0;
     line('starved -> rejected', gated,
         ' theta=' + JSON.stringify(r.thetaA) + ' applied=' + r.appliedA);

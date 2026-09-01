@@ -22,7 +22,7 @@ try {
     beginOnlineDuel(0xBEEF, true);
     if(_netMyEpoch() !== 0) fail('in-process start: mirror ' + _netMyEpoch() + ' != epoch 0');
     _netSess.epoch = 1;
-    beginOnlineDuelLevel(true);
+    beginOnlineDuelLevel(true, 2);
     if(_netMyEpoch() !== 1) fail('in-process boundary: mirror ' + _netMyEpoch() + ' != epoch 1');
     ok('in-process home: the epoch mirror follows every begin (control)');
 
@@ -32,7 +32,7 @@ try {
     _initWorker();
     if(!_useWorker()) fail('worker stub did not engage (_useWorker false)');
     _netSess.epoch = 2;
-    beginOnlineDuelLevel(true);
+    beginOnlineDuelLevel(true, 3);
     if(!posts.some(p=>p.t==='duelLevelNet')) fail('worker home never received the level begin');
     if(_netMyEpoch() !== 2) fail('worker-home boundary: mirror ' + _netMyEpoch() + ' != epoch 2 (this client would stamp/gate a stale epoch)');
     ok('worker home: the epoch mirror follows the begin that rebases the worker');

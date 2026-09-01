@@ -1,7 +1,7 @@
 // EPOCH-SPLIT test: a lost boundary BEGIN must not strand the two clients on separate timelines.
 //
 // The field failure this guards (PC vs iPhone, level 1 -> 2, v2.5.33): the host bumps the session
-// epoch, ships the 'rst', and arms its own begin -- but that begin is a one-shot timer, and a
+// epoch, ships the go, and arms its own begin -- but that begin is a one-shot timer, and a
 // throttled tab can defer or drop it. The peer begins, the timer-less side does not, and from then
 // on the two hold different TICK BASES while both keep simulating happily. Every detector goes
 // blind at the same instant, which is why it read as "nothing happens":

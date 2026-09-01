@@ -51,13 +51,11 @@ let _nmWasAdjacent=false;   // near-miss edge tracker (presentation-only; see _d
 const _BAR_MOVE_EVERY=6;   // blocks step once every 6th game tick -- ONE cadence for both modes (a calm glide, slower than the snake)
 // DEBUG x10: multiplies every rare-event probability (pellet/crystal/gouranga/gem tiers/
 // respawn heart) by 10 for testing. cfg.x10 is persisted config, read at call time like
-// cfg.diff/cfg.turbo (the worker receives it via the cfg message; like diff, a replay or
-// match must pin it). At the default 1 every threshold is float-identical.
-// Classic play scales rare events by the local debug setting; a DUEL pins the
-// scale for the whole match (set once at startDuel from the host's setting and
-// carried to both clients) -- per-client cfg would make the two sims diverge.
-let _duelX10 = false;
-const _X10=()=>players?(_duelX10?10:1):(cfg.x10?10:1);
+// cfg.diff/cfg.turbo (the worker receives it via the cfg message). CLASSIC ONLY: a duel
+// never honors it -- like difficulty, a duel always runs the normal ruleset. That is a
+// CONTRACT, not state: no x10 flag exists in duel mode, on the wire, or in the duel
+// snapshot/hash lists.
+const _X10=()=>players?1:(cfg.x10?10:1);
 let timeCrystal=null, timeCrystalAt=0, _slowMode=false, _slowModeAt=0;
 let perfectCount = 0, luckyCount = 0;
 // ---- 1:1 DUEL state. null = classic single-player (that path is untouched). In duel,
@@ -192,7 +190,14 @@ function _duelBeginLevel(reseed) {
     _gDue = 0; spawnAt = 0; levelDoneWaiting = false; phase = 'duelReady'; phaseAt = simNow;
     emit({t:'lvlreset'}); emit({t:'bars'});
 }
-function startDuel(seed, x10) {
+// ONLINE duels only: a death must not rebuild the board locally -- the respawn is a
+// negotiated boundary (fresh start_pts + epoch, exactly like a level-up), so the sim HOLDS
+// in 'dying' and emits one 'duelHalt' for the net layer instead of calling _duelBeginLevel.
+// CONFIG, not state: set by the online entry path on BOTH clients alike (each peer's own
+// entry sets it), constant for the whole match, never hashed and never snapshotted --
+// local duels and single player keep the immediate rebuild.
+let _duelNetHold = false;
+function startDuel(seed) {
     // Tick zero. simTick free-runs from page load, so without this two online
     // clients would start a duel with wildly different counters -- and every piece
     // of state stamped from simNow (phaseAt, gemAt, spawnAt...) would
@@ -209,7 +214,6 @@ function startDuel(seed, x10) {
     timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;
     _gourangaLine = []; _gourangaActive = false; _gourangaEaten = new Set(); _gourangaSteps = 0;
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
-    _duelX10 = !!x10;
     level = 1; duelWinner = -1;
     players = [ _mkDuelPlayer(6, Math.floor(ROWS/2)-4,  1),      // P0 left, heading right
                 _mkDuelPlayer(COLS-7, Math.floor(ROWS/2)+4, -1) ];   // P1 right, heading left (mirror)
@@ -726,7 +730,21 @@ function update() {
         simArmRebase();   // a held boost must re-earn its grace this level, never spawn already on
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
-        if(players)_duelBeginLevel(false);               // duel: out-of-hearts already went to duelOver, so this is always a respawn -- keep the rng flowing for a fresh board
+        if(players){   // duel: out-of-hearts already went to duelOver, so this is always a respawn
+            if(_duelNetHold){
+                // ONLINE: hold in 'dying' and hand the respawn to the net layer as a boundary
+                // (the host answers with go {why:'respawn'} -> 'startDuelRespawn'). Both sims
+                // cross this line on the same deterministic tick, so the emit fires once per
+                // death on each client -- the crossing test below keeps later held ticks quiet.
+                // Residual: an input up to RB_DEPTH(64) ticks late can still UNDO this death by
+                // rollback after the crossing (DEATH_DUR is 54 ticks), so a go {why:'respawn'}
+                // may arrive for a death that no longer exists -- both clients then run the same
+                // phantom respawn, consistently and with no heart wrongly lost. Accepted: the
+                // ~167ms window makes it rare, and consistency is what lockstep must protect.
+                if(now-TICK_MS-phaseAt<DEATH_DUR) emit({t:'duelHalt'});
+            }
+            else _duelBeginLevel(false);   // local duel: rebuild at once -- keep the rng flowing for a fresh board
+        }
         else if(lives>0)beginLevel(true);
         else{phase='nameEntry';emit({t:'gameover'});}   // presentation loads the last name, hides HUD, stops music
     }
@@ -775,7 +793,7 @@ function simSnapshot(){
         powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
         timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
         perfectCount, luckyCount, boostDir, boosting, gemOptimal, gemSteps,
-        players, duelWinner, _duelX10, _speedRound, _rngState,
+        players, duelWinner, _speedRound, _rngState,
     };
 }
 // Apply one input/control command to the sim state. Single source of truth shared by the
@@ -785,7 +803,9 @@ function simSnapshot(){
 function simCommand(m){
     switch(m.t){
         case 'start': startGame(m.seed, m.bestScore); break;
-        case 'startDuel': startDuel(m.seed, m.x10); break;
+        // m.net marks an ONLINE duel: deaths then hold for the negotiated respawn boundary
+        // (see _duelNetHold). Local duels send no flag and keep the immediate rebuild.
+        case 'startDuel': _duelNetHold = !!m.net; startDuel(m.seed); break;
         // dir/boost carry an optional player index (m.p). In duel mode they route to
         // players[p]; classic mode keeps the original single-snake path untouched.
         // A remote peer's input will arrive as these SAME commands with p = their index.
@@ -820,11 +840,21 @@ function simCommand(m){
             break;
         case 'startDuelLevel':
             // Online level-up: re-anchor to the negotiated start_pts and rebuild the next level
-            // from (seed, level). Lives/score carry over inside _duelBeginLevel.
+            // from (seed, level). The level number is host-authored and rides the go, so both
+            // sims adopt it verbatim. Lives/score carry over inside _duelBeginLevel.
             if(!players) break;
             simTick = 0; simNow = 0; _gAt = 0;
-            level = m.level|0 || Math.min(level + 1, MAX_LEVELS);
+            level = m.level|0;
             _duelBeginLevel();
+            break;
+        case 'startDuelRespawn':
+            // Online post-death restart: the death held the sim in 'dying' (_duelNetHold) while
+            // the host negotiated a fresh start_pts; both clients rebuild the SAME level at tick
+            // 0. reseed=false keeps the rng flowing for a fresh board -- the exact rebuild the
+            // local duel runs immediately, just anchored to the new shared timeline.
+            if(!players) break;
+            simTick = 0; simNow = 0; _gAt = 0;
+            _duelBeginLevel(false);
             break;
         case 'pause':
             if(phase==='playing') phase='paused';
@@ -836,7 +866,7 @@ function simCommand(m){
             break;
         case 'phase':
             phase=m.phase; phaseAt=simNow;
-            if(m.phase==='menu'){ players=null; duelWinner=-1; }   // leaving a duel clears its state
+            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; }   // leaving a duel clears its state
             break;
     }
 }
@@ -850,7 +880,7 @@ function simApply(s){
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt; _barMoveTick=s._barMoveTick;
     timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
     perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
-    players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
+    players=s.players; duelWinner=s.duelWinner; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }
 // ---- Local boost arming (DEVICE-local: never in the snapshot or the hash) ----
 // A held direction ARMS a boost; after BOOST_GRACE_TICKS of aligned live ticks the
@@ -912,6 +942,6 @@ function simApplyDuel(s){
     deathMsg=s.deathMsg; spawnAt=s.spawnAt; levelDoneWaiting=s.levelDoneWaiting;
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt;
     heart=s.heart; heartAt=s.heartAt;
-    _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner; _duelX10=s._duelX10;
+    _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner;
     _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
 }

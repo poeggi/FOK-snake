@@ -12,11 +12,10 @@
 
 // ---- Relay-mode handshake: no RTCPeerConnection at all -- the offer carries the seed but
 // NO sdp, the answer only the profile, then both sides start.php + relay.php immediately. ----
-function _netRelaySessionStart(peer, role, seed, x10, peerProfile){
+function _netRelaySessionStart(peer, role, seed, peerProfile){
     if(_netSess) _netTeardown();   // never silently skip: the offer/answer is already out
     _netSess = _netMkSess(peer, role);
     _netSess.seed = (seed>>>0) || 1;
-    _netSess.x10 = !!x10;
     if(peerProfile) _netSess.peerProfile = peerProfile;
     _netSess.relay = true;
     _netSeekStop();
@@ -33,10 +32,10 @@ function _netRelayOffer(peer, peerProfile){   // inviter/offerer in relay mode: 
     if(_netSess) _netTeardown();          // debris: replace it, never silently skip the offer
     const seed = (Math.random()*0x100000000)>>>0;
     _netTimeSync();
-    const payload = JSON.stringify({ seed, profile:_netProfile(), v:_swVersion, x10:!!cfg.x10 });
+    const payload = JSON.stringify({ seed, profile:_netProfile(), v:_swVersion });
     _netHs.offerTo = peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
     _netSignal(peer, 'offer', payload);
-    _netRelaySessionStart(peer, 'host', seed, !!cfg.x10, peerProfile);
+    _netRelaySessionStart(peer, 'host', seed, peerProfile);
 }
 function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer with just the profile
     if(d && !_netVerOk(d.v)){
@@ -59,7 +58,7 @@ function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer 
     // Without it, it waits out the full 6s P2P timer before falling back to the mode
     // we already committed to -- 6s of dead air on every mixed-setting pairing.
     _netSignal(peer, 'answer', JSON.stringify({ profile:_netProfile(), v:_swVersion, relay:true }));
-    _netRelaySessionStart(peer, 'peer', d.seed, d.x10, _netClampProfile(d.profile));
+    _netRelaySessionStart(peer, 'peer', d.seed, _netClampProfile(d.profile));
 }
 // ---- Relay transport: same messages as the DataChannel, ~200-400ms one-way. The local
 // snake stays instant (prediction), corrections just arrive slower. The user sees why:

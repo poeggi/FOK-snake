@@ -1,12 +1,12 @@
 // SERVER-PATH RESTART (rematch) test (DEFAULT suite). A rematch is host-authored: the host runs
 // a bilateral clock BURST (both sides measure the peer offset over ~150ms), nudges its own clock
 // onto the shared midpoint, authors the new match's start PTS on that clock and ships it on the
-// reliable 'rst'/'sched' lvl:0 with the agreed offset as 'bth' -- the joiner applies its own half
+// echo-acked go {why:'rematch'} with the agreed offset as 'bth' -- the joiner applies its own half
 // from bth, so that single number lands on the same real instant on both. Without that nudge the
 // restart inherits whatever relative offset the two independent server syncs left: the peer's
 // honest current-tick inputs then land outside the rollback window and are refused (dropped
 // inputs), and past ~250ms of one-sided apply the ring splits -> OUT OF SYNC. This drives the REAL
-// rematch RECEIVE path (__rematchHost -> rst lvl:0) over the wire and asserts lockstep with NO drops.
+// rematch RECEIVE path (__rematchHost -> go why:'rematch') over the wire and asserts lockstep with NO drops.
 //
 // The last row is a FALSIFICATION: the same rematch-across-an-offset holds WITH the burst but,
 // with the burst nudge neutered (noBurst), the two clients restart ~err0 apart and STAY skewed:
@@ -22,7 +22,7 @@ const { runMatch } = require('./duel-driver');
 // then plays the second match out -- the restart is the subject, so the run-up only has to be long
 // enough for a real multi-input, multi-level match to be under way when it fires.
 //   clean     : a moderate offset that flashed CONNECTION LOST in the field (drop>0 before the fix)
-//   loss+drift: a larger realistic offset + 3% loss (rst repeats must survive) + a drifting clock.
+//   loss+drift: a larger realistic offset + 3% loss (go retries must survive) + a drifting clock.
 //               Doubles as the treatment arm of the falsification pair below.
 const LB = { name:'loss+drift e=150 ', secs:24, seed:0x77C0, p2pBoundary:true, wire:{ base:7, jit:3, loss:0.03 },
     phase:8, tjit:4, recv:true, clock:{ drift:1200, err0:150, samples:8 }, rematch:{ at:8 } };

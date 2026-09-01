@@ -56,8 +56,9 @@ One place that:
 
 3. Advances levels through the REAL online boundary: when both clients are parked at
    `levelDone`, the driver replays the receive end of a level-up (shared `start_pts`
-   + bumped epoch -> `beginOnlineDuelLevel` -> `_rbReset`), with the wire still
-   flowing so a pre-boundary packet lands after `simTick` reset to 0.
+   + bumped epoch + host-authored level -> `beginOnlineDuelLevel` -> `_rbReset`),
+   with the wire still flowing so a pre-boundary packet lands after `simTick` reset
+   to 0.
 
 4. DETECTS divergence continuously and honestly: it compares each client's rollback
    ring snapshot at an IMMUTABLE past tick -- RB_DEPTH ticks behind the slower sim.
@@ -103,11 +104,11 @@ at the end, a product desync verdict on either client, or a session-end exit.
 
 ### duel-boundary.js  (REGRESSION tier -- the level-boundary guard)
 
-Plays real P2P level-ups (host bursts to the shared midpoint and ships `bth` on `rst`,
-joiner applies its half) over loss + drift + doze, and asserts both sims stay
+Plays real P2P level-ups (host bursts to the shared midpoint and ships `bth` on the
+`go`, joiner applies its half) over loss + drift + doze, and asserts both sims stay
 byte-identical across the `simTick` reset to 0. It guards the boundary PATH -- epoch
-bump, `simTick`->0, `rst` and its reliable repeats over a lossy wire, the `reqlvl` round
-trip. The burst MECHANISM is proven elsewhere (see `duel-sync.js` for the unit test and
+bump, `simTick`->0, the echo-acked `go {why:'level'}` and its retries over a lossy
+wire, the joiner's `req {why:'level'}` round trip. The burst MECHANISM is proven elsewhere (see `duel-sync.js` for the unit test and
 `duel-rematch.js` for the load-bearing control), because a single level boundary can't
 host that control: the only offset present is one level's accumulation, and a constant
 offset that survives a level survives the next unchanged, while drift big enough to
@@ -120,8 +121,8 @@ the burst bounds is a slow sweep in the on-demand netprofile.
 Swallows one client's one-shot boundary BEGIN timer (`eatBegin`), the way a throttled or
 backgrounded tab defers or drops it, and asserts the pair does not end up on separate
 tick bases. Both roles are driven: losing the host's begin and losing the joiner's need
-different repairs, since only the host can re-serve a start and only an `epq` lets a
-joiner ask. The fail gate is the DURATION of the split (a boundary is legitimately
+different repairs, since only the host can re-serve a start (an unechoed `go` keeps
+retrying) and a joiner can only ask (`req`). The fail gate is the DURATION of the split (a boundary is legitimately
 one-sided while the start is in flight) plus `splitBlind` -- a split that outlives the
 ask deadline with no banner showing. That blindness is the real finding: with the two
 clients on different bases the epoch gate drops the peer's hash one layer above the
@@ -138,6 +139,53 @@ packets carry it, and that a teardown returns the mirror to 0 (a fresh pair's li
 A frozen mirror is invisible to every duel-* sweep -- the driver boots the in-process
 home only -- yet in the field it splits a worker-mode client from any peer whose epoch
 advances (FORCE SINGLE THREADED, file://, a demoted worker) at the FIRST boundary.
+
+### smoke-level-wire.js  (FAST tier -- the wire-authored level-number guard)
+
+The duel board is a pure function of (gameSeed, level), so the two clients build
+identical barricades exactly as long as they agree on the level NUMBER. The host owns
+that number like it owns the epoch and ships it in the go's `lvl` field; both sims
+adopt it in `startDuelLevel`. This guard perturbs a client's private level counter
+and proves the wire value wins, that a duplicate begin rebuilds the byte-identical
+board (idempotent boundary), that the number crosses the main->worker seam, and that
+the host session authors 2, 3, ... on successive boundaries. Without the wire number,
+any path that runs a begin a different number of times on the two clients -- a
+duplicate fire, a stray press, a version skew -- silently rebuilds two DIFFERENT
+worlds from one boundary ("barricades different"), detectable only after the fact.
+
+### smoke-respawn-halt.js  (FAST tier -- the online death-boundary guard)
+
+An ONLINE duel death is a negotiated boundary, not a local rebuild: the sim (armed with
+`net:true` at the online entry) holds in `dying` after the death animation and emits ONE
+`duelHalt`; the host answers with an epoch bump + clock burst + `go {why:'respawn'}`, and
+both clients rebuild the same level at tick 0 from the fresh shared start_pts -- so every
+respawn re-cancels clock drift exactly like a level-up. The guard proves the hold + the
+one-shot emit, the host's one-boundary dedup (duplicate halts fold), that a `duelHalt`
+surfacing inside a rollback REPLAY still dispatches (a death introduced by a late input
+crosses DEATH_DUR only in the replay -- swallowed, both clients would hold forever), that
+the joiner's `go {why:'respawn'}` rebuild keeps level/players and the hold armed, and that
+a LOCAL duel still rebuilds immediately (control). The driver-based sweeps below stay on
+the local-rebuild path by design (they boot the sim directly, not through the online
+entry), so this guard is the coverage for the held path.
+
+### smoke-recovery-resume.js  (FAST tier -- the outage recovery-resume guard)
+
+An outage (a reconnect, or a peer detected a whole rollback ring behind) heals over a
+FULL resync burst -- but the pair is then still ticking on the clock anchor from BEFORE
+the outage, carrying whatever drift the outage accumulated (a throttled background tab, a
+reconnect over a different network path). The burst settling opens a RESUME boundary
+(`go {why:'resume'}`): a fresh clock burst, a startPts that maps the CURRENT tick onto
+the verified clock (in the past, so the armed begin fires at once and nobody rewinds),
+and an epoch bump -- and nothing else: no rebuild, no tick reset, no ring clear, because
+the sims never stopped and what they hold IS the state. The guard drives the real
+netTickPre decrement path and proves: the routine single-rs desync repair does NOT open
+the boundary (control -- a re-anchor storm under jitter is the failure this distinction
+prevents); a joiner settle asks with `req {why:'resume'}` exactly once; a settle under a
+pending transition stays quiet (that transition re-anchors anyway); a host settle ships
+ONE resume go with epoch+1 and a current-tick startPts while sim/ring stay untouched; the
+joiner's go adopts anchor + epoch only; a stale-epoch req is echoed but refused; the
+worker home's settle crosses the seam as a `duelRecovered` event into the same
+`_netResyncSettled`; and the worker-side adopt rides the ordinary `duelClock` push.
 
 ### duel-rematch.js  (REGRESSION tier -- the server-path restart guard)
 

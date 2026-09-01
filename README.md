@@ -80,9 +80,12 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
   latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
   DataChannel, with an HTTP relay fallback when P2P cannot connect. The netcode is
   deterministic lockstep with rollback: both clients run the same inputs-only sim
-  off a shared PTS clock, so there is no host and controls feel local on both ends;
-  a periodic authoritative-state exchange heals any divergence. A RELAY ONLY (NO
-  P2P) setting forces the HTTP relay path for networks where WebRTC never connects
+  off a shared PTS clock, so neither side owns the game state and controls feel
+  local on both ends. Every timeline boundary (match start, level, rematch,
+  death respawn, outage recovery) is agreed over an acknowledged go/req exchange
+  with a peer-to-peer clock burst, and a periodic authoritative-state exchange
+  heals any divergence. A RELAY ONLY (NO P2P) setting forces the HTTP relay path
+  for networks where WebRTC never connects
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
 - Config backup / restore -- to a JSON file or to the cloud (kept by id + a secret

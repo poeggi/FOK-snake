@@ -89,7 +89,7 @@ if [ "$FULL" = 1 ]; then
     echo "[checks] boosting duel stays in lockstep (two clients, real match, over a lossy wire)"
     suite test/duel-desync.js
 
-    echo "[checks] P2P level boundary holds lockstep (host bursts to the shared midpoint, ships bth on rst)"
+    echo "[checks] P2P level boundary holds lockstep (host bursts to the shared midpoint, ships bth on the go)"
     suite test/duel-boundary.js
 
     echo "[checks] a lost boundary begin is repaired, not survived silently (no split onto separate tick bases)"

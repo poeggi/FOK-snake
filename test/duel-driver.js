@@ -25,7 +25,7 @@ const HOOKS = (id) => `
   _netPollOnce = async ()=>{}; _netRelayLoop = async ()=>{};
   // NB: _netRequestStart is left REAL. The driver never reaches its server branch (first/rematch
   // boot via __p2pStart, not the server), but the p2pBoundary mode drives its 'level' branch --
-  // the host-authored P2P start (_netStartLevelP2P) -- for real over the wire.
+  // the host-authored P2P boundary (_netOpenBoundary) -- for real over the wire.
   // Mocked clocks (see duel-profile.js for the full rationale): performance.now is TRUE shared
   // time (frame domain); Date.now is this client's WALL clock, carrying a frozen anchor error
   // (__clkE0) + relative drift (__clkDr). Both default 0 (perfect sync).
@@ -85,13 +85,14 @@ const HOOKS = (id) => `
   };
   globalThis.__recv    = (txt)=>{ if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(txt); } };
   globalThis.__pts       = ()=> netPts();                      // this client's shared-timeline PTS right now
-  // ---- boundary clock BURST hooks (symmetric midpoint: BOTH sides measure + nudge half) ----
+  // ---- boundary clock BURST hooks (raw measurement -> shared-clock residual, midpoint apply) ----
   globalThis.__burstReset = ()=> _netBurstReset(_netSess);     // open a fresh burst (forget last boundary's samples)
   globalThis.__burstPing  = ()=> _netBurstPing(_netSess);      // fire one stamped burst datagram
-  globalThis.__burstTheta = ()=>{ const t = _netBurstTheta(_netSess); return t ? t.theta : null; };  // agreed peer offset (ms), or null if unusable
-  globalThis.__burstApply = ()=> _netBurstApply(_netSess);     // nudge our clock half-way to the midpoint; returns applied ms
-  globalThis.__bsFwd      = ()=> _netSess ? _netSess.bsFwd : Infinity;   // my measured min forward-delta
-  globalThis.__bsRev      = ()=> _netSess ? _netSess.bsRev : Infinity;   // the peer's min forward-delta (piggybacked)
+  globalThis.__burstTheta = ()=>{ const t = _netBurstTheta(_netSess); return t ? _netBurstResidual(_netSess, t.o) : null; };  // the shared-clock residual this side's samples settle on (ms), or null if unusable
+  globalThis.__burstApply = ()=> _netBurstApply(_netSess);     // nudge our clock half the residual toward the midpoint; returns applied ms
+  globalThis.__bsFwd      = ()=> _netSess ? _netSess.bsFwd : Infinity;   // my measured min raw forward-delta
+  globalThis.__bsRev      = ()=> _netSess ? _netSess.bsRev : Infinity;   // the peer's min raw forward-delta (piggybacked)
+  globalThis.__hostBurst  = (then)=> _netBurstThenStart(_netSess, then); // host side of a boundary: full burst engine (retries, low-pass, -R/2 apply) -> then(residual|null)
   globalThis.__tick1   = ()=>{ netTickPre(); update(); netTickPost(); };   // exactly ONE engine tick, real path
   globalThis.__tickCatchup = ()=>{
     const t = netTickTarget(); if(t === null) return;
@@ -104,28 +105,30 @@ const HOOKS = (id) => `
   globalThis.__boost   = (d, now)=>{ gameBoostStart(0, d, !!now); };  // ARM boost (simArmTick issues the real bs)
   globalThis.__boostEnd= ()=>{ gameBoostEnd(0); };              // ARM release -> real be
   // Level-up: replay the RECEIVE end of the real online boundary (net-session.js: adopt epoch +
-  // start_pts, then beginOnlineDuelLevel -> startDuelLevel -> _rbReset). The server POST /
-  // rst relay is transport, not sim, so the driver supplies the shared start_pts + epoch
-  // both sides agree on; the SIM side (simTick->0, _gAt->0, ring reset) is the REAL code.
-  globalThis.__levelUp = (startPts, epoch)=>{
+  // start_pts + host-authored level from the go, then beginOnlineDuelLevel -> startDuelLevel ->
+  // _rbReset). The driver supplies the shared start_pts + epoch + target level both sides agree
+  // on; the SIM side (simTick->0, _gAt->0, ring reset) is the REAL code.
+  globalThis.__levelUp = (startPts, epoch, lvl)=>{
     if(!_netSess) return;
     _netSync = { ofs:0, rtt:1, at:Date.now() };   // a fresh sync always precedes a new start (re-anchor)
     _netSess.epoch = epoch|0; _netSess.startPts = startPts;
-    beginOnlineDuelLevel(_netSess.role === 'host');
+    beginOnlineDuelLevel(_netSess.role === 'host', lvl|0);
   };
-  // REAL P2P boundary (p2pBoundary mode): this client "presses OK". Host -> authors the next
-  // start PTS locally and ships 'rst' over the wire; joiner -> nudges the host with 'reqlvl'. The
-  // start crosses the simulated wire (loss/jitter/doze), the joiner aligns its clock in the rst
-  // handler, and both fast-forward to tick 0 -- the exact path that flashed CONNECTION LOST live.
+  // REAL P2P boundary (p2pBoundary mode): this client "presses OK". Host -> bursts, authors the
+  // next start PTS locally and ships go {why:'level'} over the wire; joiner -> nudges the host
+  // with req {why:'level'}. The start crosses the simulated wire (loss/jitter/doze), the joiner
+  // adopts clock + level in the go handler, and both fast-forward to tick 0 -- the exact path
+  // that flashed CONNECTION LOST live.
   globalThis.__reqNextLevel = ()=> netRequestNextLevel();
   globalThis.__lvlPending   = ()=> !!(_netSess && _netSess.lvlPending);
-  // REAL rematch RECEIVE path. A rematch is host-authored (only the host runs _netRequestStart for
-  // it; the joiner just receives the rst). This hook is the SEND end the mocked server would drive:
-  // the host runs the boundary BURST (bsync + bilateral 'bs' over the wire), nudges its own clock
-  // onto the shared midpoint, authors the start_pts on that clock and ships 'rst' lvl:0 with the
-  // agreed peer offset as 'bth'. The joiner receives it through the REAL _netHandleMsg and applies
-  // its half from bth -- so whether a lvl:0 start midpoint-syncs the joiner's clock (it must, or an
-  // offset carries uncorrected into the new match) is the real code.
+  // REAL rematch SEND path. A rematch is host-authored (only the host runs _netRequestStart for
+  // it; the joiner just receives the go). This hook stands in for the server half (match identity
+  // + epoch line) and then runs the REAL P2P half: the boundary BURST (bilateral 'bs' over the
+  // wire), the clock nudge onto the shared midpoint, start_pts authored on that clock, and ONE
+  // go {why:'rematch'} shipped through _netTxShip (echo-acked + retried) with the burst residual
+  // as 'bth'. The joiner receives it through the REAL _netHandleMsg and applies its half
+  // from bth -- so whether a rematch go midpoint-syncs the joiner's clock (it must, or an offset
+  // carries uncorrected into the new match) is the real code.
   globalThis.__rematchHost = (epoch, seed)=>{
     const s = _netSess; if(!s || s.role !== 'host' || !s.game) return;
     s.epoch = epoch|0; s.seed = seed>>>0; s.lvlPending = true;
@@ -133,10 +136,10 @@ const HOOKS = (id) => `
       if(_netSess !== s || !s.game){ s.lvlPending = false; return; }
       const sp = netPts() + 250;   // author on the now-midpoint clock (production uses NET_BURST_LEAD_MS)
       s.startPts = sp; _netClockPush();
-      _netSend({ t:'rst', seed:s.seed, startPts:sp, epoch:s.epoch, lvl:0, bth:Math.round(theta) });
-      const go = ()=>{ if(_netSess === s && s.game){ s.lvlPending = false; beginOnlineDuel(s.seed, true); } };
-      const wait = Math.max(0, Math.min(5000, sp - netPts()));
-      if(wait <= 0) go(); else setTimeout(go, wait);
+      const g = { t:'go', why:'rematch', seed:s.seed, startPts:sp, epoch:s.epoch|0, lvl:1 };
+      if(theta != null) g.bth = Math.round(theta);   // starved burst -> NO bth, same as production
+      _netTxShip(s, g);
+      _netArmBegin(s, sp, ()=>{ s.lvlPending = false; s.lvl = 1; beginOnlineDuel(s.seed, true); });
     });
   };
   // Falsification knob: neuter the boundary clock-burst nudge on BOTH sides so a test can PROVE it
@@ -549,8 +552,8 @@ function runMatch(opts){
         if(!(va && vb && va.waiting && vb.waiting)) return;
         if(opts.p2pBoundary){
             // Both parked at levelDone -> drive the REAL boundary over the wire. No injected
-            // start_pts: the initiator's client authors/relays it (host rst; joiner reqlvl->host
-            // rst) and the joiner aligns its clock in the rst handler, so a lost rst / clock drift
+            // start_pts: the initiator's client authors/relays it (host go; joiner req->host go)
+            // and the joiner adopts clock + level in the go handler, so a lost go / clock drift
             // / doze is exercised for real -- the atomic __levelUp path could never reproduce it.
             if(va.level === lastBoundaryLevel) return;   // this boundary already fired; wait for it to land
             lastBoundaryLevel = va.level;
@@ -562,13 +565,13 @@ function runMatch(opts){
             return;
         }
         bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // capture this level's tallies before _rbReset wipes them
-        const sp = NET_BASE + now + 40, ep = ++levelEpoch;
-        A.__levelUp(sp, ep); B.__levelUp(sp, ep); levelUps++;
+        const sp = NET_BASE + now + 40, ep = ++levelEpoch, lv = (va.level|0) + 1;
+        A.__levelUp(sp, ep, lv); B.__levelUp(sp, ep, lv); levelUps++;
     };
-    // Optional REMATCH (game restart) at `at` seconds: the SERVER-issued start path (rst lvl:0),
+    // Optional REMATCH (game restart) at `at` seconds: the host-authored restart (go why:'rematch'),
     // the one a level boundary's pure-P2P align does NOT cover. The host authors a fresh start_pts
-    // + epoch + seed and ships 'rst' lvl:0 over the wire; the joiner receives it through the real
-    // handler -- so whether a lvl:0 start P2P-aligns the joiner's clock is the real code. Fired
+    // + epoch + seed and ships go {why:'rematch'} over the wire; the joiner receives it through the
+    // real handler -- so whether a rematch go P2P-aligns the joiner's clock is the real code. Fired
     // while both sims are mid-play, so the joiner's align window holds the samples the ongoing
     // match kept warm -- the realistic field condition (the window is consumed only at a start, so
     // it still carries the last level's samples when a match ends). opts.rematch = { at }.
@@ -611,7 +614,38 @@ function runMatch(opts){
     const CL = 'CONNECTION LOST';
     let wireDown = false, nextLive = 0;
     let diedAt = 0;
-    for(let now = 0; now <= secs * 1000; now++){
+    // opts.startBurst: production's FIRST-START clock sync. Since 2.6 the first go syncs the clock
+    // like any boundary -- the host bursts BEFORE play opens, ships go+bth, begins once (the go
+    // envelope itself is net-handshake's lane) -- so a pair whose clocks start a full tick+ apart
+    // NEVER plays a single tick on the raw offset. __p2pStart boots play atomically and skips that,
+    // which only stays faithful while err0 is sub-tick; this phase restores fidelity for a large
+    // err0: the REAL burst engine runs over the same delayed wire before the first game tick
+    // (_netBurstThenStart on the host; the joiner's run opened by the arriving 'bs' datagrams,
+    // exactly like production), the host applies its -R/2, and the joiner applies its half from its
+    // own samples -- _netBurstApply's production fallback derivation, which lands on the identical
+    // midpoint. Play then starts at the sync's end, the way a real match starts after its go.
+    // Reported as r.startSync = { gap0, gap1, residual, ms }: the A-B netPts gap before/after.
+    let startSync = null, playT0 = 0;
+    if(opts.startBurst){
+        const gapAt = ()=> A.__pts() - B.__pts();   // both clients read at the same frame instant
+        startSync = { gap0: gapAt(), residual: null, gap1: null, ms: 0 };
+        let hostR = null, hostDone = false;
+        A.__hostBurst((r)=>{ hostR = r; hostDone = true; });
+        let t = 0;
+        for(; t < 5000 && !hostDone; t++){
+            A.__now = t; B.__now = t;
+            A.__fire(); B.__fire();
+            emit(sch.A); emit(sch.B);
+            drain(wire.AB, B, sch.B); drain(wire.BA, A, sch.A);
+        }
+        B.__burstApply();
+        startSync.residual = hostR; startSync.gap1 = gapAt(); startSync.ms = t;
+        playT0 = t;
+        for(const S of [sch.A, sch.B]){   // first game tick lands at T0 on the corrected clock
+            S.k = Math.ceil((playT0 - S.phase) / TICK); S.next = S.k * TICK + S.phase;
+        }
+    }
+    for(let now = playT0; now <= secs * 1000; now++){
         const dozing = doze && now >= doze0 && now < doze1;
         wireDown = !!(outage && now >= out0 && now < out1);   // total bidirectional blackout window
         if(doze && !dozeResumed && now >= doze1){
@@ -722,6 +756,7 @@ function runMatch(opts){
         resim: a.resim + b.resim, live: a.live + b.live, liveA: a.live, liveB: b.live, lost: a.lost + b.lost,
         fix: a.fix + b.fix, drop: a.drop + b.drop, dropA: a.drop, dropB: b.drop,
         desyncProbe: opts.desyncProbe ? classifyDesyncs() : null,
+        startSync,
         rbTrace: { A: A.__rbTraceDump(), B: B.__rbTraceDump() },
     };
 }

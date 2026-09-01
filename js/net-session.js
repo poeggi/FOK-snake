@@ -1,13 +1,18 @@
 // ============================================================================
 // net-session.js -- ONLINE 1:1 session lifecycle: lobby + handshake state,
-// invites, quick match, the signal dispatcher, server-issued starts, in-duel
+// invites, quick match, the signal dispatcher, transition control, in-duel
 // message handling and teardown. NETCODE (deterministic rollback): both
 // clients run the deterministic sim locally from the shared seed; own input
 // applies instantly (local feel on BOTH ends) and travels tick-stamped to the
-// peer. There is no host and no authority -- only inputs cross the wire. A
-// late peer input rewinds the sim and re-simulates locally (a sim tick is
-// sub-microsecond, so replay is free). Server = matchmaking + signaling only.
-// Loads LAST of the net files. Offline-first contract: see net-api.js.
+// peer. The sim has no authority -- only inputs cross the wire -- but every
+// TIMELINE ORIGIN (match/rematch/level/respawn/resume) is HOST-authored: the
+// host runs a clock burst, authors start_pts on the agreed clock and ships ONE
+// 'go' {why,seed,startPts,epoch,lvl,bth}; the joiner asks via 'req' {why,epoch}.
+// Both are echo-acknowledged and retried until answered (_netTxShip); begins
+// fire on the clock, never on the ack. A late peer input rewinds the sim and
+// re-simulates locally (a sim tick is sub-microsecond, so replay is free).
+// Server = matchmaking + signaling only. Loads LAST of the net files.
+// Offline-first contract: see net-api.js.
 // ============================================================================
 // ---- lobby state (read by drawLobby + the lobby input row) ----
 // ---- HANDSHAKE STATE. Deliberately SEPARATE from the lobby UI state: a
@@ -304,24 +309,62 @@ function _netOnSignal(sig){
     } catch(e){ _netSigLog('< ERR ' + String(sig.type)); }
 }
 
-// Ship a start (sched/rst) AND keep it. The joiner's epoch has exactly ONE writer -- the 'rst'
-// handler below -- so a start that never lands is not a delayed boundary but a permanent split:
-// both sides then refuse each other's tick packets on epoch, and nothing in the stream heals it.
-function _netShipStart(s, pkt){ s.lastStart = pkt; s.lastStartAt = _wall(); _netSend(pkt); }
-// Re-serve that start to a joiner still on an older epoch. Idempotent: the receiver dedups by
-// ctlEpoch, and the ORIGINAL startPts is what lands it on our timeline instead of a private one.
-function _netReshipStart(s, peerEp){
-    if(!s || !s.game || s.role !== 'host' || !s.lastStart) return;   // only P0 authors a start
-    if((peerEp|0) >= (s.epoch|0)) return;
+// ---- transition delivery: ship-until-echoed ----
+// Every transition (go/req) is ECHO-ACKNOWLEDGED: the receiver answers the packet straight
+// back, verbatim plus a:1, FROM ITS RECEIVE HANDLER -- never from the tick loop, so a
+// backgrounded tab (rAF frozen, dc.onmessage alive) still answers. Until that echo lands the
+// sender keeps the packet in s.tx and re-sends it: fast repeats at 100/200ms cover the common
+// single loss, then the liveness pass re-serves ~1/s (_netTxTick) -- interval-driven, so it
+// too survives a backgrounded sender. There is at most ONE transition in flight per side
+// (boundaries serialize on lvlPending), so a single slot is the whole protocol.
+function _netTxShip(s, pkt){
     const now = _wall();
-    // A boundary is legitimately one-sided while it is in flight, so "behind" only means "lost"
-    // once our ship and its repeats (0/100/200ms) are well past.
-    if(now - (s.lastStartAt || 0) < 1000) return;
-    if(now - (s.reshipAt || 0) < 1000) return;         // the trigger is the peer's 60/s stream: one re-serve per second
-    s.reshipAt = now;
-    _netDbg.reship = (_netDbg.reship|0) + 1;
-    _netSigLog('! peer an epoch behind (' + (peerEp|0) + ' < ' + (s.epoch|0) + '): re-sending the start');
-    _netSend(s.lastStart);
+    s.tx = { pkt, since: now, lastAt: now, tries: 1 };
+    _netSend(pkt);   // stamps pkt.pts once; every re-send keeps it (a repeat is always in the past)
+    const rep = (n)=>{
+        if(_netSess !== s || !s.game || !s.tx || s.tx.pkt !== pkt) return;
+        s.tx.tries++; s.tx.lastAt = _wall();
+        _netDbg.retx = (_netDbg.retx|0) + 1;
+        _netSend(pkt);
+        if(n < 2 && typeof setTimeout === 'function') setTimeout(()=>rep(n+1), 100);
+    };
+    if(typeof setTimeout === 'function') setTimeout(()=>rep(1), 100);
+}
+// One liveness pass over the pending transition: re-send ~1/s, and judge the ONE deadline.
+// Only an unanswered 'go' kills -- the peer then never adopted the timeline we are already
+// playing on, which IS out of sync, and the fault is attributed to THIS sender's packet. A
+// pending 'req' never kills: its echo is normally instant, humans may legitimately sit on a
+// match-over screen forever, and a genuinely dead link is the silence detector's verdict.
+function _netTxTick(s){
+    const tx = s.tx; if(!tx) return false;
+    const now = _wall();
+    if(tx.pkt.t === 'go' && now - tx.since > RB_PERSIST_KILL_MS){
+        _netSigLog('! go unanswered ' + tx.tries + 'x');
+        _netSessionEnd('OUT OF SYNC - MATCH ENDED');
+        return true;
+    }
+    if(now - tx.lastAt >= 1000){ tx.lastAt = now; tx.tries++; _netDbg.retx = (_netDbg.retx|0) + 1; _netSend(tx.pkt); }
+    return false;
+}
+// An echo (a:1) came back: clear the pending slot it answers. Keyed on (t, epoch) -- an echo
+// of a SUPERSEDED transition (a late 'req' echo after the answering 'go' already cleared the
+// slot, or a previous epoch's stray) is ignorable, the pending one has its own retries. But a
+// KEY match with different content means the peer acknowledged a packet we never sent: the
+// two sides disagree about the transition itself, and playing on would run two different
+// timelines -- kill loudly, attributed here, instead of desyncing silently.
+function _netTxEcho(s, m){
+    const tx = s.tx; if(!tx) return;   // nothing pending: a duplicate echo of an already-cleared slot
+    const p = tx.pkt;
+    if(m.t !== p.t || (m.epoch|0) !== (p.epoch|0)) return;
+    for(const k in p){
+        if(k === 'pts') continue;   // transport stamp, not transition content
+        if(m[k] !== p[k]){
+            _netSigLog('! echo mismatch ' + p.t + '.' + k);
+            _netSessionEnd('OUT OF SYNC - MATCH ENDED');
+            return;
+        }
+    }
+    s.tx = null;   // acknowledged: the retries stop
 }
 // The begin moment of an epoch is CLOCK-driven; the one-shot below is only the fast path to it.
 // A throttled or backgrounded tab can defer or drop that timer, and a client that never begins
@@ -344,35 +387,28 @@ function _netFireBegin(s){
 }
 // A tick packet authored on a different base than ours. One boundary's worth of this is NORMAL --
 // the two sides begin an epoch up to a lead apart -- so the fault is not the drop but its
-// DURATION, and it is timed rather than counted.
+// DURATION, and it is timed rather than counted. Pure DETECTOR: the repair is not here. A peer
+// still behind our line has not echoed our 'go', so the pending-transition retries are already
+// re-serving it (_netTxTick); a peer AHEAD of our line means our own begin is overdue, which
+// _netEpochRecover fires off the shared clock below.
 function _netEpochSplit(s, peerEp){
     _netDbg.epDrop = (_netDbg.epDrop|0) + 1;
     if(!s.epSplitAt) s.epSplitAt = _wall();
     s.epPeer = peerEp;
-    _netReshipStart(s, peerEp);   // a peer below our line missed the start: re-serve it
 }
 // Recovery from a persistent split, one pass per liveness tick:
 //   1. An overdue begin fires off the shared clock. The usual cause is our own one-shot never
 //      arriving, and that repair is entirely local -- no peer cooperation needed.
-//   2. Past NET_EPOCH_ASK_MS the peer is asked with 'epq'. This is the only way a JOINER can
-//      ask for anything: _netReshipStart is host-authored, so on its own it repairs exactly one
-//      of the four role/direction combinations.
-//   3. Past RB_PERSIST_KILL_MS the match is dead, on the same deadline as an unhealed desync.
+//   2. Past RB_PERSIST_KILL_MS the match is dead, on the same deadline as an unhealed desync.
 //      Two clients on separate timelines IS out of sync; ending silent-and-split is the bug.
+//      (The echo-ack ladder normally ends it sooner, attributed to the un-echoed 'go'.)
 function _netEpochRecover(s){
     if(!s || !s.game || !inGame || !s.epSplitAt) return false;
     if(s.beginFn && s.beginAt != null){
         const p = netPts();
         if(p != null && p >= s.beginAt){ _netFireBegin(s); return false; }
     }
-    const now = _wall();
-    const age = now - s.epSplitAt;
-    if(age > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return true; }
-    if(age > NET_EPOCH_ASK_MS && now - (s.epAskAt || 0) > NET_EPOCH_ASK_MS){
-        s.epAskAt = now;
-        _netSigLog('! epoch split (peer base ' + (s.epPeer|0) + ' vs ours ' + _netMyEpoch() + '): asking for repair');
-        _netSend({ t:'epq', ep:_netMyEpoch(), sep:(s.epoch|0) });
-    }
+    if(_wall() - s.epSplitAt > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return true; }
     return false;
 }
 // The epoch of OUR tick base. In worker-duel mode the base lives in the worker, so fall back to
@@ -396,17 +432,18 @@ function _netMyEpoch(){ return (typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_n
 // each level AND turns the level-up into a negotiated restart instead of a transmitted 'advance'
 // input -- so a level boundary can never slip outside the rollback window and split the two sims.
 async function _netRequestStart(s, reason){
-    // A level boundary in an ONGOING match is pure P2P now: the DataChannel is live and the
-    // joiner's clock is aligned to the host each level, so the host authors the next start PTS
-    // locally and ships it on the reliable 'rst' -- no /api/start.php round trip, no stale
+    // A boundary in an ONGOING match is pure P2P now: the DataChannel is live and the joiner's
+    // clock is aligned to the host each boundary, so the host authors the next start PTS locally
+    // and ships it on the retried-until-echoed 'go' -- no /api/start.php round trip, no stale
     // epoch-line 409, and it keeps working even with the sign-in server unreachable. The server
     // path below stays for the match-IDENTITY moments (first start, rematch), which register and
     // verify the pair's epoch line.
-    if(reason === 'level'){ _netStartLevelP2P(s); return; }
+    if(reason === 'level'){ _netOpenBoundary(s, reason); return; }
     if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
     // The contract: a fresh sync ALWAYS precedes a new start PTS. Not "a sync from a
-    // minute ago" -- start.php rejects a pts older than ~2s as stale. A mid-match re-anchor
-    // (level-up / rematch / respawn) bounds the sweep so the player is not held on the cover;
+    // minute ago" -- start.php rejects a pts older than ~2s as stale. A rematch (the one
+    // mid-match re-anchor still on this server path; a level routes P2P above and a respawn
+    // opens its boundary directly) bounds the sweep so the player is not held on the cover;
     // the first start keeps the full-quality sweep (see NET_LEVEL_SYNC_MS).
     await _netTimeSync(true, (reason === 'first' || !reason) ? undefined : NET_LEVEL_SYNC_MS);
     if(_netSess !== s || !s.game) return;
@@ -443,31 +480,36 @@ async function _netRequestStart(s, reason){
         _netSync = { ofs: d.now + _rtt/2 - _wall(), rtt: _rtt, at: Date.now() };
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
     _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
-    // Ship the shared start, then schedule tick 0. `theta` is the burst-agreed peer offset the host
-    // measured (0 when it did not burst); the joiner applies its half from the 'bth' we stamp here.
+    // Ship the shared start, then schedule tick 0. `theta` is the SHARED-clock residual the host's
+    // burst settled on (null when it starved or did not burst); the joiner applies its half from
+    // the 'bth' we stamp here -- a starved boundary ships NO bth, and both keep the prior clock.
     const shipAndSchedule = (theta) => {
         if(_netSess !== s || !s.game) return;
-        // 'sched' is the FIRST start and is refused while inGame (a stale one must not restart a
-        // running match). Every later start -- rematch, respawn -- happens WHILE in game, so it must
-        // ride 'rst' or the peer silently ignores it and only one client restarts.
-        if(s.role === 'host') _netShipStart(s, { t: (reason === 'first' || !reason) ? 'sched' : 'rst',
-                                         seed:s.seed, startPts:s.startPts, x10:s.x10, epoch:s.epoch|0,
-                                         lvl:0, bth:Math.round(theta || 0) });
-        // The HOST authors the begin moment; the joiner takes it from the sched/rst it receives --
-        // that packet re-anchors the joiner's clock to the shared midpoint (its half of `bth`) BEFORE
-        // it begins. A joiner that instead began off its OWN start request would skip that nudge: the
-        // sched's inGame gate then swallows `bth` and the first-start burst is only half-applied (the
-        // host moved its clock, the joiner did not). Deferring to the host packet is exactly how every
-        // LEVEL boundary already begins the joiner, so the first start now follows that one path too.
+        // The host ships the 'go' and RETRIES it until echoed. why 'match' is refused by a peer
+        // already inGame (a stale first-start must not restart a running match); 'rematch' happens
+        // WHILE in game and is not.
+        if(s.role === 'host'){
+            const g = { t:'go', why:(reason === 'rematch') ? 'rematch' : 'match',
+                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:1 };
+            if(theta != null) g.bth = Math.round(theta);
+            _netTxShip(s, g);
+        }
+        // The HOST authors the begin moment; the joiner takes it from the 'go' it receives -- that
+        // packet re-anchors the joiner's clock to the shared midpoint (its half of `bth`) BEFORE it
+        // begins. A joiner that instead began off its OWN start request would skip that nudge: the
+        // go's inGame gate then swallows `bth` and the first-start burst is only half-applied (the
+        // host moved its clock, the joiner did not). Deferring to the host packet is exactly how
+        // every LEVEL boundary already begins the joiner, so the first start follows that path too.
         if(s.role !== 'host') return;
         // start_pts may already be in the PAST when we asked late (the epoch key is what lets the
         // server answer us with the same moment anyway). Then wait is 0 and we start at once -- the
         // clock-driven tick immediately puts us on the right tick, the fast-forward the contract
-        // describes. No !inGame guard: a rematch happens WHILE in game.
+        // describes. The begin stays CLOCK-driven, never echo-gated: the retries run past it until
+        // the echo lands or the deadline kills. No !inGame guard: a rematch happens WHILE in game.
         _netArmBegin(s, s.startPts, () => {
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
+            s.lvl = 1;              // the level line restarts with the match (see _netStartNextLevel)
             beginOnlineDuel(s.seed, true);
-            _netSend({ t:'start' });
         });
     };
     // Every server-authored start -- the FIRST start and a rematch alike -- runs the boundary burst
@@ -477,26 +519,44 @@ async function _netRequestStart(s, reason){
     // its own independent server-sync offset -- the widest the clocks ever sit apart, right at level 1
     // where the snakes are closest and a dropped/late input is most likely to force a visible rollback.
     if(s.role === 'host') _netBurstThenStart(s, shipAndSchedule);
-    else shipAndSchedule(0);
+    else shipAndSchedule(null);
 }
-// Host-authored P2P level start: no server. The host runs a bilateral boundary BURST (both sides
-// measure the peer offset over ~150ms), nudges its own clock onto the shared midpoint, then picks
-// tick 0 = netPts()+LEAD on that clock and ships it reliably on 'rst' with the agreed offset as
-// 'bth' -- the joiner applies its own half from bth, so the single PTS denotes the same real
-// instant on both. LEAD covers the rst's transit and its reliable repeats. Host only: the joiner
-// never reaches here (it nudges with 'reqlvl', bursts on 'bsync', and waits for the rst).
-function _netStartLevelP2P(s){
+// Host-authored P2P boundary opener: no server. The host runs a bilateral boundary BURST (both
+// sides measure the raw peer offset over the burst window), nudges its own clock onto the shared
+// midpoint, then picks tick 0 = netPts()+LEAD on that clock and ships it on a retried-until-echoed
+// 'go' with the burst residual as 'bth' -- the joiner applies its own half from bth, so the single
+// PTS denotes the same real instant on both (a starved burst ships NO bth: both keep the prior
+// clock). LEAD covers the go's transit and its fast repeats (the one constant to raise if a future
+// TURN path runs longer one-way). Host only: the joiner never reaches here (it asks with 'req',
+// bursts when the host's 'bs' datagrams arrive, and waits for the go). `why` names the boundary
+// and rides the go so the joiner arms the matching begin (a rebuild -- or the resume's adopt-only
+// re-anchor).
+function _netOpenBoundary(s, why){
     if(_netSess !== s || !s.game || s.role !== 'host') return;
     if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); s.lvlPending = false; return; }
+    // A resume follows an outage, and an outage is exactly when a device's raw clock stands still
+    // (a parked page freezes performance.now) -- the raw offset the low-pass remembers may have
+    // jumped arbitrarily. Drop the memory: the first post-resume verdict applies unmodified.
+    if(why === 'resume') s.bsPrev = null;
     _netBurstThenStart(s, (theta)=>{
         if(_netSess !== s || !s.game){ s.lvlPending = false; return; }
-        const startPts = netPts() + NET_BURST_LEAD_MS;   // tick 0 of the new epoch, on the host's now-midpoint clock
+        // A REBUILD boundary (level/respawn) restarts the timeline: tick 0 is a fresh instant just
+        // ahead. A RESUME moves ONLY the anchor: pick the startPts that maps OUR CURRENT tick onto
+        // the burst-verified clock (tick 0 lands in the past, so nobody rewinds and the armed
+        // begin fires at once) -- the peer adopting the same number lands on the same mapping,
+        // and the clock steering absorbs the few-tick residual.
+        const startPts = (why === 'resume') ? Math.round(netPts() - simTick * TICK_MS)
+                                            : netPts() + NET_BURST_LEAD_MS;
         s.startPts = startPts;
         _netClockPush();            // anchor + startPts move together: the core must see both
-        _netShipStart(s, { t:'rst', seed:s.seed, startPts:startPts, x10:s.x10, epoch:s.epoch|0, lvl:1, bth:Math.round(theta) });
+        const g = { t:'go', why, seed:s.seed, startPts:startPts, epoch:s.epoch|0, lvl:(s.lvl|0) || 1 };
+        if(theta != null) g.bth = Math.round(theta);
+        _netTxShip(s, g);
         _netArmBegin(s, startPts, () => {
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
-            beginOnlineDuelLevel(true);
+            if(why === 'level') beginOnlineDuelLevel(true, s.lvl);
+            else if(why === 'respawn') beginOnlineDuelRespawn(true);
+            else if(why === 'resume') resumeOnlineDuel();
         });
     });
 }
@@ -508,29 +568,22 @@ function _netHandleMsg(txt){
     // Boundary clock-burst datagrams: handled BEFORE the pts future-gate below. Their whole point is
     // to measure a clock offset, so a stamp lands in our "future" exactly when there IS an offset --
     // the gate would drop the samples that matter most. They carry only NTP-style stamps and never
-    // touch the tick stream or the lag stats. 'bsync' is the host's trigger to open OUR burst so both
-    // sides measure over the same window; 'bs' is one measured datagram.
-    if(m.t === 'bsync'){
-        // The trigger is repeated (reliable control) and retried, so one attempt arrives many times.
-        // (epoch,n) keys it: a late repeat must not open a second run and wipe the samples the host
-        // is still collecting on.
-        if(_netSess && _netSess.role !== 'host'){
-            const id = (m.epoch|0) + ':' + (m.n|0);
-            if(_netSess.bsSyncId !== id){ _netSess.bsSyncId = id; _netBurstRun(_netSess); }
-        }
+    // touch the tick stream or the lag stats. The burst is its own trigger: a 'bs' arriving while we
+    // are not collecting and hold no usable theta opens OUR run, so the peer's redundant datagrams --
+    // any ONE of the six -- start the reply, with no separate one-shot trigger packet to lose. Open
+    // BEFORE folding, so the run's fresh-sample reset does not wipe this very datagram.
+    if(m.t === 'bs'){
+        const s = _netSess;
+        if(s && s.game && !s.bsRunning && !_netBurstTheta(s)) _netBurstRun(s);
+        _netBurstRecv(s, m);
         return;
     }
-    if(m.t === 'bs'){ _netBurstRecv(_netSess, m); return; }
-    // Epoch-split repair request. Deliberately NOT epoch-gated -- gating the repair on the very
-    // thing that is broken is what made the split permanent -- and answered in BOTH directions:
-    // if the asker is ahead of our base we run the begin we never got to, and if it is behind our
-    // line the host re-serves the start it missed. Either side may ask; only the host can re-serve.
-    if(m.t === 'epq'){
-        const s = _netSess;
-        if(s && s.game){
-            if((m.ep|0) > _netMyEpoch()) _netFireBegin(s);
-            _netReshipStart(s, m.ep|0);
-        }
+    // A transition echo (a:1): route it to the pending slot and stop -- an echoed 'go' must never
+    // run the go handler. Handled BEFORE the pts gate: an echo carries the ORIGINAL packet's stamp
+    // back verbatim (that is what "verbatim" buys: bit-identical comparison), so its pts is a round
+    // trip stale by construction and must feed neither the future-gate nor the one-way lag stats.
+    if(m.a === 1){
+        if(_netSess) _netTxEcho(_netSess, m);
         return;
     }
     // The stamp is CHECKED, not just logged. A peer cannot have sent from our
@@ -579,7 +632,7 @@ function _netHandleMsg(txt){
     // ticks from the previous epoch's timeline. Mapped onto the post-reset base they land far
     // in the "future" and _netPeerInput refuses them -- harmless now (a refusal never warns),
     // but still pure noise on every level transition. Drop a stale-epoch
-    // tick packet silently here; sched/rst/reqlvl carry and check their own epoch already.
+    // tick packet silently here; go/req carry and check their own epoch already.
     // Compared against _rbEpoch (the epoch of OUR tick base), not s.epoch: between a halt and
     // the scheduled start the session line is already bumped while the sim still ticks the old
     // timeline, and a packet from that window is only usable by a peer still on the SAME base.
@@ -592,38 +645,78 @@ function _netHandleMsg(txt){
         _netSess.epSplitAt = 0;   // a packet on our own base: the two tick streams are shared again
     }
     switch(m.t){
-        case 'sched':
-        case 'rst': {   // the match / rematch / level start moment, issued by the server, relayed by P0
+        case 'go': {   // the ONE timeline opener: match / rematch / level / respawn / resume, host-authored
             const s = _netSess;
             if(!s || s.role === 'host' || !s.game) break;
+            // ECHO FIRST, unconditionally, from this receive handler -- a delivery ack, not
+            // agreement. Duplicates (the sender's retries) re-echo too: dedup applies to the
+            // EFFECT below, never to the answer, or a lost first echo would strand the sender
+            // retrying a transition we already run. Refusals echo as well -- each refused case
+            // is one the sender can already live with (a stale 'match' against a running game
+            // dies of its own dedup on the sender; a validation failure ends the session loudly).
+            // a:1 leads so the copied fields keep their order -- the original pts stays last,
+            // where _netSend stamped it (the echo keeps it: it declares the ORIGINAL send moment).
+            _netSend(Object.assign({ a:1 }, m));
+            if(s.tx && s.tx.pkt.t === 'req'){ s.tx = null; }   // the go IS the answer to our pending ask: stop its retries
             const ep = (typeof m.epoch === 'number') ? m.epoch|0 : (s.epoch|0);
-            // Dedup the reliable-control repeats: the sender repeats a start 2-3x (neither
-            // transport guarantees delivery), so act on each epoch exactly once -- a second
-            // copy must not re-trigger beginOnlineDuel and reset a level already running.
-            if(s.ctlEpoch === ep) break;
-            if(m.t === 'sched' && inGame) break;
+            if(s.ctlEpoch === ep) break;   // a retry of a boundary already applied: the re-echo above was all it needed
+            if(m.why === 'match' && inGame) break;   // a stale first-start must not restart a running match
             // No shared clock, no match: starting on different timelines is exactly
             // the desync this architecture exists to make impossible. Validate BEFORE
             // consuming the epoch, so a malformed copy does not block a good repeat.
             if(typeof m.startPts !== 'number' || netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); break; }
             s.ctlEpoch = ep;
             s.seed = (m.seed>>>0) || s.seed;
-            if(m.x10 !== undefined) s.x10 = !!m.x10;
-            s.startPts = m.startPts;   // the epoch tick 0 is measured from: a rematch/level moves it
+            s.startPts = m.startPts;   // the epoch tick 0 is measured from: every boundary moves it
             s.epoch = ep;              // stay on the pair's epoch line
-            if(m.lvl) _lvlCover = true;
+            if(m.why === 'level') _lvlCover = true;
             // Nudge OUR clock half of the way onto the shared MIDPOINT BEFORE we read startPts, so
             // the single number lands on the same real instant here as on the host. `bth` is the
-            // peer offset the host measured in the boundary burst and shipped with the start; we
-            // apply the joiner's half (+bth/2) while the host already applied -bth/2, so neither
-            // takes the whole jump. The sim resets to tick 0 at EVERY start, so the clock step is
-            // invisible. bth 0/absent (a first start, or a starved/rejected burst) is a safe no-op
-            // that keeps the shared server sync, exactly as a cold start did before.
-            _netBurstApply(s, m.bth || 0);
-            _netArmBegin(s, m.startPts, () => { if(m.lvl) beginOnlineDuelLevel(false); else beginOnlineDuel(s.seed, false); });
+            // SHARED-clock residual the host's boundary burst settled on (its low-passed raw
+            // offset plus both sides' clock corrections); the host already applied -bth/2, we
+            // apply +bth/2, so neither takes the whole jump. A rebuild resets the sim to tick 0,
+            // so the clock step is invisible; a resume only shifts the tick target slightly and
+            // the clock steering absorbs it. An ABSENT bth is the host's on-wire confession of a
+            // starved burst: log the failure and keep the prior in-play clock, itself
+            // burst-verified at the previous boundary (bth 0 is an ordinary zero residual).
+            if(m.bth == null) _netSigLog('! BURST SYNC FAILED (host starved) -> prior clock');
+            else _netBurstApply(s, m.bth);
+            // This boundary's burst is spent: forget its samples, so the NEXT boundary's arriving
+            // 'bs' finds no usable theta and re-opens our run. Kept samples here would block that
+            // trigger and starve the host's next burst.
+            _netBurstReset(s);
+            // m.lvl carries the target level NUMBER (host-authored, >= 2 on a level go); it is the
+            // one rebuild input, so both sims build the identical (seed, level) board however
+            // their private counters drifted. `why` picks the rebuild; the begin stays CLOCK-
+            // driven (armed here, fired at startPts), never gated on our echo landing.
+            _netArmBegin(s, m.startPts, () => {
+                if(m.why === 'level') beginOnlineDuelLevel(false, m.lvl);
+                else if(m.why === 'respawn') beginOnlineDuelRespawn(false);
+                else if(m.why === 'resume') resumeOnlineDuel();
+                else beginOnlineDuel(s.seed, false);   // match | rematch
+            });
             break;
         }
-        case 'start': break;   // schedule confirmation; its PTS is already in the past
+        case 'req': {   // the ONE intent ask: a peer wants a boundary opened (level / rematch / resume)
+            const s = _netSess;
+            if(!s || !s.game) break;
+            // Echo first, from the receive handler, unconditionally -- the ask is acknowledged
+            // even when the effect below refuses or dedups it (see the go handler's rationale).
+            _netSend(Object.assign({ a:1 }, m));
+            if(m.why === 'level'){   // joiner asks P0 to open the next level; the epoch pins it to the boundary
+                if(s.role !== 'host') break;
+                if(typeof m.epoch !== 'number' || (m.epoch|0) === (s.epoch|0)) _netStartNextLevel(s);
+                // Behind our line: a joiner that missed the boundary we already opened. No action --
+                // that go is still pending in OUR tx slot and its retries are already re-serving it.
+            } else if(m.why === 'again'){   // match over, peer pressed PLAY AGAIN (either role sends it)
+                s.peerAgain = true; _netMaybeRestart(); _uiDirty = true;
+            } else if(m.why === 'resume'){   // the resync SENDER settled as the joiner (it healed the host): ask for the clock re-anchor
+                if(s.role !== 'host') break;
+                if(typeof m.epoch !== 'number' || (m.epoch|0) === (s.epoch|0)) _netRecoveryStart(s);
+                // Behind our line: a boundary is already open; its pending go re-serves the re-anchor.
+            }
+            break;
+        }
         case 'in': _netDbg.hbRx++;   // both ends apply the other's input
             if(_netSess){ if(_netWD()) _wDuelSend({ t:'peerPkt', m }); else _netPeerInput(m); }
             break;
@@ -635,17 +728,6 @@ function _netHandleMsg(txt){
                 else if(m.t === 'h') _rbCheckHash(m);
                 else if(m.t === 'st') _rbCheckState(m);
                 else _rbApplyResync(m);
-            }
-            break;
-        case 'again':
-            if(_netSess && _netSess.game){ _netSess.peerAgain = true; _netMaybeRestart(); _uiDirty = true; }
-            break;
-        case 'reqlvl':   // joiner asks P0 to open the next level; the epoch pins it to the boundary
-            if(_netSess && _netSess.game && _netSess.role === 'host'){
-                if(typeof m.epoch !== 'number' || (m.epoch|0) === (_netSess.epoch|0)) _netStartNextLevel(_netSess);
-                // Behind our line: not an ask for the NEXT boundary, but a joiner that missed the
-                // one we already opened, re-asking with the only epoch it has.
-                else _netReshipStart(_netSess, m.epoch|0);
             }
             break;
         case 'bye': _netSessionEnd('OPPONENT LEFT'); break;
@@ -722,11 +804,12 @@ function netGameActive(){ return !!(_netSess && _netSess.game); }
 // NOT authority -- purely "which snake is mine". Both clients run the same sim.
 function netHosting(){ return !!(_netSess && _netSess.game && _netSess.role === 'host'); }
 function netWaitingAgain(){ return !!(_netSess && _netSess.game && _netSess.myAgain); }
-// PLAY AGAIN online: both sides must agree; the restart then rides an rst message
-// carrying a fresh seed and a new start_pts, and both sides adopt the new epoch.
+// PLAY AGAIN online: both sides must agree; each press ships its own req{why:'again'}
+// (retried until echoed), and the restart then rides a go{why:'rematch'} carrying a
+// fresh seed and a new start_pts; both sides adopt the new epoch.
 function netAgain(){
     const s = _netSess; if(!s || !s.game) return;
-    s.myAgain = true; _netSend({ t:'again' }); _netMaybeRestart(); _uiDirty = true;
+    s.myAgain = true; _netTxShip(s, { t:'req', why:'again', epoch:(s.epoch|0) }); _netMaybeRestart(); _uiDirty = true;
 }
 function _netMaybeRestart(){
     const s = _netSess;
@@ -747,19 +830,72 @@ function _netMaybeRestart(){
 }
 // Advance to the next duel level online. EITHER player's OK press triggers it; the level
 // boundary re-negotiates a shared start_pts (like a rematch, but score/lives carry over and
-// each sim auto-advances its own level deterministically). Only P0 relays the server-issued
-// start, so a joiner press nudges the host with 'reqlvl'; P0 owns the epoch bump + request.
+// the host authors the target level on the go). Only P0 opens a boundary, so a joiner press
+// asks the host with req{why:'level'}; P0 owns the epoch bump + the go.
 function netRequestNextLevel(){
     const s = _netSess; if(!s || !s.game || !inGame) return;
     _lvlCover = true;
     if(s.role === 'host') _netStartNextLevel(s);
-    else _netSend({ t:'reqlvl', epoch:(s.epoch|0) });   // epoch pins the ask to THIS boundary
+    else _netTxShip(s, { t:'req', why:'level', epoch:(s.epoch|0) });   // epoch pins the ask to THIS boundary; retried until echoed (or superseded by the go itself)
+}
+// A duel death crossed DEATH_DUR (the sim emitted duelHalt and now holds in 'dying', see
+// _duelNetHold in sim.js): the respawn is a negotiated boundary like a level-up, so the pair
+// re-anchors on a fresh burst + start_pts instead of each sim rebuilding on its own clock.
+// Both sims cross deterministically, so BOTH clients call this; only the host opens the
+// boundary (go {why:'respawn'}), the joiner's sim simply keeps holding until that go begins
+// it. Duplicate halts (a rollback replay re-crossing the death) fold into the one-boundary
+// guard in _netStartRespawn.
+function netDuelHalt(){
+    const s = _netSess; if(!s || !s.game || !inGame) return;
+    if(s.role === 'host') _netStartRespawn(s);
+}
+function _netStartRespawn(s){
+    if(!s || !s.game || s.role !== 'host' || s.lvlPending) return;   // one start per boundary (duplicate halts land here)
+    s.lvlPending = true;
+    s.epoch = (s.epoch|0) + 1;   // a respawn is a HALT like any other: the epoch advances
+    // No _lvlCover: the held 'dying' frame is the natural cover while the boundary negotiates.
+    // s.lvl stays -- the go re-ships the CURRENT level; the respawn rebuild ignores it anyway.
+    _netOpenBoundary(s, 'respawn');
+}
+// A FULL resync burst settled (duel-core _rbRecovered -> here; armed only by a reconnect or a
+// peer detected a whole ring behind, never by the routine single-rs desync repair). The burst
+// healed the peer's STATE -- but the pair is still ticking on the anchor from before the
+// outage, carrying whatever clock drift the outage accumulated (a throttled background tab, a
+// reconnect over a different network path). Open a RESUME boundary: burst-verify the clocks
+// and move ONLY the anchor + epoch. No rebuild, no tick reset -- the sims never stopped, so
+// what they hold IS the state and stays. No state hash rides the resume go either: the 1Hz
+// comparator confirms the healed state within a second anyway, and a wrong verdict there
+// already has its own repair ladder. The resync SENDER is the settled side and can be EITHER
+// role (send authority is who-is-ahead); only the host authors boundaries, so a joiner settle
+// asks with req{why:'resume'} instead.
+function _netResyncSettled(){
+    const s = _netSess; if(!s || !s.game || !inGame) return;
+    if(s.tx) return;   // a transition already in flight is itself a (re-)anchoring boundary: let it land
+    // No clock verdict, nothing to re-anchor onto. Unlike a rebuild boundary -- which MUST have a
+    // shared timeline or the match cannot continue -- a skipped resume is safe: the pair keeps
+    // playing on the old anchor and the repair ladder carries on. Recovery is never lethal.
+    if(netPts() == null) return;
+    if(s.role === 'host') _netRecoveryStart(s);
+    else _netTxShip(s, { t:'req', why:'resume', epoch:(s.epoch|0) });
+}
+function _netRecoveryStart(s){
+    if(!s || !s.game || s.role !== 'host' || s.lvlPending || s.tx) return;   // one boundary at a time
+    if(netPts() == null) return;   // a clockless window refuses the resume instead of killing the match (see _netResyncSettled)
+    s.lvlPending = true;
+    s.epoch = (s.epoch|0) + 1;   // a recovery is a HALT like any other: the epoch advances
+    _netOpenBoundary(s, 'resume');
 }
 function _netStartNextLevel(s){
     if(!s || !s.game || s.role !== 'host' || s.lvlPending) return;   // one start per boundary
-    _lvlCover = true;   // host may arrive here from a joiner reqlvl (no local press): cover its board too
+    _lvlCover = true;   // host may arrive here from a joiner req{why:'level'} (no local press): cover its board too
     s.lvlPending = true;
     s.epoch = (s.epoch|0) + 1;   // a level boundary is a HALT: the epoch advances, exactly like a rematch
+    // The host owns the target level exactly like the epoch: authored HERE, shipped on the
+    // go, adopted by BOTH sims. The board is a pure function of (seed, level), so a level
+    // number that lived as a private per-client counter turned any miscounted begin into two
+    // DIFFERENT boards from one boundary. Clamp mirrors the sim's own endless-duel rule:
+    // past MAX_LEVELS every level re-runs the hardest board.
+    s.lvl = Math.min(((s.lvl|0) || 1) + 1, MAX_LEVELS);
     _netRequestStart(s, 'level');
 }
 // Local leave (quit dialog YES / duelOver NO): tell the peer, tear down silently.

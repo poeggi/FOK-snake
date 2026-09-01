@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.5.35';
+const APP_VERSION = 'v2.6.0';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -35,7 +35,16 @@ const DEATH_DUR = T(54), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge) and one or more pages, each a headline + body lines ('' = blank
 // gap line). Pages are flipped with LEFT/RIGHT; the newest goes first.
-const ANNOUNCEMENT = { id:'v2.4', pages:[
+const ANNOUNCEMENT = { id:'v2.6', pages:[
+    { headline:'DUELS, REFORGED', lines:[
+        'NEW IN v2.6:',
+        'Online games are snappier -',
+        'less lag, optimized latency',
+        'Rock-solid starts, levels,',
+        'respawns and rematches',
+        '',
+        'Dropped connection? The match',
+        'RESUMES instead of ending.' ] },
     { headline:'FRESH SINCE v2.0!', lines:[
         'NEW SINCE v2.0:',
         'Duel HEART: steal a life back',

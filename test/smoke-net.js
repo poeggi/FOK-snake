@@ -393,33 +393,35 @@ runTest('SMOKE-NET', `
     simTick=0; simNow=0;
     if(netTickTarget()<200) throw 'setup: the stale epoch should put the target ahead';
     const _newEpoch=netPts();   // capture: netPts() moves between calls
-    _netHandleMsg(JSON.stringify({t:'rst', seed:0xABC, startPts:_newEpoch, x10:false}));
+    _netHandleMsg(JSON.stringify({t:'go', why:'rematch', seed:0xABC, startPts:_newEpoch, epoch:1, lvl:1, bth:0}));
     if(_netSess.startPts!==_newEpoch) throw 'a rematch must MOVE the epoch, or the new round sprints to catch up';
     if(Math.abs(netTickTarget())>2) throw 'a fresh epoch must put the target at ~tick 0, got '+netTickTarget();
     _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
-    simTick=6000; simNow=simTick*TICK_MS;   // restore: the rst handler ran startDuel, which rewinds both
+    simTick=6000; simNow=simTick*TICK_MS;   // restore: the go handler ran startDuel, which rewinds both
     log('rematch epoch ok: a new start_pts moves tick zero with it');
 
-    // A rematch/level/respawn start happens WHILE in game, so it must not ride 'sched'
-    // -- that one is refused when inGame (a stale first-start must never restart a
-    // running match). Sending it there meant P0 restarted and P1 silently ignored the
-    // message: "only one client restarts".
+    // A first-start go (why 'match') is refused while inGame -- a stale first-start must
+    // never restart a running match. Sending a restart there meant P0 restarted and P1
+    // silently ignored the message: "only one client restarts". A rematch go IS honoured
+    // in game -- and the refusal must not consume the epoch, or the honoured boundary
+    // that follows on the same epoch would read as a dedup repeat.
     fakeSess('peer'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
     _netSess.startPts=netPts()-60000; phase='duelOver';
     const _e2=netPts();
-    _netHandleMsg(JSON.stringify({t:'sched', seed:0xB0B, startPts:_e2, x10:false, epoch:1}));
-    if(_netSess.startPts===_e2) throw 'setup: sched must still be refused while in game';
-    _netHandleMsg(JSON.stringify({t:'rst', seed:0xB0B, startPts:_e2, x10:false, epoch:1}));
-    if(_netSess.startPts!==_e2) throw 'rst must be honoured while in game, or only one client restarts';
-    if((_netSess.epoch|0)!==1) throw 'the peer must adopt the pair epoch from the start message';
+    _netHandleMsg(JSON.stringify({t:'go', why:'match', seed:0xB0B, startPts:_e2, epoch:1, lvl:1, bth:0}));
+    if(_netSess.startPts===_e2) throw 'setup: a why-match go must still be refused while in game';
+    _netHandleMsg(JSON.stringify({t:'go', why:'rematch', seed:0xB0B, startPts:_e2, epoch:1, lvl:1, bth:0}));
+    if(_netSess.startPts!==_e2) throw 'a rematch go must be honoured while in game, or only one client restarts';
+    if((_netSess.epoch|0)!==1) throw 'the peer must adopt the pair epoch from the go';
     _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
     simTick=6000; simNow=simTick*TICK_MS;
-    log('in-game restart ok: rides rst (sched is first-start only), epoch adopted');
+    log('in-game restart ok: rides go why:rematch (why:match is first-start only, refusal spends no epoch)');
     log('clock-driven ticking ok: tick follows the shared clock, none without a sync');
 
     // ---- ONLINE LEVEL-UP: a level boundary is a freshly negotiated start, like a rematch ----
-    // Joiner nudges P0 (epoch-pinned reqlvl); P0 owns the epoch bump + one start per boundary
-    // (lvlPending). rst+lvl carries score/lives to the next level; a plain rst is a full restart.
+    // Joiner nudges P0 (epoch-pinned req why:'level'); P0 owns the epoch bump + one start per
+    // boundary (lvlPending). A go why:'level' carries the target level and score/lives roll on;
+    // a go why:'rematch' is a full restart.
     const _oFetchL=globalThis.fetch; globalThis.fetch=()=>({});   // _netOk() must be TRUE or the host start no-ops
 
     // joiner press: raises the cover, nudges P0, does NOT start locally
@@ -429,57 +431,58 @@ runTest('SMOKE-NET', `
     if(!_lvlCover) throw 'the presser must raise the get-ready cover at once';
     if(_netSess.lvlPending) throw 'a joiner must not start the level itself';
     { const _rq=JSON.parse(sent[sent.length-1]);
-      if(_rq.t!=='reqlvl' || (_rq.epoch|0)!==2) throw 'joiner must nudge P0 with an epoch-pinned reqlvl'; }
+      if(_rq.t!=='req' || _rq.why!=='level' || (_rq.epoch|0)!==2) throw 'joiner must nudge P0 with an epoch-pinned req why:level'; }
 
-    // host: acts on a matching-epoch reqlvl, ignores a stale one, folds repeats into one start
+    // host: acts on a matching-epoch req, ignores a stale one, folds repeats into one start
     fakeSess('host'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
     _netSess.epoch=5; _netSess.lvlPending=false; _lvlCover=false;
-    _netHandleMsg(JSON.stringify({t:'reqlvl', epoch:4}));
-    if(_netSess.lvlPending||_lvlCover) throw 'a stale-epoch reqlvl must be ignored';
-    _netHandleMsg(JSON.stringify({t:'reqlvl', epoch:5}));
-    if(!_netSess.lvlPending) throw 'host must open the level on a matching-epoch reqlvl';
+    _netHandleMsg(JSON.stringify({t:'req', why:'level', epoch:4}));
+    if(_netSess.lvlPending||_lvlCover) throw 'a stale-epoch req must be ignored';
+    _netHandleMsg(JSON.stringify({t:'req', why:'level', epoch:5}));
+    if(!_netSess.lvlPending) throw 'host must open the level on a matching-epoch req';
     if((_netSess.epoch|0)!==6) throw 'a level boundary must bump the epoch like a rematch';
     if(!_lvlCover) throw 'the host cover must rise when it opens the level';
-    _netHandleMsg(JSON.stringify({t:'reqlvl', epoch:6}));   // repeat, same boundary
+    _netHandleMsg(JSON.stringify({t:'req', why:'level', epoch:6}));   // repeat, same boundary
     if((_netSess.epoch|0)!==6) throw 'lvlPending must fold a repeat start (no second epoch bump)';
 
-    // joiner receives RST+lvl: next level, score + lives carry over, lands on the get-ready
+    // joiner receives a level go: target level adopted, score + lives carry, lands on the get-ready
     fakeSess('peer'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
     simTick=0; simNow=0; beginOnlineDuel(0xBEEF, false); bars=[];
     for(let i=0;i<80;i++){ netTickPre(); update(); }
     level=1; players[0].score=777; players[0].lives=2; players[1].score=123; players[1].lives=3;
     _netSess.epoch=0; _netSess.ctlEpoch=-1;
-    _netHandleMsg(JSON.stringify({t:'rst', seed:0xBEEF, startPts:netPts(), x10:false, epoch:1, lvl:1}));
-    if(level!==2) throw 'rst+lvl must step to the next level, got '+level;
+    _netHandleMsg(JSON.stringify({t:'go', why:'level', seed:0xBEEF, startPts:netPts(), epoch:1, lvl:2, bth:0}));
+    if(level!==2) throw 'a level go must build the level it names, got '+level;
     if(players[0].score!==777||players[0].lives!==2) throw 'level-up must carry P0 score+lives';
     if(players[1].score!==123||players[1].lives!==3) throw 'level-up must carry P1 score+lives';
     if(phase!=='duelReady') throw 'level-up lands on the shared get-ready, got '+phase;
 
-    // a plain RST (no lvl) is still a FULL restart: level 1, score zeroed
+    // a rematch go is a FULL restart: level 1, score zeroed
     fakeSess('peer'); inGame=true; _netSync={ofs:0, rtt:1, at:Date.now()};
     simTick=0; simNow=0; beginOnlineDuel(0xBEEF, false); bars=[];
     for(let i=0;i<40;i++){ netTickPre(); update(); }
     level=3; players[0].score=999;
     _netSess.epoch=0; _netSess.ctlEpoch=-1;
-    _netHandleMsg(JSON.stringify({t:'rst', seed:0xBEEF, startPts:netPts(), x10:false, epoch:2}));
-    if(level!==1) throw 'a plain rst is a full restart: level resets to 1, got '+level;
+    _netHandleMsg(JSON.stringify({t:'go', why:'rematch', seed:0xBEEF, startPts:netPts(), epoch:2, lvl:1, bth:0}));
+    if(level!==1) throw 'a rematch go is a full restart: level resets to 1, got '+level;
     if(players[0].score!==0) throw 'a full restart must zero the score';
     globalThis.fetch=_oFetchL;
     _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
     simTick=6000; simNow=simTick*TICK_MS; _lvlCover=false;
-    log('online level-up ok: joiner nudges (epoch-pinned), host owns one start/boundary, cover raised, rst+lvl carries score/lives to the next level vs plain rst full restart');
+    log('online level-up ok: joiner nudges (epoch-pinned req), host owns one start/boundary, cover raised, level go carries score/lives vs rematch go full restart');
 
     // ---- PLAY AGAIN handshake (host restarts only when BOTH agreed) ----
     fakeSess('host'); sent.length=0;
     phase='duelOver'; duelWinner=0;
     netAgain();
-    if(!JSON.stringify(sent).includes('again')) throw 'netAgain did not tell the peer';
+    { const _ag=JSON.parse(sent[sent.length-1]);
+      if(_ag.t!=='req' || _ag.why!=='again') throw 'netAgain must ship req why:again to the peer'; }
     if(phase!=='duelOver') throw 'host must wait for the peer before restarting';
     if(!netWaitingAgain()) throw 'waiting state not exposed to the UI';
     // A rematch needs a FRESH server-issued start moment, exactly like the first
     // match: with no server reachable there is no shared tick zero, so it is refused
     // rather than started on two timelines that would drift apart.
-    _netHandleMsg(JSON.stringify({t:'again'}));
+    _netHandleMsg(JSON.stringify({t:'req', why:'again', epoch:0}));
     if(_netSess!==null) throw 'both agreed but no server: the rematch must be refused, not started unsynced';
     log('rematch handshake ok: agreement relayed, refused without a server-issued start');
 
@@ -558,7 +561,7 @@ runTest('SMOKE-NET', `
     // simulating different games. So there is no unsynced fallback: it refuses.
     if(netPts()!==null) throw 'netPts must be null before any sync';
     fakeSess('peer'); sent.length=0; inGame=false;
-    _netHandleMsg(JSON.stringify({t:'sched', seed:0xFEED, startPts:null}));
+    _netHandleMsg(JSON.stringify({t:'go', why:'match', seed:0xFEED, startPts:null, epoch:0, lvl:1, bth:0}));
     if(inGame) throw 'a start without a shared clock must be refused, not begun';
     if(_netSess!==null) throw 'refusing must end the attempt, not leave it half-open';
     fakeSess('peer'); sent.length=0; inGame=true;

@@ -139,14 +139,16 @@ const HOOKS = (myId) => `
     __ctlBegins = 0;
     beginOnlineDuel = ()=>{ __ctlBegins++; };   // count begins; probe the wire, not the duel setup
     // EVERY server-authored start -- the first start and a rematch alike -- runs a short paced
-    // clock-burst (bsync + a few 'bs') on timers before the host authors and ships its sched/rst.
+    // clock-burst (bilateral 'bs' datagrams) on timers before the host authors and ships its go.
     // Run those paced pings inline so the deferred start packet is on the wire when we drain, and
-    // answer each one with a zero-offset return: there is no peer in this test, and an unanswered
-    // burst is retried until the match ends (duel-sync.js owns that path). These tests are about
-    // what the start SENDS, so the burst has to converge.
+    // answer each one with a zero-offset return: there is no peer in this test, and a starved
+    // burst falls back to the prior clock (duel-sync.js owns that path). These tests are about
+    // what the start SENDS, so the burst has to converge: rts (the raw stamp the receiver folds)
+    // matches our own raw clock, sq 1 so the sample counts for timing (sq 0 is the pre-warm),
+    // and mr/mn report a converged zero-delta reverse direction.
     const realST = setTimeout, realPing = _netBurstPing;
     globalThis.setTimeout = (fn)=>{ fn(); return -1; };
-    _netBurstPing = (s)=>{ realPing(s); _netHandleMsg(JSON.stringify({ t:'bs', pts:netPts(), sq:0, mr:0, mn:NET_BURST_MIN })); };
+    _netBurstPing = (s)=>{ realPing(s); _netHandleMsg(JSON.stringify({ t:'bs', pts:netPts(), rts:netRawPts(), sq:1, mr:0, mn:NET_BURST_MIN })); };
     try { await _realReqStart(_netSess, reason); }
     finally { globalThis.setTimeout = realST; _netBurstPing = realPing; }
   };
@@ -156,31 +158,38 @@ const HOOKS = (myId) => `
   // (s.ctlEpoch), not the incidental inGame guard.
   globalThis.__ctlBegins = 0;
   globalThis.__ctlSetup = ()=>{
-    _netSess = _netMkSess('ffffffff', 'peer'); _netSess.game = true;   // a guest processes sched/rst
+    _netSess = _netMkSess('ffffffff', 'peer'); _netSess.game = true;   // a guest processes gos
+    _netSess.dc = { readyState:'open', send:(x)=>__wire.push(x), close(){} };   // echoes are observable
     _netSync = { ofs:0, rtt:1, at:Date.now() };
     beginOnlineDuel = ()=>{ __ctlBegins++; };
   };
-  // startPts just in the past -> the go() runs synchronously (no future wait); no m.pts,
+  // startPts just in the past -> the armed begin fires synchronously (no future wait); no m.pts,
   // so the receive future-gate is skipped.
-  globalThis.__deliverCtl = (t, epoch)=>{ _netHandleMsg(JSON.stringify({ t, seed:0xBEEF, startPts:netPts()-10, epoch })); };
+  globalThis.__deliverCtl = (why, epoch, lvl)=>{ _netHandleMsg(JSON.stringify({ t:'go', why, seed:0xBEEF,
+    startPts:netPts()-10, epoch, lvl:(lvl == null ? 1 : lvl|0), bth:0 })); };
   globalThis.__ctlBeginsN = ()=> __ctlBegins;
-  // A HOST that has already opened a boundary: it shipped the start for that epoch and moved on.
-  // ageMs backdates the ship so the in-flight grace (a boundary is briefly one-sided by design)
-  // is past and a peer still behind counts as one that never got it.
-  globalThis.__hostAfterStart = (epoch, ageMs)=>{
+  // A HOST that has already opened a boundary: it shipped the go for that epoch and moved on.
+  // The go sits unanswered in the pending-transition slot; __txAge backdates it (the in-flight
+  // grace is the retry ladder's own pacing), __txTick runs one liveness pass over it.
+  globalThis.__hostAfterStart = (epoch)=>{
     _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true;
     _netSess.dc = { readyState:'open', send:(x)=>__wire.push(x), close(){} };
     _netSync = { ofs:0, rtt:1, at:Date.now() };
     _netSess.epoch = epoch|0;
     _rbEpoch = epoch|0;   // we already BEGAN that level: our tick base carries the new epoch too
-    _netShipStart(_netSess, { t:'rst', seed:0xBEEF, startPts:netPts()-500, x10:false,
-                              epoch:epoch|0, lvl:1, bth:0 });
-    _netSess.lastStartAt -= (ageMs|0);
+    _netTxShip(_netSess, { t:'go', why:'level', seed:0xBEEF, startPts:netPts()-500,
+                           epoch:epoch|0, lvl:2, bth:0 });
     __wire.length = 0;   // the original ship is not what these tests are looking for
   };
   globalThis.__peerPkt = (t, ep)=>{ _netHandleMsg(JSON.stringify({ t, ep, tk:0, l:[] })); };
-  globalThis.__lastStartPts = ()=> _netSess.lastStart.startPts;
-  globalThis.__reshipReset  = ()=>{ _netSess.reshipAt = 0; };
+  globalThis.__shipReq = (why, epoch)=>{ _netTxShip(_netSess, { t:'req', why, epoch:epoch|0 }); };
+  globalThis.__lastStartPts = ()=> _netSess.tx ? _netSess.tx.pkt.startPts : null;
+  globalThis.__txPending = ()=> (_netSess && _netSess.tx) ? _netSess.tx.pkt.t : null;
+  globalThis.__txAge = (ms)=>{ if(_netSess.tx){ _netSess.tx.since -= ms; _netSess.tx.lastAt -= ms; } };
+  globalThis.__txResendNow = ()=>{ if(_netSess.tx) _netSess.tx.lastAt = 0; };
+  globalThis.__txTick = ()=> _netTxTick(_netSess);
+  globalThis.__epoch = ()=> _netSess ? _netSess.epoch|0 : null;
+  globalThis.__sessAlive = ()=> !!_netSess;
   // Post-suspend hard-snap probes: put the clock target gap ticks ahead of simTick.
   globalThis.__breakSetup = (gap)=>{
     _netSess = _netMkSess('ffffffff', 'host'); _netSess.game = true;
@@ -751,97 +760,174 @@ try {
     if(!repaired) throw new Error('no re-converge. A.fix=' + A.__rbDbg().fix + ' A.desync=' + A.__rbDbg().desync);
   });
 
-  // A restart that happens WHILE in game (rematch, level) must not be sent as 'sched':
-  // the peer refuses that one when inGame, so only the sender would restart. This tests
-  // what _netRequestStart SENDS -- the receiver was never the problem.
-  await acheck('an in-game restart is sent as rst, not the first-start sched', async () => {
+  // A restart that happens WHILE in game (rematch, level) must not ride why:'match': the
+  // peer refuses that one when inGame, so only the sender would restart. This tests what
+  // _netRequestStart SENDS -- the receiver was never the problem.
+  await acheck('an in-game restart ships go why:rematch, never the first-start why:match', async () => {
     const A = mk(A_ID);
     A.__duelStart(0xBEEF, 'host', 1000);
     A.__drain();
     await A.__reqStart('rematch', 1);
-    const types = A.__drain().map(x => JSON.parse(x).t);
-    if(types.includes('sched')) throw new Error('a rematch used sched: the peer ignores it while in game, so only one client restarts');
-    if(!types.includes('rst')) throw new Error('a rematch sent no restart at all: ' + JSON.stringify(types));
+    const gos = A.__drain().map(x => JSON.parse(x)).filter(p => p.t === 'go' && !p.a);
+    if(gos.some(g => g.why === 'match')) throw new Error('a rematch shipped why:match: the peer ignores it while in game, so only one client restarts');
+    if(!gos.some(g => g.why === 'rematch')) throw new Error('a rematch sent no go at all: ' + JSON.stringify(gos));
   });
 
-  await acheck('the FIRST start syncs the clock like any level (host bursts, ships sched+bth, begins once)', async () => {
+  await acheck('the FIRST start syncs the clock like any level (host bursts, ships go+bth, begins once)', async () => {
     const A = mk(A_ID);
     A.__duelStart(0xBEEF, 'host', 1000);
     A.__drain();
     await A.__reqStart('first', 0);
     const pkts = A.__drain().map(x => JSON.parse(x));
-    const types = pkts.map(p => p.t);
-    if(!types.includes('sched')) throw new Error('the first start must still be sched (refused while inGame): ' + JSON.stringify(types));
-    // The load-bearing assertion: the first start now opens the SAME bilateral clock burst every
+    const go = pkts.find(p => p.t === 'go' && !p.a);
+    if(!go || go.why !== 'match') throw new Error('the first start must ship go why:match (the one kind refused while inGame): ' + JSON.stringify(pkts.map(p => p.t)));
+    // The load-bearing assertion: the first start opens the SAME bilateral clock burst every
     // level boundary does, instead of being the one path that shipped on two independent server syncs.
-    if(!types.includes('bsync')) throw new Error('the first start must open the boundary burst (bsync), same as every level: ' + JSON.stringify(types));
-    const sched = pkts.find(p => p.t === 'sched');
-    if(!('bth' in sched)) throw new Error('the first-start sched must carry the burst offset bth (the joiner applies its half): ' + JSON.stringify(sched));
+    if(!pkts.some(p => p.t === 'bs')) throw new Error('the first start must open the boundary burst (bs datagrams), same as every level: ' + JSON.stringify(pkts.map(p => p.t)));
+    if(!('bth' in go)) throw new Error('the first-start go must carry the burst offset bth (the joiner applies its half): ' + JSON.stringify(go));
     if(A.__ctlBeginsN() !== 1) throw new Error('the host authors its own begin exactly once on the first start: ' + A.__ctlBeginsN());
   });
 
-  await acheck('the FIRST-start joiner defers its begin to the host sched (no self-start)', async () => {
+  await acheck('the FIRST-start joiner defers its begin to the host go (no self-start)', async () => {
     const B = mk(B_ID);
     B.__duelStart(0xBEEF, 'peer', 3000);
     B.__drain();
     await B.__reqStart(undefined, 0);   // the joiner's dc.onopen calls _netRequestStart with NO reason
-    // A joiner that self-began off its OWN request would skip the sched's bth nudge (the inGame gate
-    // swallows it) and only half-apply the burst. It must instead wait for the host's sched/rst.
-    if(B.__ctlBeginsN() !== 0) throw new Error('the joiner must NOT self-begin on the first start -- it defers to the host sched: ' + B.__ctlBeginsN());
-    const types = B.__drain().map(x => JSON.parse(x).t);
-    for(const t of ['sched', 'rst', 'start', 'bsync'])
-      if(types.includes(t)) throw new Error('the joiner authored a start packet (' + t + '); only the host authors: ' + JSON.stringify(types));
+    // A joiner that self-began off its OWN request would skip the go's bth nudge (the inGame gate
+    // swallows it) and only half-apply the burst. It must instead wait for the host's go.
+    if(B.__ctlBeginsN() !== 0) throw new Error('the joiner must NOT self-begin on the first start -- it defers to the host go: ' + B.__ctlBeginsN());
+    const types = B.__drain().map(x => JSON.parse(x)).filter(p => !p.a).map(p => p.t);
+    if(types.includes('go')) throw new Error('the joiner authored a go; only the host authors timeline origins: ' + JSON.stringify(types));
   });
 
-  // Control transitions (sched/rst) now carry no redundancy of their own AND are repeated
-  // 2-3x by the sender (neither transport guarantees delivery), so the receiver MUST act on
-  // each epoch exactly once. A second copy re-triggering beginOnlineDuel would reset a level
-  // already running -- the very hang/desync the redundancy is meant to prevent.
-  check('a repeated sched/rst is deduped by epoch (reliable-control repeats are idempotent)', () => {
+  // Transitions (go) carry no redundancy of their own AND are retried by the sender until
+  // echoed (neither transport guarantees delivery), so the receiver MUST act on each epoch
+  // exactly once. A second copy re-triggering beginOnlineDuel would reset a level already
+  // running -- the very hang/desync the retries are meant to prevent.
+  check('a repeated go is deduped by epoch (transition retries are idempotent)', () => {
     const B = mk(B_ID);
     B.__ctlSetup();
-    B.__deliverCtl('sched', 0);
-    if(B.__ctlBeginsN() !== 1) throw new Error('first sched did not start: ' + B.__ctlBeginsN());
-    B.__deliverCtl('sched', 0);                                   // a repeat of the SAME epoch
-    if(B.__ctlBeginsN() !== 1) throw new Error('a duplicate sched restarted the level: ' + B.__ctlBeginsN());
-    B.__deliverCtl('rst', 1);                                     // a genuine next-epoch start
-    if(B.__ctlBeginsN() !== 2) throw new Error('a new-epoch rst did not start: ' + B.__ctlBeginsN());
-    B.__deliverCtl('rst', 1); B.__deliverCtl('rst', 1);           // and ITS repeats
-    if(B.__ctlBeginsN() !== 2) throw new Error('a duplicate rst restarted a running level: ' + B.__ctlBeginsN());
+    B.__deliverCtl('match', 0);
+    if(B.__ctlBeginsN() !== 1) throw new Error('first go did not start: ' + B.__ctlBeginsN());
+    B.__deliverCtl('match', 0);                                   // a retry of the SAME epoch
+    if(B.__ctlBeginsN() !== 1) throw new Error('a duplicate go restarted the level: ' + B.__ctlBeginsN());
+    B.__deliverCtl('rematch', 1);                                 // a genuine next-epoch boundary
+    if(B.__ctlBeginsN() !== 2) throw new Error('a new-epoch go did not start: ' + B.__ctlBeginsN());
+    B.__deliverCtl('rematch', 1); B.__deliverCtl('rematch', 1);   // and ITS retries
+    if(B.__ctlBeginsN() !== 2) throw new Error('a duplicate go restarted a running level: ' + B.__ctlBeginsN());
   });
 
-  // A lost start is not a late boundary, it is a permanent split. The joiner's epoch has exactly
-  // ONE writer -- the sched/rst handler -- so a start that never lands leaves it on the old epoch
-  // for good: our gate refuses every tick packet it sends, its gate refuses every one of ours, and
-  // its OK press re-asks with the same stale number forever. Neither warning fires (packets flow,
-  // so silence never trips; the hash checks that would say OUT OF SYNC are what the gate drops),
-  // so both boards just stop with nothing on screen. The host can SEE the stale epoch on every
-  // packet, so it must re-serve the start rather than only drop.
-  check('a joiner stuck an epoch behind is re-served the start, not silently dropped', () => {
-    const A = mk(A_ID);
-    A.__hostAfterStart(1, 3000);
-    A.__peerPkt('in', 0);                       // the stuck joiner is still stamping the old epoch
-    const rs = A.__drain().map(x => JSON.parse(x)).filter(p => p.t === 'rst');
-    if(rs.length !== 1) throw new Error('a behind-epoch tick packet must re-serve the start, got ' + rs.length);
-    if(rs[0].epoch !== 1) throw new Error('the re-serve must carry OUR current epoch: ' + JSON.stringify(rs[0]));
-    if(rs[0].startPts !== A.__lastStartPts()) throw new Error('the re-serve must carry the ORIGINAL startPts -- a fresh one would put the joiner on a second, private timeline');
-    // Rate-limited: the trigger is the peer's own 60/s stream, not a one-shot.
-    for(let i = 0; i < 30; i++) A.__peerPkt('in', 0);
-    if(A.__drain().length !== 0) throw new Error('the re-serve must be rate-limited, not one per refused packet');
-    // The OK press path answers too: a reqlvl below our line is the same stuck joiner asking again.
-    A.__reshipReset();
-    A.__recv(JSON.stringify({ t:'reqlvl', epoch:0 }));
-    if(A.__drain().filter(x => JSON.parse(x).t === 'rst').length !== 1) throw new Error('a behind-epoch reqlvl must re-serve the start');
+  // The receiver's half of the delivery contract: every received transition is answered
+  // verbatim plus a:1 FROM THE RECEIVE HANDLER -- not from a timer or the render loop, so
+  // a backgrounded tab (rAF frozen, dc.onmessage alive) still answers. Duplicates re-echo:
+  // dedup applies to the effect, never to the answer, or a lost first echo would strand
+  // the sender retrying a boundary the receiver already runs.
+  check('a received go is echoed verbatim (a:1); a duplicate re-echoes, its effect stays deduped', () => {
+    const B = mk(B_ID);
+    B.__ctlSetup();
+    B.__drain();
+    B.__deliverCtl('match', 0);
+    let ech = B.__drain().map(x => JSON.parse(x)).filter(p => p.t === 'go' && p.a === 1);
+    if(ech.length !== 1) throw new Error('one go in, one echo out, got ' + ech.length);
+    if(ech[0].why !== 'match' || (ech[0].epoch|0) !== 0 || (ech[0].seed>>>0) !== 0xBEEF)
+      throw new Error('the echo must carry the original packet back verbatim: ' + JSON.stringify(ech[0]));
+    B.__deliverCtl('match', 0);
+    ech = B.__drain().map(x => JSON.parse(x)).filter(p => p.t === 'go' && p.a === 1);
+    if(ech.length !== 1) throw new Error('a duplicate go must re-echo (a lost first echo strands the sender), got ' + ech.length);
+    if(B.__ctlBeginsN() !== 1) throw new Error('the re-echo is answer-only, the effect stays deduped: begins=' + B.__ctlBeginsN());
   });
 
-  // The flip side: a boundary IS legitimately one-sided while it is in flight (we bump the epoch,
-  // burst, ship, and only then does the joiner adopt it). Packets from that window must not be
-  // read as a loss, or every normal level transition would re-ship.
-  check('a boundary still in flight does not re-serve (only a start that never landed does)', () => {
+  // The sender's half: a landed echo stops the retries. A STALE echo -- a different
+  // (t, epoch) key, e.g. the previous boundary's answer arriving late -- must NOT clear
+  // the pending slot. And a SAME-KEY echo whose content differs means the peer
+  // acknowledged a packet we never sent: two different truths for one boundary, killed
+  // loudly instead of desyncing silently.
+  check('an echo clears the pending go; a stale echo does not; a corrupted one kills', () => {
     const A = mk(A_ID);
-    A.__hostAfterStart(1, 0);   // shipped just now: the joiner has not had time to adopt it
+    A.__hostAfterStart(1);
+    if(A.__txPending() !== 'go') throw new Error('setup: the shipped go must be pending');
+    const sp = A.__lastStartPts();
+    A.__recv(JSON.stringify({ t:'go', a:1, why:'level', seed:0xBEEF, startPts:sp, epoch:0, lvl:2, bth:0 }));
+    if(A.__txPending() !== 'go') throw new Error('a stale-epoch echo must not clear the pending go');
+    A.__recv(JSON.stringify({ t:'go', a:1, why:'level', seed:0xBEEF, startPts:sp, epoch:1, lvl:2, bth:0 }));
+    if(A.__txPending() !== null) throw new Error('the matching echo must clear the pending go (retries stop)');
+    A.__hostAfterStart(2);
+    A.__recv(JSON.stringify({ t:'go', a:1, why:'level', seed:0xBEEF, startPts:12345, epoch:2, lvl:2, bth:0 }));
+    if(A.__sessAlive()) throw new Error('a same-key echo with different content must end the match loudly');
+  });
+
+  // An arriving go answers a pending ask: the go IS the boundary the req asked for, so
+  // the req's retries stop without ever seeing their own echo.
+  check('an arriving go supersedes the pending req (its retries stop)', () => {
+    const B = mk(B_ID);
+    B.__ctlSetup();
+    B.__shipReq('level', 0);
+    if(B.__txPending() !== 'req') throw new Error('setup: the req must be pending');
+    B.__deliverCtl('level', 1, 2);
+    if(B.__txPending() !== null) throw new Error('the go answers the ask: the pending req must be cleared');
+  });
+
+  // The ONE deadline: a go unanswered past RB_PERSIST_KILL_MS means the peer never adopted
+  // the timeline we are already playing on -- that IS out of sync, attributed to THIS
+  // sender's packet. A pending req never kills: humans may sit on a match-over screen
+  // forever, and a dead link is the silence detector's verdict, not this one's.
+  check('an unanswered go ends the match at the deadline; an unanswered req never does', () => {
+    const A = mk(A_ID);
+    A.__hostAfterStart(1);
+    A.__txAge(3500);
+    A.__txTick();
+    if(!A.__sessAlive()) throw new Error('inside the deadline the go just keeps retrying');
+    A.__txAge(1000);
+    A.__txTick();
+    if(A.__sessAlive()) throw new Error('a go unanswered past RB_PERSIST_KILL_MS must end the match');
+    const B = mk(B_ID);
+    B.__ctlSetup();
+    B.__shipReq('again', 3);
+    B.__txAge(10000);
+    B.__txTick();
+    if(!B.__sessAlive()) throw new Error('an unanswered req must never end the match');
+    if(B.__txPending() !== 'req') throw new Error('the unanswered req keeps retrying instead');
+  });
+
+  // A lost go is not a late boundary, it is a permanent split: the joiner's epoch has
+  // exactly ONE writer -- the go handler -- so a go that never lands leaves it behind for
+  // good. The repair is the pending-transition slot: the liveness pass re-sends the go
+  // ~1/s with the ORIGINAL startPts until it is echoed. A fresh startPts would put the
+  // joiner on a second, private timeline -- the retry must re-serve the same boundary,
+  // not author a new one.
+  check('an unanswered go is re-served with the ORIGINAL startPts, rate-limited', () => {
+    const A = mk(A_ID);
+    A.__hostAfterStart(1);
+    const sp = A.__lastStartPts();
+    A.__txResendNow();
+    A.__txTick();
+    const rs = A.__drain().map(x => JSON.parse(x)).filter(p => p.t === 'go' && !p.a);
+    if(rs.length !== 1) throw new Error('one due retry must re-send exactly one go, got ' + rs.length);
+    if(rs[0].epoch !== 1) throw new Error('the retry must carry OUR current epoch: ' + JSON.stringify(rs[0]));
+    if(rs[0].startPts !== sp) throw new Error('the retry must carry the ORIGINAL startPts -- a fresh one would put the joiner on a second, private timeline');
+    A.__txTick();   // immediately again: inside the 1/s window
+    if(A.__drain().filter(x => { const p = JSON.parse(x); return p.t === 'go' && !p.a; }).length !== 0)
+      throw new Error('the retry ladder is rate-limited, not one per liveness pass');
+    // The OK press path folds in too: a req below our line is the same stuck joiner asking
+    // again. It is echoed (delivery ack) but opens NO second boundary -- the pending go's
+    // retries are already re-serving the one it missed.
+    A.__recv(JSON.stringify({ t:'req', why:'level', epoch:0 }));
+    const out = A.__drain().map(x => JSON.parse(x));
+    if(!out.some(p => p.t === 'req' && p.a === 1)) throw new Error('a behind-line ask must still be echoed (delivery ack)');
+    if(out.some(p => p.t === 'go' && !p.a)) throw new Error('a behind-line ask must not open a second boundary -- the pending go already re-serves it');
+    if(A.__epoch() !== 1) throw new Error('a behind-line ask must not bump the epoch');
+  });
+
+  // The flip side: a boundary IS legitimately one-sided while it is in flight (we bump the
+  // epoch, burst, ship, and only then does the joiner adopt it). A behind-epoch tick
+  // packet is the pure split DETECTOR; the repair lives in the pending go's retry ladder,
+  // which has its own pacing -- a fresh ship must not re-send on the next liveness pass.
+  check('a boundary still in flight does not re-send (the retry ladder is not due yet)', () => {
+    const A = mk(A_ID);
+    A.__hostAfterStart(1);   // shipped just now: the joiner has not had time to adopt it
     for(let i = 0; i < 30; i++) A.__peerPkt('in', 0);
-    if(A.__drain().length !== 0) throw new Error('a start still in flight must not be re-served');
+    A.__txTick();
+    if(A.__drain().length !== 0) throw new Error('a go still in flight must not be re-sent');
   });
 
   // A sim frozen >600 ticks (~10s) behind the shared clock can never catch up, and the peer heard

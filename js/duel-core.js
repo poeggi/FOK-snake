@@ -105,7 +105,7 @@ var _netInFlush = 0;
 // earliest tick that needs rewinding here; netTickPre does ONE rollback per tick covering
 // them all, so the expensive op is capped at the tick rate no matter the packet rate.
 var _rbRewindTo = Infinity;
-function _rbDbgFresh(){ return { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, hashLost:0, lost:0, live:0, fix:0, stbig:0, desyncAt:'' }; }
+function _rbDbgFresh(){ return { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, hashLost:0, lost:0, live:0, fix:0, desyncAt:'' }; }
 var _rbDbg = _rbDbgFresh();
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
 // and it ticks through the menus. So two clients enter a duel with wildly different
@@ -148,6 +148,7 @@ function _rbReset(){
     _netInRepeat = 0;
     _netInFlush = 0;
     _rbResyncSend = 0;
+    _rbResyncFull = false;
     _rbRewindTo = Infinity;
     _rbBadSince = 0;
     _netLagN = [];   // a new match is a new path: do not average across the old one
@@ -155,6 +156,11 @@ function _rbReset(){
     _rbEpoch = (typeof netEpoch === 'function') ? netEpoch() : 0;
     _rbDbg = _rbDbgFresh();
 }
+// RESUME boundary (go why:'resume'): the epoch line moves but the TIMELINE does not -- the
+// sims never stopped, so the base, ring, log and sent-window all keep their meaning. Adopt
+// only the epoch stamp/gate. A _rbReset here would instead rebase wire ticks mid-flight and
+// orphan every packet the peer already has in the air.
+function _rbAdoptEpoch(){ if(typeof netEpoch === 'function') _rbEpoch = netEpoch(); }
 // Two identical sims fed identical inputs produce identical state, so a hash that
 // disagrees IS the divergence -- and, with no state on the wire to fake, it is also
 // the only tamper signal a cheat could raise. FNV-1a over the snapshot: simSnapshot
@@ -187,7 +193,7 @@ function _rbReset(){
 // of any match always share one list.
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
     'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
-    '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner','_duelX10',
+    '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner',
     '_speedRound','_rngState'];
 // Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
 // duel tick still touches (_barsV is the bars change-ticker the renderer watches;
@@ -204,7 +210,7 @@ function _rbDuelSnap(){
     return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue, _gAt,
              phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
              powerPellet, powerPelletAt, _powerMode, _powerModeAt, heart, heartAt, _barMoveTick,
-             players, duelWinner, _duelX10, _speedRound, _rngState };
+             players, duelWinner, _speedRound, _rngState };
 }
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
@@ -373,13 +379,10 @@ function _rbSendState(t, sn){
     const o = Object.assign({ t:'st', tk:_rbToWire(t), i:mi, gd:sn.gemsDone|0, gem:sn.gem, rng:sn._rngState,
                 pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:sn._powerMode, pma:sn._powerModeAt,
                 hb:sn.heart, hba:sn.heartAt }, _rbPackPlayer(me));
-    const pts = netPts();
-    if(pts != null) o.pts = pts;   // stamped HERE so the size check sees the final packet and the string can be reused
-    // A very long snake can push the state past the one-datagram cap; skip it this second
-    // rather than fragment -- the hash still flags the divergence, recovery just lands later.
-    const j = JSON.stringify(o);
-    if(j.length > NET_PKT_MAX){ _rbDbg.stbig = (_rbDbg.stbig|0) + 1; return; }
-    _netSend(o, j);
+    // A very long snake can push the state past the one-datagram cap; _netSend enforces that
+    // budget universally and DROPS the oversize packet rather than fragment -- the hash still
+    // flags the divergence, recovery just lands on a later, shorter state.
+    _netSend(o);
 }
 // A snake cannot exceed the board (COLS*ROWS cells = 2 ints each); a peer claiming more
 // is malformed/hostile -- reject rather than adopt a giant array the sim then clones and
@@ -405,11 +408,19 @@ function _rbCheckState(m){
 // level/bars/phase). Sent in a small burst because the channel is unreliable and this can fragment.
 const RB_RESYNC_BURST = 4;
 var _rbResyncSend = 0;       // full-resync sends still owed (whoever is ahead of a frozen peer)
+// TRUE while the owed sends are a FULL outage burst (a reconnect, or a peer detected a whole
+// ring behind) rather than the routine single-rs desync repair. Only a full burst finishing
+// fires the recovery hook (_rbRecovered below): the outage healed the peer's STATE, but the
+// pair still ticks on the pre-outage clock anchor, so the net layer answers with a RESUME
+// boundary (fresh burst + anchor + epoch, no rebuild). A one-packet repair must NOT open a
+// boundary every time a hash disagrees -- that would be a re-anchor storm under jitter.
+var _rbResyncFull = false;
+function _rbArmFullResync(){ _rbResyncSend = RB_RESYNC_BURST; _rbResyncFull = true; }
 // A peer packet stamped a full RB_DEPTH behind our sim can only mean the peer FROZE (backgrounded)
 // while we ran on: arm an authoritative resync burst so it can catch its tick base forward. Gated
 // on _rbRing so we only offer to heal once we actually have a frontier to send.
 function _rbNoteBehindPeer(peerTk){
-    if(peerTk <= simTick - RB_DEPTH && _rbRing.length) _rbResyncSend = RB_RESYNC_BURST;
+    if(peerTk <= simTick - RB_DEPTH && _rbRing.length) _rbArmFullResync();
 }
 function _rbPackPlayer(p){
     const s = []; for(const c of p.snake) s.push(c.x, c.y);
@@ -436,7 +447,7 @@ function _rbFullState(sn, tk){
         bars:sn.bars.map(b => [b.x, b.y, (b.fragile?1:0)|(b.paired?2:0), b.pairEnd?b.pairEnd.x:-1, b.pairEnd?b.pairEnd.y:-1, b.gd==null?-1:b.gd|0, b.gdUntil|0]),
         gat:sn._gAt|0,   // hashed: without it the "full" state was not byte-identical
         gp:sn.gPer, gdue:sn._gDue, pha:sn.phaseAt, spa:sn.spawnAt, ldw:!!sn.levelDoneWaiting,
-        rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, x10:!!sn._duelX10,
+        rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner,
         pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
         hb:sn.heart, hba:sn.heartAt,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
@@ -465,7 +476,7 @@ function _rbApplyResync(m){
     snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; } return b; });
     snap._gAt = m.gat|0;
     snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
-    snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._duelX10 = !!m.x10;
+    snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
     _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is the host's to author (both branches adopt it)
@@ -491,7 +502,7 @@ function _rbApplyResync(m){
         snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;
         simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
         _rbStateQ = []; _rbHashQ = [];
-        _rbResyncSend = 0;
+        _rbResyncSend = 0; _rbResyncFull = false;   // adopting a catch-up cancels our own owed burst: a stale full-flag must not fire a later bogus recovery
         _rbDbg.fix = (_rbDbg.fix|0) + 1;
         _netSigLog('~ RESYNC-CATCHUP @' + T);
         return;
@@ -533,7 +544,7 @@ function _rbApplyResync(m){
         _rbSendState(anchor, simSnapshot());
     }
     _rbStateQ = []; _rbHashQ = [];
-    _rbResyncSend = 0;
+    _rbResyncSend = 0; _rbResyncFull = false;   // adopting a resync cancels our own owed sends (and any stale full-flag with them)
     _rbDbg.fix = (_rbDbg.fix|0) + 1;   // a repair landing is HEALING, not a connection event
     _netSigLog('~ RESYNC @' + T);
 }
@@ -727,6 +738,15 @@ function netTickPre(){
         const full = _rbFullState(last.snap, last.tk);   // stamp the ring entry's OWN tick
         if(full) _netSend(full);
         _rbResyncSend--;
+        // A FULL burst settling means the outage is over: the peer holds our frontier, but the
+        // pair is still anchored on the pre-outage clock. Hand the moment to the net layer,
+        // which opens a RESUME boundary (burst + anchor + epoch, no rebuild). Home-installed
+        // hook, like _rbPostRollback: the main-thread home calls _netResyncSettled directly
+        // (game.js), the worker home crosses the seam as a 'duelRecovered' duel event.
+        if(_rbResyncSend === 0 && _rbResyncFull){
+            _rbResyncFull = false;
+            if(typeof _rbRecovered === 'function') _rbRecovered();
+        }
     }
 }
 // Send side of the tick, called immediately AFTER update(). boost/boostend arm at the END of

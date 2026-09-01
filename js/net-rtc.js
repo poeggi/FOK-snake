@@ -75,11 +75,11 @@ function _netMkSess(peer, role){
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
              relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
              rc:0,   // offer GENERATION: bumped per re-offer, echoed by the answerer, checked on receive (a stale answer must not poison a fresh pc)
-             ctlEpoch:-1,   // last epoch we started via a control message: dedups the reliable-control repeats
+             ctlEpoch:-1,   // last epoch we started via a control message: dedups the transition retries
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
-             lastStart:null, lastStartAt:0, reshipAt:0,   // host: the start packet that opened the current epoch, when we shipped it, and when we last re-served it (see _netReshipStart)
+             tx:null,   // the ONE pending un-echoed transition ({pkt, since, lastAt, tries}; see _netTxShip)
              lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
-             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false, bsSyncId:'',   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress, the last bsync attempt we opened a burst for
+             bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
@@ -125,8 +125,7 @@ async function _netRtcOffer(peer, peerProfile){   // we invited / we are the qui
     try {
         const of = await pc.createOffer();
         await pc.setLocalDescription(of);
-        _netSess.x10 = !!cfg.x10;   // the host's rare-event scale rules the match
-        const payload = JSON.stringify({ sdp:pc.localDescription, seed:_netSess.seed, profile:_netProfile(), v:_swVersion, x10:_netSess.x10 });
+        const payload = JSON.stringify({ sdp:pc.localDescription, seed:_netSess.seed, profile:_netProfile(), v:_swVersion });
         _netHs.offerTo = peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
         _netSignal(peer, 'offer', payload);
         _netLb.msg = 'CONNECTING (P2P)...'; _uiDirty = true;
@@ -150,10 +149,9 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     _netSess.peerProfile = _netClampProfile(d.profile);
     _netNameSeen(peer, _netSess.peerProfile.name);
     _netSess.seed = (d.seed>>>0) || 1;
-    _netSess.x10 = !!d.x10;   // the host's rare-event scale, pinned for the match
     _netHs.accepting = null;
     _netWire(pc.createDataChannel('fok', NET_DC_OPTS));   // pre-negotiated: open our own end at the same id as the offerer
-    _netTimeSync();   // in parallel with the ICE handshake: synced by the time sched arrives
+    _netTimeSync();   // in parallel with the ICE handshake: synced by the time the go arrives
     try {
         await pc.setRemoteDescription(d.sdp);
         if(_netSess && _netSess.pc === pc){ _netSess.rdOk = true; _netIceFlush(_netSess); }
@@ -170,7 +168,7 @@ function _netWire(dc){
         if(s.reconnectAt){   // a rebuilt channel after a mid-game drop: SAME timeline, no re-start
             _netReconnectDone(s);
             _netMarkRecv(s);
-            if(netMyIndex() === 0){ if(_netWD()) _wDuelSend({ t:'duelResync' }); else _rbResyncSend = RB_RESYNC_BURST; }   // the drop diverged us: host ships a full resync
+            if(netMyIndex() === 0){ if(_netWD()) _wDuelSend({ t:'duelResync' }); else _rbArmFullResync(); }   // the drop diverged us: host ships a full resync (and a resume boundary when it settles)
             _duelMsg = 'RECONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
             return;
         }
@@ -191,41 +189,30 @@ function _netWire(dc){
     dc.onclose = () => { const s = _netSess; if(s && s.game && !s.relay && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end (!s.relay: DEPRECATED(relay))
 }
 // A message type that is a one-shot CONTROL transition (a phase change), as opposed to the
-// self-healing input/liveness stream. Control has no redundancy and the peer DEPENDS on it
-// -- a lost `rst` hangs the guest -- so both transports make it reliable: the relay retries
-// (_netRelayCtl), the DataChannel repeats (_netCtlRepeat). The receiver dedups by epoch
-// (rst/sched) or is idempotent (start/again/bye).
-function _netIsCtl(t){ return t === 'sched' || t === 'rst' || t === 'start' || t === 'again' || t === 'bye' || t === 'reqlvl' || t === 'bsync'; }
-// Repeat a pre-serialized control message twice more over the DataChannel, spaced, to
-// survive the unreliable channel's occasional drop without an ack protocol. Stops early if
-// the session or channel is gone. Same j (its original pts) each time -- a repeat is always
-// in the past, so the receiver's future-gate passes it.
-function _netCtlRepeat(s, j){
-    let n = 0;
-    const rep = () => {
-        if(++n > 2 || _netSess !== s || !s.game || !s.dc || s.dc.readyState !== 'open') return;
-        try{ s.dc.send(j); }catch(e){}
-        if(typeof setTimeout === 'function') setTimeout(rep, 100);
-    };
-    if(typeof setTimeout === 'function') setTimeout(rep, 100);
-}
-// `pre` (optional) is o already serialized -- callers that had to stringify anyway
-// (the st size check) pass it so the packet is not serialized twice.
-function _netSend(o, pre){
+// self-healing input/liveness stream. The wire knows exactly three: 'go' (the one timeline
+// opener), 'req' (the one intent ask) and 'bye' (best-effort farewell). go/req are ECHO-
+// ACKNOWLEDGED: the sender keeps the pending packet in s.tx and retries until the receiver
+// answers it back verbatim with a:1 (_netTxShip/_netTxEcho in net-session.js); the relay
+// transport additionally retries the raw send (_netRelayCtl). bye rides best-effort -- its
+// server-side signal twin is the reliable copy.
+function _netIsCtl(t){ return t === 'go' || t === 'req' || t === 'bye'; }
+// Every drop/divert decision runs FIRST; the time stamps are the FINAL act before serialize+send,
+// for every packet type alike. What sits between a stamp and the wire is pure one-way-delta error,
+// so the tail must be minimal AND constant -- a stamp taken before a variable amount of guard work
+// would turn that work's jitter into measured clock offset.
+function _netSend(o){
     const s = _netSess;
     if(!s) return;
-    const pts = netPts();
-    if(pts != null && o.pts === undefined){ o.pts = pts; pre = undefined; }   // API: every peer message carries the sender's PTS (added after pre was built: re-serialize)
     // Tick-stream packets are epoch-scoped (see the gate in _netHandleMsg): simTick and the
     // rollback tick-base reset at every level boundary, so stamp the epoch this copy was
     // authored under. The receiver drops a copy that crossed a boundary instead of mapping
-    // its pre-reset ticks onto the new timeline. None of these types ever carry `pre`.
+    // its pre-reset ticks onto the new timeline.
     if((o.t === 'in' || o.t === 'h' || o.t === 'st' || o.t === 'rs') && o.ep === undefined){
         // Stamp the epoch of the TICK BASE the ticks are measured on (_rbEpoch), not the live
         // session line: a halt bumps s.epoch while both sims keep ticking the old timeline until
         // the scheduled start, and a packet from that window stamped with the bumped epoch walks
         // through the receive gate onto a reset receiver -- whole-log refusals on every boundary.
-        o.ep = (typeof _rbEpoch === 'number') ? _rbEpoch|0 : (s.epoch|0); pre = undefined;
+        o.ep = (typeof _rbEpoch === 'number') ? _rbEpoch|0 : (s.epoch|0);
     }
     if(o.w){
         // The radio-warm ping only needs SOMETHING on the wire within the doze interval, so if
@@ -236,85 +223,120 @@ function _netSend(o, pre){
         if(s.relay || performance.now() - s.lastSent < (NET_WARM_EVERY - 1) * TICK_MS) return;   // s.relay: DEPRECATED(relay)
     }
     if(o.t === 'in' || o.t === 'pi') _netDbg.hbTx++;   // input-channel packets sent (incl. idle keepalives)
+    if(!s.relay && (!s.dc || s.dc.readyState !== 'open')) return;
+    // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
+    // queue them late. Rare one-shot control messages (go/req/bye) still queue --
+    // for those, late beats never (go/req are retried until echoed anyway) -- and
+    // 'bs' is deliberately not listed: a queued burst probe is rejected by its own
+    // min-filter, while a dropped one starves the boundary.
+    if(!s.relay && s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
+        _netDbg.congDrop = (_netDbg.congDrop|0) + 1;
+        if(!_netDbg.congAt || performance.now() - _netDbg.congAt > 1000){
+            _netDbg.congAt = performance.now();
+            _netSigLog('! send buffer congested ' + s.dc.bufferedAmount + 'B');
+        }
+        _uiDirty = true;
+        return;
+    }
+    // FINAL stamps, nothing but serialize+send past this point. pts is the NET clock (the
+    // corrected shared timeline) on EVERY packet -- stamped once: a copy that already carries one
+    // (a control retry, an echo) keeps it, honestly declaring the send moment of the ORIGINAL.
+    // rts is the RAW clock, burst-sync only, the very last field -- the one place raw time
+    // crosses the wire (see netRawPts), stamped in the same instant as pts so their difference
+    // IS this sender's current clock correction.
+    const pts = netPts();
+    if(pts != null && o.pts === undefined) o.pts = pts;   // API: every peer message carries the sender's PTS
+    if(o.t === 'bs' && o.rts === undefined) o.rts = netRawPts();
     if(s.relay){ _netRelaySend(s, o); return; }   // DEPRECATED(relay): the transport fork -- drop this line with net-relay.js
-    if(!s.dc || s.dc.readyState !== 'open') return;
     try{
-        const j = pre !== undefined ? pre : JSON.stringify(o);
+        const j = JSON.stringify(o);
         // One datagram or nothing. Over the path MTU, SCTP fragments the message and
         // losing ANY fragment loses the whole thing -- on a channel that never
         // retransmits, a fragmented packet is a packet that mostly does not arrive. The
         // budget leaves room for IP+UDP+DTLS+SCTP headers (~70B) under a 1280 floor.
-        if(j.length > NET_PKT_MAX) _netSigLog('! packet ' + j.length + 'B > budget');
-        // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
-        // queue them late. Rare one-shot control messages (sched/rst/start/again/bye/reqlvl)
-        // still queue and are repeated below -- for those, late beats never.
-        if(s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
-            _netDbg.congDrop = (_netDbg.congDrop|0) + 1;
-            if(!_netDbg.congAt || performance.now() - _netDbg.congAt > 1000){
-                _netDbg.congAt = performance.now();
-                _netSigLog('! send buffer congested ' + s.dc.bufferedAmount + 'B');
-            }
-            _uiDirty = true;
+        // DROPPED, not sent-and-hoped: the oversize case is the 'st' state snapshot of a
+        // very long snake -- the hash still flags the divergence, recovery lands on a
+        // later, shorter packet (see _rbSendState).
+        if(j.length > NET_PKT_MAX){
+            _netDbg.stbig = (_netDbg.stbig|0) + 1;
+            _netSigLog('! packet ' + j.length + 'B > budget: dropped');
             return;
         }
         s.dc.send(j); s.lastSent = performance.now();
-        if(_netIsCtl(o.t)) _netCtlRepeat(s, j);   // unreliable channel: repeat the transition a couple of times
     }catch(e){}
 }
-// ---- boundary clock burst (symmetric midpoint; see NET_BURST_* above) ----
+// ---- boundary clock burst (raw measurement, host residual; see NET_BURST_* above) ----
 // Open a fresh burst: forget the previous boundary's samples so this one measures the clock as it
-// is NOW. Both sides call it when a boundary opens.
+// is NOW. Both sides call it when a boundary opens. s.bsPrev -- the host's low-pass memory --
+// deliberately SURVIVES: it holds the previous boundary's RAW offset, which stays comparable
+// across clock nudges; it dies with the session, and at a resume boundary (an outage freezes a
+// parked device's raw clock, so the remembered offset may have jumped arbitrarily).
 function _netBurstReset(s){
     s = s || _netSess; if(!s) return;
-    s.bsFwd = Infinity; s.bsRev = Infinity; s.bsNf = 0; s.bsRevN = 0; s.bsSeq = 0;
+    s.bsFwd = Infinity; s.bsRev = Infinity; s.bsNf = 0; s.bsRevN = 0; s.bsSeq = 0; s.bsPeerC = null;
 }
-// Fire one burst datagram: _netSend stamps our send-pts (o.pts); we add our best forward-min so
-// far (mr) and how many samples it is over (mn), so the peer learns the one direction it cannot
-// measure itself and can gate on our sample count.
+// Fire one burst datagram: _netSend stamps the net pts AND the raw rts as its final act; we add
+// our best raw forward-min so far (mr) and how many datagrams we have received (mn), so the peer
+// learns the one direction it cannot measure itself and can gate on our delivery count.
 function _netBurstPing(s){
     s = s || _netSess;
     if(!s || !s.game || netPts() == null) return;
     _netSend({ t:'bs', sq: s.bsSeq++, mr:(s.bsFwd === Infinity ? null : Math.round(s.bsFwd)), mn: s.bsNf });
 }
-// Fold one received burst datagram. m.pts = the peer's send-pts (OUR forward direction: recv-pts
-// minus send-pts = clock offset + this direction's transit); m.mr/m.mn = the peer's own
-// forward-min and its count (OUR reverse direction, which only the peer can measure). Keep the MIN
-// of each direction -- the least-delayed datagram is the least clock-offset-biased one.
+// Fold one received burst datagram. m.rts = the peer's RAW send stamp (OUR forward direction: raw
+// recv minus raw send = raw clock offset + this direction's transit); m.mr/m.mn = the peer's own
+// forward-min and its delivery count (OUR reverse direction, which only the peer can measure).
+// Keep the MIN of each direction -- the least-delayed datagram is the least biased one. sq 0 is
+// the PRE-WARM: its delivery counts, its timing is not trusted (the first packet pays the path's
+// setup costs -- radio spin-up, ICE consent, cold caches -- which would poison the min). And
+// m.pts - m.rts, both stamped in the same instant on the sender, IS the sender's current clock
+// correction: kept as s.bsPeerC for the residual conversion, no extra wire field needed. Raw
+// stamps span arbitrary device epochs, so no per-sample magnitude bound is possible -- finiteness
+// here plus the rttMin window at the verdict (where the epochs cancel) are the sanity.
 function _netBurstRecv(s, m){
     s = s || _netSess;
-    if(!s) return;
-    const r = netPts(); if(r == null || typeof m.pts !== 'number') return;
-    const d = r - m.pts;
-    if(d < s.bsFwd) s.bsFwd = d;
+    if(!s || typeof m.rts !== 'number' || !Number.isFinite(m.rts)) return;
+    const d = netRawPts() - m.rts;
+    if(typeof m.pts === 'number' && Number.isFinite(m.pts)) s.bsPeerC = m.pts - m.rts;
+    if((m.sq|0) > 0 && d < s.bsFwd) s.bsFwd = d;
     s.bsNf++;
-    if(typeof m.mr === 'number' && m.mr < s.bsRev) s.bsRev = m.mr;
+    if(typeof m.mr === 'number' && Number.isFinite(m.mr) && m.mr < s.bsRev) s.bsRev = m.mr;
     if(typeof m.mn === 'number' && m.mn > s.bsRevN) s.bsRevN = m.mn|0;
 }
-// The agreed peer clock offset from the two exchanged direction-mins, or null if the burst is
-// unusable (too few samples either way, or an impossible round trip). Both sides feed the SAME two
-// numbers in, so both get the IDENTICAL theta -- the invariant the symmetric nudge relies on.
+// The RAW peer clock offset from the two exchanged direction-mins, or null if the burst is
+// unusable (too few deliveries either way, no peer correction seen, or an impossible round trip).
+// Both sides fold the SAME two numbers, so both recover the identical raw offset; only the HOST
+// turns it into the applied residual (the joiner takes its half from the go's bth).
 function _netBurstTheta(s){
     s = s || _netSess; if(!s) return null;
-    if(s.bsNf < NET_BURST_MIN || s.bsRevN < NET_BURST_MIN) return null;   // starved (a dozing side): keep the old clock
-    if(s.bsFwd === Infinity || s.bsRev === Infinity) return null;
+    if(s.bsNf < NET_BURST_MIN || s.bsRevN < NET_BURST_MIN) return null;   // starved (loss/doze): keep the old clock
+    if(s.bsFwd === Infinity || s.bsRev === Infinity || s.bsPeerC == null) return null;
     const host = (s.role === 'host');
-    const mAB = host ? s.bsRev : s.bsFwd;   // A->B: the host measures it via the peer's mr; the joiner measures it directly
+    const mAB = host ? s.bsRev : s.bsFwd;   // A->B: the host reads it from the peer's mr; the joiner measures it directly
     const mBA = host ? s.bsFwd : s.bsRev;   // B->A: the reverse
-    const rttMin = mAB + mBA;               // the offsets cancel in the sum: this is 2x the min one-way latency
+    const rttMin = mAB + mBA;               // the raw offsets cancel in the sum: this is 2x the min one-way latency
     if(!(rttMin >= 0) || rttMin > 5000) return null;   // impossible/absurd: a one-sided doze inflated one direction
-    return { theta:(mBA - mAB) / 2, rttMin, host };   // theta > 0 => the host clock LEADS the joiner's
+    return { o:(mBA - mAB) / 2, rttMin, host };   // o > 0 => the host RAW clock leads the joiner's
 }
-// Nudge OUR clock half of theta onto the shared midpoint (slew-capped). The host pulls its clock
-// back, the joiner steps its clock up; with the same theta on both, they meet at the exact
-// midpoint (residual 0). `theta` may be passed EXPLICITLY -- the joiner applies the value the host
-// measured and shipped on the start packet (bth), so both use the IDENTICAL number with no
-// convergence race; omitted, it is computed locally from this side's own burst samples (a rejected
-// or unusable burst -> no-op). Returns the applied ms, 0 when nothing was applied.
+// Convert a RAW offset to the SHARED-clock residual: how far the two NET clocks sit apart right
+// now. Each side's netPts carries its own correction (_netSync.ofs), so the raw offset is off by
+// their difference; the peer's correction arrived for free as bsPeerC (pts - rts on any probe).
+// Role-mapped so host and joiner derive the same number from their mirrored views.
+function _netBurstResidual(s, o){
+    const own = _netSync.ofs || 0, peer = s.bsPeerC || 0;
+    return o + (s.role === 'host' ? own - peer : peer - own);
+}
+// Nudge OUR clock half of the residual onto the shared midpoint (slew-capped). The host pulls its
+// clock back, the joiner steps its clock up; with the same R on both, they meet at the exact
+// midpoint. `theta` (the residual, ms) may be passed EXPLICITLY -- the joiner applies the value
+// the host computed and shipped on the start packet (bth), so both use the IDENTICAL number with
+// no convergence race; omitted, it is derived locally from this side's own burst samples (a
+// rejected or unusable burst -> no-op). Returns the applied ms, 0 when nothing was applied.
 function _netBurstApply(s, theta){
     s = s || _netSess;
     if(!s || _netSync.ofs == null) return 0;
-    if(theta == null){ const t = _netBurstTheta(s); if(!t) return 0; theta = t.theta; }
-    if(!theta) return 0;
+    if(theta == null){ const t = _netBurstTheta(s); if(!t) return 0; theta = _netBurstResidual(s, t.o); }
+    if(!theta || !Number.isFinite(theta)) return 0;
     let d = (s.role === 'host' ? -1 : 1) * (theta / 2);
     if(d >  NET_BURST_SLEW_MS) d =  NET_BURST_SLEW_MS;   // symmetric clamp: clips to the same magnitude on both sides
     if(d < -NET_BURST_SLEW_MS) d = -NET_BURST_SLEW_MS;
@@ -322,14 +344,14 @@ function _netBurstApply(s, theta){
     _netClockPush();
     return d;
 }
-// Run one side's outgoing burst: fire NET_BURST_N stamped datagrams NET_BURST_GAP_MS (~one engine
-// tick) apart, then HOLD the collection window open up to NET_BURST_WAIT_MS longer -- waiting for the
-// peer's return datagrams to cross a full (possibly doze-inflated) round trip -- but finish the
-// instant both directions are already usable (early-out), so a healthy link is never slowed and a
-// slow one still gets its samples. `done` fires at finish. Timer-driven so the pings genuinely spread
-// over the wire and the min-filter has samples to pick from; with no timers available, or if we are
-// torn down mid-burst, it degrades to a single synchronous ping + immediate done (which the
-// accept-gate then rejects as starved -> the prior clock is kept).
+// Run one side's outgoing burst: CREATE the NET_BURST_N datagrams at absolute deadlines
+// NET_BURST_GAP_TICKS engine ticks apart from the run's t0 -- a late timer never pushes the later
+// deadlines back, so the probe schedule cannot stretch -- then HOLD the collection window open
+// until NET_BURST_WAIT_MS past the LAST deadline. That window IS the largest round trip the burst
+// can verify; the early-out closes it the instant both directions are usable, so a healthy link
+// finishes at ~its own RTT. `done` fires at finish. With no timers available, or torn down
+// mid-burst, it degrades to a single synchronous ping + immediate done (which the accept-gate
+// then rejects as starved -> the prior clock is kept).
 function _netBurstRun(s, done){
     s = s || _netSess;
     if(!s || !s.game){ if(done) done(); return; }
@@ -337,42 +359,61 @@ function _netBurstRun(s, done){
     _netBurstReset(s);
     s.bsRunning = true;
     if(typeof setTimeout !== 'function'){ _netBurstPing(s); s.bsRunning = false; if(done) done(); return; }
-    let sent = 0, waited = 0;
+    const gap = NET_BURST_GAP_TICKS * TICK_MS;
+    const t0 = performance.now();
+    const dEnd = t0 + (NET_BURST_N - 1) * gap + NET_BURST_WAIT_MS;
+    let sent = 0;
     const finish = ()=>{ if(_netSess === s) s.bsRunning = false; if(done && _netSess === s && s.game) done(); };
     const step = ()=>{
         if(_netSess !== s || !s.game){ s.bsRunning = false; return; }   // torn down mid-burst: abandon
-        if(sent < NET_BURST_N){ _netBurstPing(s); sent++; setTimeout(step, NET_BURST_GAP_MS); return; }
-        // Every ping sent: keep collecting until both directions have enough samples (theta usable),
-        // or the extra window runs out -- whichever comes first.
-        if(_netBurstTheta(s) || waited >= NET_BURST_WAIT_MS){ finish(); return; }
-        waited += NET_BURST_GAP_MS;
-        setTimeout(step, NET_BURST_GAP_MS);
+        if(sent < NET_BURST_N){
+            _netBurstPing(s); sent++;
+            setTimeout(step, Math.max(0, t0 + sent * gap - performance.now()));
+            return;
+        }
+        // Every ping sent: keep collecting until both directions have enough samples (a usable
+        // verdict), or the window's absolute deadline passes -- whichever comes first.
+        if(_netBurstTheta(s) || performance.now() >= dEnd){ finish(); return; }
+        setTimeout(step, gap);
     };
     step();
 }
-// Host side of a boundary: open the joiner's burst ('bsync'), run our own, then hand `then` the
-// agreed peer offset (theta). The caller applies OUR half, authors the
-// start PTS on the nudged clock, and ships theta on the start packet as `bth` for the joiner's half.
-// A starved window is retried, never accepted: theta 0 would open the level on unmeasured clocks
-// and carry the standing offset into it, silently. After NET_BURST_TRIES the peer is not answering
-// at all, so the match ends rather than plays on unsynced.
+// Host side of a boundary: run our burst and hand `then` the SHARED-clock residual (ms) it
+// settled on -- or null when it starved. The burst datagrams themselves are the trigger -- the
+// first 'bs' to reach the peer opens ITS run (see the 'bs' handler in net-session.js), so both
+// sides measure over the same window with no separate one-shot trigger packet that a single loss
+// could hang the boundary on. On success the raw offset is LOW-PASSED against the previous
+// boundary's (s.bsPrev; the first of a session applies unmodified) -- sound only because raw
+// offsets are stationary across clock nudges -- then converted to the residual, applied here
+// (-R/2), and handed out for the 'go' (bth = R, the joiner's +R/2). A starved window is retried
+// NET_BURST_TRIES times; if the peer still is not answering, then(null): the boundary proceeds
+// WITHOUT a bth -- both sides keep the prior in-play clock, itself burst-verified at the last
+// boundary -- and the liveness silence ladder (not the clock sync) judges a genuinely dead peer.
 function _netBurstThenStart(s, then){
     s = s || _netSess;
-    if(!s || !s.game || s.role !== 'host'){ if(then) then(0); return; }
+    if(!s || !s.game || s.role !== 'host'){ if(then) then(null); return; }
     let tries = 0;
     const attempt = ()=>{
         if(_netSess !== s || !s.game) return;
-        _netSend({ t:'bsync', epoch:(s.epoch|0), n:++tries });   // n dedups the reliable repeats on the joiner
+        // A reply-triggered run may already be collecting (our previous try's datagrams opened the
+        // peer's run, whose replies re-opened ours). WAIT for it rather than calling _netBurstRun --
+        // its already-running early-out would fire `done` at once and burn every retry in one tick.
+        if(s.bsRunning && typeof setTimeout === 'function'){ setTimeout(attempt, 50); return; }
         _netBurstRun(s, ()=>{
             if(_netSess !== s || !s.game) return;
             const bt = _netBurstTheta(s);
             if(!bt){
-                if(tries < NET_BURST_TRIES){ _netSigLog('! burst starved -> retry ' + tries); attempt(); return; }
-                _netSessionEnd('CLOCK SYNC FAILED - MATCH ENDED');
+                if(++tries < NET_BURST_TRIES){ _netSigLog('! burst starved -> retry ' + tries); attempt(); return; }
+                _netSigLog('! BURST SYNC FAILED f' + (s.bsNf|0) + '/' + NET_BURST_N + ' r' + (s.bsRevN|0) + '/' + NET_BURST_N + ' x' + tries);
+                then(null);
                 return;
             }
-            _netBurstApply(s, bt.theta);   // host applies -theta/2 here; the joiner applies +theta/2 from bth
-            then(bt.theta);
+            const est = (s.bsPrev == null) ? bt.o : (s.bsPrev + bt.o) / 2;
+            s.bsPrev = bt.o;
+            const R = _netBurstResidual(s, est);
+            if(!Number.isFinite(R)){ then(null); return; }
+            _netBurstApply(s, R);   // host applies -R/2 here; the joiner applies +R/2 from bth
+            then(R);
         });
     };
     attempt();
@@ -434,7 +475,8 @@ function _netLiveCheck(){
     const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
     if(inGame && _dsyFor > RB_PERSIST_KILL_MS){ _netSessionEnd('OUT OF SYNC - MATCH ENDED'); return; }
     if(_netBreakRecover(s)) return;   // sim frozen ~10s behind the shared clock: the match is over, stop here
-    if(_netEpochRecover(s)) return;   // the pair drifted onto separate epoch bases: fire an overdue begin, ask, or end
+    if(_netEpochRecover(s)) return;   // the pair drifted onto separate epoch bases: fire an overdue begin, or end
+    if(_netTxTick(s)) return;         // pending-transition retry (~1/s) + the unanswered-go deadline
     // The idle keepalive carries the recent input log, so it doubles as repair:
     // a lost LAST input would otherwise sit unfixed until the player pressed
     // something else. An empty log is just an alive check, as before.

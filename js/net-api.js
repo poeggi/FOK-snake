@@ -59,43 +59,59 @@ const NET_PTS_TOL = 250;
 // thing being watched for has to arrive faster than the watcher's patience -- and
 // in-game the 16-tick input heartbeat (~267ms) is the real cadence anyway.
 const NET_KEEPALIVE_MS = 300;
-// Time budget for the clock re-sync at a MID-MATCH re-anchor (level-up / rematch).
+// Time budget for the server clock re-sync at a REMATCH (the one mid-match boundary still
+// served by start.php; level, respawn and resume boundaries are pure P2P and use the burst).
 // The full-quality sweep is 5 samples at a 200ms spread (~800ms) -- too long to sit on the
-// RE-SYNCING cover every level. Bounded, _netTimeSync adopts the best min-RTT sample so far
+// cover between matches. Bounded, _netTimeSync adopts the best min-RTT sample so far
 // and start.php's `now` gives it a final min-RTT refinement, so the anchor stays clean while
-// the wait roughly halves. THE lever if a level-up still feels slow (lower) or drifts (raise).
+// the wait roughly halves. THE lever if a rematch still feels slow (lower) or drifts (raise).
 // The FIRST start -- before anyone is watching a clock -- keeps the unbudgeted full sweep.
 const NET_LEVEL_SYNC_MS = 400;
-// ---- P2P boundary clock BURST (symmetric midpoint, over the DataChannel) ----
+// ---- P2P boundary clock BURST (raw-clock measurement, host-computed residual, over the DataChannel) ----
 // During a duel the server clock sync is gated OFF (_netTimeSync refuses while playing: moving the
 // anchor moves the tick timeline under our feet). So the two peers keep their clocks in step
-// DIRECTLY, peer-to-peer -- but only at the one moment it matters: a level boundary. At EVERY
-// boundary (the first start included) the host triggers a short bilateral BURST ('bsync'): each
-// side fires NET_BURST_N stamped datagrams one engine tick apart (the same cadence as the regular
-// per-tick send), then holds the collection window open up to NET_BURST_WAIT_MS longer so the
-// peer's return datagrams have time to cross a full, possibly doze-inflated round trip -- finishing
-// the instant both directions already have enough samples, so a healthy link is never slowed. Each
-// side keeps the MINIMUM one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi
-// power-save doze), so the min is the least-biased sample and rejects exactly the doze spikes a single
-// snapshot would swallow. Every packet piggybacks the sender's own forward-min, so BOTH sides end
-// holding the same two direction-mins and compute the IDENTICAL peer clock offset (theta) from
-// them. The host applies half of theta to its OWN clock and TRANSMITS theta on the start packet
-// ('bth'); the joiner applies the other half onto ITS clock -- so the two meet at the shared
-// MIDPOINT, neither is the master, and neither takes the whole jump. That is what lets the host
-// author ONE start PTS on its (now midpoint) clock and ship it on 'rst'/'sched' with no server
-// round trip -- the joiner reads the same real instant from that number. Gated: a starved or
-// impossible burst is rejected (theta 0) and the previous in-play clock is kept; the applied nudge
-// is slew-capped so one bad estimate cannot teleport the timeline (it converges over the next
-// boundaries, inside the rollback window).
-const NET_BURST_N = 6;            // stamped datagrams each side fires in one boundary burst
-const NET_BURST_GAP_MS = 17;      // spacing: ~one engine tick (1/60s), the SAME cadence as the regular per-tick send -- not a bespoke fast timer a foreground iOS clamp could stretch
-const NET_BURST_WAIT_MS = 100;    // after the last ping, hold the collection window open this much longer for the peer's returns to cross a doze-inflated round trip; finish EARLY once both directions are usable
-const NET_BURST_MIN = 3;          // accept-gate: fewest usable samples per direction before we trust the estimate
+// DIRECTLY, peer-to-peer -- but only at the one moment it matters: a boundary. Before EVERY
+// timeline origin (match start, level advance, rematch, post-death respawn, recovery resume --
+// no 'go' ships without a fresh clock verdict) the host opens a short bilateral BURST: each side
+// fires NET_BURST_N 'bs' datagrams one engine tick apart, then holds the collection window open
+// until NET_BURST_WAIT_MS past its last send -- that window IS the largest round trip the burst
+// can verify -- finishing the instant both directions already have enough samples, so a healthy
+// link is never slowed. The burst is its OWN trigger: the first host datagram to reach the joiner
+// opens the joiner's run (any of the N is enough -- no one-shot trigger packet whose single loss
+// could hang the boundary).
+// The MEASUREMENT runs on the RAW clock (the 'rts' stamp: _wall() with no correction -- the only
+// place raw time ever crosses the wire). Raw deltas are stationary across boundaries: in a
+// zero-drift world every burst measures the SAME raw offset no matter how many nudges the shared
+// clock has absorbed, which is what makes the host's low-pass filter sound. Each side keeps the
+// MINIMUM raw one-way delta per direction -- delay only ever ADDS (queueing, jitter, WiFi
+// power-save doze), so the min is the least-biased sample -- skipping sq 0 for timing (it is the
+// path pre-warm; its delivery still counts). Every datagram piggybacks the sender's own
+// forward-min (mr) and its delivery count (mn), so both sides can gate on both directions; and
+// because pts and rts are stamped in the same instant, pts - rts on ANY datagram hands the
+// receiver the sender's current clock correction for free (s.bsPeerC).
+// The HOST computes the verdict: the raw offset from the two direction-mins, low-passed against
+// the previous boundary's raw offset (the first of a session applies unmodified), then converted
+// to the SHARED-clock residual R = raw + (host correction - joiner correction) -- how far the two
+// NET clocks actually sit apart right now. The host applies -R/2 (slew-capped) and TRANSMITS R on
+// the 'go' ('bth'); the joiner applies +R/2 -- the clocks meet at the shared MIDPOINT, neither is
+// the master, and neither takes the whole jump. Absolute path latency cancels out of the raw
+// offset entirely (only ASYMMETRY biases it) -- the scheme is deliberately insensitive to link
+// latency, TURN-relayed paths included. That is what lets the host author ONE start PTS on its
+// (now midpoint) clock and ship it on the 'go' with no server round trip -- the joiner reads the
+// same real instant from that number. Gated: a starved or impossible burst ships NO bth at all --
+// the joiner logs the failure and BOTH sides keep the prior in-play clock, itself burst-verified
+// at the last boundary; the applied nudge is slew-capped so one bad estimate cannot teleport the
+// timeline (it converges over the next boundaries, inside the rollback window).
+const NET_BURST_N = 6;            // datagrams each side fires in one boundary burst; sq 0 is the pre-warm
+const NET_BURST_GAP_TICKS = 1;    // probe CREATION cadence in engine ticks (x TICK_MS, absolute deadlines from the run's t0 -- a late timer never stretches the schedule); the send itself is never paced
+const NET_BURST_WAIT_MS = 250;    // window past the LAST send == the max round trip the burst can verify; the early-out closes a healthy link at ~its own RTT
+const NET_BURST_MIN = 5;          // accept-gate per direction: 5 of 6 delivered = at most ONE loss; anything worse means the channel is too unreliable to trust
 const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
 const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
-const NET_BURST_TRIES = 12;       // starved-burst retries before the match ends: no boundary may open on unmeasured clocks.
-                                  // 12 x ~250ms stays inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer
-                                  // ends the match through the normal liveness path rather than here.
+const NET_BURST_TRIES = 10;       // starved-burst retries before the boundary opens anyway on the PRIOR clock (itself
+                                  // burst-verified at the last boundary). 10 x ~340ms (probe span + WAIT window) stays
+                                  // inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer ends the
+                                  // match through the liveness path, never through the clock sync.
 // How long a pending invite (sent, received, or accepting) lingers before it goes stale.
 // The server drops undelivered signals at 30s; we give up a touch sooner so the UI resolves
 // to NO ANSWER / clears the dialog while the peer could, in theory, still collect it.
@@ -111,12 +127,6 @@ const RB_RECONNECT_MS = Math.round(64 * TICK_MS);     // ~1067ms (4 missed) -> s
 // the gap; unrecovered past this -> end. 4s: two heartbeats to notice, then a wide margin
 // for a p2p link rebuild -- a >=1.5s interruption must recover the match, not end it.
 const RB_PERSIST_KILL_MS = 4000;
-// How long two clients may exchange tick packets on DIFFERENT epoch bases before it counts as a
-// fault rather than a boundary in flight. One begin lands ~NET_BURST_LEAD_MS after the other at
-// worst, so a second is generous; past it the pair is simulating independent games and the split
-// has to be announced and repaired, because every other detector is blind to it (the hash packet
-// never reaches the comparator, and the link still carries traffic so nothing reads as silent).
-const NET_EPOCH_ASK_MS = 1000;
 // NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
 // enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a
@@ -284,6 +294,11 @@ function _wall(){
         : Date.now();
 }
 function netPts(){ return _netSync.ofs == null ? null : Math.round(_wall() + _netSync.ofs); }
+// RAW pts: this device's un-nudged monotonic clock -- netPts() WITHOUT the _netSync correction.
+// Read by exactly one consumer: the 'rts' stamp on burst-sync datagrams (_netSend), where a
+// stationary-across-nudges reading is the point (see the NET_BURST_* block). NEVER used by a
+// game mechanic -- the sim, the tick timeline and every other packet stamp run on netPts().
+function netRawPts(){ return Math.round(_wall()); }
 // MANDATED latency report (API: Latency measurement and reporting): the same
 // time.php samples yield the value -- at least three, an extreme FIRST sample
 // (cold connection: DNS/TCP/TLS) discarded, the rest averaged for stability.
@@ -413,9 +428,9 @@ function netDebugQuad(){
         if(!_netSess.relay && _pn && _pn.ip) Nx.push(_pn.ip);
         Nx.push(d.path || 'path ?');
         Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
-        // RESHIP n = starts the peer missed and we re-served; non-zero without it is a dead pair.
+        // RETX n = transition re-sends (go/req shipped again because no echo landed yet).
         Nm.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : '')
-            + (d.reship ? '  RESHIP ' + d.reship : ''));
+            + (d.retx ? '  RETX ' + d.retx : ''));
         // pts live = the peer's one-way pts-delta (how late their inputs land) -- the number
         // that predicts rollbacks, so it takes the Level-2 slot the wall clock used to hold.
         Tm.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
@@ -512,8 +527,6 @@ function netDuelLook(){
     _netLookC = { pp:_pp, host:_host, col:cfg.snakeColor|0, wi:cfg.wornItems, nrc:!!cfg.noRemoteCosmetics, val };
     return val;
 }
-// The rare-event scale an online match runs with (host's setting on both ends).
-function netDuelX10(){ return _netSess ? !!_netSess.x10 : !!cfg.x10; }
 // How far into the game track we already are, measured on the SHARED clock: the music
 // is anchored to the same start_pts as tick 0, so both clients place the loop at the
 // same point instead of each starting it at pos 0 whenever its own tab arrived. 0 =
@@ -532,7 +545,7 @@ function netMenuSeekSec(){ const p = netPts(); return p != null ? p/1000 : 0; }
 function netDebugInfo(){
     return { base:NET_BASE, offline:netOffline(), rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
              pts:simTick, peerTickOfs:_netDbg.peerTkOfs, rollbacks:_rbDbg.rb, resimTicks:_rbDbg.resim, maxRewindTicks:_rbDbg.maxRew,
-             inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, hashLost:_rbDbg.hashLost|0, fixes:_rbDbg.fix|0, reships:_netDbg.reship|0, epoch:_netSess?_netSess.epoch:null,
+             inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, hashLost:_rbDbg.hashLost|0, fixes:_rbDbg.fix|0, txRetries:_netDbg.retx|0, epoch:_netSess?_netSess.epoch:null,
              inRx:_netDbg.inRx, inTx:_netDbg.inTx, lastPeerInputs:_netDbg.inLog.slice(),
              peerLagMs:_netDbg.lag, peerPtsDeltaAvgMs:_netDbg.lagAvg, peerPtsDeltaMinMs:_netDbg.lagMin, peerPtsDeltaMaxMs:_netDbg.lagMax, peerPtsDeltaN:_netDbg.lagN, ptsSync:{ synced:_netSync.ofs!=null, offsetMs:_netSync.ofs, rttMs:_netSync.rtt, ageMs:_netSync.at?Date.now()-_netSync.at:null },
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,

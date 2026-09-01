@@ -10,12 +10,13 @@ runTest('SMOKE-DUEL', `
     simTick=1000; simNow=simTick*TICK_MS;
     simCommand({t:'startDuel', seed:0xD0E1});
     if(phase!=='duelReady'||!players||players.length!==2) throw 'startDuel did not set up two players';
-    // The rare-event scale is pinned per match, independent of the local setting.
-    if(_duelX10!==false) throw 'duel must default to the standard rare-event scale';
+    // x10 (debug rare-event odds) is NEVER honored in a duel: like difficulty, a duel
+    // always runs the normal ruleset -- whatever the local setting or the wire says.
+    // A contract, not state: no x10 flag exists in duel mode or on the wire.
     cfg.x10=true; if(_X10()!==1) throw 'a running duel must ignore the local cfg.x10';
+    simCommand({t:'startDuel', seed:0xD0E1, x10:true});   // a legacy peer's flag on the wire
+    if(_X10()!==1) throw 'a duel must never honor x10, however it arrives';
     cfg.x10=false;
-    simCommand({t:'startDuel', seed:0xD0E1, x10:true});
-    if(_duelX10!==true||_X10()!==10) throw 'startDuel must adopt the transported x10 flag';
     simCommand({t:'startDuel', seed:0xD0E1});
     bars=[];   // clear the seeded barricades so straight running is safely collision-free
     for(let i=0;i<400;i++) update();
@@ -127,7 +128,7 @@ runTest('SMOKE-DUEL', `
     // ---- SPEED ROUND: rolled from the SEEDED rng, so both clients agree by
     // construction -- nothing about it crosses the wire. Same seed in, same rounds out.
     function _rounds(seed){
-        startDuel(seed>>>0, false);
+        startDuel(seed>>>0);
         const out=[];
         for(let lv=1; lv<=LEVEL_CFG.length; lv++){ level=lv; _duelBeginLevel(); out.push({lv, sp:_speedRound, gPer}); }
         return out;
@@ -146,7 +147,7 @@ runTest('SMOKE-DUEL', `
     if(_hit===_tot) throw 'every round was a speed round: the roll is inverted';
     if(_hit/_tot < 0.02 || _hit/_tot > 0.10) throw 'speed round rate off 5%: '+(100*_hit/_tot).toFixed(1)+'%';
     // It rides in the snapshot: a rollback re-simulation must not silently drop it.
-    startDuel(0x77, false); level=5; _duelBeginLevel();
+    startDuel(0x77); level=5; _duelBeginLevel();
     const _snap=simSnapshot(), _was=_speedRound;
     _speedRound=!_was; simApply(_snap);
     if(_speedRound!==_was) throw 'speed round must survive a snapshot round trip (a rollback would lose it)';

@@ -208,7 +208,11 @@ function flushFxQ(){
 let _replaying = false;   // reconciliation replay: re-queue the deferred cosmetics only
 function drainSimEvents(){
     for(const e of simEvents){
-        if(_replaying && !_FX_DEFER.has(e.t)) continue;   // non-cosmetic side effects already ran live during prediction
+        // Non-cosmetic side effects already ran live during prediction -- EXCEPT duelHalt: a
+        // death introduced BY a rollback crosses DEATH_DUR inside the replay only, and
+        // swallowing that one-shot would strand both clients in 'dying' with no respawn
+        // boundary ever opened. Duplicates are folded by the host's one-boundary guard.
+        if(_replaying && !_FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
         switch(e.t){
             case 'sfx':      _sfxQ.push({ tk:simTick, name:e.name }); break;
             case 'bonus':
@@ -224,6 +228,10 @@ function drainSimEvents(){
             case 'blog':     // classic boost transition: replay-log it at its authored tick
                 if(typeof netLogBoost === 'function'){ if(e.k === 'bs') netLogBoost(e.d, e.tk); else netLogBoostEnd(e.tk); }
                 break;
+            case 'duelHalt':   // online duel death: the sim holds in 'dying'; the host opens the respawn boundary
+                if(typeof netDuelHalt === 'function') netDuelHalt(); break;
+            case 'duelRecovered':   // worker home: a full resync burst settled -- the net layer opens the resume boundary
+                if(typeof _netResyncSettled === 'function') _netResyncSettled(); break;
             case 'lvlreset': fireworks=[]; _crushEffects=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
             case 'showhud':  if(e.v && !inGame) break;   // a stale worker "show" (e.g. a late level-reset frame) must never raise the HUD on a menu; hides always honoured
                              showHUD(e.v); break;
@@ -945,7 +953,6 @@ function beginOnlineDuel(seed, hosting){
         // sends it again with the fresh seed/startPts.
         _wDuel = true;
         _worker.postMessage({ t:'duelStartNet', seed:seed>>>0,
-            x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10,
             my: hosting ? 0 : 1,
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
@@ -958,7 +965,7 @@ function beginOnlineDuel(seed, hosting){
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
-    _wsend({ t:'startDuel', seed:seed>>>0, x10:(typeof netDuelX10==='function')?netDuelX10():!!cfg.x10 });   // routes to the LOCAL sim on both ends
+    _wsend({ t:'startDuel', seed:seed>>>0, net:true });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
@@ -967,13 +974,43 @@ function beginOnlineDuel(seed, hosting){
 // continues -- score/lives carry over and only the level is rebuilt from (seed, level).
 // Both clients re-anchor to the freshly negotiated start_pts, so the level boundary is a
 // clean re-sync point rather than a transmitted 'advance' input that can slip the window.
-function beginOnlineDuelLevel(hosting){
+function beginOnlineDuelLevel(hosting, lvl){
+    // The target level, host-authored and carried on the go: the ONE rebuild input. The
+    // board is a pure function of (seed, level), so both sims consuming this number build
+    // identical barricades however their private counters drifted (a level go always
+    // carries the number, >= 2).
+    const lvn = lvl|0;
     _sfxQ.length = 0; _fxQ.length = 0;            // startDuelLevel rewinds simTick to 0: stale queue entries would never flush
     _pendingSnap = null; _pendingEvents.length = 0; _pendingDuel = null;
     _netDbg.dsyFor = 0;
     if(_useWorker()){
         _wDuel = true;
         _worker.postMessage({ t:'duelLevelNet',
+            my: hosting ? 0 : 1, lvl: lvn,
+            ofs: _netSync ? _netSync.ofs : null,
+            startPts: (_netSess && _netSess.startPts) || 0 });
+        // Main must mirror the worker's rebase (see beginOnlineDuel): the epoch
+        // stamp/gate read main's _rbEpoch.
+        if(typeof _rbReset === 'function') _rbReset();
+        return;
+    }
+    _fbAcc = 0;
+    _wsend({ t:'startDuelLevel', level: lvn });
+    if(typeof _rbReset === 'function') _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
+    _netDbg.psetN = 0; _netDbg.psetAt = 0;
+    _fbSeedPhase();
+}
+// Online post-death restart: the death held the sim in 'dying' (the duelHalt emit) while the
+// host negotiated a fresh start_pts; both clients rebuild the SAME level from the flowing rng
+// at tick 0. Mirrors beginOnlineDuelLevel minus the level adoption -- score/lives/level all
+// carry over inside the sim.
+function beginOnlineDuelRespawn(hosting){
+    _sfxQ.length = 0; _fxQ.length = 0;            // startDuelRespawn rewinds simTick to 0: stale queue entries would never flush
+    _pendingSnap = null; _pendingEvents.length = 0; _pendingDuel = null;
+    _netDbg.dsyFor = 0;
+    if(_useWorker()){
+        _wDuel = true;
+        _worker.postMessage({ t:'duelRespawnNet',
             my: hosting ? 0 : 1,
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
@@ -983,15 +1020,29 @@ function beginOnlineDuelLevel(hosting){
         return;
     }
     _fbAcc = 0;
-    _wsend({ t:'startDuelLevel' });
-    if(typeof _rbReset === 'function') _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
+    _wsend({ t:'startDuelRespawn' });
+    if(typeof _rbReset === 'function') _rbReset();   // startDuelRespawn rewound simTick; the rollback base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();
 }
+// Recovery re-anchor (go why:'resume'): the full resync burst already healed the STATE; this
+// boundary heals the CLOCK. Adopt only -- no rebuild, no tick reset, no queue clears: the sims
+// never stopped ticking and what they hold is the truth. The fresh anchor + startPts reach the
+// worker core over the ordinary 'duelClock' adopt inside _netClockPush (no reset there either);
+// _rbAdoptEpoch moves the epoch stamp/gate onto the new line WITHOUT touching the rollback base
+// or ring, so wire ticks keep their meaning straight across the boundary.
+function resumeOnlineDuel(){
+    if(typeof _rbAdoptEpoch === 'function') _rbAdoptEpoch();   // worker mode too: main's mirror is the stamp/gate authority (see beginOnlineDuel)
+    if(typeof _netClockPush === 'function') _netClockPush();   // unconditional: a starved burst (a go without bth) skips _netBurstApply's own push
+}
+// In-process home of duel-core's recovery hook: the settle happened here on main, so call the
+// net layer directly. The worker home posts the same moment as a 'duelRecovered' duel event
+// instead (sim-worker.js), which lands in the drainSimEvents case above.
+function _rbRecovered(){ if(typeof _netResyncSettled === 'function') _netResyncSettled(); }
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
 function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
-    _wsend({ t:'startDuel', seed:null, x10:!!cfg.x10 }); }
+    _wsend({ t:'startDuel', seed:null }); }
 function _initWorker(){
     // Headless harness has no Worker: _wsend falls back to simCommand and the tests drive
     // update() directly. In a browser a construction failure (file://, CSP) must not throw

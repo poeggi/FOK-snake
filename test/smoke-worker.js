@@ -37,7 +37,7 @@ try {
     const g = (expr) => vm.runInContext(expr, ctx);
 
     send({ t:'cfg', cfg:{ diff:1, turbo:true } });
-    send({ t:'duelStartNet', seed:0xBEEF, x10:false, my:0, ofs:-100, startPts:1784500000000 - 100 });
+    send({ t:'duelStartNet', seed:0xBEEF, my:0, ofs:-100, startPts:1784500000000 - 100 });
 
     // The phase is SET once at start, never per tick.
     if (g('_dcSnapN') !== 1) throw new Error('phase should be set exactly once at start, got pset ' + g('_dcSnapN'));
