@@ -21,8 +21,6 @@ const _hudLivesCtx=_hudLivesCv.getContext('2d');
 const _hudLives2Cv=document.getElementById('hv-lives2-cv');
 const _hudLives2Ctx=_hudLives2Cv.getContext('2d');
 const _hudAL=document.getElementById('hud-a-l'), _hudBL=document.getElementById('hud-b-l');
-const _hudCL=document.getElementById('hud-c-l'), _hudDL=document.getElementById('hud-d-l');
-const _hudGmax=document.getElementById('hv-gmax');
 let _hudCache={mode:'',a:-1,b:-1,c:-1,d:-1};
 function showHUD(v) { hudEl.classList.toggle('hidden',!v); }
 function _drawHearts(cv, c2, n, color) {

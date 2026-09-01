@@ -221,8 +221,6 @@ function drainSimEvents(){
             case 'crush':    _fxQ.push({ tk:simTick, e }); break;   // deferred 2 ticks, cancellable on rollback
             case 'mpause':   Snd.musicMute('pause'); break;
             case 'munpause': Snd.musicUnmute('pause'); break;
-            case 'mstop':    Snd.musicStop(); break;
-            case 'coin':     addFOKoins(e.n); break;
             case 'ach':      unlockAch(e.id); break;
             case 'bars':     renderBarsOffscreen(); break;
             case 'blog':     // classic boost transition: replay-log it at its authored tick
