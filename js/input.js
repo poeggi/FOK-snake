@@ -830,7 +830,11 @@ document.addEventListener('touchend',e=>{
             if(!_inPlay()&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
         }
         _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
-        if(_inPlay()){gameBoostEnd(0);}
+        // The release is NEVER phase-gated (engage is): finger-up is a device fact, and
+        // swallowing it during 'dying' left the arm slot held -- the snake respawned
+        // boosting with no finger down. Keyboard keyup and the dpad touchend already
+        // deliver unconditionally; out of play this disarms an empty slot, a no-op.
+        gameBoostEnd(0);
     }
     if(phase==='credits'){creditsSpeed=_creditsNormal;}
 },{passive:false});
@@ -838,7 +842,7 @@ document.addEventListener('touchend',e=>{
 // boost here so it cannot stick on with the finger already gone.
 document.addEventListener('touchcancel',e=>{
     if(!_swipeBase) return;
-    if(_inPlay()) gameBoostEnd(0);
+    gameBoostEnd(0);   // release is never phase-gated -- same rule as touchend above
     _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
 },{passive:true});
 
@@ -914,7 +918,8 @@ dpadCanvas.addEventListener('touchmove',e=>{
     if(d!==dpadActive){
         dpadActive=d; handleKey(dpadActive,null);
         drawDpad(phase==='splash'?null:dpadActive);
-        if(_inPlay()){const gd=GDIRS[dpadActive];if(gd){gameBoostStart(0,gd);}else{gameBoostEnd(0);}}
+        const gd=GDIRS[dpadActive];
+        if(gd){if(_inPlay())gameBoostStart(0,gd);}else{gameBoostEnd(0);}   // engage gated, release never (see touchend rule)
         _startDpadRepeat(dpadActive);
     }
 },{passive:false});

@@ -206,6 +206,25 @@ runTest('SMOKE-INPUT', `
     ringOfferClose(); if(_ringEl) throw 'ringtone panel did not close';
     log('ringtone panel owns the pointer: no swallowed tap, no menu press behind the glass');
 
+    // A finger lifted DURING THE DEATH ANIMATION must still release the boost arm.
+    // The swipe layer's touchend release was gated on _inPlay(), and 'dying' is not
+    // in play: the swallowed release left the arm slot held with the finger gone, so
+    // the snake respawned boosting on its own and nothing ever ended it. Release is
+    // never phase-gated (engage is) -- keyboard keyup and dpad touchend already obey.
+    startDuel(0xDEAD, false); phase='duel'; inGame=true;
+    document.__emit('touchstart', touch(300,200));       // finger down on the play surface
+    if(!_swipeBase) throw 'play touch did not arm the swipe layer';
+    gameBoostStart(0,{x:1,y:0});                         // the hold armed a boost
+    if(!_armSlots[0]||_armSlots[0].off) throw 'boost hold did not arm the slot';
+    phase='dying';                                       // the snake dies under the finger...
+    document.__emit('touchend', touch(300,200));         // ...and the finger lifts during the animation
+    if(!_armSlots[0]||!_armSlots[0].off) throw 'REGRESSION: finger-up in dying was swallowed -- the snake respawns boosting';
+    _swipeBase={x:300,y:200}; gameBoostStart(0,{x:1,y:0});   // same rule for a cancelled touch (iOS system gesture)
+    document.__emit('touchcancel', touch(300,200));
+    if(!_armSlots[0]||!_armSlots[0].off) throw 'touchcancel in dying was swallowed -- the boost arm leaks';
+    players=null; phase='menu'; inGame=false; _armSlots=[];
+    log('finger-up during dying still releases the boost arm (no respawn-boosting)');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();
