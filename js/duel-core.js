@@ -1038,6 +1038,13 @@ function netLocalInput(kind, p, d, now){
         // a reverse. Requiring the LIVE heading keeps a respawn/level heading reset -- which
         // changes P.dir without an authored record -- from ever being mis-suppressed: a turn off
         // the new spawn axis always goes through. (Unit dirs: nonzero dot product == same axis.)
+        // The full-queue revoke path (_dirEnqueue pops the tail, then re-judges) never fires
+        // under this premise either: a FULL queue implies heading-perpendicular-to-tail
+        // (queued neighbors alternate axes), so a tail on the press's axis fails the heading
+        // half of the premise -- and a tail on the OTHER axis fails the authored half, since
+        // the record that set _lastLocalDir to the press's axis would itself have emptied
+        // slot 3 (and any later refill re-aims _lastLocalDir at the tail's axis). A
+        // suppressed press therefore always takes the plain judge-vs-tail path, a true no-op.
         if(_lastLocalDir && P.dir &&
            (_lastLocalDir.x * d.x + _lastLocalDir.y * d.y) !== 0 &&
            (P.dir.x * d.x + P.dir.y * d.y) !== 0) return true;

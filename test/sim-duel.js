@@ -79,6 +79,35 @@ const driver = `
     }
     R.steps.push('fragile bars crush in duel (parity), solid lethal, pairs break as one');
 
+    // ---- C) dirQueue registration: judge-vs-tail below the cap, pop-then-judge at it ----
+    // The newest intent always wins (_dirEnqueue): at a FULL queue a new input revokes the
+    // not-yet-executed tail, then takes the normal judging against the remaining tail --
+    // perpendicular replaces it, same/reverse just cancels it. One rule, classic == duel.
+    const DIRS={U:{x:0,y:-1},D:{x:0,y:1},L:{x:-1,y:0},R:{x:1,y:0}};
+    const qs=(dq)=>dq.map(v=>v.x===1?'R':v.x===-1?'L':v.y===1?'D':'U').join('');
+    const run=(mode, seq)=>{   // heading up, empty queue; feed seq, return the queue as a string
+      if(mode==='duel'){
+        startDuel(777); const P=players[0]; P.dir={x:0,y:-1}; P.dirQueue.length=0;
+        for(const k of seq) simCommand({t:'dir', p:0, dir:{x:DIRS[k].x,y:DIRS[k].y}});
+        return qs(players[0].dirQueue);
+      }
+      startGame(777,0); dir={x:0,y:-1}; dirQueue.length=0;
+      for(const k of seq) simCommand({t:'dir', dir:{x:DIRS[k].x,y:DIRS[k].y}});
+      return qs(dirQueue);
+    };
+    const CASES=[
+      ['UDRRLU','RU', 'below cap: same/reverse-of-anchor rejected, perpendicular queues'],
+      ['RURL',  'RUL','full + perpendicular-to-new-tail: tail replaced (Ex3)'],
+      ['LDRD',  'LD', 'full + same-as-new-tail: tail revoked, slot empty (Ex2)'],
+      ['LDRU',  'LD', 'full + reverse-of-new-tail: tail revoked, slot empty'],
+      ['RURR',  'RUR','full + repeat of the tail: harmless (pop + re-register)'],
+    ];
+    for(const [seq,want,what] of CASES) for(const mode of ['duel','classic']){
+      const got=run(mode,seq);
+      A(got===want, 'dirQueue ['+mode+'] '+what+': fed '+seq+' want '+want+' got '+got);
+    }
+    R.steps.push('dirQueue: newest intent wins at the cap (replace/cancel), classic == duel');
+
     R.ok=true;
   } catch(e){ R.err=String(e && e.stack || e); }
 })();

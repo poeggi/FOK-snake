@@ -749,8 +749,10 @@ function netDuelWarn(){
     // OUT OF SYNC is the OTHER fault: the link is fine, the worlds diverged (a hash
     // disagreed). duel-core fires one targeted repair per verdict; this banner is its live
     // status. It clears the instant a hash agrees again (_rbBadSince -> 0); unhealed past
-    // the same 2s deadline as silence, the liveness timer ends the match.
-    const dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
+    // the same 2s deadline as silence, the liveness timer ends the match. The age is
+    // clamped to >= 1: a verdict landing in the same Date.now() millisecond as this check
+    // would otherwise read as age 0 = healthy and hide the banner for that instant.
+    const dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Math.max(1, Date.now() - _rbBadSince) : 0);
     if(dsyFor > 0) return 'OUT OF SYNC';
     return null;
 }

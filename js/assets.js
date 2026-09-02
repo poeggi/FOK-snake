@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.6.8';
+const APP_VERSION = 'v2.6.9';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -176,7 +176,7 @@ const EXPERT_ACHIEVEMENTS = [
     { id:'epic_double', name:'EPIC DOUBLE',   desc:'2 epic gems in one level',
       icon:{p:{A:'#cc44ff',B:'#9900cc'},
       d:['.A..A...','AAA.AAA.','.A..A...','........','........','........','........','........']}},
-    { id:'fokoins_100k', name:'DRAGON RICH',  desc:'Earn 100,000,000 total FOKoins',
+    { id:'fokoins_100k', name:'DRAGON RICH',  desc:'Earn 100M total FOKoins',
       icon:{p:{A:'#888888',B:'#333333',C:'#cccccc',D:'#eeeeee'},
       d:['AAAAAAAA','ACDDDDCA','ADDDDDDA','ADDBDDDA','ADDDDDDA','ACDDDDCA','AAAAAAAA','........']}},
 ];

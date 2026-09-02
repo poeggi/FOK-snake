@@ -89,7 +89,7 @@ const HOOKS = (id) => `
   globalThis.__burstReset = ()=> _netBurstReset(_netSess);     // open a fresh burst (forget last boundary's samples)
   globalThis.__burstPing  = ()=> _netBurstPing(_netSess);      // fire one stamped burst datagram
   globalThis.__burstTheta = ()=>{ const t = _netBurstTheta(_netSess); return t ? _netBurstResidual(_netSess, t.o) : null; };  // the shared-clock residual this side's samples settle on (ms), or null if unusable
-  globalThis.__burstApply = ()=> _netBurstApply(_netSess);     // nudge our clock half the residual toward the midpoint; returns applied ms
+  globalThis.__burstApply = (th)=> _netBurstApply(_netSess, th);   // nudge our clock half the residual toward the midpoint; returns applied ms. Optional th = an explicitly shipped residual (production: the go's bth); omitted, the local own-sample fallback derives it
   globalThis.__bsFwd      = ()=> _netSess ? _netSess.bsFwd : Infinity;   // my measured min raw forward-delta
   globalThis.__bsRev      = ()=> _netSess ? _netSess.bsRev : Infinity;   // the peer's min raw forward-delta (piggybacked)
   globalThis.__hostBurst  = (then)=> _netBurstThenStart(_netSess, then); // host side of a boundary: full burst engine (retries, low-pass, -R/2 apply) -> then(residual|null)
@@ -166,9 +166,16 @@ const HOOKS = (id) => `
   globalThis.__silent  = ()=> _netSess ? Date.now() - _netSess.lastRecvWall : 0;   // wall-clock ms since our last inbound packet
   globalThis.__live    = ()=>{ _netLiveCheck(); };   // run ONE real liveness pass (kill/reconnect/keepalive) -- the driver pumps it at 250ms like production
   globalThis.__phase   = ()=> phase;
+  globalThis.__speedRound = ()=> !!_speedRound;   // is the CURRENT level a speed round? (seeded per-level roll)
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__simTick = ()=> simTick;
   globalThis.__gdue    = ()=> _gDue;   // ticks until the next game-step boundary (the double-gesture budget gate, see fireOnce)
+  globalThis.__dirTail = ()=>{   // my dirQueue tail + depth: the anchor the sim judges the NEXT dir record against
+    if(!players) return null;
+    const P = players[netMyIndex()]; if(!P) return null;
+    const t = P.dirQueue.length > 0 ? P.dirQueue[P.dirQueue.length - 1] : P.dir;
+    return { x:t.x, y:t.y, n:P.dirQueue.length };
+  };
   globalThis.__rbBase  = ()=> _rbBase;
   globalThis.__rbEpoch = ()=> (typeof _rbEpoch === 'number') ? _rbEpoch|0 : -1;   // the epoch of our TICK BASE: the two clients sharing this is what lockstep means
   globalThis.__epoch   = ()=> _netSess ? (_netSess.epoch|0) : -1;                 // the session line, which runs ahead of the base between a halt and its start
@@ -243,8 +250,8 @@ const rev = (u, v)=> u.x === -v.x && u.y === -v.y;
 // turns and boost transitions right next to peer packets (the concurrency the netcode bugs
 // lived in), with the straight edges as the natural quiet phases -- dense, never sparse. Each
 // steers onto its target closing the larger torus axis first, boosts on straightaways and
-// brakes into turns (the real bs/be path), and dodges its own body, the opponent's body, and
-// the opponent's predicted next cell.
+// brakes into turns (the real bs/be path), dodges its own and the opponent's body, and keeps
+// 2 cells of clearance to the opponent's head (KEEP-2 below).
 //  - EATER = smaller torus distance to the gem (ties -> index 0); the role alternates as gems
 //    respawn, so both snakes get gem chases over a match.
 //  - ROVER = the other snake loops the four corners, advancing to the next once it reaches one.
@@ -276,11 +283,16 @@ function autopilot(view){
     if(ddy !== 0) cand.push({ x:0, y:Math.sign(ddy), mag:Math.abs(ddy) });
     cand.sort((a, b)=> b.mag - a.mag);
     const blocked = new Set(view.body.slice(0, -1).map(c=> c.x + ',' + c.y));   // tail tip moves, so it is safe
-    if(view.oalive){
-        for(const c of view.obody) blocked.add(c.x + ',' + c.y);
-        blocked.add(((view.ox + view.odx + view.cols) % view.cols) + ',' + ((view.oy + view.ody + view.rows) % view.rows));  // predicted opp step: dodge head-on
-    }
-    const free = (s)=>{ const nx = (view.hx + s.x + view.cols) % view.cols, ny = (view.hy + s.y + view.rows) % view.rows; return !blocked.has(nx + ',' + ny); };
+    if(view.oalive) for(const c of view.obody) blocked.add(c.x + ',' + c.y);
+    // KEEP-2: never move to a cell closer than 2 (torus Chebyshev) to the opponent's head.
+    // Both pilots honor it, so every single-cell move is authored to land >= 2 from the other
+    // head; simultaneous moves then stay >= 1 apart, so head-to-head contact is impossible by
+    // construction. Deaths wipe the level's gem progress, so the pilot must survive to level up.
+    const free = (s)=>{
+        const nx = (view.hx + s.x + view.cols) % view.cols, ny = (view.hy + s.y + view.rows) % view.rows;
+        if(blocked.has(nx + ',' + ny)) return false;
+        return !view.oalive || torusDist(nx, ny, view.ox, view.oy, view.cols, view.rows) >= 2;
+    };
     let want = null;
     for(const c of cand){ if(!rev(c, cur) && free(c)){ want = c; break; } }        // best productive, safe turn
     if(!want && free(cur)) want = cur;                                             // else straight if safe
@@ -349,16 +361,21 @@ function applyDirective(C, out){
 //                     while a send at authoring keeps a full tick minus transit.
 //   opts.doubleEvery: with postAuthor, every Nth intent is a MULTI gesture, alternating between
 //                     two forms (per-side S.multi parity). DOUBLE at __gdue()==1: the held steer
-//                     plus its reverse in the last interval -- both records must ship at
+//                     plus one decoy in the last interval -- both records must ship at
 //                     authoring (the two-flush cap), because a capped-deferred second record
 //                     would leave at the boundary itself with zero wire budget, a guaranteed
 //                     rollback; maxRb:0 thus proves the cap is at least two. TRIPLE at birth
-//                     (__gdue()>=2): reverse-of-heading + steer + reverse-of-steer in one
-//                     interval; the third record exceeds the cap and coalesces into the NEXT
-//                     tick's flush with a boundary of budget left, keeping the cap-deferred path
-//                     on the wire and in time. Every rejected gesture passes the author gate but
-//                     is dropped by the sim's enqueue check on BOTH clients, so gameplay is
-//                     untouched.
+//                     (__gdue()>=2): decoy + steer + decoy in one interval; the third record
+//                     exceeds the cap and coalesces into the NEXT tick's flush with a boundary
+//                     of budget left, keeping the cap-deferred path on the wire and in time.
+//                     Decoys are reverses of the dirQueue TAIL (via __dirTail), NOT of the live
+//                     heading, and only fire at queue depth <= 1: the sim judges each record
+//                     against the tail (a real turn can be parked across a non-moving boundary;
+//                     snakes move only every 2nd one), and at a FULL queue the pop-then-judge
+//                     rule (_dirEnqueue) makes even a reverse-of-tail record revoke a real
+//                     turn -- below the cap it is rejected in every queue state. Each decoy
+//                     passes the author gate but is dropped by the sim's enqueue check on BOTH
+//                     clients, so gameplay is untouched (see fireOnce).
 function runMatch(opts){
     const secs = opts.secs || 20, W = opts.wire || {};
     const seed = (opts.seed >>> 0) || 0xD0E1;
@@ -500,19 +517,43 @@ function runMatch(opts){
             //     full tick minus transit.
             //   every doubleEvery-th intent is a MULTI gesture -- DOUBLE vs TRIPLE alternating
             //     on S.multi parity (see opts.doubleEvery in the header doc).
+            // DECOYS must be provably inert. The sim judges every dir record against the dirQueue
+            // TAIL (simCommand 'dir' -> _dirEnqueue), not the live heading -- and at normal pace
+            // the snake only MOVES every 2nd game boundary (stepAccum parity), so a real turn
+            // authored for a non-moving boundary PARKS in the queue across it. A "reverse of the
+            // live heading" decoy judged against such a parked turn is perpendicular -> ACCEPTED
+            // -> it steers the snake for real one step later (the orbit-the-gem livelock this
+            // replaced). And at a FULL queue nothing is inert at all: _dirEnqueue pops the tail
+            // and re-judges, so even a reverse-of-tail record revokes or replaces a real turn.
+            // So both decoys derive from __dirTail() AND only fire at queue depth <= 1, where
+            // every record meets the plain judge-vs-tail check below the cap: decoyA reverses
+            // the current tail, decoyB reverses the tail as it stands after the intent (the
+            // intent itself iff the sim will append it); both are rejected on BOTH clients,
+            // gameplay untouched. The wire stress is unchanged: distinct same-tick dir records
+            // still exercise the leading-edge flush pair and the cap-deferred third record.
             const gd = S.c.__gdue();
             const multi = opts.doubleEvery && (S.gest + 1) % opts.doubleEvery === 0;
             const hv = S.fresh && multi && (S.multi & 1) && gd >= 2 ? S.c.__view() : null;
-            if(hv && S.pend.x * hv.dx + S.pend.y * hv.dy === 0){
+            const postTail = (t, p)=>   // tail after the intent p is judged: appended unless dup/reverse
+                (!(p.x === t.x && p.y === t.y) && !(p.x === -t.x && p.y === -t.y)) ? p : t;
+            const t0 = hv ? S.c.__dirTail() || { x:hv.dx, y:hv.dy, n:0 } : null;
+            if(hv && t0.n <= 1 && S.pend.x * hv.dx + S.pend.y * hv.dy === 0){
                 S.gest++; S.multi++;
-                S.c.__steer({ x:-hv.dx, y:-hv.dy });         // rejected against the live heading
+                if(!(S.pend.x === -t0.x && S.pend.y === -t0.y))
+                    S.c.__steer({ x:-t0.x, y:-t0.y });   // decoyA: reverse of the tail (skipped when it would alias the intent)
                 S.c.__steer(S.pend);
-                S.c.__steer({ x:-S.pend.x, y:-S.pend.y });   // rejected against the just-queued steer
+                const t2 = postTail(t0, S.pend);
+                S.c.__steer({ x:-t2.x, y:-t2.y });       // decoyB: reverse of the predicted post-intent tail
                 S.pend = null;
             } else if(gd === 1){
                 S.gest++;
+                const t = multi ? S.c.__dirTail() : null;
                 S.c.__steer(S.pend);
-                if(multi){ S.multi++; S.c.__steer({ x:-S.pend.x, y:-S.pend.y }); }
+                if(multi && t && t.n < 2){   // depth <= 1 only: keeps the decoy below the cap (inert) and the tail predictable across an earlier same-boundary gesture
+                    S.multi++;
+                    const t2 = postTail(t, S.pend);
+                    S.c.__steer({ x:-t2.x, y:-t2.y });   // decoy: reverse of the predicted post-intent tail
+                }
                 S.pend = null;
             }
             S.fresh = false;
@@ -617,6 +658,7 @@ function runMatch(opts){
     const wallStepWho = wallStep ? (wallStep.who || 'B') : null;
     let wallStepped = false;
     let sawConnLost = false, maxSilentMs = 0, splitRun = 0, maxSplitMs = 0, splitBlind = false;
+    let speedA = false, speedB = false;   // did each client ever run a SPEED ROUND level?
     const CL = 'CONNECTION LOST';
     let wireDown = false, nextLive = 0;
     let diedAt = 0;
@@ -627,9 +669,12 @@ function runMatch(opts){
     // which only stays faithful while err0 is sub-tick; this phase restores fidelity for a large
     // err0: the REAL burst engine runs over the same delayed wire before the first game tick
     // (_netBurstThenStart on the host; the joiner's run opened by the arriving 'bs' datagrams,
-    // exactly like production), the host applies its -R/2, and the joiner applies its half from its
-    // own samples -- _netBurstApply's production fallback derivation, which lands on the identical
-    // midpoint. Play then starts at the sync's end, the way a real match starts after its go.
+    // exactly like production), the host applies its -R/2, and the joiner applies its half from
+    // the host's shipped residual -- the go's bth hand-off (net-session.js), driver-carried here
+    // because the go envelope itself is net-handshake's lane. The joiner's own-sample fallback is
+    // NOT used: it structurally starves once the RTT spans two probe gaps (the host's mr rides
+    // only its later probes, leaving under NET_BURST_MIN of them), which is exactly why
+    // production ships bth. Play then starts at the sync's end, like a real match after its go.
     // Reported as r.startSync = { gap0, gap1, residual, ms }: the A-B netPts gap before/after.
     let startSync = null, playT0 = 0;
     if(opts.startBurst){
@@ -644,7 +689,7 @@ function runMatch(opts){
             emit(sch.A); emit(sch.B);
             drain(wire.AB, B, sch.B); drain(wire.BA, A, sch.A);
         }
-        B.__burstApply();
+        if(hostR != null) B.__burstApply(hostR);   // the go's bth: joiner applies the host-computed residual (a starved burst ships none -- prior clock kept, as in production)
         startSync.residual = hostR; startSync.gap1 = gapAt(); startSync.ms = t;
         playT0 = t;
         for(const S of [sch.A, sch.B]){   // first game tick lands at T0 on the corrected clock
@@ -694,6 +739,8 @@ function runMatch(opts){
         if(!(dozing && dozeWho === 'B')) drain(wire.AB, B, sch.B);
         if(!(dozing && dozeWho === 'A')) drain(wire.BA, A, sch.A);
         maybeLevelUp(now);
+        if(!speedA && A.__speedRound()) speedA = true;
+        if(!speedB && B.__speedRound()) speedB = true;
         checkDiverge();
         if(opts.desyncProbe) sampleRingAgree();
         // Banner + silence tracking: prove the outage actually surfaced CONNECTION LOST (the fault
@@ -756,6 +803,7 @@ function runMatch(opts){
         sawConnLost, maxSilentMs, endWarn: A.__warn() || B.__warn() || null,
         maxSplitMs, splitBlind, epA: A.__rbEpoch(), epB: B.__rbEpoch(),
         levelReached, levelUps, localJumps, localJumpsA: localJumpsBy.A, localJumpsB: localJumpsBy.B, maxLocalJump, rematched: rematchDone,
+        speedRoundA: speedA, speedRoundB: speedB,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,
         rb: a.rb + b.rb, rbA: a.rb, rbB: b.rb,

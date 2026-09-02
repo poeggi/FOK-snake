@@ -23,37 +23,48 @@ const log = s => { steps.push(s); };
 //   headroom    : CRUCIAL -- do not shorten, reseed, relax maxRb or fold into another case. It is
 //                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
 //                 zero: there is no "a few rollbacks are fine" reading of it to erode.
-//                 The clocks START >20ms apart (err0 24 -- well over an engine tick's worth of pts
-//                 gap) on a ~10ms-RTT channel; the REAL first-start burst sync must first bring the
-//                 relative pts to nearly 0 (asserted via startSync), and only then does play open.
-//                 From there latency + jitter + the burst RESIDUAL sum below one tick (16.67ms)
-//                 with heavy movement from BOTH ends -> PROVES the chain end to end: the burst
-//                 earns the sub-tick condition, and the one-tick author headroom then does its job
-//                 -- every input lands within its authoring lead, delivered on time (or via the
-//                 one-tick-late shortcut) and NEVER rolls back. Asserted hard as maxRb:0. The
-//                 noburst twin lane proves the burst is load-bearing: apply disabled, same start
-//                 gap -> rollbacks appear. (Correction survival across level/rematch boundaries
-//                 at large err0 is duel-boundary/duel-rematch territory.)
+//                 The clocks START 30ms apart (err0 30 -- nearly two engine ticks of pts gap) on a
+//                 30ms-RTT channel; the REAL first-start burst sync must first bring the relative
+//                 pts to nearly 0 (asserted via startSync), and only then does play open. From
+//                 there the wire alone spends 96% of the one-tick budget (15+1 = 16ms of 16.67ms),
+//                 so the lane holds 0 rollbacks ONLY if the burst residual stays inside the
+//                 remaining margin AND the one-tick author headroom does its job -- it PROVES both
+//                 ends of the chain at once: the burst earns the sub-tick condition, and every
+//                 input then lands within its authoring lead, delivered on time (or via the
+//                 one-tick-late shortcut) and NEVER rolls back (maxRb:0). The match levels through
+//                 the REAL L1->L2 req->go boundary (re-burst on the wire) into a speed round both
+//                 clients must see (expectLevel/expectSpeed), under heavy movement and multi-touch
+//                 gestures from BOTH ends. The noburst twin lane proves the burst is load-bearing:
+//                 apply disabled, same start gap -> rollbacks appear. (Correction survival across
+//                 boundaries at LARGER err0 is duel-boundary/duel-rematch territory.)
 const SCEN = [
     { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:12, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
     { name:'lossy-boost  5% loss      ', seed:0xBEEF, secs:20, wire:{ base:12, jit:6,  loss:0.05 }, phase:8, tjit:4, recv:true },
     { name:'long-levels  to L2-3      ', seed:0x77C0, secs:40, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true },
-    // Clocks start 22-26ms apart (err0 24 +/- anchor jitter): >20ms of raw pts gap, ~1.4 engine
-    // ticks -- unplayable at 0rb if left standing. startBurst runs the production first-start
-    // burst over the same delayed wire (host _netBurstThenStart -R/2, joiner's own-sample half)
-    // BEFORE the first game tick, exactly as a real 2.6 match syncs on its first go. The lane
-    // asserts the sync itself: |gap0| > 20 (the start condition is real) and |gap1| <= 3
-    // (relative pts brought to nearly 0). Play then runs with tick schedules ALIGNED
-    // (phase0/tjit0): net 3-7ms (base5+/-jit2) plus the ~1-2ms burst residual sum well inside
-    // the 16.67ms tick. It is the SUM of net + residual pts + any schedule skew -- not any one
-    // term -- that must stay under a tick; with skew zeroed this is a KNOWN-0rb condition, so
-    // maxRb:0 is exact. Any rb here is a real headroom (or burst) leak to debug. p2pBoundary is
-    // DEFENSIVE: this pilot config does not finish a level inside 30s (the lane plays out at L1),
-    // but if a boundary ever does fire it must be the real req->go one (which re-bursts on the
-    // wire) and never the atomic test shortcut -- the shortcut re-zeroes _netSync.ofs, silently
-    // WIPING the correction and turning this lane red for the wrong reason. Boundary-burst
-    // survival itself is asserted in duel-boundary (err0 40) and duel-rematch (err0 90, with its
-    // own noBurst control). Schedule skew is a separate stress -- see clean-boost.
+    // Clocks start 28-32ms apart (err0 30 +/- anchor jitter): ~1.8 engine ticks of raw pts gap,
+    // unplayable at 0rb if left standing. startBurst runs the production first-start burst over
+    // the same delayed wire (host _netBurstThenStart -R/2; the joiner applies the host-computed
+    // bth residual from the go -- its own samples would starve at this RTT) BEFORE the first game
+    // tick, exactly as a real 2.6 match syncs on its first go. The lane asserts the sync itself:
+    // |gap0| > 25 (the start condition is real) and |gap1| <= 3 (relative pts brought to nearly
+    // 0). Play then runs with tick schedules ALIGNED (phase0/tjit0) on a wire that alone uses
+    // 96% of the one-tick budget: 14-16ms transit (base15 +/- jit1) against the 16.67ms tick.
+    // jit:1 is the provable maximum -- at jit:2 the worst packet takes 17ms, over budget by
+    // physics, and a rollback would be CORRECT. It is the SUM of net + residual pts + any
+    // schedule skew that must stay under a tick, so the burst residual eats the remaining margin
+    // directly: a sub-millisecond residual regression flips this lane red. That is the point --
+    // the sub-tick margin the engine owes either side is only available if PTS alignment works,
+    // so this lane tests both at once. With skew zeroed this is a KNOWN-0rb condition and
+    // maxRb:0 is exact; any rb here is a real headroom (or burst) leak to debug.
+    //
+    // p2pBoundary is ACTIVE coverage: the pilots level through the REAL L1->L2 req->go boundary
+    // (epoch bump, simTick->0, re-burst on the wire), and L2 for this seed is a SPEED round --
+    // faster game ticks, more moves, more records -- which BOTH clients must observe
+    // (expectLevel:2 + expectSpeed). The atomic test shortcut would re-zero _netSync.ofs and
+    // silently WIPE the correction, turning the lane red for the wrong reason; the real boundary
+    // re-earns it on the wire. Boundary-burst survival at larger err0 stays duel-boundary
+    // (err0 40) / duel-rematch (err0 90) territory. Schedule skew is a separate stress -- see
+    // clean-boost.
     //
     // postAuthor: worst-case input phase. Steers are authored AFTER their tick ran (a real touch
     // lands mid-interval, after the boundary's flush already left) and each is HELD to the last
@@ -65,18 +76,19 @@ const SCEN = [
     // with rb in the hundreds. The default authoring path is DOUBLY best-case -- pre-tick (the
     // same boundary's flush ships the record, zero deferral) and at maximum _gDue (autopilot
     // intents are born right after a game step) -- which is how that defect stayed green here.
-    // doubleEvery: every 3rd intent is a MULTI gesture, alternating between a DOUBLE in the last
-    // interval (both records must ship at authoring -- proves the two-flush cap) and a TRIPLE at
-    // birth (its third record exceeds the cap and coalesces into the next tick's flush -- the
-    // cap-deferred path stays on the wire and inside the authoring lead). See duel-driver.
+    // doubleEvery: every 2nd intent is a MULTI gesture (fast fingers), alternating between a
+    // DOUBLE in the last interval (both records must ship at authoring -- proves the two-flush
+    // cap) and a TRIPLE at birth (its third record exceeds the cap and coalesces into the next
+    // tick's flush -- the cap-deferred path stays on the wire and inside the authoring lead).
+    // Decoys are provably-inert reverses of the dirQueue TAIL -- see duel-driver.
     // CRUCIAL (see header): the 0-rollback headroom guard. Keep it long and keep maxRb at 0.
-    { name:'headroom     burst 0rb   ', seed:0x77C0, secs:30, wire:{ base:5,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:24, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, doubleEvery:3, maxRb:0, expectSync:{ minGap0:20, maxGap1:3 } },
+    { name:'headroom     burst 0rb   ', seed:0x7002, secs:30, wire:{ base:15, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:30, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, doubleEvery:2, maxRb:0, expectSync:{ minGap0:25, maxGap1:3 }, expectLevel:2, expectSpeed:true },
     // Falsification twin: identical start gap and wire, burst APPLY disabled (noBurst) -> the raw
-    // 24ms (~1.4 tick) offset stands, the ahead peer runs a persistent tick lead, the other side's
+    // 30ms (~1.8 tick) offset stands, the ahead peer runs a persistent tick lead, the other side's
     // inputs land late there, rollbacks MUST appear (minRb) while the pair still HEALS by rollback
     // (all health gates stay on). RED without the burst, GREEN with -- proves the lane above is
     // load-bearing, not vacuously 0.
-    { name:'headroom     noburst RED ', seed:0x77C0, secs:10, wire:{ base:5,  jit:2,  loss:0    }, phase:0, tjit:0, clock:{ err0:24, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, doubleEvery:3, minRb:1, expectSync:{ minGap1:20 } },
+    { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:15, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:30, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, doubleEvery:2, minRb:1, expectSync:{ minGap1:25 } },
 ];
 
 let failed = 0;
@@ -90,14 +102,18 @@ for(const sc of SCEN){
         || (ex.minGap0 != null && g0 <= ex.minGap0)     // the start condition was not actually hard
         || (ex.maxGap1 != null && g1 > ex.maxGap1)      // burst failed to bring pts to nearly 0
         || (ex.minGap1 != null && g1 <= ex.minGap1));   // noburst twin: the gap must SURVIVE
+    const lvlBad = sc.expectLevel != null && r.levelReached < sc.expectLevel;   // the real boundary must fire
+    const spdBad = !!sc.expectSpeed && !(r.speedRoundA && r.speedRoundB);       // BOTH clients must see the speed round
     const bad = r.localJumps > 0 || !!r.firstDiverge || !r.converged
-        || r.desyncA > 0 || r.desyncB > 0 || r.exitReason === 'session-end' || rbOver || rbUnder || syncBad;
+        || r.desyncA > 0 || r.desyncB > 0 || r.exitReason === 'session-end' || rbOver || rbUnder
+        || syncBad || lvlBad || spdBad;
     const fd = r.firstDiverge ? ('  1stDiverge @' + r.firstDiverge.tick + ' [' + r.firstDiverge.fields.join(',') + ']') : '';
     const rbNote = sc.maxRb != null ? (rbOver ? '  rb>' + sc.maxRb + ' HEADROOM LEAK' : '  (<=' + sc.maxRb + ' rb: headroom holds)')
         : sc.minRb != null ? (rbUnder ? '  rb<' + sc.minRb + ' LANE NOT LOAD-BEARING' : '  (rb>=' + sc.minRb + ': burst is load-bearing)') : '';
     const syncNote = ss ? ' pts=' + ss.gap0 + '->' + ss.gap1 + (syncBad ? ' SYNC BAD' : '') : '';
     log(sc.name.trim().padEnd(22)
-        + ' L' + r.levelReached
+        + ' L' + r.levelReached + (lvlBad ? ' NO LEVEL-UP' : '')
+        + (sc.expectSpeed ? ' speed=' + (r.speedRoundA ? 'A' : '-') + (r.speedRoundB ? 'B' : '-') + (spdBad ? ' MISSED' : '') : '')
         + ' conv=' + (r.converged ? 'yes' : 'NO')
         + ' selfJumps=' + r.localJumps + (r.maxLocalJump > 1 ? '(max' + r.maxLocalJump + ')' : '')
         + ' desync=' + r.desyncA + '/' + r.desyncB

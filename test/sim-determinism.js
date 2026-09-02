@@ -7,7 +7,9 @@ const { runTest } = require('./harness');
 
 // Recorded from the first green run; update ONLY intentionally (a deliberate rule
 // change), never to paper over a refactor that shifted sim output.
-const GOLDEN = '7f2ad170:216';
+// Regolden history: 7f2ad170:216 -> cbe587a2:219 (dirQueue pop-then-judge at the cap,
+// a deliberate sim rule change: the newest intent revokes/replaces the queue tail).
+const GOLDEN = 'cbe587a2:219';
 
 const driver = `
 ;(function(){

@@ -104,18 +104,26 @@ never had: it never boosts, so the boost path shipped a desync no test could see
     clean-boost      phase offset only, no loss -- isolates the boost/rollback path
     lossy-boost      + 5% packet loss           -- stresses the redundancy/loss window
     long-levels      longer run to levels 2-3   -- exercises the level-boundary path
-    headroom burst   clocks start >20ms apart   -- the CRUCIAL 0-rollback lane: the
+    headroom burst   clocks start 30ms apart    -- the CRUCIAL 0-rollback lane: the
                                                    production first-start clock burst
                                                    (startBurst) must close the pts gap
-                                                   to <=3ms and the match must then
-                                                   hold ZERO rollbacks (maxRb 0)
+                                                   to <=3ms; play then holds ZERO
+                                                   rollbacks (maxRb 0) on a wire that
+                                                   alone uses 96% of the one-tick
+                                                   budget (15+1 = 16ms of 16.67ms; the
+                                                   burst residual eats what is left),
+                                                   through the REAL L1->L2 boundary
+                                                   into a speed round BOTH clients
+                                                   must see (expectLevel/expectSpeed),
+                                                   with multi-touch gestures on
     headroom noburst same gap, apply disabled   -- RED control: rollbacks MUST appear
                                                    (minRb), proving the burst lane is
                                                    load-bearing, not vacuously green
 
 Fail gate (any one trips it): a local-head jump, a first-divergence, non-convergence
 at the end, a product desync verdict on either client, a session-end exit, the
-per-lane rollback bounds (maxRb / minRb), or the start-sync gates (expectSync).
+per-lane rollback bounds (maxRb / minRb), the start-sync gates (expectSync), or the
+level/speed-round gates (expectLevel / expectSpeed).
 
 ### duel-boundary.js  (REGRESSION tier -- the level-boundary guard)
 

@@ -803,6 +803,20 @@ function simSnapshot(){
         players, duelWinner, _speedRound, _rngState,
     };
 }
+// Register one steering record into a dirQueue. ONE rule shared by classic (module
+// globals) and duel (per-player) -- q is the queue, cur the live heading, d the new
+// direction. A record is judged against the LAST REGISTERED direction (the queue tail,
+// or the heading when nothing is queued): same or exact reverse of it is not registered.
+// The queue holds at most 3 records, and the NEWEST intent always wins: at a full queue
+// the new input first REVOKES the not-yet-executed tail, then takes the normal judging
+// against the remaining tail -- a perpendicular input replaces the revoked turn, a
+// same/reverse input just cancels it and leaves the slot empty. (A repeat of the tail
+// direction pops and re-registers it identically, so input stutter stays harmless.)
+function _dirEnqueue(q, cur, d){
+    if(q.length >= 3) q.pop();
+    const last = q.length > 0 ? q[q.length-1] : cur;
+    if(!(d.x === -last.x && d.y === -last.y) && !(d.x === last.x && d.y === last.y)) q.push(d);
+}
 // Apply one input/control command to the sim state. Single source of truth shared by the
 // Web Worker (sim-worker.js onmessage) and the headless path (game.js _wsend when there is
 // no Worker -- tests + any browser without Worker support). Pure sim effects only; the
@@ -819,12 +833,10 @@ function simCommand(m){
         case 'dir': {
             if(players){
                 const P = players[m.p||0]; if(!P || !P.alive) break;
-                const last = P.dirQueue.length>0 ? P.dirQueue[P.dirQueue.length-1] : P.dir;
-                if(!(m.dir.x===-last.x&&m.dir.y===-last.y) && !(m.dir.x===last.x&&m.dir.y===last.y) && P.dirQueue.length<3) P.dirQueue.push(m.dir);
+                _dirEnqueue(P.dirQueue, P.dir, m.dir);
                 break;
             }
-            const last = dirQueue.length>0 ? dirQueue[dirQueue.length-1] : dir;
-            if(!(m.dir.x===-last.x&&m.dir.y===-last.y) && !(m.dir.x===last.x&&m.dir.y===last.y) && dirQueue.length<3) dirQueue.push(m.dir);
+            _dirEnqueue(dirQueue, dir, m.dir);
             break;
         }
         case 'boost':

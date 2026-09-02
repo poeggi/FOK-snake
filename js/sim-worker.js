@@ -137,7 +137,7 @@ function _post() {
         // different Date.now() bases only through the same wall clock -- age is origin-free).
         msg.duel = { ev: _dcEvents.splice(0), rew: _dcRewTo, rb: _rbDbg,
                      inRx: _netDbg.inRx, inTx: _netDbg.inTx, inLog: _netDbg.inLog, ptk: _netDbg.peerTkOfs,
-                     dsyFor: _rbBadSince ? Date.now() - _rbBadSince : 0,
+                     dsyFor: _rbBadSince ? Math.max(1, Date.now() - _rbBadSince) : 0,   // >= 1: age 0 doubles as 'healthy' on the wire
                      psetN: _dcSnapN, psetAgo: _dcSnapAt ? performance.now() - _dcSnapAt : -1,
                      msg: _duelMsg };
         // ONE-SHOT: a duel message is an event, not a state. Clearing it after posting
