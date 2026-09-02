@@ -948,6 +948,7 @@ function _netTeardown(){
     s.game = false; s.relay = false;
     if(s.connT) clearTimeout(s.connT);
     if(s.liveT) clearInterval(s.liveT);
+    if(s.warmT) clearInterval(s.warmT);
     if(s.relayAbort){ try{ s.relayAbort.abort(); }catch(e){} s.relayAbort = null; }   // DEPRECATED(relay): close the held relay socket now
     try{ if(s.dc){ s.dc.onopen=s.dc.onmessage=s.dc.onclose=null; s.dc.close(); } }catch(e){}
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}

@@ -78,7 +78,7 @@ function _netMkSess(peer, role){
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the transition retries
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
              tx:null,   // the ONE pending un-echoed transition ({pkt, since, lastAt, tries}; see _netTxShip)
-             lastRecv:0, lastSent:0, liveT:null, myAgain:false, peerAgain:false, lvlPending:false,
+             lastRecv:0, lastSent:0, liveT:null, warmT:null, myAgain:false, peerAgain:false, lvlPending:false,
              bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
@@ -461,6 +461,14 @@ function _netBreakRecover(s){
 function _netLiveStart(){
     if(!_netTimers) return;
     _netSess.liveT = setInterval(_netLiveCheck, 250);
+    // Radio-warm beat for the session's WHOLE life, not just while the sim ticks. The
+    // tick-scheduled warm ping stops with the ticks, which leaves the windows a duel is
+    // built on -- the burst-to-tick-0 lead, level/respawn boundaries, a resume negotiation
+    // -- silent long enough for a cellular radio to doze right before the most
+    // latency-critical packets. The w-gate in _netSend does ALL the suppression: any real
+    // traffic (burst probes included) within the warm window skips the ping, and the relay
+    // path never pings at all.
+    _netSess.warmT = setInterval(()=>{ _netSend({ t:'pi', w:1 }); }, NET_WARM_EVERY * TICK_MS);
 }
 // ONE liveness pass (ping-when-idle, reconnect/kill on silence, end a stuck desync). Split out
 // of the setInterval body so the headless duel driver can run the REAL check on its simulated
