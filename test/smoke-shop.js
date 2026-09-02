@@ -1,5 +1,6 @@
 // Shop smoke: mystery-box open + reveal, BOX GEAR tab wear/remove, ADMIN box lifecycle,
-// wear slots (one 'head'/'eyes'/'neck' item at a time + the REMOVE-first notice), volatile tags.
+// wear slots (one 'head'/'eyes'/'neck'/'masquerade' item at a time + the REMOVE-first
+// notice), volatile tags.
 // Run: node test/smoke-shop.js
 const { runTest } = require('./harness');
 
@@ -34,11 +35,11 @@ runTest('SMOKE-SHOP', `
     if(_boxList().length!==BOXES.length) throw 'ADMIN box still offered after being claimed';
     log('admin box ok');
 
-    // Wear slots: cat groups head/nose wear ('head'), eyewear ('eyes') and neckwear
-    // ('neck'); only one item per slot wears at a time, a second attempt is refused with
-    // a notice naming the blocker. volatile is a pure data tag (a 1:1 feature consumes
-    // it) and must sit on hats/crowns/eyewear/moustache but NOT on the halo or slot-free
-    // items.
+    // Wear slots: cat groups headwear ('head'), eyewear ('eyes'), neckwear ('neck') and
+    // face disguise ('masquerade'); only one item per slot wears at a time, a second
+    // attempt is refused with a notice naming the blocker. volatile is a pure data tag
+    // (a 1:1 feature consumes it) and must sit on hats/crowns/eyewear/moustache but NOT
+    // on the halo or slot-free items.
     const _it=id=>SHOP_ITEMS.concat(BOX_ITEMS).find(s=>s.id===id);
     cfg.shopItems=Object.assign(cfg.shopItems||{},{cylinder:true,crown:true,shades:true,necktie:true,bow:true});
     cfg.wornItems={}; _shopMsg=null;
@@ -65,7 +66,7 @@ runTest('SMOKE-SHOP', `
     if(_shopMsg!=='REMOVE ROYAL CROWN FIRST') throw 'buy refusal notice wrong/missing: '+_shopMsg;
     if(!(_it('crown').volatile&&_it('moustache').volatile&&_it('shades').volatile&&_it('propeller').volatile)) throw 'volatile tag missing';
     if(_it('halo').volatile||_it('gown').volatile||_it('necktie').volatile) throw 'volatile tag on a non-volatile item';
-    if(_it('halo').cat!=='head'||_it('moustache').cat!=='head'||_it('eyepatch').cat!=='eyes'||_it('bow').cat!=='neck'||_it('shoes').cat) throw 'wear-slot cats off';
+    if(_it('halo').cat!=='head'||_it('moustache').cat!=='masquerade'||_it('eyepatch').cat!=='eyes'||_it('bow').cat!=='neck'||_it('shoes').cat) throw 'wear-slot cats off';
     log('wear slots + volatile ok');
 
     R.ok = true;

@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.6.11';
+const APP_VERSION = 'v2.6.12';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -207,8 +207,8 @@ const EGG_ACHIEVEMENTS = [
 
 // Wearing metadata on cosmetics (shop + box items alike):
 //   cat      : wear slot, never shown in the UI. Only ONE item per slot can be worn at a
-//              time ('head' = anything worn on the head or the nose, 'eyes' = eyewear,
-//              'neck' = neckwear); _shopToggleWear refuses a second item of an occupied slot.
+//              time ('head' = headwear, 'eyes' = eyewear, 'neck' = neckwear, 'masquerade' =
+//              face disguise); _shopToggleWear refuses a second item of an occupied slot.
 //   volatile : cosmetics property, shown as a tag on the shop rows. No gameplay meaning
 //              here; a 1:1 feature consumes it.
 const SHOP_ITEMS = [
@@ -227,7 +227,7 @@ const SHOP_ITEMS = [
     // --- Page 2 ---
     { id:'shoes',    name:'SHOES',         desc:'Fresh kicks for the tail',       price:300000, page:1,
       icon:{p:{W:'#eeeeee',S:'#cc2222',L:'#333333'},d:['........','........','........','WW...WW.','WWW.WWW.','SSS.SSS.','LLL.LLL.','........']}},
-    { id:'moustache',name:'MOUSTACHE',     desc:'A dashing handlebar',            price:450000, page:1, cat:'head', volatile:true,
+    { id:'moustache',name:'MOUSTACHE',     desc:'A dashing handlebar',            price:450000, page:1, cat:'masquerade', volatile:true,
       icon:{p:{A:'#3a2a1a'},d:['........','........','........','.A....A.','AAA..AAA','.AAAAAA.','..AAAA..','........']}},
     { id:'halo',     name:'HALO',          desc:'For the angelic serpent',        price:650000, page:1, cat:'head',
       icon:{p:{A:'#ffd83a',G:'#fff4a0'},d:['........','.GAAAAG.','A......A','A......A','.GAAAAG.','........','........','........']}},

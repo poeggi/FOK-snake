@@ -660,7 +660,7 @@ function _drawGearPage(){
         drawPixelIcon(16,y+(rowH-4)/2-8,item.icon,2);
         ctx.textAlign='left'; ctx.textBaseline='top';
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#dddddd'; ctx.fillText(item.name,46,y+7);
-        if(item.volatile){ ctx.fillStyle='#ffaa44'; ctx.fillText('VOLATILE',46+ctx.measureText(item.name).width+12,y+7); }
+        if(item.volatile){ ctx.fillStyle='#888888'; ctx.fillText('(volatile)',46+ctx.measureText(item.name).width+18,y+7); }
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=rc; ctx.fillText((item.rarity||'').toUpperCase()+' - BOX EXCLUSIVE',46,y+21);
         ctx.textAlign='right';
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#4a7a9a'; ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
@@ -721,7 +721,7 @@ function drawShop() {
         ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=worn?'#7fff7f':(owned&&isRep)?'#ff66aa':owned?'#5a8aaa':sel?'#dddddd':'#aaaaaa';
         ctx.fillText(item.name,46,y+7);
-        if(item.volatile){ ctx.fillStyle='#ffaa44'; ctx.fillText('VOLATILE',46+ctx.measureText(item.name).width+12,y+7); }
+        if(item.volatile){ ctx.fillStyle='#888888'; ctx.fillText('(volatile)',46+ctx.measureText(item.name).width+18,y+7); }
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle='#999999';
         ctx.fillText(item.desc,46,y+21);
         ctx.textAlign='right';
