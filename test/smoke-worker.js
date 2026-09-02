@@ -83,6 +83,22 @@ try {
     step(10);
     if (g('players[0].boosting')) throw new Error('disarm did not end the boost');
     step(100);
+
+    // ---- tick-throw survival. A throw escaping _step would skip the re-arm and kill
+    // the chain for the worker's lifetime: _running stays true, so _run(true) -- a
+    // rematch's duelStartNet included -- would see a live loop and return (the field
+    // SIM STALL wedge, healable only by a page reload). The loop must catch, post ONE
+    // throttled err, and resume the moment the fault clears. ----
+    vm.runInContext('var _updReal = update; update = function(){ throw new Error("forced tick fault"); };', ctx);
+    step(40);                      // ~10 faulting ticks inside one 5s throttle window
+    vm.runInContext('update = _updReal;', ctx);
+    const tkFault = g('simTick');
+    step(50);
+    if (g('simTick') <= tkFault) throw new Error('chain did not resume after a tick fault');
+    // The dead-chain latch itself: _running true with no fire scheduled must re-arm.
+    vm.runInContext('_timer = null;', ctx);
+    send({ t:'run', on:true });
+    if (g('_timer') === null) throw new Error('_run(true) left a dead chain dead (the _running latch)');
 } catch (e) { crashed = e; }
 
 const wires = posts.filter(p => p.t === 'wire').map(w => w.o.t);
@@ -97,6 +113,8 @@ const checks = [
     ['a host resync was sent', count('rs') >= 1],
     ['local input reached the wire', count('in') >= 1],
     ['the arming stage authored real bs + be transitions', inLogs.some(s => s.includes('"k":"bs"')) && inLogs.some(s => s.includes('"k":"be"'))],
+    ['a faulting tick posted exactly one throttled err naming the throw',
+        posts.filter(p => p.t === 'err').length === 1 && /forced tick fault/.test((posts.find(p => p.t === 'err') || {}).msg)],
 ];
 const bad = checks.filter(c => !c[1]).map(c => c[0]);
 for (const c of checks) console.log('  ' + (c[1] ? 'ok  ' : 'FAIL') + ' ' + c[0]);

@@ -1063,6 +1063,9 @@ function _initWorker(){
         const m = e.data;
         if(m.t==='wire'){ if(netWorkerDuelOn() && typeof _netSend==='function') _netSend(m.o); return; }   // duel-core's outbound packet
         if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
+        // A tick threw inside the worker; its loop caught it and re-armed itself (throttled
+        // to one post per 5s). Same prefix as onerror below: this line IS the root cause.
+        if(m.t==='err'){ console.error('sim worker error', m.msg + (m.n > 1 ? ' (x' + m.n + ')' : ''), m.stack); return; }
         if(m.t!=='frame') return;
         _workerFrames++;
         _lastWorkerFrameAt = performance.now();   // watchdog heartbeat

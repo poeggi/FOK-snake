@@ -102,6 +102,7 @@ function _dcTarget(){
 }
 
 let _timer = null, _last = 0, _acc = 0, _running = false;
+let _errN = 0, _errAt = 0;         // tick-throw diagnostics: total count + last posted-to-main time
 
 // Transport packing: cloning ~100 {x,y} objects at 60Hz dominated the sim thread's cost
 // (the tick itself is sub-microsecond). The snake travels as one flat Int16Array (a
@@ -156,6 +157,32 @@ function _post() {
 // hardware. Jitter is a non-problem: dt is measured, so a late/early fire just accrues the real
 // elapsed time and the count stays locked to the wall clock; _acc carries the sub-tick remainder.
 function _step() {
+    _timer = null;                     // fired: while _running, a null _timer means "no fire scheduled"
+    try { _stepTicks(); }
+    catch (err) {
+        // A tick threw. Without this catch the exception would skip the re-arm below and
+        // kill the chain for the life of the worker: _running stays true, so every later
+        // _run(true) -- a rematch's duelStartNet included -- sees a live loop and returns.
+        // That is the SIM STALL wedge seen in the field: board frozen, restarts silently
+        // dead, only a page reload heals. The sim state may well be corrupt, but the
+        // CHAIN must survive -- the next boundary (rematch/level/respawn/menu start)
+        // rebuilds the state anyway. Drop the accrued backlog so a deterministically
+        // throwing state costs one throw per tick period, not a MAX_CATCHUP burst; post
+        // the error (the first at once, then one per 5s carrying the running count) so
+        // main's console names the root cause.
+        _acc = 0; _errN++;
+        const at = performance.now();
+        if (_errN === 1 || at - _errAt >= 5000) {
+            _errAt = at;
+            postMessage({ t:'err', n:_errN, msg:String((err && err.message) || err), stack:String((err && err.stack) || '') });
+        }
+    }
+    // Re-arm to the next tick boundary. _acc is the sub-tick remainder already accrued, so
+    // TICK_MS - _acc is the real time until the next tick (clamped to one period). _running
+    // stays the authoritative on/off flag; _timer only says whether a fire is scheduled.
+    if (_running) _timer = setTimeout(_step, Math.max(0, Math.min(TICK_MS, TICK_MS - _acc)));
+}
+function _stepTicks() {
     const now = performance.now();
     let dt = now - _last; _last = now;
     if (dt > 250) dt = 250;            // clamp a long stall (e.g. worker was throttled)
@@ -179,16 +206,14 @@ function _step() {
     const gameplay = phase!=='splash' && phase!=='menu' && phase!=='settings' && phase!=='scores'
                   && phase!=='achievements' && phase!=='shop' && phase!=='credits' && phase!=='news';
     if (ran > 0 && (gameplay || simEvents.length || simTick % 2 === 0)) _post();
-    // Re-arm to the next tick boundary. _acc is the sub-tick remainder already accrued, so
-    // TICK_MS - _acc is the real time until the next tick (clamped to one period). _running is
-    // the authoritative on/off flag -- a fired setTimeout handle stays non-null, so it cannot
-    // double as the stop flag.
-    if (_running) _timer = setTimeout(_step, Math.max(0, Math.min(TICK_MS, TICK_MS - _acc)));
 }
 
 function _run(on) {
     if (on) {
-        if (_running) return;
+        // _running alone is NOT proof of life: null _timer while running means the chain
+        // is not scheduled (nothing may leave it that way, but a bug that does must not
+        // wedge the app) -- fall through and re-arm instead of returning.
+        if (_running && _timer !== null) return;
         _running = true; _last = performance.now();   // NOT _acc: a duel start seeds the phase into _acc just before this
         _timer = setTimeout(_step, 0);
     } else {
