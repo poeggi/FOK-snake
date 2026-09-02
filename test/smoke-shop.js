@@ -1,4 +1,5 @@
-// Shop smoke: mystery-box open + reveal, BOX GEAR tab wear/remove, ADMIN box lifecycle.
+// Shop smoke: mystery-box open + reveal, BOX GEAR tab wear/remove, ADMIN box lifecycle,
+// wear slots (one 'head'/'eyes'/'neck' item at a time + the REMOVE-first notice), volatile tags.
 // Run: node test/smoke-shop.js
 const { runTest } = require('./harness');
 
@@ -32,6 +33,40 @@ runTest('SMOKE-SHOP', `
     if(!(cfg.shopItems.admincrown && _adminConsumed)) throw 'ADMIN box did not grant + consume';
     if(_boxList().length!==BOXES.length) throw 'ADMIN box still offered after being claimed';
     log('admin box ok');
+
+    // Wear slots: cat groups head/nose wear ('head'), eyewear ('eyes') and neckwear
+    // ('neck'); only one item per slot wears at a time, a second attempt is refused with
+    // a notice naming the blocker. volatile is a pure data tag (a 1:1 feature consumes
+    // it) and must sit on hats/crowns/eyewear/moustache but NOT on the halo or slot-free
+    // items.
+    const _it=id=>SHOP_ITEMS.concat(BOX_ITEMS).find(s=>s.id===id);
+    cfg.shopItems=Object.assign(cfg.shopItems||{},{cylinder:true,crown:true,shades:true,necktie:true,bow:true});
+    cfg.wornItems={}; _shopMsg=null;
+    _shopToggleWear(_it('cylinder'));
+    if(!cfg.wornItems.cylinder) throw 'hat did not wear onto an empty head slot';
+    if(!_shopToggleWear(_it('crown'))) throw 'refused wear must still count as handled (buy fall-through)';
+    if(cfg.wornItems.crown) throw 'crown worn OVER the hat: head slot not exclusive';
+    if(_shopMsg!=='REMOVE CYLINDER HAT FIRST') throw 'refusal notice wrong/missing: '+_shopMsg;
+    _shopToggleWear(_it('shades'));
+    if(!cfg.wornItems.shades) throw 'eyewear wrongly blocked by the worn HEAD item';
+    _shopToggleWear(_it('necktie'));
+    if(!cfg.wornItems.necktie) throw 'neck slot wrongly blocked by the worn HEAD item';
+    _shopMsg=null; _shopToggleWear(_it('bow'));
+    if(cfg.wornItems.bow||_shopMsg!=='REMOVE NECKTIE FIRST') throw 'bow tie ignored the worn necktie';
+    _shopToggleWear(_it('cylinder'));   // take the hat off...
+    _shopToggleWear(_it('crown'));      // ...now the crown fits
+    if(!(cfg.wornItems.crown&&!cfg.wornItems.cylinder)) throw 'remove-then-wear did not free the slot';
+    // Buying into an occupied slot: owned, NOT auto-worn, notice queued behind PURCHASED!.
+    delete cfg.shopItems.wizard; _cachedFOKoins=5000000; _shopMsg=null;
+    shopPage=1; shopSel=SHOP_ITEMS.filter(it=>(it.page||0)===1).findIndex(it=>it.id==='wizard');
+    press('Enter');
+    if(!cfg.shopItems.wizard) throw 'buy into an occupied slot did not purchase';
+    if(cfg.wornItems.wizard) throw 'purchase auto-worn OVER the worn crown';
+    if(_shopMsg!=='REMOVE ROYAL CROWN FIRST') throw 'buy refusal notice wrong/missing: '+_shopMsg;
+    if(!(_it('crown').volatile&&_it('moustache').volatile&&_it('shades').volatile&&_it('propeller').volatile)) throw 'volatile tag missing';
+    if(_it('halo').volatile||_it('gown').volatile||_it('necktie').volatile) throw 'volatile tag on a non-volatile item';
+    if(_it('halo').cat!=='head'||_it('moustache').cat!=='head'||_it('eyepatch').cat!=='eyes'||_it('bow').cat!=='neck'||_it('shoes').cat) throw 'wear-slot cats off';
+    log('wear slots + volatile ok');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

@@ -525,16 +525,35 @@ function exportFpsLog(){
 // ================================================================
 // Shop/box behaviours (moved from the screens: they mutate coins/cfg, they do not draw).
 function _gearList(){ const si=cfg.shopItems||{}; return BOX_ITEMS.filter(b=>si[b.id]); }
+let _shopMsg = null, _shopMsgAt = 0;   // wear-refusal notice; drawShop flashes + times it out
+// The worn item occupying the same wear slot (cat) as item, or null. Shop and box
+// cosmetics share the slots, so a box-won hat blocks a bought crown and vice versa.
+function _wornCatClash(item){
+    if(!item.cat) return null;
+    const wi = cfg.wornItems || {};
+    return SHOP_ITEMS.concat(BOX_ITEMS).find(o => o.id !== item.id && o.cat === item.cat && wi[o.id]) || null;
+}
 // Wear/unwear an OWNED wearable item. The SINGLE toggle every shop control path uses -- the
 // tab OK/tap and the SPACE key, on every tab -- so wearing behaves identically whatever the
 // tab or input method, with no per-tab copies. Returns true if it acted (item was an owned
 // wearable); false for an unowned or repeatable item, so the caller can decide (e.g. buy).
+// Wearing onto an occupied slot is refused with ONE harmonized notice naming the blocker;
+// that still counts as acted (true), so no caller falls through to a buy attempt.
 function _shopToggleWear(item){
     if(!item) return false;
     const si = cfg.shopItems || (cfg.shopItems = {});
     if(item.repeatable || !si[item.id]) return false;   // only owned, non-consumable items are wearable
     const wi = cfg.wornItems || (cfg.wornItems = {});
-    if(wi[item.id]) delete wi[item.id]; else wi[item.id] = true;
+    if(wi[item.id]) delete wi[item.id];
+    else {
+        const other = _wornCatClash(item);
+        if(other){
+            _shopMsg = 'REMOVE ' + other.name + ' FIRST'; _shopMsgAt = simNow;
+            Snd.sfxPlay('fail', cfg.music);
+            return true;
+        }
+        wi[item.id] = true;
+    }
     saveCfg(); Snd.sfxPlay('nav', cfg.music);
     return true;
 }

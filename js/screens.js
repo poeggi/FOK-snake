@@ -660,6 +660,7 @@ function _drawGearPage(){
         drawPixelIcon(16,y+(rowH-4)/2-8,item.icon,2);
         ctx.textAlign='left'; ctx.textBaseline='top';
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#dddddd'; ctx.fillText(item.name,46,y+7);
+        if(item.volatile){ ctx.fillStyle='#ffaa44'; ctx.fillText('VOLATILE',46+ctx.measureText(item.name).width+12,y+7); }
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=rc; ctx.fillText((item.rarity||'').toUpperCase()+' - BOX EXCLUSIVE',46,y+21);
         ctx.textAlign='right';
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#4a7a9a'; ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
@@ -720,6 +721,7 @@ function drawShop() {
         ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=worn?'#7fff7f':(owned&&isRep)?'#ff66aa':owned?'#5a8aaa':sel?'#dddddd':'#aaaaaa';
         ctx.fillText(item.name,46,y+7);
+        if(item.volatile){ ctx.fillStyle='#ffaa44'; ctx.fillText('VOLATILE',46+ctx.measureText(item.name).width+12,y+7); }
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle='#999999';
         ctx.fillText(item.desc,46,y+21);
         ctx.textAlign='right';
@@ -768,6 +770,16 @@ function drawShop() {
         ctx.save();ctx.globalAlpha=a;
         ctx.shadowColor='#7fff7f';ctx.shadowBlur=GLOW.TITLE;
         ct('PURCHASED!',CW/2,CH/2+20,'#7fff7f',FONT.TITLE);
+        ctx.restore();
+    }
+    // Wear-refusal flash: the wear slot is occupied -- one notice style for every slot,
+    // same idiom as the purchase flash so shop feedback reads as one voice.
+    const refAge=now-_shopMsgAt;   // can start negative: a buy queues it behind PURCHASED!
+    if(_shopMsg&&_shopMsgAt>0&&refAge>=0&&refAge<1800){
+        const a=refAge<120?refAge/120:refAge>1400?1-(refAge-1400)/400:1;
+        ctx.save();ctx.globalAlpha=a;
+        ctx.shadowColor='#ff5555';ctx.shadowBlur=GLOW.TITLE;
+        ct(_shopMsg,CW/2,CH/2+20,'#ff5555',FONT.MENU);
         ctx.restore();
     }
     _drawBoxReveal();

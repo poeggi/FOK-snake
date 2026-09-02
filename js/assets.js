@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.6.10';
+const APP_VERSION = 'v2.6.11';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -205,29 +205,35 @@ const EGG_ACHIEVEMENTS = [
     { id:'egg_tbd3',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
 ];
 
+// Wearing metadata on cosmetics (shop + box items alike):
+//   cat      : wear slot, never shown in the UI. Only ONE item per slot can be worn at a
+//              time ('head' = anything worn on the head or the nose, 'eyes' = eyewear,
+//              'neck' = neckwear); _shopToggleWear refuses a second item of an occupied slot.
+//   volatile : cosmetics property, shown as a tag on the shop rows. No gameplay meaning
+//              here; a 1:1 feature consumes it.
 const SHOP_ITEMS = [
-    { id:'necktie',  name:'NECKTIE',       desc:'Business on the grid',           price:25000,
+    { id:'necktie',  name:'NECKTIE',       desc:'Business on the grid',           price:25000, cat:'neck',
       icon:{p:{A:'#2a52be',B:'#1a3a8e',C:'#5a82ee'},d:['...BB...','...BB...','...AA...','..AAAA..','..ACCA..','..AAAA..','...AA...','........']}},
-    { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:50000,
+    { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:50000, cat:'eyes', volatile:true,
       icon:{p:{A:'#111111',B:'#1a3050'},d:['.AAA.AAA','ABBBABBB','ABBBABBB','.AAA.AAA','........','........','........','........']}},
-    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000,
+    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000, cat:'head', volatile:true,
       icon:{p:{A:'#1a1a1a',B:'#333333'},d:['........','..AAAA..','..AAAA..','..AAAA..','.BBBBBB.','........','........','........']}},
     { id:'donate',   name:'DONATE',        desc:'Support the dev. Repeatable!',  price:100000, repeatable:true,
       icon:{p:{A:'#ff4499',B:'#ff88cc'},d:['.AA.AA..','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','...A....','........','........']}},
-    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000,
+    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000, cat:'eyes', volatile:true,
       icon:{p:{H:'#d8d8d8',A:'#999999',S:'#484848',G:'#eeeeee',C:'#aaaaaa',D:'#555555'},d:['..HHAA..','.H....A.','.H.G..A.','.A....S.','..AASS..','.....CD.','....CD..','...CD...']}},
-    { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:250000,
+    { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:250000, cat:'neck',
       icon:{p:{A:'#cc2222',B:'#ff4444',C:'#aa0000'},d:['........','AA...AA.','ABBACBBA','AABACBAA','AA...AA.','........','........','........']}},
     // --- Page 2 ---
     { id:'shoes',    name:'SHOES',         desc:'Fresh kicks for the tail',       price:300000, page:1,
       icon:{p:{W:'#eeeeee',S:'#cc2222',L:'#333333'},d:['........','........','........','WW...WW.','WWW.WWW.','SSS.SSS.','LLL.LLL.','........']}},
-    { id:'moustache',name:'MOUSTACHE',     desc:'A dashing handlebar',            price:450000, page:1,
+    { id:'moustache',name:'MOUSTACHE',     desc:'A dashing handlebar',            price:450000, page:1, cat:'head', volatile:true,
       icon:{p:{A:'#3a2a1a'},d:['........','........','........','.A....A.','AAA..AAA','.AAAAAA.','..AAAA..','........']}},
-    { id:'halo',     name:'HALO',          desc:'For the angelic serpent',        price:650000, page:1,
+    { id:'halo',     name:'HALO',          desc:'For the angelic serpent',        price:650000, page:1, cat:'head',
       icon:{p:{A:'#ffd83a',G:'#fff4a0'},d:['........','.GAAAAG.','A......A','A......A','.GAAAAG.','........','........','........']}},
-    { id:'wizard',   name:'WIZARD HAT',    desc:'Arcane and pointy',              price:900000, page:1,
+    { id:'wizard',   name:'WIZARD HAT',    desc:'Arcane and pointy',              price:900000, page:1, cat:'head', volatile:true,
       icon:{p:{P:'#5a2a9a',S:'#ffe860',B:'#3a1a6a'},d:['...S....','...P....','..PPP...','..PPP...','.PPPPP..','PPPPPPP.','BBBBBBB.','........']}},
-    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000, page:1,
+    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000, page:1, cat:'head', volatile:true,
       icon:{p:{A:'#ffd700',C:'#ff4444'},d:['A..A..A.','AAAAAAA.','ACAAACA.','AAAAAAA.','........','........','........','........']}},
     { id:'gown',     name:'INVISIBLE GOWN',desc:'Unseen - shimmers when you soar',price:3000000, page:1,
       icon:{p:{A:'#8fbfe0',S:'#ffffff'},d:['...S....','..AAA...','..A.A...','.A...A..','.A...A..','.AAAAA..','.AAAAA..','S......S']}},
@@ -244,11 +250,11 @@ const ITEM_RARITY = {
     crown:'legendary', gown:'legendary',
 };
 const BOX_ITEMS = [
-    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000,   desc:'Arr. Box-only.',
+    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000,   cat:'eyes', volatile:true, desc:'Arr. Box-only.',
       icon:{p:{A:'#0a0a0a',S:'#3a3a3a'},d:['........','S.....S.','.S...S..','..AAA...','..AAA...','..AAA...','........','........']}},
-    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000,  desc:'Everything pops. Box-only.',
+    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000,  cat:'eyes', volatile:true, desc:'Everything pops. Box-only.',
       icon:{p:{R:'#ff2a2a',C:'#22e0ff',F:'#111111'},d:['........','.FFFFFF.','.FRRCCF.','.FRRCCF.','.FFFFFF.','........','........','........']}},
-    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000,  desc:'Ready for takeoff. Box-only.',
+    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000,  cat:'head', volatile:true, desc:'Ready for takeoff. Box-only.',
       icon:{p:{R:'#e03c3c',Y:'#f5d020',G:'#2aa84a',B:'#4a90d9',H:'#ffd700',S:'#888888'},d:['..B..R..','..BBRR..','...HH...','...S....','..RRRR..','.YRYRYR.','.GGGGGG.','........']}},
     { id:'blackbelt',  name:'BLACK BELT',    rarity:'rare',      value:250000,  desc:'Dojo master. Box-only.',
       icon:{p:{B:'#111111',D:'#3a3a3a'},d:['........','........','BBBBBBBB','BDDDDDDB','...BB...','..B..B..','..B..B..','........']}},
@@ -256,7 +262,7 @@ const BOX_ITEMS = [
       icon:{p:{R:'#ff2a2a',H:'#ff9090'},d:['........','........','HH....HH','RRRRRRRR','HH....HH','........','........','........']}},
     { id:'goldchain',  name:'GOLD CHAIN',    rarity:'legendary', value:1500000, desc:'Ice cold bling. Box-only.',
       icon:{p:{G:'#ffd700',Y:'#b8860b',M:'#fff2a0'},d:['........','........','G......G','.G....G.','..G..G..','..GYYG..','...MM...','........']}},
-    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, desc:'ADMIN box only. The trophy.',
+    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, cat:'head', volatile:true, desc:'ADMIN box only. The trophy.',
       icon:{p:{A:'#ffe860',C:'#00e5ff',B:'#cc9a00'},d:['C..C..C.','AAAAAAA.','ACAAACA.','AAAAAAA.','BBBBBBB.','........','........','........']}},
 ];
 // Box tiers. odds = probability of each outcome (coins filler + a loot rarity); they

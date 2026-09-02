@@ -311,7 +311,13 @@ const UI_INPUT = {
             if(_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
                 _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch (e) {}
                 si[item.id]=true;
-                if(!item.repeatable)(cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
+                if(!item.repeatable){
+                    // Auto-wear the purchase -- unless its wear slot is taken: then it stays
+                    // owned-not-worn and the REMOVE-first notice queues behind PURCHASED!.
+                    const other=_wornCatClash(item);
+                    if(other){ _shopMsg='REMOVE '+other.name+' FIRST'; _shopMsgAt=simNow+1200; }
+                    else (cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
+                }
                 saveCfg();
                 if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full');
                 triggerPurchaseAnim(); Snd.sfxPlay('perfect',cfg.music);
