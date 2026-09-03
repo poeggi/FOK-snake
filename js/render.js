@@ -1205,9 +1205,20 @@ function _gemIsFinisherHeart() {
     if(!players || gemsDone !== GEMS_PER_LEVEL-1) return false;
     if(typeof netGameActive==='function' && netGameActive()){
         const me=(typeof netMyIndex==='function') ? netMyIndex() : 0;
-        return !!(players[me] && players[me].lives < START_LIVES);
+        return !!(players[me] && players[me].lives < _duelHeartsMax);
     }
-    return players.some(p=>p.lives < START_LIVES);
+    return players.some(p=>p.lives < _duelHeartsMax);
+}
+// The segments a powered self-bite knocked off, in the colour of the snake that lost them.
+// Rides the SAME particle list a crushed bar uses, so it fades and clears with everything
+// else; only the hue and the lighter, slower scatter say it was flesh and not masonry.
+// The hue comes from the one duel-pair accessor, so the burst can never come out in the
+// other snake's colour; single player has no pair and reads the configured one.
+function _biteBurst(x, y, p) {
+    const hue = players ? _wsOwnerHue(p) : SNAKE_COLORS[cfg.snakeColor||0].h;
+    return { x, y, at:simNow, pts:Array.from({length:14},()=>({
+        ang:Math.random()*Math.PI*2, spd:2+Math.random()*7, sz:2+Math.random()*3,
+        col:'hsl('+hue+',75%,'+Math.round(45+Math.random()*30)+'%)' })) };
 }
 function _drawCrushEffects(now) {
     _crushEffects=_crushEffects.filter(e=>{

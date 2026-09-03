@@ -496,7 +496,7 @@ async function _netRequestStart(s, reason){
         // WHILE in game and is not.
         if(s.role === 'host'){
             const g = { t:'go', why:(reason === 'rematch') ? 'rematch' : 'match',
-                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:1 };
+                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:1, hm:s.hearts|0 };
             if(theta != null) g.bth = Math.round(theta);
             _netTxShip(s, g);
         }
@@ -555,7 +555,7 @@ function _netOpenBoundary(s, why){
                                             : netPts() + NET_BURST_LEAD_MS;
         s.startPts = startPts;
         _netClockPush();            // anchor + startPts move together: the core must see both
-        const g = { t:'go', why, seed:s.seed, startPts:startPts, epoch:s.epoch|0, lvl:(s.lvl|0) || 1 };
+        const g = { t:'go', why, seed:s.seed, startPts:startPts, epoch:s.epoch|0, lvl:(s.lvl|0) || 1, hm:s.hearts|0 };
         if(theta != null) g.bth = Math.round(theta);
         _netTxShip(s, g);
         _netArmBegin(s, startPts, () => {
@@ -671,6 +671,15 @@ function _netHandleMsg(txt){
             // the desync this architecture exists to make impossible. Validate BEFORE
             // consuming the epoch, so a malformed copy does not block a good repeat.
             if(typeof m.startPts !== 'number' || netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); break; }
+            // The heart cap rides EVERY go and is adopted verbatim: one number, host-authored,
+            // so both sims open on the same cap however each side got here. Where a preset
+            // exists (a tournament roles sheet said 2), a go that disagrees is a protocol
+            // fault rather than a difference to absorb -- the bracket would otherwise score a
+            // match the two clients did not play under the same rules. The echo verifier
+            // makes the agreement byte-exact for free (hm is just another copied field).
+            const hm = _duelHearts(m.hm);
+            if(s.heartsWant != null && hm !== s.heartsWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
+            s.hearts = hm;
             s.ctlEpoch = ep;
             s.seed = (m.seed>>>0) || s.seed;
             s.startPts = m.startPts;   // the epoch tick 0 is measured from: every boundary moves it

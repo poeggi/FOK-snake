@@ -238,7 +238,7 @@ onmessage = (e) => {
         case 'duelStartNet':   // a (re)start: fresh seed/startPts, rollback state rebased
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? null : m.ofs); _dcStartPts = m.startPts || 0;
             _dcOn = true; self.inGame = true;
-            simCommand({ t:'startDuel', seed:m.seed>>>0, net:true, ws:m.ws });   // net: deaths hold for the negotiated respawn boundary
+            simCommand({ t:'startDuel', seed:m.seed>>>0, net:true, ws:m.ws, hearts:m.hearts });   // net: deaths hold for the negotiated respawn boundary; hearts = the go's negotiated cap
             _rbReset();                                  // AFTER startDuel: it rewinds simTick, the base reads it
             // Only on a MATCH start: the level and respawn boundaries below keep the same mid,
             // and resetting there would drop a pending claim and rewind every instance version.

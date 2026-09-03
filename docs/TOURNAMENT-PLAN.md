@@ -30,16 +30,58 @@ transfer).
 
 IRON RULE preserved throughout: ONE sim implementation for solo, local 1:1,
 online 1:1 and spectating. A spectator is the same sim with input authoring
-disabled, running ~1.5s behind the live edge so forwarded inputs land in its
-future window and no rollback ever triggers.
+disabled, fed the players' own packets verbatim.
+
+P2P-ONLY, also throughout: tournament matches and every spectator link run on
+a direct DataChannel. The deprecated server relay is refused - not merely
+unused - at all three of its entry points, so a bracket can never score a
+match that ran on a transport the rest of the tournament is not using. A
+failure to connect fails loudly, and that is the point: the bracket can then
+re-deal or walk the match over, which relaying it silently would hide.
+
+LATENCY BUDGET (a hard requirement, not an aspiration): each forwarding hop
+adds at most ONE game step of buffering, so a secondary spectator sits at most
+TWO game steps behind the players. A game step is the sim's visible unit of
+change - gPer engine ticks, 50ms at the fastest duel pace and up to 200ms at
+level 1 - not the 16.7ms engine tick. What the budget governs is BUFFERING,
+the delay this design chooses to add; the wire's own propagation is physics
+and is whatever the network gives. Concretely: a primary forwards each
+envelope on arrival and never batches, and a spectator paces one step behind
+the edge rather than the 1.5s cushion an earlier draft proposed.
+
+That cushion would have bought "a spectator never rolls back" - forwarded
+inputs would always have landed in its future window. The budget is worth
+more than the guarantee: a spectator that rolls back does so through the SAME
+machinery the players already run every match, and it is the safe place to
+spend it, because a spectator never repairs toward the players. An occasional
+correction on a watcher's screen costs far less than a stream that trails the
+action by a second and a half.
 
 ## Status
 
 - Step 0 (menu restructure): DONE, commit 2eb6c26. Main menu SOLO PLAY /
   MULTIPLAYER; duelMenu phase is the MULTIPLAYER menu with TOURNAMENT greyed
   (COMING SOON); new duel11 phase holds 1:1 ONLINE / 1:1 LOCAL.
-- Phases A..F: NOT STARTED. Order: A -> (server 4.1 deployed) -> B -> C ->
-  E -> F. B onward is blocked on the server speaking API 4.1.
+- Phase A (heart cap + stakes as negotiated match parameters): DONE. The
+  P2P-only refusal shipped with it (the netP2POnly latch in net-rtc.js plus
+  guards at _netRelayOffer / _netRelayAnswer / _netRelayStart). Covered by
+  test/duel-hearts.js, including the GOLDEN_DUEL_H2 2-heart lockstep lane;
+  the classic and duel goldens in sim-determinism.js did NOT move, which is
+  the proof the default lane is untouched.
+- The POWER BITE shipped in the same release, as a sim rule rather than a
+  tournament one: with the power pill up, running into your own body is no
+  longer lethal in ANY mode -- the head goes through and everything from the
+  bitten segment back falls off (js/sim.js `_powerBiteIdx` / `_powerBite`,
+  called from both step() and duelStep(); floor SNAKE_MIN_LEN, shared with
+  the chomp). It is written once and called from both, so tournament matches
+  inherit it with no tournament-side code at all. Covered by
+  test/power-bite.js, which drives single player and 1:1 off ONE fixture and
+  asserts the same outcome from both. All three goldens held: no golden
+  scenario ever reaches a powered self-bite (verified by arming the rule to
+  throw and re-running them), so the rule is new ground rather than a silent
+  rewrite of the recorded lanes.
+- Phases B..F: NOT STARTED. Order: B -> C -> E -> F. B onward is blocked on
+  the server speaking API 4.1.
 
 Every phase is independently shippable and green-gated; each wire-surface
 phase is a MINOR bump via annotated tag (hook-managed versions - never
@@ -77,10 +119,25 @@ duels at 3. Stakes must be switchable off per match.
 
 All in the one shared sim/netcode - no second code path.
 
-- Pacing by startPts bias: a spectator sets startPts += SPEC_DELAY_MS
-  (1500). Both homes derive tick targets from startPts, so the whole sim
-  runs behind with zero new pacing code. Widen the future gate when
-  spectating: RB_SPEC_FUTURE = 192 vs RB_FUTURE 32 (duel-core.js:1123).
+- Pacing by startPts bias, sized in GAME STEPS: a spectator sets
+  startPts += SPEC_DELAY_STEPS * gPer * TICK_MS, with SPEC_DELAY_STEPS = 1
+  per hop from the feeder (a primary 1, a secondary 2). Both homes already
+  derive their tick targets from startPts, so the whole sim runs behind with
+  zero new pacing code, and the bias is re-derived at every 'go' because gPer
+  changes with the level. Widen the future gate when spectating
+  (RB_SPEC_FUTURE = 192 vs RB_FUTURE 32, duel-core.js:1123) so an input that
+  arrives early is buffered rather than dropped.
+- Rollback is EXPECTED at this pacing, not an error: a packet whose step has
+  already been simulated rewinds the spectator through the ordinary
+  duel-core path. Two properties make that safe, and both are asserted in
+  duel-spec.js - a spectator authors nothing, so its rewind cannot
+  propagate, and it never sends a repair toward the players. What it must
+  NOT do is flap the OUT OF SYNC banner on an ordinary catch-up: only a hash
+  mismatch that survives a fresh 'rs' surfaces to the viewer.
+- Forward on arrival, never on a timer: a primary re-envelopes and sends the
+  moment a packet lands. Batching, coalescing or waiting for the next
+  heartbeat would each spend the one-step budget the tree is built around.
+  smoke-net measures the added delay per hop in steps and fails over one.
 - Envelope `{t:'sp', g:<feederGen>, n:<seq>, p:0|1, m:<verbatim packet>}` on
   a RELIABLE ordered DataChannel, separate from the unreliable duel channel
   (SPEC_PKT_MAX 16384). Inner packets are the parsed originals, never
@@ -119,7 +176,9 @@ All in the one shared sim/netcode - no second code path.
   envelopes since] (the feeder emits an enveloped 'rs' every 10s as a
   checkpoint; roughly a 10-15KB buffer) and answer
   `{t:'sreq', from:<n>, g, rs?}` and `{t:'ssub'}` (warm standby, silent).
-- Secondaries dual-connect to both primaries; they feed from one and fail
+- Secondaries dual-connect to both primaries and hold BOTH streams open,
+  feeding from one: the standby link is already warm, so a switch costs no
+  reconnect and the two-step budget survives the failover itself. They fail
   over locally on 1.5s of envelope silence (the feeder's 16-tick heartbeat
   cadence makes silence unambiguous); records are idempotent by (p,q) so
   overlap during a switch is harmless.

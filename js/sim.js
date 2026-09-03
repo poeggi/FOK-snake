@@ -206,12 +206,37 @@ function startGame(seed, bestScore) { players = null; duelWinner = -1; _ws = nul
 // No power-ups, no coins/achievements (economy protection).
 // A duel snake's spawn length, and the floor a CHOMP may chew it down to. A snake is
 // always a head AND a body: a lone head reads as a broken render, not as a hit taken.
-const DUEL_LEN = 3, DUEL_MIN_LEN = 2;
+// SNAKE_MIN_LEN is the floor EVERY bite respects, in every mode: a bite that would leave a
+// head with no body at all reads as a broken render rather than a hit taken, so the chomp
+// goes as deep as it can and stops there.
+const DUEL_LEN = 3, SNAKE_MIN_LEN = 2;
 function _mkDuelPlayer(x0, y0, dx) {
     return { snake: Array.from({length:DUEL_LEN},(_,i)=>({x:(x0-dx*i+COLS)%COLS, y:y0})),
              dir: {x:dx, y:0}, dirQueue: [],
              boostDir: null, boosting: false, stepAccum: 0,
-             score: 0, lives: START_LIVES, alive: true, slowUntil: 0 };
+             score: 0, lives: _duelHeartsMax, alive: true, slowUntil: 0 };
+}
+// ---- POWER BITE: one rule, every mode ----
+// With the power pill up, running into your OWN body stops being lethal: the head goes
+// through and everything from the bitten segment back falls away. It is the rule a chomp
+// already applies to the OTHER snake -- eaten off from the bitten segment back -- turned on
+// its owner, so it is written once here and called from step() and duelStep() rather than
+// implemented per mode: single player, local 1:1 and online 1:1 shorten identically.
+// The SHORTENING is sim state (it rides the snapshot and the duel's lockstep hash, so both
+// clients cut the same segments on the same tick); the pieces flying off are the renderer's.
+//
+// _powerBiteIdx searches the PRE-move body and returns the bitten index, or 0 for none --
+// index 0 is the head, which a move can never land on, so 0 doubles as "nowhere". The
+// caller passes the same body the lethal check uses, tail tip excluded unless eating, so a
+// bite always costs at least one segment (the tip vacates as the head arrives).
+function _powerBiteIdx(body, hk) {
+    for (let j = 1; j < body.length; j++) if (ck(body[j]) === hk) return j;
+    return 0;
+}
+// ...and _powerBite applies it AFTER the move, where the unshifted head has pushed the
+// bitten segment one place along. That segment goes too: the head is standing on it now.
+function _powerBite(snk, at) {
+    snk.length = Math.max(at + 1, SNAKE_MIN_LEN);
 }
 // (Re)build the current duel level: fresh symmetric spawns (lives + scores kept),
 // level-scaled barricades and speed, gems reset, READY/GO. Used for the match start,
@@ -281,6 +306,16 @@ function _duelBeginLevel(reseed) {
 // entry sets it), constant for the whole match, never hashed and never snapshotted --
 // local duels and single player keep the immediate rebuild.
 let _duelNetHold = false;
+// The duel's heart cap, negotiated PER MATCH and constant for its lifetime: ordinary
+// duels and a tournament final run at START_LIVES, tournament round/knockout matches at 2.
+// CONFIG like _duelNetHold, not state -- both clients adopt the same number from the 'go'
+// before tick 0, so it never varies mid-match and never needs hashing. It IS mirrored
+// through the snapshot, because the renderer must draw the heart row against the cap the
+// match is actually running rather than the constant.
+let _duelHeartsMax = START_LIVES;
+// A cap off the wire is untrusted input: anything outside 1..START_LIVES reads as the
+// default, so a malformed or absent hm can never hand a player extra lives.
+function _duelHearts(h){ h = h|0; return (h >= 1 && h <= START_LIVES) ? h : START_LIVES; }
 // Builds one player's worn windswept state from an untrusted list. Ids the cosmetics tables
 // do not know are dropped rather than trusted (the list arrives from a peer profile, and an
 // unknown id would have no steal chance to roll against), and so is a repeat of an id
@@ -374,7 +409,7 @@ function _duelSpawnGem() {
     // can matter (someone below the cap) and never stacked on another heart. The lives/heart
     // gates are all synced state so both clients take the same branch and consume the rng in
     // lockstep; the cell is chosen without rng (see _duelHeartCell).
-    if (!heart && level >= 2 && players.some(p => p.lives < START_LIVES) && rng() < 0.05 * _X10()) {
+    if (!heart && level >= 2 && players.some(p => p.lives < _duelHeartsMax) && rng() < 0.05 * _X10()) {
         const hB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
         hB.add(ck(gem)); if (powerPellet) hB.add(ck(powerPellet));
         const hc = _duelHeartCell(hB);
@@ -396,21 +431,27 @@ function duelStep(now) {
     if (!moves[0] && !moves[1]) return;
     const protect = now - spawnAt < SPAWN_PROTECT;
     const dead = [false, false];
-    const crushK = [null, null], biteK = [null, null];
+    const crushK = [null, null], biteK = [null, null], selfK = [0, 0];
     const into = [null, null], hitAt = [null, null];   // renderer-only: what the death ran into, and where
     const barKeys = new Set(bars.map(ck));
     for (let i = 0; i < 2; i++) {
         if (!moves[i]) continue;
         const hk = ck(moves[i]), other = players[1-i];
         const eats = gem && ck(gem) === hk;
+        // Where this move runs into the mover's OWN body (0 = nowhere).
+        const selfAt = protect ? 0 : _powerBiteIdx(eats ? players[i].snake : players[i].snake.slice(0,-1), hk);
         if (!protect) {
             if (barKeys.has(hk)) {
                 const hb = bars.find(b => ck(b) === hk);
                 if (hb && (hb.fragile || _powerMode)) crushK[i] = hk;   // fragile OR powered: smash through, same rule as single player
                 else { dead[i] = true; into[i] = 'bar'; hitAt[i] = moves[i]; }   // solid bar: lethal
             }
-            // own body: tail vacates unless eating (same rule as classic; power does not excuse it)
-            else if ((eats ? players[i].snake : players[i].snake.slice(0,-1)).some(s => ck(s) === hk)) { dead[i] = true; into[i] = 'self'; hitAt[i] = moves[i]; }
+            // own body: the tail vacates unless eating (same rule as classic). POWERED this is
+            // no longer lethal -- the head goes through and the tail falls off (see _powerBite).
+            else if (selfAt > 0) {
+                if (_powerMode) selfK[i] = selfAt;
+                else { dead[i] = true; into[i] = 'self'; hitAt[i] = moves[i]; }
+            }
             // opponent's snake: lethal normally; POWERED it becomes food -- biting the
             // head kills THEM, biting the body eats their tail off and slows the biter.
             else if (other.alive && other.snake.some(s => ck(s) === hk)) {
@@ -484,12 +525,21 @@ function duelStep(now) {
         }
         if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
             heart = null;
-            if (P.lives < START_LIVES) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); }
+            if (P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); }
         }
         if (eater < 0 && gem && ck(gem) === ck(moves[i])) {
             eater = i;
             P.snake.push(Object.assign({}, P.snake[P.snake.length - 1]));   // +2 growth (classic normal)
         } else P.snake.pop();
+    }
+    // A POWERED self-bite resolves with the move applied, so the index has shifted one along
+    // with the head. Ahead of the chomps below: a segment this snake has already lost cannot
+    // also be chomped off it, and the chomp's findIndex simply comes up empty.
+    for (let i = 0; i < 2; i++) {
+        if (!selfK[i]) continue;
+        const n = players[i].snake.length;
+        _powerBite(players[i].snake, selfK[i]);
+        emit({t:'bite', p:i, x:moves[i].x, y:moves[i].y, n:n - players[i].snake.length});
     }
     // Bites resolve after the moves: the victim's tail is eaten off from the bitten
     // segment back (if it moved away this very tick, it escaped), the biter chews
@@ -501,7 +551,7 @@ function duelStep(now) {
         // A bite at the NECK (idx 1) used to leave a head with no body at all, which
         // reads as a broken render rather than a hit taken. The chomp still bites as
         // deep as it can; it just cannot take the last body segment with it.
-        if (idx > 0) other.snake.length = Math.max(idx, DUEL_MIN_LEN);
+        if (idx > 0) other.snake.length = Math.max(idx, SNAKE_MIN_LEN);
         players[i].slowUntil = now + T(120);
         emit({t:'sfx',name:'crash'}); emit({t:'bonus',label:'CHOMP!'});
     }
@@ -509,8 +559,8 @@ function duelStep(now) {
         players[eater].score += level * 100;
         gemsDone++;
         if (gemsDone >= GEMS_PER_LEVEL) {
-            // Twist: the level-finisher earns a heart back (max 3).
-            if (players[eater].lives < START_LIVES) players[eater].lives++;
+            // Twist: the level-finisher earns a heart back, capped at the match's cap.
+            if (players[eater].lives < _duelHeartsMax) players[eater].lives++;
             emit({t:'sfx',name:'levelUp'});
             // Same "press to continue" gate as single player: wait in 'levelDone' for 'advance'.
             levelWasPerfect = false;   // no perfect-level bonus in a duel
@@ -741,7 +791,10 @@ function step(now) {
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
     const anyAte=ate||ateGourangaIdx>=0;
-    if(!protect && (anyAte?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now, 'self', head);return;}
+    // Own body: lethal normally, but POWERED the head goes through and the bitten segment
+    // back falls off instead -- applied at the end of the step, once the move is in.
+    const selfAt = protect ? 0 : _powerBiteIdx(anyAte?snake:snake.slice(0,-1), hk);
+    if(selfAt > 0 && !_powerMode){die(now, 'self', head);return;}
     if(!anyAte) gemSteps++;
     if(_gourangaActive && _gourangaEaten.size>0) _gourangaSteps++;   // count every move once the sweep has begun
     snake.unshift(head);
@@ -816,6 +869,11 @@ function step(now) {
         }
     } else snake.pop();
     if(anyAte && cfg.diff > 0) snake.push(Object.assign({}, snake[snake.length - 1]));
+    if(selfAt > 0){
+        const n = snake.length;
+        _powerBite(snake, selfAt);
+        emit({t:'bite', p:0, x:head.x, y:head.y, n:n - snake.length});
+    }
 }
 
 // into/at describe the impact for the renderer only ('bar' dents, everything else just
@@ -958,7 +1016,7 @@ function simSnapshot(){
         powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
         timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
         perfectCount, luckyCount, boostDir, boosting, gemOptimal, gemSteps,
-        players, duelWinner, _speedRound, _nmWasAdjacent, _ws, _rngState,
+        players, duelWinner, _speedRound, _nmWasAdjacent, _ws, _rngState, _duelHeartsMax,
     };
 }
 // Register one steering record into a dirQueue. ONE rule shared by classic (module
@@ -984,7 +1042,9 @@ function simCommand(m){
         case 'start': startGame(m.seed, m.bestScore); break;
         // m.net marks an ONLINE duel: deaths then hold for the negotiated respawn boundary
         // (see _duelNetHold). Local duels send no flag and keep the immediate rebuild.
-        case 'startDuel': _duelNetHold = !!m.net; startDuel(m.seed, m.ws); break;
+        // m.hearts is the negotiated cap (absent = START_LIVES). Set BEFORE startDuel:
+        // _mkDuelPlayer reads it for the opening life count.
+        case 'startDuel': _duelNetHold = !!m.net; _duelHeartsMax = _duelHearts(m.hearts); startDuel(m.seed, m.ws); break;
         // dir/boost carry an optional player index (m.p). In duel mode they route to
         // players[p]; classic mode keeps the original single-snake path untouched.
         // A remote peer's input will arrive as these SAME commands with p = their index.
@@ -1043,7 +1103,7 @@ function simCommand(m){
             break;
         case 'phase':
             phase=m.phase; phaseAt=simNow;
-            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; _ws=null; _nmWasAdjacent=false; }   // leaving a duel clears its state
+            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; _duelHeartsMax=START_LIVES; _ws=null; _nmWasAdjacent=false; }   // leaving a duel clears its state
             break;
     }
 }
@@ -1058,6 +1118,7 @@ function simApply(s){
     timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
     perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
     players=s.players; duelWinner=s.duelWinner; _speedRound=s._speedRound; _nmWasAdjacent=s._nmWasAdjacent; _ws=s._ws; if(s._rngState!=null) _rngState=s._rngState;
+    _duelHeartsMax=_duelHearts(s._duelHeartsMax);
 }
 // ---- Local boost arming (DEVICE-local: never in the snapshot or the hash) ----
 // A held direction ARMS a boost; after BOOST_GRACE_TICKS of aligned live ticks the

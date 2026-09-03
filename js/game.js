@@ -210,6 +210,8 @@ function flushFxQ(){
                                   sz:2+Math.random()*4,
                                   col:['#ff6600','#ffaa00','#ffdd44','#cc3300','#ffffff','#886644'][Math.floor(Math.random()*6)]
                               })) }); break;
+            case 'bite':  _crushEffects.push(_biteBurst(e.x, e.y, e.p));
+                          showBonus(simNow, 'TAIL OFF!'); break;
             case 'nearmiss': armNearMiss(e.heavy, simNow);   // shake + coincident sfx, both settled 2 ticks
                              Snd.sfxPlay(e.heavy?'boom':'squeeze', cfg.music); break;
             case 'crash':  armCrash(e, simNow); break;
@@ -597,6 +599,7 @@ function _duelWsLists(hosting){
 function _wsTransfer(e){
     if(e.from === e.to) return;                       // took their own item straight back
     if(typeof netGameActive !== 'function' || !netGameActive()) return;
+    if(_netSess && _netSess.stakes === false) return;   // stakes off: the steal is real on the board, but nothing outlives the match
     const me = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
     if(e.from !== me && e.to !== me) return;
     // NEW objects, not in-place edits: netDuelLook memoizes on cfg.wornItems by reference.
@@ -1005,9 +1008,14 @@ function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x
 // side's secret (from start.php -- each client gets only its own, which is what makes a tag
 // the peer cannot forge), the two player ids in SIM INDEX order (host is always P0), and our
 // view of every instance's version so a transfer can name the seq the server compares against.
+// STAKES OFF (a tournament creator's choice) drops the match handle: duel-core opens a
+// claim only when it has a mid, so an empty one turns every steal into a board-only
+// event -- the mechanic plays out identically, nothing leaves the room. Deliberately NOT
+// done by emptying the worn lists: that would change the SIM, and single player, local
+// 1:1 and online 1:1 run one mechanic (the harmonized-mechanics rule).
 function _duelClaimArgs(hosting){
     const s = _netSess || {}, me = getPlayerId(), peer = s.peer || '';
-    return { mid: s.mid || '', sec: s.secret || '',
+    return { mid: (s.stakes === false) ? '' : (s.mid || ''), sec: s.secret || '',
              ids: hosting ? [me, peer] : [peer, me],
              seqs: itemMatchSeqs(s.peerProfile) };
 }
@@ -1029,6 +1037,9 @@ function _rbPostRollback(barsChanged, keep){
         else Snd.duck(false);
     }
 }
+// The heart cap THIS match runs under, as negotiated on the go (net-session.js adopts it
+// onto the session before the begin fires). Ordinary duels never set it and get START_LIVES.
+function _duelMatchHearts(){ return _duelHearts(_netSess && _netSess.hearts); }
 // Online duel entry (called by net-session.js when the DataChannel opens on both ends).
 // BOTH clients start the same deterministic sim from the shared seed and run it
 // locally (in-process). There is no host and no authority: each side sends only
@@ -1054,7 +1065,7 @@ function beginOnlineDuel(seed, hosting){
         // sends it again with the fresh seed/startPts.
         _wDuel = true;
         _worker.postMessage(Object.assign({ t:'duelStartNet', seed:seed>>>0,
-            my: hosting ? 0 : 1, ws: _duelWsLists(hosting),
+            my: hosting ? 0 : 1, ws: _duelWsLists(hosting), hearts: _duelMatchHearts(),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 }, _duelClaimArgs(hosting)));
         // The epoch stamp + receive gate live on MAIN (_netSend/_netHandleMsg read
@@ -1066,7 +1077,7 @@ function beginOnlineDuel(seed, hosting){
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
-    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting) });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
+    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting), hearts:_duelMatchHearts() });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
     const ca = _duelClaimArgs(hosting);
     if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it

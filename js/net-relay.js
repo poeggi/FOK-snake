@@ -10,6 +10,16 @@
 // residual hook list in docs/DEPRECATED-relay.md. New netcode belongs in net-rtc.js /
 // net-session.js and must work over the DataChannel without a relay equivalent.
 
+// The P2P-ONLY refusal (see netP2POnly in net-rtc.js). Relay mode has three ways in -- the
+// offerer's and the answerer's deliberate relay handshake, and _netRelayStart's fallback
+// after P2P failed -- so the check sits at each of them rather than at the shared session
+// builder: the two handshake paths must refuse BEFORE they signal, or the peer answers into
+// a mode this side will not run. Failing loudly is the point: a tournament can re-deal or
+// walk the match over, which relaying it silently would hide.
+function _netRelayRefuse(where){
+    _netSigLog('! relay REFUSED (p2p-only) ' + where);
+    _netLb.msg = 'P2P FAILED - NEEDS A DIRECT LINK'; _uiDirty = true;
+}
 // ---- Relay-mode handshake: no RTCPeerConnection at all -- the offer carries the seed but
 // NO sdp, the answer only the profile, then both sides start.php + relay.php immediately. ----
 function _netRelaySessionStart(peer, role, seed, peerProfile){
@@ -29,6 +39,7 @@ function _netRelaySessionStart(peer, role, seed, peerProfile){
 }
 function _netRelayOffer(peer, peerProfile){   // inviter/offerer in relay mode: make the seed, offer with no sdp
     if(inGame){ _netSigLog('> offer SKIP(ingame)'); return; }
+    if(netP2POnly()){ _netRelayRefuse('offer'); return; }
     if(_netSess) _netTeardown();          // debris: replace it, never silently skip the offer
     const seed = (Math.random()*0x100000000)>>>0;
     _netTimeSync();
@@ -38,6 +49,7 @@ function _netRelayOffer(peer, peerProfile){   // inviter/offerer in relay mode: 
     _netRelaySessionStart(peer, 'host', seed, peerProfile);
 }
 function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer with just the profile
+    if(netP2POnly()){ _netRelayRefuse('answer'); return; }
     if(d && !_netVerOk(d.v)){
         _netLb.msg = 'VERSION MISMATCH - BOTH PLEASE RELOAD'; _uiDirty = true;
         _netSignal(peer, 'bye', ''); return;
@@ -66,6 +78,7 @@ function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer 
 function netRelayActive(){ return !!(_netSess && _netSess.game && _netSess.relay); }
 function _netRelayStart(s){
     if(_netSess !== s || s.game) return;
+    if(netP2POnly()){ _netRelayRefuse('fallback'); _netSessionEnd('P2P FAILED - NEEDS A DIRECT LINK'); return; }
     s.relay = true;
     if(s.connT){ clearTimeout(s.connT); s.connT = null; }
     // Retire the failed RTC attempt: its late close/failed events must not

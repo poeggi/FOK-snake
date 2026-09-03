@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v3.0.3';
+const APP_VERSION = 'v3.1.0';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -23,7 +23,7 @@ const MAX_CATCHUP = 5;                          // max sim ticks simulated per r
 // game.js queues and dispatches them, sim-worker.js re-queues exactly these during a
 // rollback re-sim. It lives here, shared, because a kind listed in one home and forgotten in
 // another is not a visible bug -- the effect is simply dropped and never fires again.
-const FX_DEFER = new Set(['sfx', 'bonus', 'crash', 'crush', 'fw', 'nearmiss', 'wsblow', 'wsget']);
+const FX_DEFER = new Set(['sfx', 'bonus', 'bite', 'crash', 'crush', 'fw', 'nearmiss', 'wsblow', 'wsget']);
 const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
 // Speaker split into two 8x8 icons drawn side by side (total 32x16px at CS=2)
 // BODY: cone only (cols 0-3). WAVES: 3 arcs inner(col1,rows3-4) mid(col3,rows2-5) outer(col5,rows1-6). X: diagonal cross for muted.

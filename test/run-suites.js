@@ -50,6 +50,8 @@ const FAST = [
     ['test/check-ownership.js',   200, 'no main-thread writes to worker-owned state', false],
     ['test/duel-touch.js',        200, 'touch input funnel: a same-direction swipe collapses onto the dpad, real turns still author'],
     ['test/sim-duel.js',          100, 'duel sim rules (speed round re-rolled every spawn; fragile bars crush like single player)'],
+    ['test/duel-hearts.js',       900, 'per-match heart cap + item stakes: negotiated on the wire, one sim, and the 2-heart lockstep golden'],
+    ['test/power-bite.js',        200, 'powered self-bite shortens instead of killing, identically in single player and 1:1'],
     ['test/check-compat.js',      100, 'shipped sources stay on the supported browser floor', false],
     ['test/duel-sync.js',         100, 'P2P boundary clock burst: both sides agree on the peer offset and nudge to the shared midpoint'],
     ['test/check-ascii.js',       100, 'ASCII-only sources', false],

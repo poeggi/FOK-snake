@@ -68,6 +68,15 @@ function _netIceFlush(s){
     const q = s.iceQ; s.iceQ = [];
     for(const c of q) _netIceRelease(s, c);
 }
+// P2P-ONLY MODE. Tournament matches and every spectator link must run on a direct
+// DataChannel: the deprecated server relay's jittered HTTP round trips cannot hold the
+// spectator tree's forwarding budget, and a bracket must not score a match that ran on a
+// transport the rest of the tournament is not using. The LATCH covers the window before a
+// session exists (the relay handshake mints its own), the per-session flag covers a link
+// that is already up; either one refuses.
+let _netP2POnly = false;
+function netP2POnlySet(v){ _netP2POnly = !!v; }
+function netP2POnly(){ return _netP2POnly || !!(_netSess && _netSess.p2pOnly); }
 function _netMkSess(peer, role){
     return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
@@ -80,6 +89,13 @@ function _netMkSess(peer, role){
              tx:null,   // the ONE pending un-echoed transition ({pkt, since, lastAt, tries}; see _netTxShip)
              lastRecv:0, lastSent:0, liveT:null, warmT:null, myAgain:false, peerAgain:false, lvlPending:false,
              bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
+             // Per-MATCH negotiated parameters. hearts is the cap both sims open on (it rides
+             // every go); stakes says whether a steal really changes hands off the board;
+             // heartsWant is a PRESET (a tournament roles sheet) a received go must match.
+             hearts:START_LIVES, stakes:true, heartsWant:null,
+             // Tournament matches and every spectator link are P2P-ONLY: the deprecated
+             // server relay is not an acceptable transport for them (see _netRelayStart).
+             p2pOnly:false,
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
 }
