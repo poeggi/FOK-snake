@@ -248,29 +248,32 @@ function _drawWsItem(now){
     // TILE filling the cell it landed in, lit in the colour of the player it came off. it.own
     // is sim state and the pair of colours is derived the same way on both devices, so the
     // two screens light the same tile the same colour with nothing crossing the wire.
-    // Three cues, deliberately not all of them glow: a dark panel lifts the icon off whatever
-    // it landed on, a bright frame pins the tile to the grid, and a square bloom pulls the eye
-    // from across the board. Only the bloom spends the glow budget, so the drop still reads
-    // under SIMPLE gfx and DISABLE GLOW -- which is exactly where a shadowBlur-only marker
-    // used to vanish. The icon does NOT bob: vertical drift would unstick the tile from its
-    // cell, and sitting square in one cell is the whole point of drawing a tile. The
-    // BACKLIGHT breathes instead, which is also what a lit panel would actually do.
+    // The tile carries no drawn edge at all. A 1px frame reads as a hard line pasted onto
+    // the board, and the cell is meant to look BACKLIT rather than outlined, so the edge is
+    // FEATHERED instead: squares spilling outward onto the board, and nested squares
+    // accumulating inward to a lit core. That still resolves as one square cell -- which is
+    // what keeps it in the same visual language as the square shock ring -- without a single
+    // hard line anywhere. All of it is plain fills rather than shadowBlur, so SIMPLE gfx only
+    // drops the outward spill and DISABLE GLOW (which merely zeroes shadowBlur) leaves the
+    // marker intact instead of flattening it to a dim panel. The icon does NOT bob: vertical
+    // drift would unstick the tile from its cell, and sitting square in one cell is the whole
+    // point of drawing a tile. The BACKLIGHT breathes instead, which is also what a lit panel
+    // would actually do.
     const hue = _wsOwnerHue(it.own);
     const pulse = (_simpleGfx()||_reduceMotion()) ? 1 : 0.7+0.3*Math.sin(now/300);   // REDUCE MOTION keeps the backlight, just holds it steady
     const x0 = it.x*CS, y0 = it.y*CS;
     ctx.save();
-    if(!_simpleGfx() && !cfg.disableGlow)
-        for(let k=3;k>=1;k--){   // square bloom: the tile's own light spilling onto the board
-            ctx.fillStyle=`hsla(${hue},100%,60%,${0.10*pulse/k})`;
-            ctx.fillRect(x0-k*3, y0-k*3, CS+k*6, CS+k*6);
+    ctx.fillStyle='rgba(8,6,2,0.66)'; ctx.fillRect(x0,y0,CS,CS);   // dark seat: lifts the icon off whatever it landed on
+    if(!_simpleGfx())
+        for(let k=3;k>=1;k--){   // outward feather: the tile's own light spilling onto the board
+            ctx.fillStyle=`hsla(${hue},100%,58%,${0.055*pulse})`;
+            ctx.fillRect(x0-k*2.5, y0-k*2.5, CS+k*5, CS+k*5);
         }
-    ctx.fillStyle='rgba(8,6,2,0.72)'; ctx.fillRect(x0,y0,CS,CS);
-    const lit = ctx.createLinearGradient(0,y0,0,y0+CS);   // brightest along the top edge, so it reads as lit from behind
-    lit.addColorStop(0,`hsla(${hue},100%,62%,${0.42*pulse})`);
-    lit.addColorStop(1,`hsla(${hue},100%,50%,${0.14*pulse})`);
-    ctx.fillStyle=lit; ctx.fillRect(x0,y0,CS,CS);
-    ctx.strokeStyle=`hsla(${hue},100%,72%,${0.55+0.45*pulse})`;
-    ctx.lineWidth=1; ctx.strokeRect(x0+0.5,y0+0.5,CS-1,CS-1);   // half-pixel: a 1px frame ON the grid line, not straddling it
+    for(let i=0;i<6;i++){   // inward feather: nested squares accumulating to a lit core
+        const ins=(i/6)*(CS*0.46);
+        ctx.fillStyle=`hsla(${hue},100%,${56+(i/6)*10}%,${0.085*pulse})`;
+        ctx.fillRect(x0+ins, y0+ins, CS-ins*2, CS-ins*2);
+    }
     ctx.shadowColor=`hsl(${hue},100%,70%)`; ctx.shadowBlur=_simpleGfx()?0:GLOW.TEXT;
     drawPixelIcon(cx-4*sq, cy-4*sq, item.icon, sq);
     ctx.restore();
@@ -445,6 +448,79 @@ function eyeOffsets(d) {
     const E=CS-2;
     if(d.x===1)  return [[E-5,2],[E-5,E-5]]; if(d.x===-1) return [[2,2],[2,E-5]];
     if(d.y===-1) return [[2,2],[E-5,2]];      return [[2,E-5],[E-5,E-5]];
+}
+// EYELIDS. Both of these are renderer-only, the same discipline the scrape follows: they
+// read state the sim owns but judge nothing, draw no rng, are never hashed and put nothing on
+// the wire, so a rollback cannot disturb them and there is nothing to keep in lockstep.
+//
+// _blinkK is the idle blink, and it reports the PACE of the round. The cadence is a hash of
+// the wall clock and the player index -- no stored state, and the two screens happen to agree
+// only because they read the same clock. Cruising gets a heavy lid that falls, lingers and
+// lifts; boosting gets a bare flick, because an eye shut for a quarter second at two cells a
+// tick is an eye that missed the wall. From BLINK_FLICK_LEVEL on nothing is ever slow again,
+// so the flick becomes the whole vocabulary.
+const BLINK_CYCLE = 4200;   // nominal ms between blinks
+const BLINK_HEAVY = 260;    // cruising: a lid that takes its time
+const BLINK_FLICK = 110;    // boosting / late levels: shut and open, no frames in between
+const BLINK_FLICK_LEVEL = 5;
+function _blinkK(pi, fast, now){
+    const t = now + (pi+1)*1637;   // per-snake phase: two snakes must never share a blink grid
+    const slot = Math.floor(t/BLINK_CYCLE);
+    let dt = Infinity;
+    // The jitter carries a blink either side of its slot boundary, so the neighbours are read
+    // too -- scanning the current slot alone silently drops every negatively jittered blink.
+    for(let k=slot-1;k<=slot+1;k++){
+        const h = ((k+(pi+1)*97)*2654435761)>>>0;
+        const d = t - (k*BLINK_CYCLE + (h%1600) - 800);
+        if(d>=0 && d<dt) dt=d;
+    }
+    if(fast) return dt<BLINK_FLICK ? 1 : 0;
+    if(dt>=BLINK_HEAVY) return 0;
+    return Math.pow(Math.sin((dt/BLINK_HEAVY)*Math.PI), 0.6);   // lingers shut at the bottom of the arc
+}
+// The one place the two are combined, and the one gate over both: shut wins over any blink
+// phase (there is no half-bracing), and REDUCE MOTION leaves the eyes wide open -- a plain
+// 3x3 eye and nothing else. Split out of drawSnakeG so the policy -- who counts as
+// boosting, where the flick takes over, whether a brace beats a blink -- can be tested
+// directly; the canvas calls themselves are unobservable in the headless harness.
+function _eyeLid(segs, eyeDir, pi, now){
+    if(_reduceMotion()) return 0;
+    const fast=((players&&pi>=0)?players[pi].boosting:boosting)||level>=BLINK_FLICK_LEVEL;
+    return Math.max(_blinkK(pi, fast, now), _braceK(segs, eyeDir, pi));
+}
+// _braceK is the flinch, and a flinch is anticipation or it is nothing: the eyes are already
+// shut when the hit lands, not after. Two things are worth bracing for -- the cells the head is
+// about to enter, and the rival's head closing in on a DIFFERENT heading, which is the pass
+// that costs gear (a shared heading is a scrape, and nothing ever comes off a scrape). Both
+// ramp: half shut two cells out, fully shut one cell out. Written without allocating, because
+// it runs per snake per frame on hardware as slow as a TV browser.
+function _braceK(segs, eyeDir, pi){
+    const h = segs[0], d = eyeDir || {x:1,y:0};
+    const duel = !!players && pi>=0;
+    let k = 0;
+    for(let n=1;n<=2;n++){
+        const x=(h.x+d.x*n+COLS)%COLS, y=(h.y+d.y*n+ROWS)%ROWS;
+        let solid = false;
+        // A fragile bar is smashed through rather than hit, so there is nothing there to fear.
+        for(let i=0;i<bars.length;i++) if(bars[i].x===x&&bars[i].y===y&&!bars[i].fragile){ solid=true; break; }
+        // Own body, minus the tail cell it is about to vacate.
+        if(!solid) for(let i=0;i<segs.length-1;i++) if(segs[i].x===x&&segs[i].y===y){ solid=true; break; }
+        if(!solid && duel){
+            const o=players[1-pi];
+            if(o.alive) for(let i=0;i<o.snake.length;i++) if(o.snake[i].x===x&&o.snake[i].y===y){ solid=true; break; }
+        }
+        if(solid){ k = n===1 ? 1 : 0.5; break; }
+    }
+    if(duel && players[0].alive && players[1].alive){
+        const o=players[1-pi], od=o.dir, oh=o.snake[0];
+        if(!(od.x===d.x && od.y===d.y)){
+            const dx=Math.min((h.x-oh.x+COLS)%COLS,(oh.x-h.x+COLS)%COLS);
+            const dy=Math.min((h.y-oh.y+ROWS)%ROWS,(oh.y-h.y+ROWS)%ROWS);
+            const ch=Math.max(dx,dy);
+            if(ch<=1) k=1; else if(ch<=2 && k<0.5) k=0.5;
+        }
+    }
+    return k;
 }
 const _gridCanvas=document.createElement('canvas'); _gridCanvas.width=CW; _gridCanvas.height=CH;
 const _scanCanvas=document.createElement('canvas'); _scanCanvas.width=CW; _scanCanvas.height=CH;
@@ -866,7 +942,7 @@ function drawPacHead(x, y, facing) {
 // the belt/shoes/gown used to live in drawSnake() alone, which meant an online
 // opponent silently lost half their cosmetics. shimmer = draw the gown's travelling
 // sparkle (single player: beating the record; duel: leading -- both clients agree).
-function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt) {
+function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt, pi) {
     const sc=SNAKE_COLORS[colorIdx||0];
     const cols = flash ? null : _bodyCols(segs.length, sc.h);
     const sw=CS-2,sh=CS-2,len=segs.length;
@@ -897,7 +973,9 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt) {
         if(!flash){
             ctx.shadowBlur=0;
             const eyeDir=squeue.length>0?squeue[0]:sdir;
-            ctx.fillStyle='#001500'; eyeOffsets(eyeDir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy,3,3));
+            const lid=_eyeLid(segs, eyeDir, pi, performance.now());
+            const drop=Math.round(lid*2), eh=3-drop;   // the lid comes DOWN: a shut eye is a slit where the bottom of the eye was
+            ctx.fillStyle='#001500'; eyeOffsets(eyeDir).forEach(([ox,oy])=>ctx.fillRect(x+ox,y+oy+drop,3,eh));
             if(squeue.length>0&&(squeue[0].x!==sdir.x||squeue[0].y!==sdir.y)){
                 const qd=squeue[0];
                 const mx=Math.round(x+sw/2+qd.x*(sw/2-3)), my=Math.round(y+sh/2+qd.y*(sh/2-3));
@@ -953,7 +1031,7 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt) {
 function drawSnake(flash, now) {
     drawSnakeG(snake, dir, dirQueue, cfg.snakeColor||0, cfg.wornItems||{}, flash,
                phase==='playing' && score>=_shimmerThreshold,
-               now===undefined?null:_crashJolt(-1, now));
+               now===undefined?null:_crashJolt(-1, now), -1);
 }
 
 
