@@ -10,7 +10,7 @@ Everything here is headless Node against the real `js/*` (loaded in a VM by
 
 ## Test tiers
 
-`test/checks.sh` runs in two tiers so the local pre-commit hook stays snappy while the
+`test/checks.sh` runs in tiers so the local pre-commit hook stays snappy while the
 full regression coverage still gates every deploy:
 
     bash test/checks.sh          FAST tier -- the local pre-commit hook. Every cheap
@@ -21,6 +21,13 @@ full regression coverage still gates every deploy:
     bash test/checks.sh --full   REGRESSION tier -- FAST plus the heavy duel sweeps
                                  below. CI runs this on every push/PR, so it gates the
                                  auto-deploy to Pages.
+    bash test/checks.sh --live   LIVE tier -- FAST plus the two contracts that can only
+                                 be proven against a deployed server: the peer-net
+                                 direct-connection hint (test/peer-net.sh) and the API
+                                 4.0 item registry (test/items-live.js). Needs the
+                                 network and writes to the real database under the
+                                 project's fixed test ids, so it gates nothing -- run it
+                                 by hand after a server deploy.
 
 RUN `--full` LOCALLY after any significant netcode or sim rework (and before a release).
 The fast tier proves each netcode PATH still works; the regression tier plays many long,

@@ -57,9 +57,13 @@ fi
 
 # On-demand LIVE server contract (NOT part of the default run, and never in CI):
 # bash test/checks.sh --live. Needs the network and a running deployment, so it can
-# gate neither a commit nor a push. Checks the peer-net hint the direct-IPv6 path
-# depends on -- see test/peer-net.sh for what breaks silently when it regresses.
+# gate neither a commit nor a push. Two contracts live here: the peer-net hint the
+# direct-IPv6 path depends on (see test/peer-net.sh), and the API 4.0 item registry,
+# where a client/server disagreement over the attestation MAC would otherwise show up
+# only as a duel that silently refuses every steal.
 if [ "${1:-}" = "--live" ]; then
     echo "[checks] live server: peer-net direct-connection hint"
     bash test/peer-net.sh
+    echo "[checks] live server: item registry contract"
+    node test/items-live.js
 fi
