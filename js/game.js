@@ -37,8 +37,9 @@ let _resetKind = 'stats';          // which reset the confirm screen is arming: 
 let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net-api.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
-const MENU_ITEMS     = ['PLAY', '1VS1', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
-let duelSel = 0;   // 1:1 submenu selection (0 = PLAY ONLINE, 1 = PLAY LOCAL, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
+const MENU_ITEMS     = ['SOLO PLAY', 'MULTIPLAYER', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
+let duelSel = 0;   // MULTIPLAYER submenu selection (0 = 1:1 DUEL, 1 = TOURNAMENT, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
+let duel11Sel = 0; // 1:1 DUEL submenu selection (0 = 1:1 ONLINE, 1 = 1:1 LOCAL)
 // Local 1:1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
 const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
 let cfg = defaultCfg();
@@ -148,7 +149,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','friendId','invite','lobby','friends'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','duel11','friendId','invite','lobby','friends'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -740,6 +741,7 @@ const CONTROLS = {
     playing:      ['esc','pause','ok','dpad'],
     paused:       ['esc','pause','ok','dpad'],
     duelMenu:     ['esc','ok','dpad'],
+    duel11:       ['esc','ok','dpad'],
     friends:      ['esc','ok','dpad'],
     lobby:        ['esc','ok','dpad'],
     friendId:     ['esc','ok','dpad'],
@@ -801,6 +803,7 @@ const SCREENS = {
     resetConfirm: { d:()=>drawResetConfirm(),    hud:false, freeze:true },
     paused:       { d:()=>drawGameBoard(simNow), hud:true,  freeze:true },
     duelMenu:     { d:()=>drawDuelMenu(),        hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
+    duel11:       { d:()=>drawDuel11(),          hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
     friendId:     { d:()=>drawFriendId(),        hud:false, freeze:true },
     lobby:        { d:()=>drawLobby(),           hud:false },
     friends:      { d:()=>drawFriends(),         hud:false },

@@ -51,13 +51,13 @@ runTest('SMOKE-NET', `
 
     // ---- lobby: open from the 1:1 menu, render, navigate, invite dialog ----
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    phase='duelMenu'; duelSel=0; press('Enter');   // 1:1 menu order: 0 PLAY ONLINE, 1 LOCAL, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
-    if(phase!=='lobby') throw 'PLAY ONLINE did not open the lobby';
+    phase='duel11'; duel11Sel=0; press('Enter');   // 1:1 DUEL submenu order: 0 1:1 ONLINE, 1 1:1 LOCAL
+    if(phase!=='lobby') throw '1:1 ONLINE did not open the lobby';
     drawLobby();
     press('ArrowDown'); press('ArrowDown'); press('ArrowDown');
     if(_netLb.sel!==3) throw 'lobby nav broken (sel='+_netLb.sel+')';
     press('Enter');   // BACK
-    if(phase!=='duelMenu') throw 'lobby BACK did not return';
+    if(phase!=='duel11') throw 'lobby BACK did not return';
     phase='lobby'; netLobbyEnter();
     _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER<XSS>',color:99}})});
     if(!_netLb.invite) throw 'incoming invite not surfaced in the lobby';
@@ -66,9 +66,9 @@ runTest('SMOKE-NET', `
     press('n');                                    // decline (soft: no network to send on)
     if(_netLb.invite) throw 'decline did not clear the invite';
     // offline mode blocks the lobby entirely
-    cfg.offline=true; phase='duelMenu'; duelSel=0; press('Enter');
-    if(phase==='lobby') throw 'PLAY ONLINE must be blocked in offline mode';
-    cfg.offline=false; drawDuelMenu();
+    cfg.offline=true; phase='duel11'; duel11Sel=0; press('Enter');
+    if(phase==='lobby') throw '1:1 ONLINE must be blocked in offline mode';
+    cfg.offline=false; drawDuel11();
     log('lobby ok: open, nav, invite surface/clamp/decline, offline block');
 
     // ---- online duel netcode over a fake wire (host side) ----
@@ -494,7 +494,7 @@ runTest('SMOKE-NET', `
     fakeSess('peer'); inGame=true; prevPhase='duel'; phase='quitConfirm'; quitConfirmSel=0;
     press('Enter');   // quit YES
     if(_netSess!==null) throw 'quit-YES did not tear the online session down';
-    if(phase!=='duelMenu') throw 'quitting a 1:1 must land on the 1:1 menu, not main';
+    if(phase!=='duel11') throw 'quitting a 1:1 must land on the 1:1 menu, not main';
     if(netGameActive()) throw 'session queries stuck after quit';
     fakeSess('peer'); inGame=false; phase='menu';
     beginGame();      // starting any local game clears leftovers too
@@ -511,7 +511,8 @@ runTest('SMOKE-NET', `
     // every 10th tick in the main menu, never in-game / elsewhere ----
     _netSess=null;
     phase='lobby';    if(!_netPollDue()) throw 'lobby must poll every tick';
-    phase='duelMenu'; if(!_netPollDue()) throw '1:1 menu must poll every tick';
+    phase='duelMenu'; if(!_netPollDue()) throw 'multiplayer menu must poll every tick';
+    phase='duel11';   if(!_netPollDue()) throw '1:1 submenu must poll every tick';
     phase='menu';     _netPollTick=10; if(!_netPollDue()) throw 'main menu must poll every 10th tick';
     _netPollTick=11;  if(_netPollDue()) throw 'main menu must skip between 10s ticks';
     phase='playing';  if(_netPollDue()) throw 'no polling during a classic game';
@@ -801,7 +802,7 @@ runTest('SMOKE-NET', `
     log('qr auto-confirm ok: friends while presenting, manual otherwise');
 
     // ---- invites surface on 1:1/social screens; elsewhere they auto-decline ----
-    for(const ph of ['duelMenu','friends','friendId']){
+    for(const ph of ['duelMenu','duel11','friends','friendId']){
         phase=ph; _netLb.invite=null; _netSess=null;
         _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER'}})});
         if(phase!=='lobby'||!_netLb.invite) throw 'invite must surface from '+ph;
@@ -936,7 +937,7 @@ runTest('SMOKE-NET', `
     // ---- remote end: bye lands us on the 1:1 menu with a message, never a crash ----
     fakeSess('host'); inGame=true; phase='duel';
     _netHandleMsg(JSON.stringify({t:'bye'}));
-    if(phase!=='duelMenu'||inGame) throw 'peer bye did not exit cleanly';
+    if(phase!=='duel11'||inGame) throw 'peer bye did not exit cleanly';
     if(_duelMsg!=='OPPONENT LEFT') throw 'missing OPPONENT LEFT message';
     if(_netSess!==null) throw 'session not torn down';
     // and the local quit path tells the peer

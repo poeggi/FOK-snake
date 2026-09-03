@@ -662,7 +662,7 @@ async function _netHello(){
 let _netPollTick = 0;
 function _netPollDue(){
     if(_netSess && _netSess.game && !_netSess.reconnecting) return false;   // reconnecting: poll so the re-handshake signals flow
-    if(phase === 'lobby' || phase === 'duelMenu' || phase === 'friends' || phase === 'friendId') return true;
+    if(phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId') return true;
     if(_netSess) return true;                        // offer/answer/ice in flight
     if(phase === 'menu') return _netPollTick % 10 === 0;
     return false;
@@ -694,7 +694,7 @@ let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // outstanding at all times and the link is never left idle.
 async function _netPollOnce(){
     if(_netPollBusy || !_netOk() || !_netPollDue()) return;
-    const held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'friends' || phase === 'friendId';   // long-poll during a reconnect so the re-handshake signals arrive fast
+    const held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId';   // long-poll during a reconnect so the re-handshake signals arrive fast
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;

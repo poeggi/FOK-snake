@@ -45,6 +45,7 @@ try {
     bench('shop', ()=>drawShop());
     phase='credits'; creditsScroll=CH-20; bench('credits', ()=>drawCredits());
     phase='duelMenu'; duelSel=0; bench('duel menu', ()=>drawDuelMenu());
+    phase='duel11'; duel11Sel=0; bench('1:1 submenu', ()=>drawDuel11());
     phase='lobby'; bench('online lobby', ()=>drawLobby());
     phase='friends'; bench('friends screen', ()=>drawFriends());
     phase='friendId'; bench('MY ID (QR cached)', ()=>drawFriendId());
@@ -97,7 +98,7 @@ try {
     // Coverage: every SCREENS phase must be profiled here (directly or via the
     // game-board/duel-board draws) -- a new screen missing from this list warns.
     const covered=new Set(['splash','menu','news','settings','scores','achievements','shop',
-      'credits','duelMenu','lobby','friends','friendId','invite','quitConfirm','resetConfirm','nameEntry',
+      'credits','duelMenu','duel11','lobby','friends','friendId','invite','quitConfirm','resetConfirm','nameEntry',
       'playing','paused','dying','levelReady','levelDone',
       'duel','duelReady','duelPaused','duelOver']);
     for(const ph of Object.keys(SCREENS))

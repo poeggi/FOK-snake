@@ -140,7 +140,7 @@ function _duelExit(){
     // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
     // follow us out and render on the menu as if it had just happened there.
     _duelMsg=''; _duelMsgAt=0;
-    phase='duelMenu';   // back to where the match was started from, not the main menu
+    phase='duel11';   // back to where the match was started from, not the main menu
     showHUD(false); Snd.musicStop(); Snd.sfxPlay('nav',cfg.music);
 }
 function _backToMenu(){ phase='menu'; Snd.sfxPlay('nav',cfg.music); }
@@ -165,8 +165,8 @@ const UI_INPUT = {
         confirm(){
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
-                case 'PLAY':         beginGame(); break;
-                case '1VS1':         phase='duelMenu'; duelSel=0; break;
+                case 'SOLO PLAY':    beginGame(); break;
+                case 'MULTIPLAYER':  phase='duelMenu'; duelSel=0; break;
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;
@@ -179,17 +179,26 @@ const UI_INPUT = {
     duelMenu: {
         nav(key){ duelSel=_navStep(key, duelSel, 6); },
         confirm(){
-            if(duelSel===0){
-                if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
-                else { Snd.sfxPlay('select',cfg.music); phase='lobby'; netLobbyEnter(); }
-            }
-            else if(duelSel===1){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
+            if(duelSel===0){ Snd.sfxPlay('select',cfg.music); phase='duel11'; duel11Sel=0; }
+            else if(duelSel===1) Snd.sfxPlay('fail',cfg.music);   // TOURNAMENT: greyed until it ships
             else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; }
             else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
             else if(duelSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
             else this.back();   // BACK row (like drawSettings)
         },
         back: _backToMenu,
+    },
+    duel11: {
+        nav(key){ duel11Sel=_navStep(key, duel11Sel, 3); },
+        confirm(){
+            if(duel11Sel===0){
+                if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
+                else { Snd.sfxPlay('select',cfg.music); phase='lobby'; netLobbyEnter(); }
+            }
+            else if(duel11Sel===1){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
+            else this.back();   // BACK row
+        },
+        back(){ phase='duelMenu'; Snd.sfxPlay('nav',cfg.music); },
     },
     friendId: {
         confirm(){ phase=_friendIdBack; Snd.sfxPlay('nav',cfg.music); },
@@ -235,7 +244,7 @@ const UI_INPUT = {
             else if(_netLb.sel<=fr.length){ Snd.sfxPlay('select',cfg.music); _netInviteSend(fr[_netLb.sel-1]); }
             else this.back();
         },
-        back(){ netLobbyLeave(); phase='duelMenu'; Snd.sfxPlay('nav',cfg.music); },
+        back(){ netLobbyLeave(); phase='duel11'; Snd.sfxPlay('nav',cfg.music); },
         other(key){
             if(!_netLb.invite) return false;
             if(key==='y'||key==='Y'){ Snd.sfxPlay('select',cfg.music); _netInviteAnswer(true); return true; }
@@ -385,7 +394,7 @@ const UI_INPUT = {
                 // and draw on the menu as if it had happened there. (_duelExit does the
                 // same -- these are the TWO ways out of a duel.)
                 _duelMsg=''; _duelMsgAt=0;
-                phase = wasDuel ? 'duelMenu' : 'menu';   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
+                phase = wasDuel ? 'duel11' : 'menu';   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
             }   // quit: leave gameplay, keep the worker clock running for menu animations
             else { phase=prevPhase; Snd.duck(false); }   // back to the game at full volume
         },

@@ -1289,11 +1289,11 @@ function drawDuelMenu() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
     // at y=24 with glow 16, items from startY=90 in rowH steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
-    ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    ctg('MULTIPLAYER',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const startY=90, rowH=28;
     const items=[
-        {t:'PLAY ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
-        {t:'PLAY LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'(PC + KEYBOARD ONLY)'},
+        {t:'1:1 DUEL',    en:true},
+        {t:'TOURNAMENT',  en:false, note:'(COMING SOON)'},
         {t:'MY ID',       en:true},
         {t:'ADD FRIEND',  en:true},
         {t:'FRIENDS',     en:true},
@@ -1305,6 +1305,26 @@ function drawDuelMenu() {
     });
     menuItem('BACK', CH-52, duelSel===items.length);   // BACK toward the bottom, like drawSettings
     if(items[duelSel] && items[duelSel].note) ct(items[duelSel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
+    if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// The 1:1 DUEL submenu: ONLINE opens the lobby, LOCAL is two players on one keyboard
+// (beginDuel gates on _hasKeyboard, so the row greys out on touch-only devices).
+function drawDuel11() {
+    drawGrid(); drawOvBg(0.92);
+    ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    const startY=90, rowH=28;
+    const items=[
+        {t:'1:1 ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
+        {t:'1:1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'(PC + KEYBOARD ONLY)'},
+    ];
+    items.forEach((it,i)=>{
+        const y=startY+i*rowH, sel=duel11Sel===i;
+        if(it.en) menuItem(it.t,y,sel);
+        else ct(sel?('> '+it.t+' <'):it.t, CW/2, y, sel?'#777':'#555', FONT.MENU);
+    });
+    menuItem('BACK', CH-52, duel11Sel===items.length);
+    if(items[duel11Sel] && items[duel11Sel].note) ct(items[duel11Sel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
     if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

@@ -167,7 +167,7 @@ function _netOnSignal(sig){
                 // a 1:1/social screen jumps there. Anywhere else (main menu, games,
                 // settings, ...) the player is UNAVAILABLE -- decline immediately so
                 // the inviter is not left waiting for the 30s staleness.
-                if(phase === 'duelMenu' || phase === 'friends' || phase === 'friendId'){ netLobbyEnter(); phase = 'lobby'; }
+                if(phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId'){ netLobbyEnter(); phase = 'lobby'; }
                 else if(phase !== 'lobby'){ _netSignal(from, 'decline', ''); return; }
                 _netLb.invite = { from, profile:_netClampProfile(_netJson(pl).profile), relay: sig.type === 'invite-relay', at: Date.now() };
                 _netNameSeen(from, _netLb.invite.profile.name);
@@ -939,7 +939,7 @@ function _netSessionEnd(msg, remoteBye){
     _netTeardown();
     if(wasGame && inGame){   // only while the online duel is actually still on screen
         inGame = false; _wsend({ t:'phase', phase:'menu' });
-        phase = 'duelMenu'; showHUD(false); Snd.musicStop();
+        phase = 'duel11'; showHUD(false); Snd.musicStop();
         _duelMsg = msg; _duelMsgAt = _msgNow();
         Snd.sfxPlay('fail', cfg.music); _uiDirty = true;
     } else if(phase === 'lobby'){ _netLb.msg = msg; _uiDirty = true; }

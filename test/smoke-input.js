@@ -51,7 +51,7 @@ runTest('SMOKE-INPUT', `
     if(!getScores().some(s=>s.name==='KA'&&s.score===1234)) throw 'submitted score not recorded';
     log('nav wrap, any-key exit, y-confirm, name-entry submit ok');
 
-    // 1:1 menu: 4 entries with wrap; ADD FRIEND opens the hex entry (camera denied in
+    // MULTIPLAYER menu: 5 rows + BACK with wrap; ADD FRIEND opens the hex entry (camera denied in
     // the harness -> manual path), hex-only filter, submit adds the friend.
     localStorage.removeItem('fok-snake-friends');
     phase='duelMenu'; duelSel=0;
@@ -59,8 +59,13 @@ runTest('SMOKE-INPUT', `
     press('Enter'); if(phase!=='menu') throw 'duel menu BACK did not return to main';
     phase='duelMenu'; duelSel=0;
     press('ArrowUp'); press('ArrowDown'); if(duelSel!==0) throw 'duel menu nav did not wrap down';
-    duelSel=2; press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID did not open';   // 1:1 menu order: 0 ONLINE, 1 LOCAL, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
+    duelSel=2; press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID did not open';   // MULTIPLAYER order: 0 1:1 DUEL, 1 TOURNAMENT, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
     press('Escape'); if(phase!=='duelMenu') throw 'friendId ESC did not return';
+    // 1:1 DUEL submenu: opens from row 0; TOURNAMENT (row 1) is greyed and stays put.
+    duelSel=0; press('Enter'); if(phase!=='duel11') throw '1:1 DUEL did not open its submenu';
+    press('ArrowUp'); if(duel11Sel!==2) throw 'duel11 nav did not wrap up';   // 2 = BACK row
+    press('Enter'); if(phase!=='duelMenu') throw 'duel11 BACK did not return';
+    duelSel=1; press('Enter'); if(phase!=='duelMenu') throw 'TOURNAMENT must stay put (coming soon)';
     // Same screen from SETTINGS > USER: returns to settings instead.
     phase='settings'; settingsCat=SETTINGS_CATS.findIndex(c=>c.label==='USER'); settingsSel=1;
     press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID from settings did not open';
