@@ -142,6 +142,38 @@ const driver = `
     A(opp.steals>0, 'no gear came loose in 200 opposite-direction passes');
     A(opp.kinds.indexOf('nearmiss')>=0 && opp.kinds.indexOf('wsblow')>=0, 'an opposite pass is missing its shake/blow events');
     R.steps.push('near miss: same direction is sim-silent, opposite direction shakes and blows gear off');
+    // The board EDGE is not a place two snakes can pass each other. The wrap is real for movement
+    // and stays real, but to the two people playing, the top row and the bottom row are a whole
+    // screen apart: no shake, no gear, nothing.
+    const edge = (a0,a1,d1)=>{
+      startDuel(4242, [['shades'],['shades']]);
+      phase='duel'; _nmWasAdjacent=false; simEvents.length=0;
+      players[0].snake[0]=a0; players[0].dir={x:1,y:0};
+      players[1].snake[0]=a1; players[1].dir=d1;
+      for(let k=0;k<200;k++){ _nmWasAdjacent=false; _duelNearMiss(); }
+      return simEvents.map(e=>e.t).join(',') + (_ws.it?'+steal':'');
+    };
+    A(edge({x:10,y:0},{x:10,y:ROWS-1},{x:-1,y:0})==='', 'the top row passed the bottom row across the wrap');
+    A(edge({x:0,y:5},{x:COLS-1,y:5},{x:-1,y:0})==='', 'the left column passed the right column across the wrap');
+    R.steps.push('near miss: the board edge is not a pass, in neither axis');
+    // ...and gear knocked off at an edge settles against that edge instead of sailing over it.
+    {
+      startDuel(7, [['shades'],['shades']]);
+      bars=[]; gem=null; heart=null; powerPellet=null;
+      let rolls=0, far=0;
+      for(let k=0;k<300;k++){
+        players[0].snake[0]={x:1,y:1}; players[0].dir={x:1,y:0};
+        players[1].snake[0]={x:1,y:2}; players[1].dir={x:-1,y:0};
+        _ws.it=null; _ws.w[0]=['shades']; _ws.w[1]=['shades'];
+        _duelStealRoll();
+        if(!_ws.it) continue;
+        rolls++;
+        const H=players[_ws.it.own].snake[0];
+        if(Math.max(Math.abs(_ws.it.x-H.x),Math.abs(_ws.it.y-H.y))>5) far++;
+      }
+      A(rolls>0 && far===0, 'gear blown off in a corner flew across the board ('+far+'/'+rolls+')');
+      R.steps.push('steal: gear lost at an edge lands against it, never a screen away');
+    }
     // both snakes wearing: a roll picks ONE victim, never both, and over many passes the
     // draw lands on either of them
     {

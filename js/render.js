@@ -150,6 +150,9 @@ const _SCRAPE_LIFE = 300;    // ms per spark
 // the other snake exactly ONE cell ACROSS that heading from a head -- straight ahead or behind
 // is tailgating, not a scrape. Heads level is only the most obvious case; when one snake is
 // ahead, what the other rides is its BODY, which is the commoner way to end up alongside.
+// One cell means one cell ON SCREEN: the offsets do not wrap, so the top row and the bottom row
+// never rub. Nothing is touching there, and sparks arcing across the whole board say otherwise
+// (the near-miss judges the same way -- see _duelNearMiss).
 function _scrapePoint(){
     if(phase!=='duel' || !players || !players[0].alive || !players[1].alive) return null;
     const d=players[0].dir, e=players[1].dir;
@@ -160,8 +163,7 @@ function _scrapePoint(){
 function _flankPoint(h, other, d){
     for(let i=0;i<other.length;i++){
         const c=other[i];
-        const sx=((c.x-h.x+COLS+COLS/2)%COLS)-COLS/2;   // signed, the short way round
-        const sy=((c.y-h.y+ROWS+ROWS/2)%ROWS)-ROWS/2;
+        const sx=c.x-h.x, sy=c.y-h.y;   // signed, straight across the board: an edge is not a contact
         const across=d.x?sy:sx, along=d.x?sx:sy;
         if(Math.abs(across)===1 && Math.abs(along)<=1)   // sparks fly from BETWEEN the two cells
             return d.x ? { x:h.x*CS+CS/2, y:(h.y+across/2)*CS+CS/2 }
@@ -199,10 +201,9 @@ function _drawWsItem(now){
     if(left > 0){
         if(!_wsFly) return;                       // no local flight: stay hidden until it lands
         const t = 1 - left/WS_LAND_TICKS;
-        // Shortest wrapped path, so an item blown across an edge tumbles over it rather than
-        // sweeping back across the whole board.
-        const dx = ((it.x-_wsFly.sx+COLS+COLS/2)%COLS)-COLS/2;
-        const dy = ((it.y-_wsFly.sy+ROWS+ROWS/2)%ROWS)-ROWS/2;
+        // A straight throw: the landing cell is clamped to the board (see _duelStealRoll), so the
+        // item never has an edge to cross and the tumble is always the short way by construction.
+        const dx = it.x-_wsFly.sx, dy = it.y-_wsFly.sy;
         // The item is thrown UP as well as across: it grows toward the apex so it reads as
         // near the camera, and shrinks back as it drops. The shadow stays on the ground track
         // and is the only cue that separates "high up" from "further along".
@@ -514,9 +515,10 @@ function _braceK(segs, eyeDir, pi){
     if(duel && players[0].alive && players[1].alive){
         const o=players[1-pi], od=o.dir, oh=o.snake[0];
         if(!(od.x===d.x && od.y===d.y)){
-            const dx=Math.min((h.x-oh.x+COLS)%COLS,(oh.x-h.x+COLS)%COLS);
-            const dy=Math.min((h.y-oh.y+ROWS)%ROWS,(oh.y-h.y+ROWS)%ROWS);
-            const ch=Math.max(dx,dy);
+            // Unwrapped, like the near-miss this braces for: a rival across an edge is a screen
+            // away and takes nothing off you. The path lookahead above stays wrapped -- that one
+            // is a real collision, and movement really does cross the edge.
+            const ch=Math.max(Math.abs(h.x-oh.x),Math.abs(h.y-oh.y));
             if(ch<=1) k=1; else if(ch<=2 && k<0.5) k=0.5;
         }
     }

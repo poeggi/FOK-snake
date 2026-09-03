@@ -85,6 +85,13 @@ runTest('SMOKE-GAME', `
     if(_scrapePoint()) throw 'tailgating in the SAME lane scraped';
     put(lane(10,5,6), lane(16,6,8), {x:-1,y:0});
     if(_scrapePoint()) throw 'opposite headings scraped -- that is a pass, not a scrape';
+    // The edge is not a contact: nothing is rubbing between the top row and the bottom row, and
+    // sparks arcing across the whole board would say otherwise (the sim judges a pass the same).
+    put(lane(10,0,6), lane(10,ROWS-1,6));
+    if(_scrapePoint()) throw 'the top row scraped against the bottom row across the wrap';
+    const col=(x,hy,len)=>Array.from({length:len},(_,i)=>({x,y:(hy+i+ROWS)%ROWS}));
+    put(col(0,5,6), col(COLS-1,5,6), {x:0,y:-1}); players[0].dir={x:0,y:-1};
+    if(_scrapePoint()) throw 'the left column scraped against the right column across the wrap';
     put(lane(10,5,6), lane(16,6,8));
     _scrapePts.length=0;
     drawDuelBoard(simNow); const one=_scrapePts.length;

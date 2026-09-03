@@ -96,9 +96,13 @@ let simEvents = [];
 function emit(e){ simEvents.push(e); }
 
 // NEAR-MISS (duel): fires on the rising edge of the two heads passing within one cell
-// (wrapped Chebyshev <=1). Judged here in the sim -- every game tick, deterministically --
-// so it never depends on which tick a RAF happens to sample; fast/boost levels advance 2
-// cells/tick and can skip the single adjacency frame render-side.
+// (Chebyshev <=1, measured straight across the board). Adjacency deliberately does NOT wrap:
+// a head on the top row and a head on the bottom row are a whole screen apart to the two people
+// playing, and gear must not fly off a pass they never saw. Movement still wraps -- an edge is
+// only transparent to a snake crossing it, never to a pass alongside it.
+// Judged here in the sim -- every game tick, deterministically -- so it never depends on which
+// tick a RAF happens to sample; fast/boost levels advance 2 cells/tick and can skip the single
+// adjacency frame render-side.
 // Only a pass on DIFFERENT headings counts: shake (heavy when both are boosting) plus a roll
 // for a windswept item to be knocked off (_duelStealRoll), at odds that double for whoever
 // the OTHER snake tore past -- boosting through a pass is the aggressive act. Gear comes
@@ -113,9 +117,7 @@ function emit(e){ simEvents.push(e); }
 function _duelNearMiss(){
     if(phase!=='duel' || !players || !players[0].alive || !players[1].alive){ _nmWasAdjacent=false; return; }
     const a=players[0].snake[0], b=players[1].snake[0];
-    const dx=Math.min((a.x-b.x+COLS)%COLS,(b.x-a.x+COLS)%COLS);
-    const dy=Math.min((a.y-b.y+ROWS)%ROWS,(b.y-a.y+ROWS)%ROWS);
-    const adj=Math.max(dx,dy)<=1;
+    const adj=Math.max(Math.abs(a.x-b.x),Math.abs(a.y-b.y))<=1;
     const d0=players[0].dir, d1=players[1].dir;
     if(adj && !_nmWasAdjacent && !(d0.x===d1.x && d0.y===d1.y)){
         const boosts = (players[0].boosting?1:0) + (players[1].boosting?1:0);
@@ -147,8 +149,11 @@ function _duelStealRoll(){
     const pct = WS[id].pct * (players[1-v].boosting ? 2 : 1);
     if(ri(100) >= pct) return;
     // Where it lands: a few cells off one flank of the victim's heading, give or take a cell
-    // fore or aft. Blocked cells (snakes, bars, the other collectibles) fall back to the
-    // ordinary free-cell scan, which is deterministic too.
+    // fore or aft, and CLAMPED to the board rather than wrapped -- gear knocked off at an edge
+    // settles against that edge instead of sailing over it and landing a screen away from the
+    // pass that caused it. Blocked cells (snakes, bars, the other collectibles) fall back to the
+    // ordinary free-cell scan, which is deterministic too. Clamping moves the cell, never the
+    // number of rng draws, so the shared stream stays in step either way.
     const P = players[v], H = P.snake[0], d = P.dir;
     const side = ri(2) ? 1 : -1;
     const dist = 2 + ri(3);       // 2..4 cells out to the side
@@ -157,8 +162,9 @@ function _duelStealRoll(){
     if(gem) blocked.add(ck(gem));
     if(heart) blocked.add(ck(heart));
     if(powerPellet) blocked.add(ck(powerPellet));
-    let c = { x:(((H.x - d.y*side*dist + d.x*along) % COLS) + COLS) % COLS,
-              y:(((H.y + d.x*side*dist + d.y*along) % ROWS) + ROWS) % ROWS };
+    const clamp=(n,max)=> n<0 ? 0 : (n>max-1 ? max-1 : n);
+    let c = { x:clamp(H.x - d.y*side*dist + d.x*along, COLS),
+              y:clamp(H.y + d.x*side*dist + d.y*along, ROWS) };
     if(blocked.has(ck(c))) c = freeCell(blocked);
     list.splice(list.indexOf(id), 1);
     _ws.it = { id, own:v, x:c.x, y:c.y, at:simTick + WS_LAND_TICKS };

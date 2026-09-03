@@ -71,7 +71,9 @@ runTest('SMOKE-EYES', `
     if(_braceK(players[0].snake,EAST,0)!==0) throw 'a shared heading is a scrape: nothing comes off it, nothing to brace for';
     players=[mk(5,5,EAST), mk(5,6,{x:-1,y:0})];
     if(_braceK(players[0].snake,EAST,0)!==1) throw 'a pass one cell off must shut the eyes';
-    log('brace: a pass braces, a scrape does not');
+    players=[mk(5,0,EAST), mk(5,ROWS-1,{x:-1,y:0})];
+    if(_braceK(players[0].snake,EAST,0)!==0) throw 'a rival across the board edge is a screen away: nothing to brace for';
+    log('brace: a pass braces, a scrape does not, an edge is not a pass');
 
     // ---- the combined policy ----
     players=null; bars=[]; boosting=false; level=1;

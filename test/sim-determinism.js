@@ -28,7 +28,10 @@ const GOLDEN = 'bb02d65e:216';
 // death instead of calling the match on the crash tick, so the last kill lands 84 ticks
 // later; the pilots' input LCG runs on ACROSS matches, so every match after the first one
 // that ends is re-rolled -- hence a whole-lane move rather than 8x84 ticks).
-const GOLDEN_DUEL = 'c38ae1e0:31451';
+// -> 94a81a85:31451 (the board EDGE stopped being a place two snakes can pass: near-miss
+// adjacency and the loose item's landing cell no longer wrap, so a pass judged across an edge --
+// and every steal roll and rng draw behind it -- is gone from the lane)
+const GOLDEN_DUEL = '94a81a85:31451';
 
 const driver = `
 ;(function(){
