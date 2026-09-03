@@ -31,7 +31,10 @@ const GOLDEN = 'bb02d65e:216';
 // -> 94a81a85:31451 (the board EDGE stopped being a place two snakes can pass: near-miss
 // adjacency and the loose item's landing cell no longer wrap, so a pass judged across an edge --
 // and every steal roll and rng draw behind it -- is gone from the lane)
-const GOLDEN_DUEL = '94a81a85:31451';
+// -> 2a6bf65:31451 (contract 4.0: _ws carries a per-side {itemId: uid} map alongside the
+// worn lists, because a server item INSTANCE is what a steal moves. Hashed bytes only --
+// the tick count is untouched, and the pilots wear unregistered gear so every uid is '')
+const GOLDEN_DUEL = '2a6bf65:31451';
 
 const driver = `
 ;(function(){

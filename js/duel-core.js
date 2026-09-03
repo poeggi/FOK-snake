@@ -289,7 +289,9 @@ function _rbCheckHash(m){
     // length so a hostile peer cannot ship tens of thousands of entries for the
     // mismatch diff (_rbHashSettle) to iterate.
     const f = Array.isArray(m.f) ? m.f.slice(0, RB_HASH_DUEL.length) : null;
-    _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f });
+    // g = the peer's item-attestation tag for that tick (see _wsAttest). Parked with the
+    // hash and only kept once the verdict proves the _ws field agreed.
+    _rbHashQ.push({ tk:_rbFromWire(m.tk), h:m.h>>>0, f, g:m.g });
     if(_rbHashQ.length > 8){ _rbHashQ.shift(); _rbDbg.hashLost++; }   // evicted before it could be judged: count it, never drop a verdict in silence
     // A hash rides RB_HASH_LAG+1 behind its sender's live tick (the emit tick, see the schedule
     // in netTickPre), so reconstruct that live tick to tell "peer froze" from "hash is just old".
@@ -324,6 +326,139 @@ function _rbMyHashFind(tk){
     for(let j = _rbMyHash.length - 1; j >= 0; j--) if(_rbMyHash[j].tk === tk) return _rbMyHash[j];
     return null;
 }
+// ---- ITEM ATTESTATION: the duel half of the handover ----------------------------------
+// A cosmetic that changes hands has to end up owned by exactly one player ON THE SERVER, and
+// the only two parties who witnessed the steal are the two clients. So each client attests
+// what it saw: on every hash tick it MACs a digest of "which item instance is worn by whom"
+// with its own per-match secret and ships that tag beside the hash it was already sending.
+// The peer's tag for the same tick is what turns a client's report into EVIDENCE -- the
+// server holds both secrets, so it can verify a tag it did not produce and no client can
+// forge the other side's agreement (see items.js and the server's Items::claim ladder).
+//
+// WHY the transfer is derived HERE rather than from the 'wsget' event: that event is in
+// FX_DEFER, so it re-queues on every rollback re-sim and a claim built from it would fire
+// again for a transfer that was rolled back and replayed. What we attest instead is the
+// frozen hash tick hk (= 64k - 64, on the pinned 64-grid), which is immutable by construction
+// and identical on both clients -- so diffing the ownership map between consecutive attested
+// ticks yields each transfer exactly once, in the same window, on both sides.
+//
+// An item with no uid (bought while offline, never registered) simply has nothing to name on
+// the server: it stays out of the digest and generates no claim. It is still worn, drawn and
+// stealable -- offline play is never blocked, it is only unattestable.
+var _wsMid = '', _wsSec = '', _wsIds = ['', ''], _wsSeqs = null;
+var _wsOwnPrev = null;       // the uid -> player-index map at the previously attested tick
+var _wsPend = [];            // gains held back for the peer's tag
+var _wsPeerTag = [];         // [{tk,g}] peer tags for ticks whose _ws provably agreed
+const WS_TAG_RE = /^[0-9a-f]{16}$/;
+const WS_CLAIM_WAIT = 128;   // drain ticks (~2.1s) a gain waits for the peer's tag before shipping unproven
+const WS_PEERTAG_KEEP = 8;   // one per hash tick, the same arrival margin RB_MYHASH_KEEP allows
+const WS_PEND_MAX = 8;
+
+// Match identity for the attestation, from the server's start.php (mid + this side's secret)
+// plus the two player ids in sim index order. Cleared per match: a tag keyed with a previous
+// match's secret would read as tampering, not as a stale packet.
+function _wsClaimReset(mid, sec, ids, seqs){
+    _wsMid = typeof mid === 'string' ? mid : '';
+    _wsSec = typeof sec === 'string' ? sec : '';
+    _wsIds = Array.isArray(ids) ? [ids[0] || '', ids[1] || ''] : ['', ''];
+    _wsSeqs = (seqs && typeof seqs === 'object') ? seqs : {};
+    _wsOwnPrev = null; _wsPend = []; _wsPeerTag = [];
+}
+// uid -> owning player index, from a ring snapshot. The LOOSE item counts as its owner's:
+// while it is in flight or lying on the board it has left nobody's inventory, and leaving it
+// out would read as a disappearance followed by an unrelated appearance instead of one
+// transfer. Empty uids are skipped -- unregistered items share the '' key and are not
+// instances the server knows.
+function _wsOwnAt(sn){
+    const o = {}, ws = sn && sn._ws;
+    if(!ws) return o;
+    for(let i = 0; i < 2; i++){ const m = ws.u[i]; for(const k in m) if(m[k]) o[m[k]] = i; }
+    if(ws.it && ws.it.uid) o[ws.it.uid] = ws.it.own;
+    return o;
+}
+// The attested ownership digest: uid=owner pairs, uid-SORTED so it is a function of the state
+// and not of the order the two clients happened to reach it in, hashed so it stays inside the
+// server's ws_digest cap however much gear is in play.
+function _wsDigestOf(own){
+    const ks = Object.keys(own).sort();
+    let s = '';
+    for(let i = 0; i < ks.length; i++) s += ks[i] + '=' + own[ks[i]] + ';';
+    return sha256Hex(s);
+}
+// The catalog id behind a uid, for the local inventory fix-up in items.js. The server keys
+// everything by uid and never needs it.
+function _wsItemOf(sn, uid){
+    const ws = sn && sn._ws;
+    if(!ws) return '';
+    for(let i = 0; i < 2; i++){ const m = ws.u[i]; for(const k in m) if(m[k] === uid) return k; }
+    return (ws.it && ws.it.uid === uid) ? ws.it.id : '';
+}
+function _wsRelease(c, g){
+    if(typeof _wsClaimOut !== 'function') return;
+    _wsClaimOut({ mid:_wsMid, uid:c.uid, item:c.item, from:c.from, to:c.to, tick:c.tick,
+                  seq:c.seq, digest:c.dg, myTag:c.tag, peerTag:g || '' });
+}
+// Every uid whose owner CHANGED between the two attested ticks. A uid that only appears is a
+// mint or a resync import, and one that only disappears is an item displaced out of a wear
+// slot but still owned (see the pickup in sim.js) -- neither changed hands, and reporting
+// either would move a server row nothing moved.
+function _wsDiff(prev, now, hk, dg, tag, snap){
+    const me = netMyIndex();
+    for(const uid in now){
+        const a = prev[uid], b = now[uid];
+        if(a === undefined || a === b) continue;
+        // seq is the compare-and-swap the server checks: our view of the instance's version
+        // BEFORE this transfer. Bumped here, at the deterministic attest tick, so a steal and
+        // a steal-back inside one match each compare against the right value.
+        const seq = _wsSeqs[uid] | 0;
+        _wsSeqs[uid] = seq + 1;
+        const c = { uid, item:_wsItemOf(snap, uid), from:_wsIds[a], to:_wsIds[b],
+                    tick:hk, seq, dg, tag, wait:WS_CLAIM_WAIT };
+        // "I LOST it" needs no corroboration: a client has nothing to gain by giving an item
+        // away, so the server settles that direction on the caller's own tag alone -- send it
+        // at once and let it settle the peer's gain. "I TOOK it" is the direction that pays,
+        // so it waits for the peer's tag for the same tick and ships unproven only once the
+        // wait runs out, where the server holds it through its grace period instead.
+        if(b === me){ if(_wsPend.length < WS_PEND_MAX) _wsPend.push(c); }
+        else if(a === me) _wsRelease(c, '');
+    }
+}
+// Runs on the emit tick, against the snapshot whose hash is being frozen: attest that tick's
+// ownership, and derive any transfer since the last attested one. Returns the tag to ship
+// inside the 'h' packet.
+function _wsAttest(hk, snap){
+    if(!_wsMid || !_wsSec || !_wsIds[0] || !_wsIds[1]) return '';
+    const own = _wsOwnAt(snap);
+    const dg = _wsDigestOf(own);
+    const tag = itemTag(_wsSec, _wsMid, hk, dg);
+    if(_wsOwnPrev && tag) _wsDiff(_wsOwnPrev, own, hk, dg, tag, snap);
+    _wsOwnPrev = own;
+    return tag;
+}
+// A peer tag is only worth keeping for a tick whose _ws we KNOW agreed. Two sides that
+// diverged attested different digests, so the peer's tag would be valid for a state we never
+// saw -- and the server reads an unverifiable peer tag as provable tampering and freezes the
+// item. A benign desync must not destroy gear, so an unproven claim (no tag at all) is
+// strictly better than a wrong one.
+function _wsPeerTagAdd(tk, g){
+    if(typeof g !== 'string' || !WS_TAG_RE.test(g)) return;
+    _wsPeerTag.push({ tk, g });
+    if(_wsPeerTag.length > WS_PEERTAG_KEEP) _wsPeerTag.shift();
+}
+// Called each tick: ship the gains whose corroboration has arrived, and the ones that waited
+// long enough. The countdown is in DRAIN TICKS, not simTick -- a level boundary resets simTick
+// to 0, and a deadline expressed in it would never expire.
+function _wsDrain(){
+    if(!_wsPend.length) return;
+    for(let i = _wsPend.length - 1; i >= 0; i--){
+        const c = _wsPend[i];
+        let g = '';
+        for(let j = _wsPeerTag.length - 1; j >= 0; j--) if(_wsPeerTag[j].tk === c.tick){ g = _wsPeerTag[j].g; break; }
+        if(!g && --c.wait > 0) continue;
+        _wsPend.splice(i, 1);
+        _wsRelease(c, g);
+    }
+}
 // Called each tick: judge whatever has settled and we still hold a comparable copy of.
 function _rbHashSettle(){
     if(!_rbHashQ.length) return;
@@ -337,7 +472,9 @@ function _rbHashSettle(){
         let hb = _rbMyHashFind(q.tk);
         if(!hb){ const e = _rbRingFind(q.tk); if(e) hb = _rbHashBoth(e.snap); }
         if(!hb){ _rbDbg.hashLost++; continue; }             // no settled copy of that tick here: not comparable
-        if(hb.h === q.h){ _rbDbg.hashOk++; _rbBadSince = 0; continue; }   // agreement heals the escalation clock
+        // Whole-state agreement covers _ws too, so the peer's tag attests the same ownership
+        // we did: worth keeping as corroboration for any transfer at that tick.
+        if(hb.h === q.h){ _rbDbg.hashOk++; _rbBadSince = 0; _wsPeerTagAdd(q.tk, q.g); continue; }   // agreement heals the escalation clock
         // Deterministic sims do not drift back into agreement: this one is permanent.
         // NOT a connection warning -- the link is fine, the worlds are not.
         _rbDbg.desync++;
@@ -362,6 +499,10 @@ function _rbHashSettle(){
                 where = bad.join(',');
                 snakes = bad.indexOf('players') >= 0;
                 struct = bad.some(k => k !== 'players');
+                // The worlds split, but not over WHO OWNS WHAT: the peer attested the same
+                // ownership digest we did, so its tag still corroborates a transfer at this
+                // tick. If _ws is among the diverged fields it does not, and no tag is kept.
+                if(bad.indexOf('_ws') < 0) _wsPeerTagAdd(q.tk, q.g);
             }
         }
         if(snakes && _rbRing.length){ const le = _rbRing[_rbRing.length - 1]; _rbSendState(le.tk, le.snap); }
@@ -471,7 +612,8 @@ function _rbFullState(sn, tk){
         rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, nma:!!sn._nmWasAdjacent,
         // The windswept registry rides whole: who wears what, plus any item lying on the
         // board. Hashed, so an rs that dropped it would keep the hashes apart forever.
-        ws:sn._ws ? { w:[sn._ws.w[0].slice(), sn._ws.w[1].slice()], it:sn._ws.it } : null,
+        ws:sn._ws ? { w:[sn._ws.w[0].slice(), sn._ws.w[1].slice()],
+                      u:[sn._ws.u[0], sn._ws.u[1]], it:sn._ws.it } : null,
         pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
         hb:sn.heart, hba:sn.heartAt,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
@@ -482,7 +624,8 @@ function _rbFullState(sn, tk){
 function _rbWsItem(o){
     if(!o || !WS[o.id]) return null;
     if(!(o.x >= 0 && o.x < COLS && o.y >= 0 && o.y < ROWS)) return null;
-    return { id:o.id, own:o.own ? 1 : 0, x:o.x|0, y:o.y|0, at:o.at|0 };
+    const uid = (typeof o.uid === 'string' && WS_UID_RE.test(o.uid)) ? o.uid : '';
+    return { id:o.id, uid, own:o.own ? 1 : 0, x:o.x|0, y:o.y|0, at:o.at|0 };
 }
 function _rbApplyResync(m){
     if(!players || !m || !m.p0 || !m.p1) return;
@@ -510,8 +653,12 @@ function _rbApplyResync(m){
     snap._gAt = m.gat|0;
     snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._nmWasAdjacent = !!m.nma;
-    snap._ws = m.ws ? { w:[_wsKnown(m.ws.w && m.ws.w[0]), _wsKnown(m.ws.w && m.ws.w[1])],
-                        it:_rbWsItem(m.ws.it) } : null;
+    snap._ws = null;
+    if(m.ws){
+        const u = Array.isArray(m.ws.u) ? m.ws.u : [];
+        const s0 = _wsSeed(m.ws.w && m.ws.w[0], u[0]), s1 = _wsSeed(m.ws.w && m.ws.w[1], u[1]);
+        snap._ws = { w:[s0.w, s1.w], u:[s0.u, s1.u], it:_rbWsItem(m.ws.it) };
+    }
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
     _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is the host's to author (both branches adopt it)
@@ -658,7 +805,10 @@ function _rbCloneWs(v){
     if(!v) return v;
     const it = v.it;
     return { w:[ v.w[0].slice(), v.w[1].slice() ],
-             it: it ? { id:it.id, own:it.own, x:it.x, y:it.y, at:it.at } : it };
+             // The uid maps are cloned key-by-key in their own insertion order, which
+             // JSON.stringify then reproduces -- same contract as the key order below.
+             u:[ Object.assign({}, v.u[0]), Object.assign({}, v.u[1]) ],
+             it: it ? { id:it.id, uid:it.uid, own:it.own, x:it.x, y:it.y, at:it.at } : it };
 }
 function _rbCloneSnap(s){
     const bs = s.bars || [], bars = new Array(bs.length);
@@ -743,7 +893,7 @@ function netTickPre(){
         if(_rbResyncQ && _rbFromWire(_rbResyncQ.tk) <= simTick){
             const rq = _rbResyncQ; _rbResyncQ = null; _rbApplyResync(rq);
         }
-        _rbHashSettle(); _rbStateSettle();
+        _rbHashSettle(); _rbStateSettle(); _wsDrain();
     }
     _rbEnsureSnap(t);
     // Our own input was applied the moment it happened (netLocalInput), at exactly this
@@ -818,7 +968,14 @@ function netTickPre(){
             if(he){
                 const hb = _rbHashBoth(he.snap);
                 _rbMyHashAdd(hk, hb);   // the peer's hash for hk is judged against THIS, however late it lands
-                _netSend({ t:'h', tk:_rbToWire(hk), h:hb.h, f:hb.f });
+                // The item attestation rides the SAME tick and the same packet: hk is frozen
+                // here, so both clients sign the identical ownership state (see _wsAttest).
+                // Omitted when there is nothing to attest -- a local duel, or a match with no
+                // registered gear in it.
+                const o = { t:'h', tk:_rbToWire(hk), h:hb.h, f:hb.f };
+                const g = _wsAttest(hk, he.snap);
+                if(g) o.g = g;
+                _netSend(o);
             }
         }
     } else if(!_inFlushed && (t & 15) === 5 && !_replaying){

@@ -80,7 +80,8 @@ function _prefersReducedMotion() {
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, reduceMotion:_prefersReducedMotion(),
-             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3 };
+             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3,
+             itemReg:{}, mintQ:[], claimQ:[], itemsSeeded:0 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
 // the game in a bad state (e.g. an out-of-range diff or colour index).
@@ -114,6 +115,13 @@ function _sanitizeCfg() {
     cfg.debug       = (Number.isInteger(cfg.debug) && cfg.debug>=0 && cfg.debug<=3) ? cfg.debug : 0;
     if(!cfg.shopItems || typeof cfg.shopItems!=='object' || Array.isArray(cfg.shopItems)) cfg.shopItems = {};
     if(cfg.wornItems!==null && (typeof cfg.wornItems!=='object' || Array.isArray(cfg.wornItems))) cfg.wornItems = null;
+    // The item registry and its two offline backlogs (see items.js). Only the
+    // container shape is enforced here; a malformed ENTRY is dropped where it is
+    // read (a uid must match the 32-hex pattern) or refused by the server.
+    if(!cfg.itemReg || typeof cfg.itemReg!=='object' || Array.isArray(cfg.itemReg)) cfg.itemReg = {};
+    if(!Array.isArray(cfg.mintQ))  cfg.mintQ  = [];
+    if(!Array.isArray(cfg.claimQ)) cfg.claimQ = [];
+    cfg.itemsSeeded = cfg.itemsSeeded ? 1 : 0;   // one-time legacy grandfather, done
 }
 // Error-tolerant load: parse failures fall back to defaults; keys absent from an
 // older or partial save (including a restored old backup) keep their defaults;
@@ -161,12 +169,16 @@ function resetStats() {
     keys.forEach(k=>{ _lsPending.delete(k); try { localStorage.removeItem(k); } catch (e) {} });
     _cachedFOKoins = 0;
     achUnlocked = {}; achPopups = []; _scoreboardCache = null;
-    cfg.shopItems = {}; cfg.wornItems = null; saveCfg();   // NOTE: cfg.debug (+ other settings) intentionally preserved
+    // Owned items are no longer local truth: the server holds the instances, so a
+    // wipe clears the local view and the next reconcile hands back whatever it
+    // still says is ours. The unregistered backlog IS local, so it goes for good.
+    cfg.shopItems = {}; cfg.wornItems = null; cfg.mintQ = []; saveCfg();   // NOTE: cfg.debug (+ other settings) intentionally preserved
 }
 // Reset SETTINGS (preferences) to defaults, keeping stats, owned shop items, the id and
 // friends. Distinct from RESET STATS (scores/coins) and RESET ID (identity).
 function resetSettings() {
-    const d = defaultCfg(), keep = { shopItems:1, wornItems:1, boxPity:1, shopOpens:1, debug:1, x10:1, cfgVer:1 };
+    const d = defaultCfg(), keep = { shopItems:1, wornItems:1, boxPity:1, shopOpens:1, debug:1, x10:1, cfgVer:1,
+                                     itemReg:1, mintQ:1, claimQ:1, itemsSeeded:1 };
     for(const k in d) if(!keep[k]) cfg[k] = d[k];
     saveCfg();
     // Re-apply the reset preferences to the LIVE app -- writing cfg alone leaves everything with
@@ -316,6 +328,10 @@ function _applyRestoredConfig(d){
     if(d.tok) setCloudToken(d.tok);                            // and the cloud-restore credential
     _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
     if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
+    // A restored backup carries a SNAPSHOT of the item registry, which is exactly
+    // what must not be trusted: re-reconcile against the server now rather than
+    // next session, so a restore cannot resurrect an instance for this whole run.
+    if(typeof itemResync==='function') itemResync();
     applyHandedness(); updateMuteBtn(); if(typeof applyFpsBox==='function')applyFpsBox(); _scoreboardCache=null;
     Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
     return true;

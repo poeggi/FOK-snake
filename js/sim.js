@@ -67,10 +67,18 @@ let duelWinner = -1;   // -1 = none yet; 0/1 = winner index; 2 = draw (head-on /
 // WINDSWEPT COSMETICS (duel only; null in classic). w[i] = the windswept item ids player i is
 // WEARING right now -- the sim owns this for the length of the match, so the renderer takes
 // the windswept half of a duel look from here rather than from either device's config. it =
-// the single loose item, knocked off by a near-miss and lying on the board: { id, own (who
-// it falls back to), x, y, at (the tick it lands on) }. ONE loose item at a time, which is
-// also the steal cooldown. Seeded at startDuel from the two exchanged profiles -- never from
-// _duelLook, whose cfg.noRemoteCosmetics view is local and would desync the roll.
+// the single loose item, knocked off by a near-miss and lying on the board: { id, uid, own
+// (who it falls back to), x, y, at (the tick it lands on) }. ONE loose item at a time, which
+// is also the steal cooldown. Seeded at startDuel from the two exchanged profiles -- never
+// from _duelLook, whose cfg.noRemoteCosmetics view is local and would desync the roll.
+//
+// u[i] = { itemId: uid } for the same worn items: the SERVER's unique id of the exact
+// instance player i is wearing, which is what a transfer has to name for the server to move
+// the right row (see items.js). It rides in a map rather than alongside w because both
+// players can legitimately wear the same catalog item -- two crowns, two different uids --
+// and per-side maps keep those apart with no index bookkeeping to drift. An empty uid is
+// normal and means "acquired offline, never registered": still worn, still stealable, just
+// not attestable until it has one.
 let _ws = null;
 const WS_LAND_TICKS = 30;   // 500ms of flight before the item touches down and can be taken
 
@@ -139,6 +147,7 @@ function _duelStealRoll(){
     const v = (n0 && n1) ? ri(2) : (n0 ? 0 : 1);
     const list = _ws.w[v];
     const id = list[ri(list.length)];
+    const uid = _ws.u[v][id] || '';
     // Price-scaled: cheap gear flies off, crowns cling on. What SPEED changes is not how fast
     // the victim was going but how hard the OTHER snake tore past -- a boosting rival doubles
     // the odds; your own boost neither protects you nor costs you. So neither-boosting and
@@ -167,7 +176,8 @@ function _duelStealRoll(){
               y:clamp(H.y + d.x*side*dist + d.y*along, ROWS) };
     if(blocked.has(ck(c))) c = freeCell(blocked);
     list.splice(list.indexOf(id), 1);
-    _ws.it = { id, own:v, x:c.x, y:c.y, at:simTick + WS_LAND_TICKS };
+    delete _ws.u[v][id];   // the instance travels ON the loose item now, not in the worn map
+    _ws.it = { id, uid, own:v, x:c.x, y:c.y, at:simTick + WS_LAND_TICKS };
     emit({t:'wsblow', id, own:v, hx:H.x, hy:H.y, x:c.x, y:c.y});
 }
 function freeCell(blocked) {
@@ -240,7 +250,7 @@ function _duelBeginLevel(reseed) {
     gPer = _speedRound ? LEVEL_CFG[9].normal : LEVEL_CFG[li].normal;
     // A blown-off item nobody picked up goes back to the snake it came off: the board is
     // about to be rebuilt, and losing gear to a rebuild is not something either player did.
-    if(_ws && _ws.it){ _ws.w[_ws.it.own].push(_ws.it.id); _ws.it = null; }
+    if(_ws && _ws.it){ _wsWearBack(_ws.it); _ws.it = null; }
     _nmWasAdjacent = false;   // fresh spawns are far apart; never carry a pass across a rebuild
     for (let i = 0; i < 2; i++) {
         const keep = players[i];
@@ -271,9 +281,32 @@ function _duelBeginLevel(reseed) {
 // entry sets it), constant for the whole match, never hashed and never snapshotted --
 // local duels and single player keep the immediate rebuild.
 let _duelNetHold = false;
-// Ids the cosmetics tables do not know are dropped rather than trusted: the list arrives
-// from a peer profile, and an unknown id would have no steal chance to roll against.
-function _wsKnown(a){ return Array.isArray(a) ? a.filter(id => WS[id]) : []; }
+// Builds one player's worn windswept state from an untrusted list. Ids the cosmetics tables
+// do not know are dropped rather than trusted (the list arrives from a peer profile, and an
+// unknown id would have no steal chance to roll against), and so is a repeat of an id
+// already in the list -- an item can only be worn once, and a duplicate would otherwise sit
+// in w twice with one entry in u.
+//
+// Accepts either bare ids or { id, uid } entries, because a LOCAL duel has no registry
+// behind it and passes plain ids (_wsWorn). uid may also arrive separately as a map, which
+// is the shape the resync wire uses. Anything that is not a 32-hex uid becomes '' -- an
+// unregistered item, which is a valid state, not an error.
+const WS_UID_RE = /^[0-9a-f]{32}$/;
+const _wsId = v => (v && typeof v === 'object') ? v.id : v;
+function _wsSeed(a, um){
+    const w = [], u = {};
+    if(Array.isArray(a)) for(const v of a){
+        const id = _wsId(v);
+        if(!WS[id] || u[id] !== undefined) continue;
+        w.push(id);
+        const q = um ? um[id] : (v && typeof v === 'object' ? v.uid : '');
+        u[id] = (typeof q === 'string' && WS_UID_RE.test(q)) ? q : '';
+    }
+    return { w, u };
+}
+// A loose item going back on the snake it came off (a board rebuild, a crash): the id and
+// the instance return together. Nothing changed hands, so no transfer is claimed.
+function _wsWearBack(g){ _ws.w[g.own].push(g.id); _ws.u[g.own][g.id] = g.uid; }
 const _HALT_RE = 6;   // held-death re-announce period in engine ticks (100ms) -- see the dying hold in update()
 // ws = the two players' worn windswept item ids, [P0, P1], already in the fixed table order
 // (_wsWorn on main). Both clients build BOTH lists from the same two exchanged profiles, so
@@ -303,7 +336,8 @@ function startDuel(seed, ws) {
     // three. Inert while _powerMode is off -- but they are ON THE WIRE HASH, so two devices
     // with different last games would disagree at tick 0 over state neither one is using.
     powerPelletAt = 0; _powerModeAt = 0; _barMoveTick = 0;
-    _ws = { w:[_wsKnown(ws && ws[0]), _wsKnown(ws && ws[1])], it:null };
+    const s0 = _wsSeed(ws && ws[0]), s1 = _wsSeed(ws && ws[1]);
+    _ws = { w:[s0.w, s1.w], u:[s0.u, s1.u], it:null };
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
     level = 1; duelWinner = -1;
     players = [ _mkDuelPlayer(6, Math.floor(ROWS/2)-4,  1),      // P0 left, heading right
@@ -398,7 +432,7 @@ function duelStep(now) {
         // to hand it back. Whoever it came off gets it back here, in flight or already lying
         // on the board, the same rule _duelBeginLevel applies to a board rebuild. Nothing is
         // drawn from the rng, so both clients cancel the same drop on the same tick.
-        if (_ws && _ws.it) { _ws.w[_ws.it.own].push(_ws.it.id); _ws.it = null; }
+        if (_ws && _ws.it) { _wsWearBack(_ws.it); _ws.it = null; }
         if (dead[0]) players[0].lives--;
         if (dead[1]) players[1].lives--;
         for (let i = 0; i < 2; i++) if (dead[i]) {
@@ -441,10 +475,12 @@ function duelStep(now) {
             // Only one item per wear slot stays ON: a won hat pushes off the hat already
             // worn. The displaced one is still OWNED (see _wsTransfer) -- just not worn,
             // so it is no longer on this snake to be stolen either.
-            const w = _ws.w[i], cat = WS[g.id].cat;
-            if (cat) for (let k = w.length - 1; k >= 0; k--) if (WS[w[k]].cat === cat) w.splice(k, 1);
-            w.push(g.id);
-            emit({t:'wsget', id:g.id, from:g.own, to:i});
+            const w = _ws.w[i], um = _ws.u[i], cat = WS[g.id].cat;
+            if (cat) for (let k = w.length - 1; k >= 0; k--) if (WS[w[k]].cat === cat) { delete um[w[k]]; w.splice(k, 1); }
+            w.push(g.id); um[g.id] = g.uid;
+            // uid names the exact instance that changed hands, which is what the server's
+            // items row is keyed by -- the catalog id alone could be either player's copy.
+            emit({t:'wsget', id:g.id, uid:g.uid, from:g.own, to:i});
         }
         if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
             heart = null;

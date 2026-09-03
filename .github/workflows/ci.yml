@@ -4,6 +4,9 @@
 # no installs, no build. Runs on every push and PR so a broken commit is caught
 # even though main auto-deploys to GitHub Pages. The local pre-commit hook runs
 # only the fast tier (bash test/checks.sh) for speed; CI is the full gate.
+#
+# The suites run concurrently across the runner's cores (test/run-suites.js), so the
+# tier costs roughly its longest sweep rather than the sum of all of them.
 name: ci
 
 on:
@@ -30,10 +33,10 @@ jobs:
         run: |
           {
             echo "### FOK-snake CI (full regression tier)"
-            echo "- JS syntax check (node --check)"
+            echo "- JS syntax check (every shipped source parsed)"
             echo "- ASCII-only sources"
             echo "- sim determinism + invariants (golden hashes)"
             echo "- headless smoke test (menus + gameplay)"
-            echo "- duel lockstep sweeps (desync / boundary / rematch / respawn)"
+            echo "- duel lockstep sweeps (desync / recovery / boundary / clock)"
             echo "- sw.js CACHE / ASSETS integrity"
           } >> "$GITHUB_STEP_SUMMARY"

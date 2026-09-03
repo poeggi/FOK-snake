@@ -12,11 +12,11 @@
 // device offline, or these files deleted (all callers guard with typeof).
 // ============================================================================
 const NET_BASE = 'https://fok-server.poggensee.it';
-const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md: Versioning; v3 = t.txt clock, epoch-keyed starts + sync gate, remote debug flag, 3.1 = peer-net hint)
+const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md: Versioning; v4 = the ITEM REGISTRY -- the server owns item-instance ownership, so a transfer moves one row instead of copying a flag)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 5;   // built against 3.5 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag + `platform` tag on scores/profile + 3.5 friend-request `exists` verdict and `retry_after` throttle; per-player stats.php available, not yet consumed)
+const NET_API_BUILT_MINOR = 0;   // built against 4.0 (items.php list/mint/seed/claim + the mid/secret pair on start.php); every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -263,14 +263,37 @@ function _detectPlatform(){
     }
     _platformC = p; return p;
 }
+// wornUids/wornSeqs are the item-registry half of the profile: the server's unique id, and
+// our view of its version, for each windswept item we are WEARING into the match. Both
+// clients seed the sim's windswept state from these two exchanged profiles, so a transfer can
+// name the exact instance that moved (see _ws in sim.js, itemWornUids in items.js). Items
+// bought offline have no uid yet and simply do not appear here.
 function _netProfile(){
-    return { name:(_netMyName()||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{}, platform:_detectPlatform() };
+    const wu = (typeof itemWornUids === 'function') ? itemWornUids() : { uids:{}, seqs:{} };
+    return { name:(_netMyName()||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{},
+             wornUids:wu.uids, wornSeqs:wu.seqs, platform:_detectPlatform() };
+}
+// A peer's uid/seq map is untrusted input the SIM then hashes, so it is clamped to plain
+// {string: string|int} pairs of a bounded size before it can reach _wsSeed. A malformed entry
+// becomes an unregistered item, which is a state the duel already handles.
+function _netClampUids(o, num){
+    const out = {};
+    if(!o || typeof o !== 'object') return out;
+    let n = 0;
+    for(const k in o){
+        if(++n > WINDSWEPT_ITEMS.length) break;
+        if(typeof k !== 'string' || k.length > 32) continue;
+        out[k] = num ? (o[k]|0) : (typeof o[k] === 'string' ? o[k].slice(0,32) : '');
+    }
+    return out;
 }
 function _netClampProfile(p){
     p = (p && typeof p === 'object') ? p : {};
     return { name: String(p.name||'???').slice(0,MAX_NAME),
              color: Math.abs(p.color|0) % SNAKE_COLORS.length,
              shopItems: (p.shopItems && typeof p.shopItems === 'object') ? p.shopItems : {},
+             wornUids: _netClampUids(p.wornUids, false),
+             wornSeqs: _netClampUids(p.wornSeqs, true),
              platform: (typeof p.platform === 'string') ? p.platform.slice(0,12) : null };
 }
 

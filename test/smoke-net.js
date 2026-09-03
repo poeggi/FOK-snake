@@ -368,17 +368,19 @@ runTest('SMOKE-NET', `
     if((cfg.debug|0)!==2) throw 'a repeated instruction must not stamp on a self-enabled client';
     // The REPORT is what we are actually doing, never what was asked.
     cfg.debug=0; _netDbgSrv=null;
-    // api MAJOR gate: the client's own MAJOR.MINOR string is compatible; an OLDER minor and a
-    // legacy integer still are; a newer MINOR flags an update; only a newer MAJOR disables online.
-    _applyHello({api:'3.5'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 3.5: the same version must read as up to date';
+    // api MAJOR gate: the client's own MAJOR.MINOR string is compatible; an OLDER server
+    // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
+    // disables online. An older server MAJOR (one without the item registry) stays usable:
+    // online play is unaffected, item registration simply has nowhere to land.
+    _applyHello({api:'4.0'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.0: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
-    _applyHello({api:'3.1'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER minor (server 3.1) must read as up to date';
-    _applyHello({api:3});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags';
-    _applyHello({api:'3.6'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:'3.5'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER major (server 3.5) must read as up to date';
+    _applyHello({api:4});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags';
+    _applyHello({api:'4.1'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
-    _applyHello({api:'4.0'});   // newer MAJOR: incompatible
+    _applyHello({api:'5.0'});   // newer MAJOR: incompatible
     if(!_netApiNewer || netUpdateNotice()!=='UPDATE REQUIRED - PLEASE RELOAD') throw 'a newer major must flag UPDATE REQUIRED and gate online off';
     _netApiNewer=false; _netApiOutdated=false;
     log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major');

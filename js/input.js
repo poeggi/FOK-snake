@@ -344,8 +344,12 @@ const UI_INPUT = {
             const si=cfg.shopItems||(cfg.shopItems={});
             if(_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
                 _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch (e) {}
-                si[item.id]=true;
-                if(!item.repeatable){
+                // A wearable purchase goes through the registry (it needs a server instance
+                // id, queued if we are offline); a repeatable is a consumable the server
+                // never tracks and just flips its own flag.
+                if(item.repeatable) si[item.id]=true;
+                else {
+                    itemGrant(item.id,'shop');
                     // Auto-wear the purchase -- unless its wear slot is taken: then it stays
                     // owned-not-worn and the REMOVE-first notice queues behind PURCHASED!.
                     const other=_wornCatClash(item);

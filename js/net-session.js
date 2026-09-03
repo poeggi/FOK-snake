@@ -479,6 +479,12 @@ async function _netRequestStart(s, reason){
     if(typeof d.now === 'number' && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
         _netSync = { ofs: d.now + _rtt/2 - _wall(), rtt: _rtt, at: Date.now() };
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
+    // The item-registry match handle plus THIS side's attestation secret. duel-core MACs its
+    // ownership digest with the secret once a second, which is what lets the server verify a
+    // steal it did not witness (see _wsAttest, items.js). Additive: a server that does not
+    // send them leaves the duel unattested, exactly as it ran before the registry.
+    if(typeof d.mid === 'string') s.mid = d.mid;
+    if(typeof d.secret === 'string') s.secret = d.secret;
     _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
     // Ship the shared start, then schedule tick 0. `theta` is the SHARED-clock residual the host's
     // burst settled on (null when it starved or did not burst); the joiner applies its half from

@@ -575,11 +575,16 @@ function _shopToggleWear(item){
 // local duel has no second inventory, so P1 starts bare. Built from the RAW profiles, never
 // from netDuelLook: its cfg.noRemoteCosmetics view is one device's rendering preference, and
 // running the steal roll off it would desync the match the moment somebody toggled it.
+// Each id travels as { id, uid } so the sim knows WHICH INSTANCE of a catalog item is in
+// play: both players can legitimately wear a crown, and only the uid tells the server's two
+// rows apart. An id with no uid is an item bought while offline -- in play, just unattestable.
 function _duelWsLists(hosting){
-    const mine = _wsWorn(cfg.wornItems);
+    const wu = itemWornUids();
+    const mine = _wsWorn(cfg.wornItems).map(id => ({ id, uid:wu.uids[id] || '' }));
     if(hosting == null) return [mine, []];
     const pp = (_netSess && _netSess.peerProfile) || null;
-    const theirs = _wsWorn(pp && pp.shopItems);
+    const pu = (pp && pp.wornUids) || {};
+    const theirs = _wsWorn(pp && pp.shopItems).map(id => ({ id, uid:pu[id] || '' }));
     return hosting ? [mine, theirs] : [theirs, mine];
 }
 // A pickup moved ownership in the sim; this is the write-back, and it happens ONLINE ONLY.
@@ -603,7 +608,20 @@ function _wsTransfer(e){
         if(cat) for(const o of SHOP_ITEMS.concat(BOX_ITEMS)) if(o.cat === cat) delete wi[o.id];
         wi[e.id] = true;                              // worn at once, exactly as the sim shows it
     }
-    cfg.shopItems = si; cfg.wornItems = wi; saveCfg();
+    cfg.shopItems = si; cfg.wornItems = wi;
+    // The registry side of the same move: the uid is the instance that changed hands, so the
+    // winner ADOPTS that exact one rather than being handed a fresh copy of the catalog item.
+    // Applied locally and at once -- the server claim (duel-core's attestation) confirms it
+    // afterwards, or repairs it on the next reconcile if it was never ours to take.
+    if(e.from === me) itemLose(e.id);
+    else {
+        // The peer's own view of the instance's version, so the local record is right even if
+        // the claim never gets delivered; the claim response and the next list reconcile both
+        // correct it if it is not.
+        const ps = (_netSess && _netSess.peerProfile && _netSess.peerProfile.wornSeqs) || {};
+        itemAdopt(e.id, e.uid, (ps[e.id]|0) + 1);
+    }
+    saveCfg();
 }
 let _boxOpenAt = 0, _boxReward = null;
 // ADMIN box: surfaces on the boxes tab once every ADMIN_BOX_EVERY shop opens, then is
@@ -628,7 +646,7 @@ function _openBox(box){
         const si=cfg.shopItems||(cfg.shopItems={});
         _adminConsumed=true;
         if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',rarity:'legendary',refund}; }
-        else { si.admincrown=true; _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
+        else { itemGrant('admincrown','box'); _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
         saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('unbox',cfg.music); return;
     }
     if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
@@ -638,7 +656,7 @@ function _openBox(box){
     else {
         const si=cfg.shopItems||(cfg.shopItems={});
         if(si[res.id]){ const refund=Math.round(_boxItemValue(res.id)*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:res.id,rarity:res.rarity,refund}; }
-        else { si[res.id]=true; if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
+        else { itemGrant(res.id,'box'); if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
     }
     saveCfg();
     _boxOpenAt=simNow;
@@ -980,6 +998,16 @@ function _wsend(m){
     if(_useWorker()) _worker.postMessage(m); else if(typeof simCommand==='function') simCommand(m);
 }
 function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x10: !!cfg.x10 }; }
+// What duel-core's item attestation needs for a match: the registry's match handle, THIS
+// side's secret (from start.php -- each client gets only its own, which is what makes a tag
+// the peer cannot forge), the two player ids in SIM INDEX order (host is always P0), and our
+// view of every instance's version so a transfer can name the seq the server compares against.
+function _duelClaimArgs(hosting){
+    const s = _netSess || {}, me = getPlayerId(), peer = s.peer || '';
+    return { mid: s.mid || '', sec: s.secret || '',
+             ids: hosting ? [me, peer] : [peer, me],
+             seqs: itemMatchSeqs(s.peerProfile) };
+}
 function beginGame(){
     if(typeof netEndSession==='function') netEndSession();   // a lingering online session must never eat the local game's frames
     inGame = true; Snd.musicFadeOut(0.5);   // menu music fades out; READY/GO runs silent
@@ -1022,10 +1050,10 @@ function beginOnlineDuel(seed, hosting){
         // message carries everything the core needs; a rematch/level start simply
         // sends it again with the fresh seed/startPts.
         _wDuel = true;
-        _worker.postMessage({ t:'duelStartNet', seed:seed>>>0,
+        _worker.postMessage(Object.assign({ t:'duelStartNet', seed:seed>>>0,
             my: hosting ? 0 : 1, ws: _duelWsLists(hosting),
             ofs: _netSync ? _netSync.ofs : null,
-            startPts: (_netSess && _netSess.startPts) || 0 });
+            startPts: (_netSess && _netSess.startPts) || 0 }, _duelClaimArgs(hosting)));
         // The epoch stamp + receive gate live on MAIN (_netSend/_netHandleMsg read
         // _rbEpoch), and the worker cannot compute it (netEpoch needs _netSess). The
         // message above rebases the worker, so main's dormant core must adopt the same
@@ -1036,6 +1064,8 @@ function beginOnlineDuel(seed, hosting){
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
     _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting) });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
+    const ca = _duelClaimArgs(hosting);
+    if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
@@ -1109,6 +1139,9 @@ function resumeOnlineDuel(){
 // net layer directly. The worker home posts the same moment as a 'duelRecovered' duel event
 // instead (sim-worker.js), which lands in the drainSimEvents case above.
 function _rbRecovered(){ if(typeof _netResyncSettled === 'function') _netResyncSettled(); }
+// In-process home of duel-core's item-handover hook: the registry client is right here, so
+// hand the claim straight to it. The worker home posts an 'iclaim' message instead.
+function _wsClaimOut(c){ if(typeof itemClaim === 'function') itemClaim(c); }
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
 function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
@@ -1135,6 +1168,10 @@ function _initWorker(){
         const m = e.data;
         if(m.t==='wire'){ if(netWorkerDuelOn() && typeof _netSend==='function') _netSend(m.o); return; }   // duel-core's outbound packet
         if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
+        // An item handover the worker's duel-core attested and released. Only MAIN can post
+        // it (the registry client owns cfg and the fetch), so it comes out as a message the
+        // same way the wire packets do.
+        if(m.t==='iclaim'){ if(typeof itemClaim==='function') itemClaim(m.c); return; }
         // A tick threw inside the worker; its loop caught it and re-armed itself (throttled
         // to one post per 5s). Same prefix as onerror below: this line IS the root cause.
         if(m.t==='err'){ console.error('sim worker error', m.msg + (m.n > 1 ? ' (x' + m.n + ')' : ''), m.stack); return; }

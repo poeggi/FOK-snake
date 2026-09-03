@@ -13,20 +13,42 @@ Everything here is headless Node against the real `js/*` (loaded in a VM by
 `test/checks.sh` runs in two tiers so the local pre-commit hook stays snappy while the
 full regression coverage still gates every deploy:
 
-    bash test/checks.sh          FAST tier (~8s) -- the local pre-commit hook. Every
-                                 cheap guard: syntax, ASCII, sim determinism + invariants,
+    bash test/checks.sh          FAST tier -- the local pre-commit hook. Every cheap
+                                 guard: syntax, ASCII, sim determinism + invariants,
                                  all smoke tests, and the single-scenario netcode paths
-                                 (net-handshake, smoke-worker, relay-sim, duel-sync,
-                                 duel-warn).
-    bash test/checks.sh --full   REGRESSION tier (~2min) -- FAST plus the six heavy duel
-                                 sweeps below. CI runs this on every push/PR, so it gates
-                                 the auto-deploy to Pages.
+                                 (net-handshake, smoke-worker, duel-sync, duel-warn,
+                                 duel-touch).
+    bash test/checks.sh --full   REGRESSION tier -- FAST plus the heavy duel sweeps
+                                 below. CI runs this on every push/PR, so it gates the
+                                 auto-deploy to Pages.
 
 RUN `--full` LOCALLY after any significant netcode or sim rework (and before a release).
 The fast tier proves each netcode PATH still works; the regression tier plays many long,
 lossy, dozing matches to catch rare, slow-accumulation divergence a single scenario misses.
 The heavy sweeps dominate runtime (each plays real 20-40s lockstep matches), which is the
 whole reason they are not on the commit hot path -- they are not weaker, just slower.
+
+### run-suites.js  (the suite table, and the runner for it)
+
+`checks.sh` is a tier selector; the list of suites and how to run them lives here. Every
+suite is a pure, isolated process -- it reads sources, simulates, asserts, and writes
+nothing -- so they run CONCURRENTLY, longest-first, one child per core:
+
+    node test/run-suites.js            # fast tier
+    node test/run-suites.js --full     # regression tier
+    node test/run-suites.js --list     # just name the suites in the tier
+    JOBS=1 bash test/checks.sh --full  # serial, when a failure reads better that way
+
+Runtime is almost entirely SIMULATED MATCH TIME -- the heavy sweeps play minutes of
+lockstep duel between them and everything else in the suite adds up to seconds -- so
+folding suites into fewer processes would save the node startups and nothing that matters.
+Spreading them across cores is what shortens the wait, and it costs no coverage: every
+suite still runs, whole, in its own process, and a suite that must show a completion
+banner still has to.
+
+The smoke tests are discovered rather than listed, so a new `test/smoke-*.js` is picked up
+by existing. `weight` is a measured millisecond figure used only to dispatch the long
+sweeps first; a stale one costs packing efficiency, never correctness.
 
 ## Files
 
@@ -275,7 +297,7 @@ cells), so recovery no longer stalls once the outage outlasts the redundant inpu
 Run any of them directly, or the whole regression tier:
 
     node test/duel-desync.js         # one suite
-    bash test/checks.sh --full       # fast tier + all six heavy sweeps (what CI runs)
+    bash test/checks.sh --full       # fast tier + every heavy sweep (what CI runs)
 
 ### duel-profile.js  (on-demand -- latency/rollback profiler)
 

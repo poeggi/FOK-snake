@@ -19,7 +19,7 @@
 // duel-core.js, below) the ONLINE duel's sim + rollback. game.js falls back to an
 // in-process sim only where Worker construction fails (file://, exotic browsers).
 // ============================================================================
-importScripts('assets.js', 'sim.js', 'duel-core.js');
+importScripts('hmac.js', 'assets.js', 'sim.js', 'duel-core.js');
 
 // sim.js reads cfg.diff / cfg.turbo. Declare it on the worker global so those bare
 // references resolve; the main thread sends the real config via {t:'cfg'} before starting.
@@ -72,6 +72,12 @@ self.drainSimEvents = () => {
 // layer opens the RESUME boundary (clock re-anchor, no rebuild). The in-process home wires
 // this hook straight to _netResyncSettled instead (game.js _rbRecovered).
 self._rbRecovered = () => { _dcEvents.push({ tk: simTick, e: { t: 'duelRecovered' } }); };
+// Item-handover hook (duel-core): a claim has been attested and released. Only MAIN can
+// deliver it -- the registry client owns cfg and the fetch -- so it crosses as its own
+// message rather than a tick-tagged sim event: it is not a sim effect and must not be
+// replayed, coalesced or cancelled by a rollback. The in-process home calls itemClaim
+// directly instead (game.js _wsClaimOut).
+self._wsClaimOut = (c) => { if(_dcOn) postMessage({ t: 'iclaim', c }); };
 // Note the deepest rewind per post so main can cancel already-queued cosmetics past it.
 const _dcRbOrig = _rbRollback;
 self._rbRollback = function(toTick){
@@ -234,6 +240,9 @@ onmessage = (e) => {
             _dcOn = true; self.inGame = true;
             simCommand({ t:'startDuel', seed:m.seed>>>0, net:true, ws:m.ws });   // net: deaths hold for the negotiated respawn boundary
             _rbReset();                                  // AFTER startDuel: it rewinds simTick, the base reads it
+            // Only on a MATCH start: the level and respawn boundaries below keep the same mid,
+            // and resetting there would drop a pending claim and rewind every instance version.
+            _wsClaimReset(m.mid, m.sec, m.ids, m.seqs);
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
             _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
             _last = performance.now(); _acc = 0; _dcSnapN = 0; _dcSnapAt = 0;
