@@ -24,12 +24,12 @@ function menuItem(text,y,sel,c=ctx,dim) {
 // the small FONT.HINT, coloured by kind -- red on failure, green on success, amber otherwise.
 // The slot stays blank when there is nothing to say, so it reads identically across menus.
 const STATUS_Y = CH - 76;
-function drawStatus(msg){
+function drawStatus(msg, y){
     if(!msg) return;
     const col = /FAIL|INVALID|OFFLINE|WRONG|TOO LARGE|NO CLOUD|NO BACKUP|BAD|MISMATCH|BUSY|SYNC|UNREACHABLE|NOT SUPPORTED|CANNOT|LOST|DECLINE|EXPIRED/i.test(msg) ? '#ff5555'
               : /SAVED|RESTORED|ADDED|ACCEPTED|CONNECTED|READY|SENT/i.test(msg) ? '#7fff7f'
               : '#ffaa44';
-    ct(msg, CW/2, STATUS_Y, col, FONT.HINT);
+    ct(msg, CW/2, y || STATUS_Y, col, FONT.HINT);
 }
 
 // ================================================================
@@ -491,8 +491,12 @@ function drawWinStar(cx, cy, r){
 // One scoreboard row, shared by the LOCAL and GLOBAL tabs (g = global). The hardening
 // casts (|0, %, typeof) exist for the untrusted server fields and are identity on
 // well-formed local rows; only score keeps a split, |0 would truncate past 2^31.
+// Row pitch has to clear the tallest cosmetic, not just the text: a wizard hat or a crown
+// on the head at the right reaches ~28px above its own row, so at the old 28px pitch it grew
+// into the row above. 34 gives the headgear its own air; 8 rows still end well clear of HINT_Y.
+const SCORE_ROW_Y = 90, SCORE_ROW_H = 34;
 function _drawScoreRow(s, i, g){
-    const y=90+i*28;
+    const y=SCORE_ROW_Y+i*SCORE_ROW_H;
     ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
     const diff=['E','N','H'][s.diff==null?1:s.diff]||'N';
     ctx.textAlign='left';  ctx.fillText(String(s.name||'???').slice(0,MAX_NAME), 24, y);
@@ -596,8 +600,8 @@ function drawAchievements() {
         // Descriptions are static strings in a fixed font; wrap to <=aw-32, max two lines.
         const _mw=aw-32; let _d1=a.desc,_d2='';
         if(ctx.measureText(_d1).width>_mw){
-            const _ws=a.desc.split(' '); let _l='';
-            for(const _w of _ws){const _t=_l?_l+' '+_w:_w;if(ctx.measureText(_t).width<=_mw)_l=_t;else{_d2=a.desc.slice(_l.length+1);break;}}_d1=_l;
+            const _wds=a.desc.split(' '); let _l='';
+            for(const _w of _wds){const _t=_l?_l+' '+_w:_w;if(ctx.measureText(_t).width<=_mw)_l=_t;else{_d2=a.desc.slice(_l.length+1);break;}}_d1=_l;
         }
         ctx.fillText(_d1,x+26,y+28);
         if(_d2) ctx.fillText(_d2,x+26,y+42);
@@ -660,7 +664,7 @@ function _drawGearPage(){
         drawPixelIcon(16,y+(rowH-4)/2-8,item.icon,2);
         ctx.textAlign='left'; ctx.textBaseline='top';
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#dddddd'; ctx.fillText(item.name,46,y+7);
-        if(item.volatile){ ctx.fillStyle='#888888'; ctx.fillText('(volatile)',46+ctx.measureText(item.name).width+18,y+7); }
+        if(item.windswept){ ctx.fillStyle='#888888'; ctx.fillText('(windswept)',46+ctx.measureText(item.name).width+18,y+7); }
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=rc; ctx.fillText((item.rarity||'').toUpperCase()+' - BOX EXCLUSIVE',46,y+21);
         ctx.textAlign='right';
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle=worn?'#7fff7f':'#4a7a9a'; ctx.fillText(worn?'WORN':'OWNED',CW-18,y+9);
@@ -721,7 +725,7 @@ function drawShop() {
         ctx.font=`${FONT.HINT}px "Press Start 2P"`;
         ctx.fillStyle=worn?'#7fff7f':(owned&&isRep)?'#ff66aa':owned?'#5a8aaa':sel?'#dddddd':'#aaaaaa';
         ctx.fillText(item.name,46,y+7);
-        if(item.volatile){ ctx.fillStyle='#888888'; ctx.fillText('(volatile)',46+ctx.measureText(item.name).width+18,y+7); }
+        if(item.windswept){ ctx.fillStyle='#888888'; ctx.fillText('(windswept)',46+ctx.measureText(item.name).width+18,y+7); }
         ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.fillStyle='#999999';
         ctx.fillText(item.desc,46,y+21);
         ctx.textAlign='right';
@@ -859,7 +863,11 @@ function drawNameEntry(now) {
     }
     const isFriend=entryMode==='friend';
     const sw=30,sh=40,gap=5,dashW=isFriend?18:0;                 // friend id shows as XXXX-XXXX
-    const totalW=max*(sw+gap)-gap+dashW,sx0=Math.floor(CW/2-totalW/2),sy=122;
+    // ...and ends in a SUBMIT button (_entryOnOk). Deliberately not a ninth slot: shorter,
+    // wider, a pill rather than a box, and a clear step of its own away from the field, so it
+    // reads as a control to press instead of somewhere else to type.
+    const okW=isFriend?46:0,okH=34,okGap=isFriend?22:0;
+    const totalW=max*(sw+gap)-gap+dashW+(isFriend?okGap+okW:0),sx0=Math.floor(CW/2-totalW/2),sy=122;
     if(isFriend){   // dash between the two 4-digit quads so the mask matches fmtFriendId / SHOW MY ID
         ct('-',sx0+3*(sw+gap)+sw+(gap+dashW)/2,sy+sh/2,'#4a7a4a',FONT.MENU);
     }
@@ -873,6 +881,19 @@ function drawNameEntry(now) {
             const gc=chars[nameCharIdx]; ctx.globalAlpha=0.42; if(gc===' '){ctx.fillStyle='#7fff7f';ctx.fillRect(sx+8,sy+sh-12,sw-16,2);}else{ct(gc==='\r'?'\u21B5':gc,sx+sw/2,sy+sh/2,'#7fff7f',FONT.MENU);} ctx.globalAlpha=1;
             if(Math.floor(now/400)%2===0){ctx.fillStyle='#7fff7f55';ctx.fillRect(sx+5,sy+sh-6,sw-10,2);}
         }
+    }
+    if(isFriend){
+        // The SUBMIT button: the 8th digit moves the cursor onto it rather than leaving it
+        // parked on the last digit, so the ID is sent with the same OK that typed it. Three
+        // states, and the dead one is dead for real -- short of 8 digits the cursor cannot
+        // reach it (_entryLast), so the grey face is not bluffing. Live, it inverts against
+        // the hollow slots: filled face, dark glyph.
+        const ox=sx0+max*(sw+gap)-gap+dashW+okGap, oy=sy+(sh-okH)/2;
+        const ready=nameStr.length>=max, on=ready&&nameCursorPos>=max;
+        ctx.fillStyle=on?'#7fff7f':ready?'#2c5c2c':'#151520'; ctx.strokeStyle=on?'#bfffbf':ready?'#4a8a4a':'#26263a'; ctx.lineWidth=on?2:1;
+        if(on){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=GLOW.TEXT; }
+        rr(ox,oy,okW,okH,okH/2); ctx.fill(); ctx.shadowBlur=0; ctx.stroke();
+        ct('\u21B5',ox+okW/2,oy+okH/2,on?'#0a1a0a':ready?'#cfeccf':'#3a3a4a',FONT.MENU);
     }
     const selY=sy+sh+90,ci=nameCharIdx;
     const dialX=entryMode==='friend'?190:CW/2;   // friend mode: dial left, camera right -> pair centered
@@ -910,6 +931,10 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
     if(entryMode==='friend') _drawScanPanel();
+    // ADD FRIEND verdicts (checking / added / no such ID / rate limit) sit BELOW the
+    // viewfinder and the dial, not at STATUS_Y -- that band is under both of them here.
+    // Held longer than the menus' 2.6s: this one is read and acted on, not just noticed.
+    if(isFriend && _duelMsg && _msgNow()-_duelMsgAt<5000) drawStatus(_duelMsg, 354);
     ct(isFriend?'UP/DN:letter  L/R:move  A:place  BKSP:del  ESC:back'
               :'UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,HINT_Y,'#888',FONT.HINT);
 }
@@ -931,7 +956,11 @@ function _drawScanPanel(){
     if(_scanState==='live'&&_scanVideo&&_scanVideo.videoWidth){
         const vw=_scanVideo.videoWidth,vh=_scanVideo.videoHeight,s=Math.min(vw,vh)*0.7/_scanZoom;   // /zoom: show a smaller centre crop, magnified
         try{ ctx.drawImage(_scanVideo,(vw-s)/2,(vh-s)/2,s,s,vx,vy,vs,vs); }catch(e){}
-        ct('POINT AT FRIEND QR',vx+vs/2,vy+vs+14,'#4a7a4a',FONT.HINT);
+        // Beside the viewfinder, not under it: the ADD FRIEND verdict lands below (drawStatus
+        // at 354) and the two were drawing over each other.
+        const capX=(vx+vs+4+CW)/2;
+        ct('POINT AT',capX,vy+vs/2-8,'#4a7a4a',FONT.HINT);
+        ct('QR',capX,vy+vs/2+8,'#4a7a4a',FONT.HINT);
     } else if(_scanState==='starting'){
         ct('CAMERA...',vx+vs/2,vy+vs/2,'#555',FONT.HINT);
     } else if(_scanManualOff){
@@ -970,6 +999,7 @@ function drawWorld(now) {
     if(powerPellet) _drawPowerPellet(now);
     if(timeCrystal) _drawTimeCrystal(now);
     if(heart) _drawHeart(now);
+    _drawWsItem(now);      // knocked-off cosmetic: in flight, or lying there to be taken
     _drawCrushEffects(now);
     if(players){
         const protect=phase==='duel'&&(now-spawnAt<SPAWN_PROTECT);
@@ -978,16 +1008,19 @@ function drawWorld(now) {
         // The gown reveals on whoever LEADS -- a duel has no record to chase, and the local
         // best score is device-local, so it is the one condition both clients can agree on.
         const _sh0=players[0].score>players[1].score, _sh1=players[1].score>players[0].score;
-        drawSnakeG(players[0].snake, players[0].dir, players[0].dirQueue, lk.c0, lk.i0, !players[0].alive, _sh0);
-        drawSnakeG(players[1].snake, players[1].dir, players[1].dirQueue, lk.c1, lk.i1, !players[1].alive, _sh1);
+        drawSnakeG(players[0].snake, players[0].dir, players[0].dirQueue, lk.c0, lk.i0, !players[0].alive, _sh0, _crashJolt(0, now));
+        drawSnakeG(players[1].snake, players[1].dir, players[1].dirQueue, lk.c1, lk.i1, !players[1].alive, _sh1, _crashJolt(1, now));
         ctx.globalAlpha=1;
+        _duelScrapeFx(now);   // judged and drawn per frame; sparks belong on TOP of the two flanks making them
+        _drawWsBlowFx(now);   // the shock ring names its victim, so it goes on top of that snake's head
     } else if(snake){
         const dying=phase==='dying',flash=dying&&Math.floor((now-phaseAt)/85)%2===1;
         const protect=phase==='playing'&&(now-spawnAt<SPAWN_PROTECT);
         if(protect&&Math.floor(now/130)%2===1) ctx.globalAlpha=0.22;
-        drawSnake(flash);
+        drawSnake(flash, now);
         ctx.globalAlpha=1;
     }
+    _drawCrashFx(now);   // dent, chips and the stars/birds ring sit ON TOP of the wreck
     // Fireworks particles (perfect level); the array stays empty in a duel, so this no-ops.
     if(fireworks.length>0){
         fireworks=fireworks.filter(p=>{
@@ -1010,9 +1043,28 @@ function _duelLook(){
     return {
         c0: lk?lk.c0:(cfg.snakeColor||0),
         c1: lk?lk.c1:((cfg.snakeColor||0)+1)%SNAKE_COLORS.length,
-        i0: lk?lk.i0:(cfg.wornItems||{}),
-        i1: lk?lk.i1:{}
+        i0: _wsLook(lk?lk.i0:(cfg.wornItems||{}), 0),
+        i1: _wsLook(lk?lk.i1:{}, 1)
     };
+}
+// For the length of a duel the SIM owns which WINDSWEPT items a snake wears -- they come off
+// in a near-miss and change hands on a pickup, so neither device's config is the truth any
+// more. Take the windswept half from _ws and the fixed cosmetics from the profiles, and a
+// blown-off crown leaves the snake on both screens at the same tick.
+// Memoized on the two list LENGTHS, which is enough: every mutation (blow, pickup, the
+// revert at a rebuild) changes one of them, and this runs twice a frame.
+let _wsLookC = null;
+function _wsLook(items, idx){
+    if(typeof _ws==='undefined' || !_ws) return items;
+    const w=_ws.w[idx], n=_ws.w[0].length*100+_ws.w[1].length;
+    const c=_wsLookC && _wsLookC[idx];
+    if(c && c.src===items && c.n===n) return c.val;
+    const val={};
+    for(const k in items) if(!WS[k]) val[k]=items[k];
+    for(const id of w) val[id]=true;
+    if(!_wsLookC) _wsLookC=[null,null];
+    _wsLookC[idx]={ src:items, n, val };
+    return val;
 }
 // The per-player controls line under the 1:1 DUEL title. Local 1:1 shows both schemes
 // (P1 arrows, P2 WASD, one keyboard). An ONLINE duel drives ONE snake from this device --
@@ -1110,7 +1162,7 @@ function drawDeathFx(now){
     if(now-phaseAt < FX_SETTLE_MS) return;   // 2-tick hold: a rolled-back death never flashes
     const t=(now-phaseAt)/DEATH_DUR;
     ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5); ctx.shadowColor='#ff4444';
-    if(!players && lives===0){ctx.shadowBlur=GLOW.BIG;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.JUMBO);}   // duel deaths are always a life-lost (out-of-hearts -> duelOver)
+    if(!players && lives===0){ctx.shadowBlur=GLOW.BIG;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.JUMBO);}   // a duel death always reads as a heart lost; its winner banner follows at duelOver
     else{ctx.shadowBlur=GLOW.TITLE;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.TITLE);}
     ctx.restore();
 }

@@ -204,7 +204,7 @@ function _rbAdoptEpoch(){ if(typeof netEpoch === 'function') _rbEpoch = netEpoch
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
     'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
     '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner',
-    '_speedRound','_rngState'];
+    '_speedRound','_nmWasAdjacent','_ws','_rngState'];
 // Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
 // duel tick still touches (_barsV is the bars change-ticker the renderer watches;
 // levelDoneWaiting gates 'advance'). The full simSnapshot would drag every classic-
@@ -220,7 +220,7 @@ function _rbDuelSnap(){
     return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue, _gAt,
              phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
              powerPellet, powerPelletAt, _powerMode, _powerModeAt, heart, heartAt, _barMoveTick,
-             players, duelWinner, _speedRound, _rngState };
+             players, duelWinner, _speedRound, _nmWasAdjacent, _ws, _rngState };
 }
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
@@ -468,10 +468,21 @@ function _rbFullState(sn, tk){
         bars:sn.bars.map(b => [b.x, b.y, (b.fragile?1:0)|(b.paired?2:0), b.pairEnd?b.pairEnd.x:-1, b.pairEnd?b.pairEnd.y:-1, b.gd==null?-1:b.gd|0, b.gdUntil|0]),
         gat:sn._gAt|0,   // hashed: without it the "full" state was not byte-identical
         gp:sn.gPer, gdue:sn._gDue, pha:sn.phaseAt, spa:sn.spawnAt, ldw:!!sn.levelDoneWaiting,
-        rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner,
+        rng:sn._rngState, sr:!!sn._speedRound, dw:sn.duelWinner, nma:!!sn._nmWasAdjacent,
+        // The windswept registry rides whole: who wears what, plus any item lying on the
+        // board. Hashed, so an rs that dropped it would keep the hashes apart forever.
+        ws:sn._ws ? { w:[sn._ws.w[0].slice(), sn._ws.w[1].slice()], it:sn._ws.it } : null,
         pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
         hb:sn.heart, hba:sn.heartAt,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
+}
+// A loose windswept item off the wire, rebuilt in the sim's own key order. An unknown id or an
+// off-board cell drops the item rather than importing it: losing one cosmetic beats adopting
+// a state the local sim would then hash differently forever.
+function _rbWsItem(o){
+    if(!o || !WS[o.id]) return null;
+    if(!(o.x >= 0 && o.x < COLS && o.y >= 0 && o.y < ROWS)) return null;
+    return { id:o.id, own:o.own ? 1 : 0, x:o.x|0, y:o.y|0, at:o.at|0 };
 }
 function _rbApplyResync(m){
     if(!players || !m || !m.p0 || !m.p1) return;
@@ -498,7 +509,9 @@ function _rbApplyResync(m){
     snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; } return b; });
     snap._gAt = m.gat|0;
     snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
-    snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw;
+    snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._nmWasAdjacent = !!m.nma;
+    snap._ws = m.ws ? { w:[_wsKnown(m.ws.w && m.ws.w[0]), _wsKnown(m.ws.w && m.ws.w[1])],
+                        it:_rbWsItem(m.ws.it) } : null;
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
     _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is the host's to author (both branches adopt it)
@@ -638,6 +651,15 @@ function _rbClonePlayer(p){
              boosting:p.boosting, stepAccum:p.stepAccum, score:p.score, lives:p.lives,
              alive:p.alive, slowUntil:p.slowUntil };
 }
+// The windswept registry, cloned to the same shape the sim builds (see _ws in sim.js and
+// _duelStealRoll's item literal): the per-field hash stringifies this object, so the key
+// ORDER here is part of the byte-identity contract, not a style choice.
+function _rbCloneWs(v){
+    if(!v) return v;
+    const it = v.it;
+    return { w:[ v.w[0].slice(), v.w[1].slice() ],
+             it: it ? { id:it.id, own:it.own, x:it.x, y:it.y, at:it.at } : it };
+}
 function _rbCloneSnap(s){
     const bs = s.bars || [], bars = new Array(bs.length);
     for(let i = 0; i < bs.length; i++) bars[i] = _rbCloneFlat(bs[i]);
@@ -650,7 +672,8 @@ function _rbCloneSnap(s){
         heart:s.heart ? { x:s.heart.x, y:s.heart.y } : s.heart, heartAt:s.heartAt,
         _barMoveTick:s._barMoveTick,
         players:s.players ? [ _rbClonePlayer(s.players[0]), _rbClonePlayer(s.players[1]) ] : s.players,
-        duelWinner:s.duelWinner, _speedRound:s._speedRound, _rngState:s._rngState };
+        duelWinner:s.duelWinner, _speedRound:s._speedRound, _nmWasAdjacent:s._nmWasAdjacent,
+        _ws:_rbCloneWs(s._ws), _rngState:s._rngState };
 }
 function _rbAdd(tk, cmd){
     let a = _rbLog.get(tk);

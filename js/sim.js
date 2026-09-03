@@ -47,7 +47,7 @@ const GOURANGA_MAX_MOVES = (7 - 1) + 2;
 let heart=null, heartAt=0, heartIsEarly=false, _earlyHeartUsed=false, _earlyHeartTrigger=-1, _earlyHeartCount=0;
 let powerPellet=null, powerPelletAt=0, _powerMode=false, _powerModeAt=0;
 let _barMoveTick=0;   // power-mode bar-drift cadence counter
-let _nmWasAdjacent=false;   // near-miss edge tracker (presentation-only; see _duelNearMiss)
+let _nmWasAdjacent=false;   // near-miss edge tracker -- REAL sim state, see _duelNearMiss
 const _BAR_MOVE_EVERY=6;   // blocks step once every 6th game tick -- ONE cadence for both modes (a calm glide, slower than the snake)
 // DEBUG x10: multiplies every rare-event probability (pellet/crystal/gouranga/gem tiers/
 // respawn heart) by 10 for testing. cfg.x10 is persisted config, read at call time like
@@ -64,6 +64,15 @@ let perfectCount = 0, luckyCount = 0;
 // online later swaps the input SOURCE, never the sim.
 let players = null;
 let duelWinner = -1;   // -1 = none yet; 0/1 = winner index; 2 = draw (head-on / double death)
+// WINDSWEPT COSMETICS (duel only; null in classic). w[i] = the windswept item ids player i is
+// WEARING right now -- the sim owns this for the length of the match, so the renderer takes
+// the windswept half of a duel look from here rather than from either device's config. it =
+// the single loose item, knocked off by a near-miss and lying on the board: { id, own (who
+// it falls back to), x, y, at (the tick it lands on) }. ONE loose item at a time, which is
+// also the steal cooldown. Seeded at startDuel from the two exchanged profiles -- never from
+// _duelLook, whose cfg.noRemoteCosmetics view is local and would desync the roll.
+let _ws = null;
+const WS_LAND_TICKS = 30;   // 500ms of flight before the item touches down and can be taken
 
 const ck = p => `${p.x},${p.y}`;
 // Seeded PRNG (mulberry32) drives ALL simulation randomness so a game is fully
@@ -86,20 +95,74 @@ const ri = n => Math.floor(rng() * n);
 let simEvents = [];
 function emit(e){ simEvents.push(e); }
 
-// NEAR-MISS (duel, presentation-only): emit a cosmetic event on the rising edge of the two
-// heads passing within one cell (wrapped Chebyshev <=1). Judged here in the sim -- every game
-// tick, deterministically -- so the shake never depends on which tick a RAF happens to sample;
-// fast/boost levels advance 2 cells/tick and can skip the single adjacency frame render-side.
-// heavy = both snakes boosting through the pass. _nmWasAdjacent is a re-derived edge tracker,
-// never hashed or snapshotted (see check-snapshot EXCLUDE); a rollback may re-arm it at most once.
+// NEAR-MISS (duel): fires on the rising edge of the two heads passing within one cell
+// (wrapped Chebyshev <=1). Judged here in the sim -- every game tick, deterministically --
+// so it never depends on which tick a RAF happens to sample; fast/boost levels advance 2
+// cells/tick and can skip the single adjacency frame render-side.
+// Only a pass on DIFFERENT headings counts: shake (heavy when both are boosting) plus a roll
+// for a windswept item to be knocked off (_duelStealRoll), at odds that double for whoever
+// the OTHER snake tore past -- boosting through a pass is the aggressive act. Gear comes
+// off HEAD to HEAD only: grinding along somebody's tail must not strip them.
+// Running side by side on the SAME heading is a scrape, not a pass -- no shake, nothing comes
+// loose, just sparks and a squeal. That one is pure presentation and lives entirely in the
+// renderer (_duelScrapeFx in render.js), judged per frame off the positions already on
+// screen: it draws no rng and touches no state, so there is nothing about it to keep in
+// lockstep and no reason to make a sim event of it.
+// _nmWasAdjacent is REAL sim state, hashed and snapshotted: it gates an rng-consuming roll,
+// so a rollback that re-armed it would fire a second steal on one client only and desync.
 function _duelNearMiss(){
     if(phase!=='duel' || !players || !players[0].alive || !players[1].alive){ _nmWasAdjacent=false; return; }
     const a=players[0].snake[0], b=players[1].snake[0];
     const dx=Math.min((a.x-b.x+COLS)%COLS,(b.x-a.x+COLS)%COLS);
     const dy=Math.min((a.y-b.y+ROWS)%ROWS,(b.y-a.y+ROWS)%ROWS);
     const adj=Math.max(dx,dy)<=1;
-    if(adj && !_nmWasAdjacent) emit({t:'nearmiss', heavy: !!(players[0].boosting && players[1].boosting)});
+    const d0=players[0].dir, d1=players[1].dir;
+    if(adj && !_nmWasAdjacent && !(d0.x===d1.x && d0.y===d1.y)){
+        const boosts = (players[0].boosting?1:0) + (players[1].boosting?1:0);
+        emit({t:'nearmiss', heavy: boosts===2});
+        _duelStealRoll();
+    }
     _nmWasAdjacent=adj;
+}
+// The steal roll at a pass. Everything here comes off the shared PRNG and hashed state, so
+// both clients reach the same verdict with nothing crossing the wire -- the same property
+// that lets the whole duel run without an authority.
+// Order of draws is fixed (victim, item, chance, side, distance, offset) because the NUMBER
+// of rng calls is itself part of the lockstep contract: a client that drew once more would
+// take the whole rest of the match from a different stream position.
+function _duelStealRoll(){
+    if(!_ws || _ws.it) return;   // one loose item at a time: that IS the anti-farming cooldown
+    const n0=_ws.w[0].length, n1=_ws.w[1].length;
+    if(!n0 && !n1) return;
+    const v = (n0 && n1) ? ri(2) : (n0 ? 0 : 1);
+    const list = _ws.w[v];
+    const id = list[ri(list.length)];
+    // Price-scaled: cheap gear flies off, crowns cling on. What SPEED changes is not how fast
+    // the victim was going but how hard the OTHER snake tore past -- a boosting rival doubles
+    // the odds; your own boost neither protects you nor costs you. So neither-boosting and
+    // both-boosting are symmetric, and exactly one boosting is the asymmetric case, paid for
+    // by the one who did NOT boost. Integer, and the same number of draws either way, so the
+    // rng stream never depends on who happened to be boosting. The ladder tops out at 40 x2,
+    // which is why nothing here needs a cap: no pass is ever a foregone loss.
+    const pct = WS[id].pct * (players[1-v].boosting ? 2 : 1);
+    if(ri(100) >= pct) return;
+    // Where it lands: a few cells off one flank of the victim's heading, give or take a cell
+    // fore or aft. Blocked cells (snakes, bars, the other collectibles) fall back to the
+    // ordinary free-cell scan, which is deterministic too.
+    const P = players[v], H = P.snake[0], d = P.dir;
+    const side = ri(2) ? 1 : -1;
+    const dist = 2 + ri(3);       // 2..4 cells out to the side
+    const along = ri(3) - 1;      // -1..1 cells along the heading
+    const blocked = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
+    if(gem) blocked.add(ck(gem));
+    if(heart) blocked.add(ck(heart));
+    if(powerPellet) blocked.add(ck(powerPellet));
+    let c = { x:(((H.x - d.y*side*dist + d.x*along) % COLS) + COLS) % COLS,
+              y:(((H.y + d.x*side*dist + d.y*along) % ROWS) + ROWS) % ROWS };
+    if(blocked.has(ck(c))) c = freeCell(blocked);
+    list.splice(list.indexOf(id), 1);
+    _ws.it = { id, own:v, x:c.x, y:c.y, at:simTick + WS_LAND_TICKS };
+    emit({t:'wsblow', id, own:v, hx:H.x, hy:H.y, x:c.x, y:c.y});
 }
 function freeCell(blocked) {
     let p, tries=0;
@@ -108,7 +171,7 @@ function freeCell(blocked) {
     return p;
 }
 
-function startGame(seed, bestScore) { players = null; duelWinner = -1;   // classic mode: no duel state
+function startGame(seed, bestScore) { players = null; duelWinner = -1; _ws = null; _nmWasAdjacent = false;   // classic mode: no duel state
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
     level=1; lives=START_LIVES; score=0; perfectCount=0; luckyCount=0; _levelStartLen=0; _earlyHeartUsed=false; _earlyHeartTrigger=Math.floor(rng()*30); _earlyHeartCount=0;
     // bestScore is passed in -- the presentation owns localStorage; the sim stays IO-free.
@@ -158,16 +221,21 @@ function _duelBeginLevel(reseed) {
     // LEVEL_CFG has 10 entries; a duel is endless, so past level 10 it reuses the last
     // (hardest) config rather than reading off the end and throwing mid-match.
     const li = Math.min(level, LEVEL_CFG.length) - 1;
-    if(reseed){
-        seedRng(_duelLevelSeed(gameSeed, level));
-        // Roll the speed round HERE and nowhere else: it is a property of the LEVEL, decided
-        // once when the level opens. A respawn (reseed=false) keeps the standing verdict --
-        // _speedRound is hashed + rollback-restored, so both clients stay on it -- otherwise a
-        // level with several deaths would re-roll the 1-in-10 each time and run well above 10%.
-        _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
-        if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
-    }
+    if(reseed) seedRng(_duelLevelSeed(gameSeed, level));
+    // Roll the speed round HERE and nowhere else, on EVERY spawn: a new level and every
+    // respawn after a death each take their own 1-in-10 chance. It used to be rolled only
+    // when a level opened, so a level that came up hot STAYED hot through every death on it
+    // -- which is exactly what made a speed round so punishing to finish. A death now
+    // re-rolls it in either direction. The draw rides the shared PRNG (re-anchored to
+    // (gameSeed, level) on a new level, flowing on a respawn; _rngState is hashed and
+    // rollback-restored either way), so both clients reach the same verdict.
+    _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
+    if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
     gPer = _speedRound ? LEVEL_CFG[9].normal : LEVEL_CFG[li].normal;
+    // A blown-off item nobody picked up goes back to the snake it came off: the board is
+    // about to be rebuilt, and losing gear to a rebuild is not something either player did.
+    if(_ws && _ws.it){ _ws.w[_ws.it.own].push(_ws.it.id); _ws.it = null; }
+    _nmWasAdjacent = false;   // fresh spawns are far apart; never carry a pass across a rebuild
     for (let i = 0; i < 2; i++) {
         const keep = players[i];
         const fresh = i === 0 ? _mkDuelPlayer(6, Math.floor(ROWS/2)-4, 1)
@@ -197,8 +265,14 @@ function _duelBeginLevel(reseed) {
 // entry sets it), constant for the whole match, never hashed and never snapshotted --
 // local duels and single player keep the immediate rebuild.
 let _duelNetHold = false;
+// Ids the cosmetics tables do not know are dropped rather than trusted: the list arrives
+// from a peer profile, and an unknown id would have no steal chance to roll against.
+function _wsKnown(a){ return Array.isArray(a) ? a.filter(id => WS[id]) : []; }
 const _HALT_RE = 6;   // held-death re-announce period in engine ticks (100ms) -- see the dying hold in update()
-function startDuel(seed) {
+// ws = the two players' worn windswept item ids, [P0, P1], already in the fixed table order
+// (_wsWorn on main). Both clients build BOTH lists from the same two exchanged profiles, so
+// no list crosses the wire; ids the tables do not know are dropped rather than trusted.
+function startDuel(seed, ws) {
     // Tick zero. simTick free-runs from page load, so without this two online
     // clients would start a duel with wildly different counters -- and every piece
     // of state stamped from simNow (phaseAt, gemAt, spawnAt...) would
@@ -214,6 +288,16 @@ function startDuel(seed) {
     heart = null; heartAt = 0; heartIsEarly = false; _earlyHeartUsed = false; _earlyHeartTrigger = -1; _earlyHeartCount = 0;
     timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;
     _gourangaLine = []; _gourangaActive = false; _gourangaEaten = new Set(); _gourangaSteps = 0;
+    _nmWasAdjacent = false;
+    deathMsg = '';   // hashed on the wire: a message left by this device's last game (single
+                     // player or a previous duel) would make tick 0 hash differently on the two
+                     // clients and read as a desync until the first death overwrote it.
+    // Same trap, three more hashed fields: _duelBeginLevel drops the pellet and the power
+    // mode but not their timestamps or the bar-drift counter, and classic play writes all
+    // three. Inert while _powerMode is off -- but they are ON THE WIRE HASH, so two devices
+    // with different last games would disagree at tick 0 over state neither one is using.
+    powerPelletAt = 0; _powerModeAt = 0; _barMoveTick = 0;
+    _ws = { w:[_wsKnown(ws && ws[0]), _wsKnown(ws && ws[1])], it:null };
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
     level = 1; duelWinner = -1;
     players = [ _mkDuelPlayer(6, Math.floor(ROWS/2)-4,  1),      // P0 left, heading right
@@ -250,7 +334,7 @@ function _duelSpawnGem() {
     // can matter (someone below the cap) and never stacked on another heart. The lives/heart
     // gates are all synced state so both clients take the same branch and consume the rng in
     // lockstep; the cell is chosen without rng (see _duelHeartCell).
-    if (!heart && level >= 2 && players.some(p => p.lives < START_LIVES) && rng() < 0.015 * _X10()) {
+    if (!heart && level >= 2 && players.some(p => p.lives < START_LIVES) && rng() < 0.05 * _X10()) {
         const hB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
         hB.add(ck(gem)); if (powerPellet) hB.add(ck(powerPellet));
         const hc = _duelHeartCell(hB);
@@ -273,6 +357,7 @@ function duelStep(now) {
     const protect = now - spawnAt < SPAWN_PROTECT;
     const dead = [false, false];
     const crushK = [null, null], biteK = [null, null];
+    const into = [null, null], hitAt = [null, null];   // renderer-only: what the death ran into, and where
     const barKeys = new Set(bars.map(ck));
     for (let i = 0; i < 2; i++) {
         if (!moves[i]) continue;
@@ -282,36 +367,48 @@ function duelStep(now) {
             if (barKeys.has(hk)) {
                 const hb = bars.find(b => ck(b) === hk);
                 if (hb && (hb.fragile || _powerMode)) crushK[i] = hk;   // fragile OR powered: smash through, same rule as single player
-                else dead[i] = true;                                    // solid bar: lethal
+                else { dead[i] = true; into[i] = 'bar'; hitAt[i] = moves[i]; }   // solid bar: lethal
             }
             // own body: tail vacates unless eating (same rule as classic; power does not excuse it)
-            else if ((eats ? players[i].snake : players[i].snake.slice(0,-1)).some(s => ck(s) === hk)) dead[i] = true;
+            else if ((eats ? players[i].snake : players[i].snake.slice(0,-1)).some(s => ck(s) === hk)) { dead[i] = true; into[i] = 'self'; hitAt[i] = moves[i]; }
             // opponent's snake: lethal normally; POWERED it becomes food -- biting the
             // head kills THEM, biting the body eats their tail off and slows the biter.
             else if (other.alive && other.snake.some(s => ck(s) === hk)) {
-                if (!_powerMode) dead[i] = true;
-                else if (ck(other.snake[0]) === hk) dead[1-i] = true;
+                if (!_powerMode) { dead[i] = true; into[i] = 'snake'; hitAt[i] = moves[i]; }
+                else if (ck(other.snake[0]) === hk) { dead[1-i] = true; into[1-i] = 'snake'; hitAt[1-i] = moves[i]; }
                 else biteK[i] = hk;
             }
         }
     }
     // head-on: both moving into the same cell (also covers a simultaneous gem grab)
-    if (moves[0] && moves[1] && !protect && ck(moves[0]) === ck(moves[1])) { dead[0] = dead[1] = true; }
+    if (moves[0] && moves[1] && !protect && ck(moves[0]) === ck(moves[1])) {
+        dead[0] = dead[1] = true;
+        for (let i = 0; i < 2; i++) { into[i] = 'headon'; hitAt[i] = moves[i]; }
+    }
     if (dead[0] || dead[1]) {
+        // A crash NEVER costs gear. The pass that leads into a collision has already rolled
+        // its steal a tick or two earlier, so a head-on or a swerve into somebody read as
+        // "I hit them and my hat came off" -- and a match-ending death has no rebuild coming
+        // to hand it back. Whoever it came off gets it back here, in flight or already lying
+        // on the board, the same rule _duelBeginLevel applies to a board rebuild. Nothing is
+        // drawn from the rng, so both clients cancel the same drop on the same tick.
+        if (_ws && _ws.it) { _ws.w[_ws.it.own].push(_ws.it.id); _ws.it = null; }
         if (dead[0]) players[0].lives--;
         if (dead[1]) players[1].lives--;
-        emit({t:'sfx',name:'die'});
-        const out0 = players[0].lives <= 0, out1 = players[1].lives <= 0;
-        if (out0 || out1) {
-            players[0].alive = !out0; players[1].alive = !out1;
-            duelWinner = (out0 && out1) ? 2 : (out0 ? 1 : 0);
-            phase = 'duelOver'; phaseAt = now;
-            emit({t:'mpause'});
-        } else {
-            // Heart lost, match goes on: same death beat as single player (dying -> respawn).
-            deathMsg = (dead[0]&&dead[1]) ? 'BOTH LOSE A LIFE' : (dead[0] ? 'P1 LIFE LOST' : 'P2 LIFE LOST');
-            phase = 'dying'; phaseAt = now;
+        for (let i = 0; i < 2; i++) if (dead[i]) {
+            const at = hitAt[i] || players[i].snake[0];
+            emit({t:'crash',p:i,hx:players[i].snake[0].x,hy:players[i].snake[0].y,
+                  x:at.x,y:at.y,into:into[i]||'snake',boost:!!players[i].boosting});
         }
+        emit({t:'sfx',name:'die'});
+        // EVERY death takes the same beat as single player, the last one included: the sim
+        // holds in 'dying' for DEATH_DUR and update() decides afterwards whether that was a
+        // respawn or the end of the match. Calling the match here instead put the winner
+        // banner over the one wreck most worth seeing -- and the beat outlasts RB_DEPTH, so a
+        // mispredicted final kill is still rolled back before it is ever called.
+        deathMsg = (dead[0]&&dead[1]) ? 'BOTH LOSE A LIFE' : (dead[0] ? 'P1 LIFE LOST' : 'P2 LIFE LOST');
+        phase = 'dying'; phaseAt = now;
+        if (players[0].lives <= 0 || players[1].lives <= 0) emit({t:'mpause'});
         return;
     }
     // Bar crush (fragile or powered): the SAME destruction path as single player, so a
@@ -330,6 +427,18 @@ function duelStep(now) {
         if (powerPellet && ck(powerPellet) === ck(moves[i])) {
             powerPellet = null; _powerMode = true; _powerModeAt = now; _barMoveTick = 0;
             P.score += level * 200; emit({t:'bonus',label:'POWER UP!'});
+        }
+        // A landed windswept item goes to whoever reaches it first -- including the snake it
+        // came off, who can simply take it back. Nothing is collectible in flight (at).
+        if (_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) {
+            const g = _ws.it; _ws.it = null;
+            // Only one item per wear slot stays ON: a won hat pushes off the hat already
+            // worn. The displaced one is still OWNED (see _wsTransfer) -- just not worn,
+            // so it is no longer on this snake to be stolen either.
+            const w = _ws.w[i], cat = WS[g.id].cat;
+            if (cat) for (let k = w.length - 1; k >= 0; k--) if (WS[w[k]].cat === cat) w.splice(k, 1);
+            w.push(g.id);
+            emit({t:'wsget', id:g.id, from:g.own, to:i});
         }
         if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
             heart = null;
@@ -575,7 +684,7 @@ function step(now) {
             if(hitBar.fragile||_powerMode){
                 _crushBarAt(hk);
                 score+=level*100;   // a crush scores like a gem; FOKoins follow from the run score at game over
-            } else { die(now); return; }
+            } else { die(now, 'bar', head); return; }
         }
     }
     if(powerPellet&&ck(powerPellet)===hk){
@@ -590,7 +699,7 @@ function step(now) {
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
     const anyAte=ate||ateGourangaIdx>=0;
-    if(!protect && (anyAte?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now);return;}
+    if(!protect && (anyAte?snake:snake.slice(0,-1)).some(s=>ck(s)===hk)){die(now, 'self', head);return;}
     if(!anyAte) gemSteps++;
     if(_gourangaActive && _gourangaEaten.size>0) _gourangaSteps++;   // count every move once the sweep has begun
     snake.unshift(head);
@@ -667,9 +776,12 @@ function step(now) {
     if(anyAte && cfg.diff > 0) snake.push(Object.assign({}, snake[snake.length - 1]));
 }
 
-function die(now) {
+// into/at describe the impact for the renderer only ('bar' dents, everything else just
+// crushes the head). p:-1 marks the classic snake, so one crash handler serves both modes.
+function die(now, into, at) {
     lives--; phase='dying'; phaseAt=now;
     deathMsg=lives>0?`LIFE LOST  (${lives} left)`:'GAME OVER!';
+    if(into) emit({t:'crash',p:-1,hx:snake[0].x,hy:snake[0].y,x:at.x,y:at.y,into,boost:!!boosting});
     emit({t:'sfx',name:'die'}); emit({t:'mpause'});
 }
 
@@ -731,8 +843,14 @@ function update() {
         simArmRebase();   // a held boost must re-earn its grace this level, never spawn already on
     }
     if(phase==='dying'&&now-phaseAt>=DEATH_DUR){
-        if(players){   // duel: out-of-hearts already went to duelOver, so this is always a respawn
-            if(_duelNetHold){
+        if(players){
+            const out0 = players[0].lives<=0, out1 = players[1].lives<=0;
+            if(out0||out1){   // the beat has played out and somebody is out of hearts: call the match
+                players[0].alive = !out0; players[1].alive = !out1;
+                duelWinner = (out0&&out1) ? 2 : (out0 ? 1 : 0);
+                phase = 'duelOver'; phaseAt = now;
+            }
+            else if(_duelNetHold){
                 // ONLINE: hold in 'dying' and hand the respawn to the net layer as a boundary
                 // (the host answers with go {why:'respawn'} -> 'startDuelRespawn'). The halt is
                 // LEVEL-triggered, not edge-triggered: the hold re-announces itself every
@@ -743,11 +861,9 @@ function update() {
                 // guard, or never crossed because a full resync adopted a state already past
                 // DEATH_DUR. Repeats are free: netDuelHalt is host-gated and _netStartRespawn
                 // folds them into the one open boundary.
-                // Residual: an input up to RB_DEPTH(64) ticks late can still UNDO this death by
-                // rollback after the crossing (DEATH_DUR is 54 ticks), so a go {why:'respawn'}
-                // may arrive for a death that no longer exists -- both clients then run the same
-                // phantom respawn, consistently and with no heart wrongly lost. Accepted: the
-                // ~167ms window makes it rare, and consistency is what lockstep must protect.
+                // DEATH_DUR (84 ticks) outlasts RB_DEPTH (64), so the deepest late input cannot
+                // reach back past the crossing: a halt, once announced, can no longer be undone by
+                // a rollback, and no go {why:'respawn'} arrives for a death that has vanished.
                 if(Math.round((now-phaseAt-DEATH_DUR)/TICK_MS)%_HALT_RE===0) emit({t:'duelHalt'});
             }
             else _duelBeginLevel(false);   // local duel: rebuild at once -- keep the rng flowing for a fresh board
@@ -800,7 +916,7 @@ function simSnapshot(){
         powerPellet, powerPelletAt, _powerMode, _powerModeAt, _barMoveTick,
         timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
         perfectCount, luckyCount, boostDir, boosting, gemOptimal, gemSteps,
-        players, duelWinner, _speedRound, _rngState,
+        players, duelWinner, _speedRound, _nmWasAdjacent, _ws, _rngState,
     };
 }
 // Register one steering record into a dirQueue. ONE rule shared by classic (module
@@ -826,7 +942,7 @@ function simCommand(m){
         case 'start': startGame(m.seed, m.bestScore); break;
         // m.net marks an ONLINE duel: deaths then hold for the negotiated respawn boundary
         // (see _duelNetHold). Local duels send no flag and keep the immediate rebuild.
-        case 'startDuel': _duelNetHold = !!m.net; startDuel(m.seed); break;
+        case 'startDuel': _duelNetHold = !!m.net; startDuel(m.seed, m.ws); break;
         // dir/boost carry an optional player index (m.p). In duel mode they route to
         // players[p]; classic mode keeps the original single-snake path untouched.
         // A remote peer's input will arrive as these SAME commands with p = their index.
@@ -885,7 +1001,7 @@ function simCommand(m){
             break;
         case 'phase':
             phase=m.phase; phaseAt=simNow;
-            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; }   // leaving a duel clears its state
+            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; _ws=null; _nmWasAdjacent=false; }   // leaving a duel clears its state
             break;
     }
 }
@@ -899,7 +1015,7 @@ function simApply(s){
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt; _barMoveTick=s._barMoveTick;
     timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
     perfectCount=s.perfectCount; luckyCount=s.luckyCount; boostDir=s.boostDir; boosting=s.boosting; gemOptimal=s.gemOptimal; gemSteps=s.gemSteps;
-    players=s.players; duelWinner=s.duelWinner; _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
+    players=s.players; duelWinner=s.duelWinner; _speedRound=s._speedRound; _nmWasAdjacent=s._nmWasAdjacent; _ws=s._ws; if(s._rngState!=null) _rngState=s._rngState;
 }
 // ---- Local boost arming (DEVICE-local: never in the snapshot or the hash) ----
 // A held direction ARMS a boost; after BOOST_GRACE_TICKS of aligned live ticks the
@@ -962,5 +1078,6 @@ function simApplyDuel(s){
     powerPellet=s.powerPellet; powerPelletAt=s.powerPelletAt; _powerMode=s._powerMode; _powerModeAt=s._powerModeAt;
     heart=s.heart; heartAt=s.heartAt;
     _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner;
-    _speedRound=s._speedRound; if(s._rngState!=null) _rngState=s._rngState;
+    _speedRound=s._speedRound; _nmWasAdjacent=s._nmWasAdjacent; _ws=s._ws;
+    if(s._rngState!=null) _rngState=s._rngState;
 }

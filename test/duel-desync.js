@@ -11,7 +11,7 @@
 //   2. no unhealed divergence         -- ring snapshots at a settled past tick hash-agree.
 //   3. re-convergence + no desync kill -- the sims end on one identical world, no DESYNC exit.
 // See test/README.md for the driver, the metrics, and how to run each scenario.
-const { runMatch } = require('./duel-driver');
+const { runMatch, jouster } = require('./duel-driver');
 
 const steps = [];
 const log = s => { steps.push(s); };
@@ -20,6 +20,7 @@ const log = s => { steps.push(s); };
 //   clean-boost : phase offset only, NO loss -> isolates the deferred-rollback boost drop (F1)
 //   lossy-boost : + packet loss              -> stresses the redundancy/loss window (F3)
 //   long-levels : longer run to levels 2-3   -> exercises the level-boundary epoch gap (F2)
+//   windswept   : jousting passes + loss     -> the near-miss steal, sim AND wardrobe write-back
 //   headroom    : CRUCIAL -- do not shorten, reseed, relax maxRb or fold into another case. It is
 //                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
 //                 zero: there is no "a few rollbacks are fine" reading of it to erode.
@@ -89,6 +90,25 @@ const SCEN = [
     // (all health gates stay on). RED without the burst, GREEN with -- proves the lane above is
     // load-bearing, not vacuously 0.
     { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:15, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:30, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, doubleEvery:2, minRb:1, expectSync:{ minGap1:25 } },
+    // WINDSWEPT steal over the wire. The autopilot deliberately keeps two cells of clearance, so
+    // under it the near-miss rules are dead code -- this lane flies the `jouster` director instead:
+    // adjacent opposing lanes, one cell apart, boosting down the lane and braking into the turns,
+    // then chasing whatever comes loose. That is the only way the driver ever produces a near miss.
+    // What it guards, beyond the usual health gates:
+    //   expectWs   both a blow and a completed pickup actually happen (the lane cannot pass
+    //              vacuously by simply never staging a near miss), and the two sims agree on the
+    //              full steal state -- both worn lists AND the loose item -- after the settle.
+    //   wsOwnBad   the per-device write-back moved the gear the same way the sim did, both halves:
+    //              the winner's device gained it, the loser's lost it. Needs flushFx, which runs
+    //              the browser's presentation half (the 2-tick queues) inside the tick loop -- so
+    //              this is also the only lane where the deferred fx path itself is exercised under
+    //              rollback, i.e. where a cosmetic kind that never reaches _fxQ shows up as a miss.
+    // Both wardrobes are stocked from BOTH tables (shop + box) so the sim's fixed-order registry,
+    // the per-slot displacement and the price ladder all participate. Lossy on purpose: a steal
+    // that is rolled back mid-flight and re-simmed must land on the same wardrobe on both ends.
+    { name:'windswept    steal 5% loss', seed:0xBEEF, secs:25, wire:{ base:12, jit:6, loss:0.05 }, phase:8, tjit:4, recv:true,
+      director: jouster, flushFx:true, ws:{ A:['shades','moustache','crown'], B:['cylinder','glasses3d','wizard'] },
+      expectWs:{ minBlows:1, minSteals:1 } },
 ];
 
 let failed = 0;
@@ -104,9 +124,12 @@ for(const sc of SCEN){
         || (ex.minGap1 != null && g1 <= ex.minGap1));   // noburst twin: the gap must SURVIVE
     const lvlBad = sc.expectLevel != null && r.levelReached < sc.expectLevel;   // the real boundary must fire
     const spdBad = !!sc.expectSpeed && !(r.speedRoundA && r.speedRoundB);       // BOTH clients must see the speed round
+    const ew = sc.expectWs;
+    const wsBad = !!ew && (r.wsBlows < ew.minBlows || r.wsSteals < ew.minSteals   // the rules must have actually fired
+        || !r.wsSame || r.wsOwnBad > 0);                                          // and both ends agree, sim AND wardrobe
     const bad = r.localJumps > 0 || !!r.firstDiverge || !r.converged
         || r.desyncA > 0 || r.desyncB > 0 || r.exitReason === 'session-end' || rbOver || rbUnder
-        || syncBad || lvlBad || spdBad;
+        || syncBad || lvlBad || spdBad || wsBad;
     const fd = r.firstDiverge ? ('  1stDiverge @' + r.firstDiverge.tick + ' [' + r.firstDiverge.fields.join(',') + ']') : '';
     const rbNote = sc.maxRb != null ? (rbOver ? '  rb>' + sc.maxRb + ' HEADROOM LEAK' : '  (<=' + sc.maxRb + ' rb: headroom holds)')
         : sc.minRb != null ? (rbUnder ? '  rb<' + sc.minRb + ' LANE NOT LOAD-BEARING' : '  (rb>=' + sc.minRb + ': burst is load-bearing)') : '';
@@ -116,6 +139,8 @@ for(const sc of SCEN){
         + (sc.expectSpeed ? ' speed=' + (r.speedRoundA ? 'A' : '-') + (r.speedRoundB ? 'B' : '-') + (spdBad ? ' MISSED' : '') : '')
         + ' conv=' + (r.converged ? 'yes' : 'NO')
         + ' selfJumps=' + r.localJumps + (r.maxLocalJump > 1 ? '(max' + r.maxLocalJump + ')' : '')
+        + (ew ? ' ws=' + r.wsBlows + 'blown/' + r.wsSteals + 'stolen'
+                 + (r.wsSame ? '' : ' SIM SPLIT') + (r.wsOwnBad ? ' WARDROBE x' + r.wsOwnBad : '') : '')
         + ' desync=' + r.desyncA + '/' + r.desyncB
         + ' rb=' + r.rb + ' lost=' + r.lost + syncNote
         + (r.exitReason ? ' exit=' + r.exitReason + '@' + r.diedAt.toFixed(0) + 's' : '')
@@ -127,7 +152,8 @@ for(const sc of SCEN){
 console.log(steps.join('\n'));
 if(failed){
     console.log('\nDUEL-DESYNC FAIL: ' + failed + '/' + SCEN.length + ' scenario(s) diverged -- a boosting duel does'
-        + '\n  not stay in lockstep (own-snake teleports / unhealed hash split / DESYNC exit).');
+        + '\n  not stay in lockstep (own-snake teleports / unhealed hash split / DESYNC exit),'
+        + '\n  or the windswept steal did not fire / left the two devices wearing different gear.');
     process.exit(1);
 }
 console.log('\nDUEL-DESYNC PASSED');

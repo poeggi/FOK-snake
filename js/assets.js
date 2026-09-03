@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v2.6.12';
+const APP_VERSION = 'v2.7.0';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -16,6 +16,14 @@ const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 const SIM_HZ = 60, TICK_MS = 1000 / SIM_HZ;   // 60 Hz base tick (16.67 ms per tick)
 const T = t => t * TICK_MS;                    // ticks -> sim-clock ms
 const MAX_CATCHUP = 5;                          // max sim ticks simulated per rendered frame
+// Cosmetic sim events -- sounds, particle bursts, floating labels, the windswept steal --
+// never fire when the sim emits them. They queue for a fixed 2-engine-tick (1/30s) delay so
+// an online correction arriving inside that window can cancel a wrongly predicted effect
+// before it is seen, heard, or written to the wardrobe. Both homes filter on THIS one set:
+// game.js queues and dispatches them, sim-worker.js re-queues exactly these during a
+// rollback re-sim. It lives here, shared, because a kind listed in one home and forgotten in
+// another is not a visible bug -- the effect is simply dropped and never fires again.
+const FX_DEFER = new Set(['sfx', 'bonus', 'crash', 'crush', 'fw', 'nearmiss', 'wsblow', 'wsget']);
 const HEART_PX = [[0,1,1,0,1,1,0],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[0,1,1,1,1,1,0],[0,0,1,1,1,0,0],[0,0,0,1,0,0,0]];
 // Speaker split into two 8x8 icons drawn side by side (total 32x16px at CS=2)
 // BODY: cone only (cols 0-3). WAVES: 3 arcs inner(col1,rows3-4) mid(col3,rows2-5) outer(col5,rows1-6). X: diagonal cross for muted.
@@ -30,12 +38,30 @@ const SPEAKER_X     = [[0,0,0,0,0,0,0,0],[0,1,0,0,0,1,0,0],[0,0,1,0,1,0,0,0],[0,
 const SYM_ONE = { w:4, h:6, px:[[2,0],[1,1],[2,1],[2,2],[2,3],[2,4],[2,5]] };
 // yen sign: 5x7  (screen: 10x14px)
 const SYM_YEN = { w:5, h:7, px:[[0,0],[4,0],[1,1],[3,1],[2,2],[0,3],[1,3],[2,3],[3,3],[4,3],[2,4],[0,5],[1,5],[2,5],[3,5],[4,5],[2,6]] };
-const DEATH_DUR = T(54), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18);
+const DEATH_DUR = T(84), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18);
 // Main-menu announcement. Set to null when there is nothing to announce.
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge) and one or more pages, each a headline + body lines ('' = blank
 // gap line). Pages are flipped with LEFT/RIGHT; the newest goes first.
-const ANNOUNCEMENT = { id:'v2.6', pages:[
+const ANNOUNCEMENT = { id:'v2.7.1', pages:[
+    { headline:'CRASH, BANG, WALLOP', lines:[
+        'NEW IN v2.7:',
+        'Prettier all round - gear knocked',
+        'off a snake now tumbles high and',
+        'lands in a puff of dust',
+        '',
+        'Ram a wall and it dents, you see',
+        'stars, and at full boost the tail',
+        'folds up like a train wreck.' ] },
+    { headline:'FINDERS KEEPERS', lines:[
+        'NEW IN v2.7:',
+        'WINDSWEPT gear gets knocked off',
+        'when two snakes graze in 1:1',
+        'It lands nearby - grab it first',
+        'and it is yours to keep',
+        '',
+        'Cheap trinkets fly off easily.',
+        'Crowns cling on.' ] },
     { headline:'DUELS, REFORGED', lines:[
         'NEW IN v2.6:',
         'Online games are snappier -',
@@ -45,33 +71,15 @@ const ANNOUNCEMENT = { id:'v2.6', pages:[
         '',
         'Dropped connection? The match',
         'RESUMES instead of ending.' ] },
-    { headline:'FRESH SINCE v2.0!', lines:[
-        'NEW SINCE v2.0:',
-        'Duel HEART: steal a life back',
-        'Player tags - mobile / PC / TV',
-        'Gold star for a full 10-clear',
-        'HARD: double rare-gem luck',
-        'Longer power pellet, keep-awake',
-        'Touch-sens & a live menu snake',
-        'Plus loads of bug fixes!' ] },
-    { headline:'MULTIPLAYER IS HERE!', lines:[
-        'NEW IN v2.0:',
-        'Play 1:1 ONLINE against a friend',
-        'Add friends by ID or QR scan',
-        'Quick match with a stranger',
-        'Global high scores',
-        '',
-        'Both snakes, one world -',
-        'no lag, no host, no waiting.' ] },
-    { headline:'AND A LITTLE CHAOS', lines:[
-        'ALSO IN v2.0:',
-        'SPEED ROUNDS: 1 in 10 levels',
-        'runs at level 10 pace',
+    { headline:'THE STORY SO FAR', lines:[
+        'SINCE v2.0:',
+        '1:1 ONLINE - friends by ID or QR',
+        'or a quick match with a stranger',
+        'SPEED ROUNDS at level 10 pace',
         'Power pellet? Eat your rival!',
-        'Tail = they slow. Head = gone.',
-        '',
-        '1:1 menu > PLAY ONLINE',
-        'Bring a friend.' ] },
+        'Duel HEART steals a life back',
+        'Global high scores, gold stars,',
+        'HARD mode and a live menu snake.' ] },
 ] };
 // Minecraft-style title splash lines; one is picked at random each load.
 // Keep them short and ASCII so they fit the tilted, pulsing draw.
@@ -208,32 +216,34 @@ const EGG_ACHIEVEMENTS = [
 // Wearing metadata on cosmetics (shop + box items alike):
 //   cat      : wear slot, never shown in the UI. Only ONE item per slot can be worn at a
 //              time ('head' = headwear, 'eyes' = eyewear, 'neck' = neckwear, 'masquerade' =
-//              face disguise); _shopToggleWear refuses a second item of an occupied slot.
-//   volatile : cosmetics property, shown as a tag on the shop rows. No gameplay meaning
-//              here; a 1:1 feature consumes it.
+//              face disguise, 'divine' = halo and the like); _shopToggleWear refuses a
+//              second item of an occupied slot.
+//   windswept: loose enough to be knocked off in a 1:1 duel -- a near-miss can blow it
+//              away for the rival to pick up (see WINDSWEPT_ITEMS). Shown as a tag on the
+//              shop rows; the cheaper the item, the likelier it comes off.
 const SHOP_ITEMS = [
     { id:'necktie',  name:'NECKTIE',       desc:'Business on the grid',           price:25000, cat:'neck',
       icon:{p:{A:'#2a52be',B:'#1a3a8e',C:'#5a82ee'},d:['...BB...','...BB...','...AA...','..AAAA..','..ACCA..','..AAAA..','...AA...','........']}},
-    { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:50000, cat:'eyes', volatile:true,
+    { id:'shades',   name:'SUNGLASSES',    desc:'Too cool for the grid',          price:50000, cat:'eyes', windswept:true,
       icon:{p:{A:'#111111',B:'#1a3050'},d:['.AAA.AAA','ABBBABBB','ABBBABBB','.AAA.AAA','........','........','........','........']}},
-    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000, cat:'head', volatile:true,
+    { id:'cylinder', name:'CYLINDER HAT',  desc:'A distinguished top hat',       price:100000, cat:'head', windswept:true,
       icon:{p:{A:'#1a1a1a',B:'#333333'},d:['........','..AAAA..','..AAAA..','..AAAA..','.BBBBBB.','........','........','........']}},
     { id:'donate',   name:'DONATE',        desc:'Support the dev. Repeatable!',  price:100000, repeatable:true,
       icon:{p:{A:'#ff4499',B:'#ff88cc'},d:['.AA.AA..','AAAAAAA.','AAAAAAA.','.AAAAA..','..AAA...','...A....','........','........']}},
-    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000, cat:'eyes', volatile:true,
+    { id:'monocle',  name:'MONOCLE',       desc:'For the refined serpent',        price:150000, cat:'eyes', windswept:true,
       icon:{p:{H:'#d8d8d8',A:'#999999',S:'#484848',G:'#eeeeee',C:'#aaaaaa',D:'#555555'},d:['..HHAA..','.H....A.','.H.G..A.','.A....S.','..AASS..','.....CD.','....CD..','...CD...']}},
     { id:'bow',      name:'BOW TIE',       desc:'Charming and aerodynamic',       price:250000, cat:'neck',
       icon:{p:{A:'#cc2222',B:'#ff4444',C:'#aa0000'},d:['........','AA...AA.','ABBACBBA','AABACBAA','AA...AA.','........','........','........']}},
     // --- Page 2 ---
     { id:'shoes',    name:'SHOES',         desc:'Fresh kicks for the tail',       price:300000, page:1,
       icon:{p:{W:'#eeeeee',S:'#cc2222',L:'#333333'},d:['........','........','........','WW...WW.','WWW.WWW.','SSS.SSS.','LLL.LLL.','........']}},
-    { id:'moustache',name:'MOUSTACHE',     desc:'A dashing handlebar',            price:450000, page:1, cat:'masquerade', volatile:true,
+    { id:'moustache',name:'MOUSTACHE',     desc:'A dashing handlebar',            price:450000, page:1, cat:'masquerade', windswept:true,
       icon:{p:{A:'#3a2a1a'},d:['........','........','........','.A....A.','AAA..AAA','.AAAAAA.','..AAAA..','........']}},
-    { id:'halo',     name:'HALO',          desc:'For the angelic serpent',        price:650000, page:1, cat:'head',
+    { id:'halo',     name:'HALO',          desc:'For the angelic serpent',        price:650000, page:1, cat:'divine',
       icon:{p:{A:'#ffd83a',G:'#fff4a0'},d:['........','.GAAAAG.','A......A','A......A','.GAAAAG.','........','........','........']}},
-    { id:'wizard',   name:'WIZARD HAT',    desc:'Arcane and pointy',              price:900000, page:1, cat:'head', volatile:true,
+    { id:'wizard',   name:'WIZARD HAT',    desc:'Arcane and pointy',              price:900000, page:1, cat:'head', windswept:true,
       icon:{p:{P:'#5a2a9a',S:'#ffe860',B:'#3a1a6a'},d:['...S....','...P....','..PPP...','..PPP...','.PPPPP..','PPPPPPP.','BBBBBBB.','........']}},
-    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000, page:1, cat:'head', volatile:true,
+    { id:'crown',    name:'ROYAL CROWN',   desc:'Fit for a snake king',           price:1000000, page:1, cat:'head', windswept:true,
       icon:{p:{A:'#ffd700',C:'#ff4444'},d:['A..A..A.','AAAAAAA.','ACAAACA.','AAAAAAA.','........','........','........','........']}},
     { id:'gown',     name:'INVISIBLE GOWN',desc:'Unseen - shimmers when you soar',price:3000000, page:1,
       icon:{p:{A:'#8fbfe0',S:'#ffffff'},d:['...S....','..AAA...','..A.A...','.A...A..','.A...A..','.AAAAA..','.AAAAA..','S......S']}},
@@ -250,11 +260,11 @@ const ITEM_RARITY = {
     crown:'legendary', gown:'legendary',
 };
 const BOX_ITEMS = [
-    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000,   cat:'eyes', volatile:true, desc:'Arr. Box-only.',
+    { id:'eyepatch',   name:'EYEPATCH',      rarity:'common',    value:80000,   cat:'eyes', windswept:true, desc:'Arr. Box-only.',
       icon:{p:{A:'#0a0a0a',S:'#3a3a3a'},d:['........','S.....S.','.S...S..','..AAA...','..AAA...','..AAA...','........','........']}},
-    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000,  cat:'eyes', volatile:true, desc:'Everything pops. Box-only.',
+    { id:'glasses3d',  name:'3D GLASSES',    rarity:'rare',      value:220000,  cat:'eyes', windswept:true, desc:'Everything pops. Box-only.',
       icon:{p:{R:'#ff2a2a',C:'#22e0ff',F:'#111111'},d:['........','.FFFFFF.','.FRRCCF.','.FRRCCF.','.FFFFFF.','........','........','........']}},
-    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000,  cat:'head', volatile:true, desc:'Ready for takeoff. Box-only.',
+    { id:'propeller',  name:'PROPELLER HAT', rarity:'epic',      value:600000,  cat:'head', windswept:true, desc:'Ready for takeoff. Box-only.',
       icon:{p:{R:'#e03c3c',Y:'#f5d020',G:'#2aa84a',B:'#4a90d9',H:'#ffd700',S:'#888888'},d:['..B..R..','..BBRR..','...HH...','...S....','..RRRR..','.YRYRYR.','.GGGGGG.','........']}},
     { id:'blackbelt',  name:'BLACK BELT',    rarity:'rare',      value:250000,  desc:'Dojo master. Box-only.',
       icon:{p:{B:'#111111',D:'#3a3a3a'},d:['........','........','BBBBBBBB','BDDDDDDB','...BB...','..B..B..','..B..B..','........']}},
@@ -262,9 +272,42 @@ const BOX_ITEMS = [
       icon:{p:{R:'#ff2a2a',H:'#ff9090'},d:['........','........','HH....HH','RRRRRRRR','HH....HH','........','........','........']}},
     { id:'goldchain',  name:'GOLD CHAIN',    rarity:'legendary', value:1500000, desc:'Ice cold bling. Box-only.',
       icon:{p:{G:'#ffd700',Y:'#b8860b',M:'#fff2a0'},d:['........','........','G......G','.G....G.','..G..G..','..GYYG..','...MM...','........']}},
-    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, cat:'head', volatile:true, desc:'ADMIN box only. The trophy.',
+    { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, cat:'head', windswept:true, desc:'ADMIN box only. The trophy.',
       icon:{p:{A:'#ffe860',C:'#00e5ff',B:'#cc9a00'},d:['C..C..C.','AAAAAAA.','ACAAACA.','AAAAAAA.','BBBBBBB.','........','........','........']}},
 ];
+// ---------------- Windswept cosmetics (1:1 steal) ----------------
+// Every windswept cosmetic in ONE fixed order: shop items first, then box items, exactly as
+// the two tables above are written. The ORDER IS A LOCKSTEP CONTRACT -- both clients build a
+// player's worn-windswept list by walking THIS table (_wsWorn), never by walking a config
+// object, whose key order is whatever that device happened to buy things in.
+// pct = chance in percent that a single near-miss blows the item off, scaled by price: the
+// cheap trinkets come off easily, the trophies cling on. An integer ladder, not a curve --
+// the sim rolls this and sim-purity forbids Math.log there (see test/sim-purity.js).
+function _wsPct(cost){
+    if(cost <=   80000) return 40;
+    if(cost <=  100000) return 35;
+    if(cost <=  150000) return 30;
+    if(cost <=  250000) return 25;
+    if(cost <=  500000) return 20;
+    if(cost <=  750000) return 15;
+    if(cost <= 1000000) return 10;
+    return 5;
+}
+const WINDSWEPT_ITEMS = SHOP_ITEMS.concat(BOX_ITEMS)
+    .filter(o => o.windswept)
+    .map(o => ({ id:o.id, name:o.name, cat:o.cat || '', icon:o.icon,
+                 pct:_wsPct(o.price != null ? o.price : o.value) }));
+// id -> that entry. The sim reads .pct (the roll) and .cat (a won item displaces whatever
+// shares its slot); the renderer reads .icon and .name. Also the "is this id windswept?" test.
+const WS = {};
+for(const v of WINDSWEPT_ITEMS) WS[v.id] = v;
+// The windswept items a player is WEARING, in table order. `worn` is a cfg.wornItems-shaped
+// map (mine) or a peer profile's shopItems (theirs) -- both carry worn ids as keys.
+function _wsWorn(worn){
+    const w = worn || {}, out = [];
+    for(const v of WINDSWEPT_ITEMS) if(w[v.id]) out.push(v.id);
+    return out;
+}
 // Box tiers. odds = probability of each outcome (coins filler + a loot rarity); they
 // bias toward rarer loot as the tier rises. Prices sit ABOVE expected loot value
 // (house edge) -- enforced by test/box-odds.js. ADMIN box is a rare free-claim.

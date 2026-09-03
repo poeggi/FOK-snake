@@ -61,7 +61,7 @@ self.drainSimEvents = () => {
         // crosses DEATH_DUR inside the replay, and swallowing it would delay the respawn
         // boundary by a full re-announce period (_HALT_RE). A duplicate halt is folded by
         // the host's one-boundary guard, so passing it through is always safe.
-        if(_replaying && !(e.t==='sfx'||e.t==='bonus'||e.t==='fw'||e.t==='crush'||e.t==='duelHalt')) continue;
+        if(_replaying && !FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
         _dcEvents.push({ tk: simTick, e });
     }
     simEvents.length = 0;
@@ -232,7 +232,7 @@ onmessage = (e) => {
         case 'duelStartNet':   // a (re)start: fresh seed/startPts, rollback state rebased
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? null : m.ofs); _dcStartPts = m.startPts || 0;
             _dcOn = true; self.inGame = true;
-            simCommand({ t:'startDuel', seed:m.seed>>>0, net:true });   // net: deaths hold for the negotiated respawn boundary
+            simCommand({ t:'startDuel', seed:m.seed>>>0, net:true, ws:m.ws });   // net: deaths hold for the negotiated respawn boundary
             _rbReset();                                  // AFTER startDuel: it rewinds simTick, the base reads it
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
             _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';

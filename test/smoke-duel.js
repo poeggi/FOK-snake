@@ -43,7 +43,9 @@ runTest('SMOKE-DUEL', `
         players[0].snake=[{x:10,y:5},{x:9,y:5},{x:8,y:5}]; players[0].dir={x:1,y:0}; players[0].dirQueue=[]; players[0].stepAccum=0;
         players[1].snake=[{x:14,y:5},{x:15,y:5},{x:16,y:5}]; players[1].dir={x:-1,y:0}; players[1].dirQueue=[]; players[1].stepAccum=0;
         gem={x:0,y:0,tier:0}; spawnAt=-999999; phase='duel';
-        for(let i=0;i<200&&(phase==='duel'||phase==='dying');i++) update();
+        let beat=0;
+        for(let i=0;i<200&&(phase==='duel'||phase==='dying');i++){ update(); if(phase==='dying') beat++; }
+        return beat;   // ticks held in 'dying': every death takes the beat, the match-ending one too
     };
     headOn();
     if(phase!=='duelReady') throw 'duel: first head-on should restart the level, got '+phase;
@@ -115,8 +117,11 @@ runTest('SMOKE-DUEL', `
     log('duel power ok: pellet pickup, tail bite (slow, no death), head bite kills');
 
     players[0].lives=1; players[1].lives=1;
-    headOn();
+    const beat=headOn();
     if(phase!=='duelOver') throw 'duel: final head-on did not end the match';
+    // The match-ending crash takes the SAME beat as every other death: the sim holds in
+    // 'dying' for DEATH_DUR so the wreck is on screen, and calls the match only afterwards.
+    if(beat < Math.round(DEATH_DUR/TICK_MS)) throw 'duel: the last heart lost skipped the death beat ('+beat+' ticks)';
     if(duelWinner!==2) throw 'duel: double knockout should be a draw, got winner='+duelWinner;
     drawDuelBoard(simNow);                       // duelOver rematch dialog renders
     simCommand({t:'startDuel', seed:0xD0E2});    // rematch: fresh match state

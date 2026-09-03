@@ -16,7 +16,7 @@ const NET_API_BUILT = 3;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 4;   // built against 3.4 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag + `platform` tag on scores/profile; per-player stats.php available, not yet consumed)
+const NET_API_BUILT_MINOR = 5;   // built against 3.5 (3.1 peer-net hint + 3.2 relay pull/piggyback + 3.3 relay 'gone' leave signal + 3.4 score `completed` flag + `platform` tag on scores/profile + 3.5 friend-request `exists` verdict and `retry_after` throttle; per-player stats.php available, not yet consumed)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -162,8 +162,8 @@ async function _netPostRes(path, body){
         let j = null; try{ j = await r.json(); }catch(e){}   // an error status may carry no JSON at all
         // Keep the server's own reason ({"ok":false,"error":"..."}): guessing it
         // from the status alone is how 'invalid pts' got misread as a clock drift.
-        return { status: r.status, json: (j && j.ok) ? j : null, err: (j && j.error) ? String(j.error) : '' };
-    } catch(e){ return { status:0, json:null, err:'' }; }
+        return { status: r.status, json: (j && j.ok) ? j : null, body: j, err: (j && j.error) ? String(j.error) : '' };
+    } catch(e){ return { status:0, json:null, body:null, err:'' }; }
 }
 async function _netPost(path, body){ return (await _netPostRes(path, body)).json; }
 async function _netGet(path, signal){
@@ -778,11 +778,15 @@ function netFriendBanned(){ return Date.now() < _netFrBannedUntil; }
 // _netPostRes, not _netPost: friend.php answers 429 for the 1h request ban, and the
 // status-blind variant made that indistinguishable from a blip -- the UI then sat on
 // 'NOT FRIENDS YET - RETRY IN A MOMENT' for an hour of a condition that will not clear.
+// 3.5 throttles the 'request' action per id: ~1s between requests, then a 60s cooldown
+// after a streak, on top of the 1h spam ban. retry_after carries the wait in seconds;
+// without it (a pre-3.5 server, or a body-less 429) fall back to a minute.
+function _netFrWait(res){ const w = res.body && +res.body.retry_after; return w > 0 ? Math.min(w, 3600) : 60; }
 function _netFriendApi(action, peer){
     const body = { id: getPlayerId(), action };
     if(peer) body.peer = peer;
     return _netPostRes('/api/friend.php', body).then(res => {
-        if(res.status === 429) _netFrBannedUntil = Date.now() + 60000;   // re-checked, not trusted: one minute of quiet, then try again
+        if(res.status === 429) _netFrBannedUntil = Date.now() + _netFrWait(res)*1000;   // re-checked, not trusted: quiet for the stated wait, then try again
         return res.json;
     });
 }
@@ -817,6 +821,31 @@ function netFriendRequest(id){
         }
         return r;
     });
+}
+// User-driven ADD FRIEND. The entry screen must not close on an ID that does not
+// exist, so this one reports the server's verdict instead of firing and forgetting:
+// it bypasses netFriendRequest's soft gates (a person retyping a corrected ID must
+// not be told to wait 30s for their own previous attempt) and reads the STATUS, not
+// just the body -- 429 is the request ban / spam cooldown and will not clear on a
+// retry, while a refused peer is an ID nobody owns. No answer at all stays
+// offline-safe: the friend is kept locally and the background handshake retries.
+// Resolves { ok, state } | { offline:true } | { error:'unknown'|'rate' }.
+function netFriendVerify(id){
+    if(!_netOk()) return Promise.resolve({ offline:true });
+    if(netFriendBanned()) return Promise.resolve({ error:'rate', wait:Math.ceil((_netFrBannedUntil-Date.now())/1000) });
+    _netFrRequested[id] = Date.now();
+    return _netPostRes('/api/friend.php', { id:getPlayerId(), action:'request', peer:id }).then(res => {
+        if(res.status === 429){ const w=_netFrWait(res); _netFrBannedUntil = Date.now() + w*1000; return { error:'rate', wait:w }; }
+        if(!res.status || res.status >= 500) return { offline:true };   // no answer / server fault: not a verdict on the ID
+        if(!res.json) return { error:'unknown' };   // 4xx: the server refused this peer outright
+        // API 3.5: exists:false = nobody ever registered that id, nothing was recorded and
+        // there is no 'state'. A pre-3.5 server omits the field, and absence is NOT a
+        // verdict -- fall through to the state it did answer with.
+        if(res.json.exists === false) return { error:'unknown' };
+        const st = res.json.state;
+        if(st === 'accepted' && !_netFrOk[id]){ _netFrOkMark(id); _netFrRefresh(false); }
+        return { ok:true, state:st };
+    }, () => ({ offline:true }));
 }
 function netFriendsEnter(){
     _netFr.sel = 0; _netFr.confirm = null; _netFr.msg = '';

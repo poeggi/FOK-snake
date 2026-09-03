@@ -1,6 +1,6 @@
 // Shop smoke: mystery-box open + reveal, BOX GEAR tab wear/remove, ADMIN box lifecycle,
 // wear slots (one 'head'/'eyes'/'neck'/'masquerade' item at a time + the REMOVE-first
-// notice), volatile tags.
+// notice), windswept tags.
 // Run: node test/smoke-shop.js
 const { runTest } = require('./harness');
 
@@ -37,7 +37,7 @@ runTest('SMOKE-SHOP', `
 
     // Wear slots: cat groups headwear ('head'), eyewear ('eyes'), neckwear ('neck') and
     // face disguise ('masquerade'); only one item per slot wears at a time, a second
-    // attempt is refused with a notice naming the blocker. volatile is a pure data tag
+    // attempt is refused with a notice naming the blocker. windswept is a pure data tag
     // (a 1:1 feature consumes it) and must sit on hats/crowns/eyewear/moustache but NOT
     // on the halo or slot-free items.
     const _it=id=>SHOP_ITEMS.concat(BOX_ITEMS).find(s=>s.id===id);
@@ -64,10 +64,10 @@ runTest('SMOKE-SHOP', `
     if(!cfg.shopItems.wizard) throw 'buy into an occupied slot did not purchase';
     if(cfg.wornItems.wizard) throw 'purchase auto-worn OVER the worn crown';
     if(_shopMsg!=='REMOVE ROYAL CROWN FIRST') throw 'buy refusal notice wrong/missing: '+_shopMsg;
-    if(!(_it('crown').volatile&&_it('moustache').volatile&&_it('shades').volatile&&_it('propeller').volatile)) throw 'volatile tag missing';
-    if(_it('halo').volatile||_it('gown').volatile||_it('necktie').volatile) throw 'volatile tag on a non-volatile item';
-    if(_it('halo').cat!=='head'||_it('moustache').cat!=='masquerade'||_it('eyepatch').cat!=='eyes'||_it('bow').cat!=='neck'||_it('shoes').cat) throw 'wear-slot cats off';
-    log('wear slots + volatile ok');
+    if(!(_it('crown').windswept&&_it('moustache').windswept&&_it('shades').windswept&&_it('propeller').windswept)) throw 'windswept tag missing';
+    if(_it('halo').windswept||_it('gown').windswept||_it('necktie').windswept) throw 'windswept tag on a non-windswept item';
+    if(_it('halo').cat!=='divine'||_it('moustache').cat!=='masquerade'||_it('eyepatch').cat!=='eyes'||_it('bow').cat!=='neck'||_it('shoes').cat) throw 'wear-slot cats off';
+    log('wear slots + windswept ok');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

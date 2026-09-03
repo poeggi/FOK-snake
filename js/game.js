@@ -117,6 +117,15 @@ let _scoreTainted = false;
 let entryMode = 'score';
 function _entryChars() { return entryMode === 'friend' ? HEX_CHARS : NAME_CHARS; }
 function _entryMax()   { return entryMode === 'friend' ? 8 : MAX_NAME; }
+// A friend ID gets one cursor slot PAST the last digit: a SUBMIT button the cursor lands on
+// when the 8th digit goes in, so the same OK that typed the ID also sends it -- on a TV or a
+// gamepad there is no RETURN key to hunt for. That slot only exists while all 8 digits are
+// in: an incomplete ID has no live key to press and none to walk onto, which is what the
+// greyed button on screen means. Name entry keeps its own return glyph on the dial, so it
+// stops at the last character as before.
+function _entryReady() { return entryMode === 'friend' && nameStr.length >= _entryMax(); }
+function _entryLast()  { return _entryMax() - (_entryReady() ? 0 : 1); }
+function _entryOnOk()  { return _entryReady() && nameCursorPos >= _entryMax(); }
 // Transient confirmation line on the 1:1 menu. Stamped on the WALL clock, not the
 // sim clock: a duel restarts simNow at 0 while the worker's own simNow has been
 // free-running since page load, so ending a session swaps a small simNow for a huge
@@ -157,14 +166,14 @@ if (typeof Snd !== 'undefined' && Snd.setMusicSeekProvider) Snd.setMusicSeekProv
 // ================================================================
 // GAME LOGIC
 // ================================================================
-// Event-driven cosmetic feedback -- sounds, particle bursts (crush/fireworks) and
-// floating labels (bonus) -- plays on a fixed 2-engine-tick (1/30s) delay, in EVERY
-// mode. An online correction arriving in that window cancels a wrongly predicted
-// effect before it is seen or heard (see _rbRollback, which filters both queues, and
-// drainSimEvents, which re-queues on replay). Uniform delay across modes keeps the
-// feel identical whether or not a peer is connected. Sound is the more intrusive to
-// retract, but a false confetti burst or "+1 UP!" is jarring too.
-const _FX_DEFER = new Set(['sfx', 'bonus', 'crush', 'fw', 'nearmiss']);   // deferred + rollback-cancellable
+// Event-driven cosmetic feedback -- the FX_DEFER kinds (assets.js) -- plays on a fixed
+// 2-engine-tick (1/30s) delay, in EVERY mode. An online correction arriving in that window
+// cancels a wrongly predicted effect before it is seen or heard (see _rbRollback, which
+// filters both queues, and drainSimEvents, which re-queues on replay). Uniform delay across
+// modes keeps the feel identical whether or not a peer is connected. Sound is the more
+// intrusive to retract, but a false confetti burst or "+1 UP!" is jarring too; wsblow/wsget
+// carry the steal, so a correction must un-do the tumble, the sound AND the ownership write
+// before any of it is seen.
 const FX_SETTLE_MS = 1000 / 30;   // 2 ticks, for phase-derived messages (death, duel winner)
 let _sfxQ = [];
 let _fxQ  = [];          // visual effects awaiting their 2-tick delay: { tk, e } (raw sim event)
@@ -202,6 +211,10 @@ function flushFxQ(){
                               })) }); break;
             case 'nearmiss': armNearMiss(e.heavy, simNow);   // shake + coincident sfx, both settled 2 ticks
                              Snd.sfxPlay(e.heavy?'boom':'squeeze', cfg.music); break;
+            case 'crash':  armCrash(e, simNow); break;
+            case 'wsblow':  armWsFly(e); Snd.sfxPlay('crash', cfg.music); break;
+            case 'wsget':   _wsTransfer(e); Snd.sfxPlay('unbox', cfg.music);
+                             showBonus(simNow, WS[e.id] ? WS[e.id].name + '!' : 'ITEM!'); break;
         }
     }
 }
@@ -212,13 +225,9 @@ function drainSimEvents(){
         // death introduced BY a rollback crosses DEATH_DUR inside the replay only, and
         // swallowing it would delay the respawn boundary by a full re-announce period
         // (_HALT_RE). Duplicates are folded by the host's one-boundary guard.
-        if(_replaying && !_FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
+        if(_replaying && !FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
         switch(e.t){
             case 'sfx':      _sfxQ.push({ tk:simTick, name:e.name }); break;
-            case 'bonus':
-            case 'fw':
-            case 'nearmiss':
-            case 'crush':    _fxQ.push({ tk:simTick, e }); break;   // deferred 2 ticks, cancellable on rollback
             case 'mpause':   Snd.musicMute('pause'); break;
             case 'munpause': Snd.musicUnmute('pause'); break;
             case 'ach':      unlockAch(e.id); break;
@@ -230,7 +239,7 @@ function drainSimEvents(){
                 if(typeof netDuelHalt === 'function') netDuelHalt(); break;
             case 'duelRecovered':   // worker home: a full resync burst settled -- the net layer opens the resume boundary
                 if(typeof _netResyncSettled === 'function') _netResyncSettled(); break;
-            case 'lvlreset': fireworks=[]; _crushEffects=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
+            case 'lvlreset': fireworks=[]; _crushEffects=[]; _crashFx=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
             case 'showhud':  if(e.v && !inGame) break;   // a stale worker "show" (e.g. a late level-reset frame) must never raise the HUD on a menu; hides always honoured
                              showHUD(e.v); break;
             case 'gameover':
@@ -239,6 +248,10 @@ function drainSimEvents(){
                 try{ nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME); }catch (e){ nameStr=''; }
                 nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0; nameCursorPos=nameStr.length;
                 showHUD(false); Snd.musicStop(); break;
+            // Every remaining deferred cosmetic waits its 2 ticks in _fxQ, where a rollback can
+            // still cancel it. Driven off the set rather than a case list of its own, so a kind
+            // added to FX_DEFER cannot end up with nowhere to go and vanish (flushFxQ dispatches).
+            default: if(FX_DEFER.has(e.t)) _fxQ.push({ tk:simTick, e });
         }
     }
     simEvents.length = 0;
@@ -557,6 +570,41 @@ function _shopToggleWear(item){
     saveCfg(); Snd.sfxPlay('nav', cfg.music);
     return true;
 }
+// ---- Windswept cosmetics: the duel's half of the wardrobe ----
+// The two players' worn windswept ids in the fixed table order, [P0, P1] -- host is P0, and a
+// local duel has no second inventory, so P1 starts bare. Built from the RAW profiles, never
+// from netDuelLook: its cfg.noRemoteCosmetics view is one device's rendering preference, and
+// running the steal roll off it would desync the match the moment somebody toggled it.
+function _duelWsLists(hosting){
+    const mine = _wsWorn(cfg.wornItems);
+    if(hosting == null) return [mine, []];
+    const pp = (_netSess && _netSess.peerProfile) || null;
+    const theirs = _wsWorn(pp && pp.shopItems);
+    return hosting ? [mine, theirs] : [theirs, mine];
+}
+// A pickup moved ownership in the sim; this is the write-back, and it happens ONLINE ONLY.
+// Two devices means two inventories and each client applies the half that concerns its own
+// player. A local duel shares ONE config: there is no second inventory to move gear into, so
+// a write-back would just destroy an item somebody bought on this device. The sim runs the
+// identical mechanic either way (ONE code path, per the harmonized-mechanics rule) -- only
+// whether the result outlives the match differs.
+function _wsTransfer(e){
+    if(e.from === e.to) return;                       // took their own item straight back
+    if(typeof netGameActive !== 'function' || !netGameActive()) return;
+    const me = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
+    if(e.from !== me && e.to !== me) return;
+    // NEW objects, not in-place edits: netDuelLook memoizes on cfg.wornItems by reference.
+    const si = Object.assign({}, cfg.shopItems || {});
+    const wi = Object.assign({}, cfg.wornItems || {});
+    if(e.from === me){ delete si[e.id]; delete wi[e.id]; }
+    else {
+        si[e.id] = true;
+        const cat = WS[e.id] && WS[e.id].cat;       // one item per wear slot still holds
+        if(cat) for(const o of SHOP_ITEMS.concat(BOX_ITEMS)) if(o.cat === cat) delete wi[o.id];
+        wi[e.id] = true;                              // worn at once, exactly as the sim shows it
+    }
+    cfg.shopItems = si; cfg.wornItems = wi; saveCfg();
+}
 let _boxOpenAt = 0, _boxReward = null;
 // ADMIN box: surfaces on the boxes tab once every ADMIN_BOX_EVERY shop opens, then is
 // consumed for the run once claimed. _boxList() appends it only while available.
@@ -774,6 +822,11 @@ function loop(rafNow) {
         if(_fpsRec) _fpsRecordAvg(_live,rafNow); else if(cfg.showFps) fpsEl.textContent=`${_live} FPS`;   // recording: box shows locked worst, not live; off: box keeps the 'FPS' label
         fpsFrames=0; fpsLast=rafNow; }
 
+    // The side-by-side grind is a HELD voice, re-asserted every duel frame by _duelScrapeFx.
+    // Release it here, in the loop that always runs, so pausing/dying/quitting mid-scrape
+    // cannot strand it on with nobody left drawing the board to turn it off.
+    if(phase!=='duel') Snd.scrapeSet(false);
+
     // Music routing (skip splash/paused/quitConfirm states)
     if(phase!=='splash'&&phase!=='paused'&&phase!=='quitConfirm'&&phase!=='resetConfirm'&&phase!=='levelReady'&&phase!=='duelReady'&&performance.now()>=_musicHoldUntil){   // ready phases are music-NEUTRAL: menu music fades at PLAY, game music starts at playing/duel
         const menuPhase=_MENU_PHASES.indexOf(phase)>=0;
@@ -970,7 +1023,7 @@ function beginOnlineDuel(seed, hosting){
         // sends it again with the fresh seed/startPts.
         _wDuel = true;
         _worker.postMessage({ t:'duelStartNet', seed:seed>>>0,
-            my: hosting ? 0 : 1,
+            my: hosting ? 0 : 1, ws: _duelWsLists(hosting),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
         // The epoch stamp + receive gate live on MAIN (_netSend/_netHandleMsg read
@@ -982,7 +1035,7 @@ function beginOnlineDuel(seed, hosting){
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
-    _wsend({ t:'startDuel', seed:seed>>>0, net:true });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
+    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting) });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
@@ -1059,7 +1112,7 @@ function _rbRecovered(){ if(typeof _netResyncSettled === 'function') _netResyncS
 // Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
 function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
-    _wsend({ t:'startDuel', seed:null }); }
+    _wsend({ t:'startDuel', seed:null, ws:_duelWsLists(null) }); }
 function _initWorker(){
     // Headless harness has no Worker: _wsend falls back to simCommand and the tests drive
     // update() directly. In a browser a construction failure (file://, CSP) must not throw
@@ -1139,7 +1192,7 @@ function _applyDuelEvents(list){
     for(const r of list){
         const e = r.e;
         if(e.t === 'sfx') _sfxQ.push({ tk:r.tk, name:e.name });
-        else if(e.t === 'bonus' || e.t === 'fw' || e.t === 'crush') _fxQ.push({ tk:r.tk, e });
+        else if(FX_DEFER.has(e.t)) _fxQ.push({ tk:r.tk, e });   // the worker's authored tick, so a rewind cancels the right ones
         else { const hold = simEvents; simEvents = [e]; drainSimEvents(); simEvents = hold; }
     }
 }

@@ -9,7 +9,6 @@ const EXCLUDE = new Set([
     'gameSeed',   // static per game; _rngState DOES travel now: the online peer's prediction must roll the host's dice
     'simEvents',               // events travel next to the snapshot, not inside it
     '_armSlots',               // boost arming is DEVICE-local input authorship: mirroring (or hashing) it would leak one device's keys into the shared state
-    '_nmWasAdjacent',          // near-miss edge tracker: presentation-only, re-derived each duel tick, never hashed
     '_duelNetHold',            // CONFIG, not state: set by the online entry path on both clients alike, constant for the match, never hashed
 ]);
 

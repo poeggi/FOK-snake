@@ -116,7 +116,7 @@ else
     echo "[checks] (fast tier) skipping heavy duel sweeps -- run 'bash test/checks.sh --full' after any netcode/sim rework"
 fi
 
-echo "[checks] duel sim rules (speed round per-level stable across respawns; fragile bars crush like single player)"
+echo "[checks] duel sim rules (speed round re-rolled every spawn; fragile bars crush like single player)"
 suite test/sim-duel.js
 
 echo "[checks] sim invariants"

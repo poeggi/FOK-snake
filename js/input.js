@@ -73,13 +73,39 @@ function _entryOpen(mode, prefill){
     nameCharIdx=nameStr.length>0?Math.max(0,_entryChars().indexOf(nameStr[0])):0;
     nameCursorPos=nameStr.length; phase='nameEntry';
 }
-function _entryLeave(to){ scanStop(); _scanOk=''; _scanManualOff=false; entryMode='score'; phase=to; setTimeout(()=>nameInp.blur(),10); }
+function _entryLeave(to){ _friendPending=false; scanStop(); _scanOk=''; _scanManualOff=false; entryMode='score'; phase=to; setTimeout(()=>nameInp.blur(),10); }
+// ADD FRIEND bookkeeping shared by the checked and the unchecked (no net-api) paths.
+let _friendPending=false;
+function _friendAdded(id, state, added){
+    if(!added) addFriend(id);
+    if(state==='accepted'&&typeof _netFrCelebrate==='function') _netFrCelebrate((netFriendName(id)||fmtFriendId(id))+' - YOU ARE FRIENDS!');
+    else { _duelMsg='FRIEND ADDED: '+fmtFriendId(id); _duelMsgAt=_msgNow(); }
+    _entryLeave('duelMenu'); Snd.sfxPlay('select',cfg.music);
+}
 function _submitName(){
     if(entryMode==='friend'){
         const id=nameStr.toLowerCase();
-        if(id.length!==8||!addFriend(id)){ Snd.sfxPlay('fail',cfg.music); return; }   // malformed or own ID
-        _duelMsg='FRIEND ADDED: '+fmtFriendId(id); _duelMsgAt=_msgNow();
-        _entryLeave('duelMenu'); Snd.sfxPlay('select',cfg.music); return;
+        // Malformed or our own ID needs no server and stays instant.
+        if(id.length!==8||!/^[0-9a-f]{8}$/.test(id)||id===getPlayerId()){ Snd.sfxPlay('fail',cfg.music); return; }
+        if(_friendPending) return;   // one check in flight: a second RETURN must not stack requests
+        // Offline (or no net-api at all): nothing to ask, so the add stays instant and local.
+        if(typeof netFriendVerify!=='function'||!_netOk()){ _friendAdded(id); return; }
+        // Do NOT leave the screen on the server's word alone: a typo in an 8-digit ID is
+        // invisible, and a friend that does not exist fails much later, at the invite.
+        _friendPending=true; _duelMsg='CHECKING ID...'; _duelMsgAt=_msgNow(); _uiDirty=true;
+        netFriendVerify(id).then(v=>{
+            _friendPending=false;
+            const ok = v && (v.ok || v.offline);   // offline is offline-safe: keep it, the handshake retries
+            if(ok) addFriend(id);
+            if(phase!=='nameEntry'||entryMode!=='friend') return;   // walked away while we asked
+            if(ok){ _friendAdded(id, v.state, true); return; }
+            _scanOk='';   // a scanned code nobody owns: unlock the viewfinder for another try
+            const w=(v&&v.wait)||60;   // server-stated back-off (3.5): seconds for a throttle, up to an hour for the spam ban
+            _duelMsg = v&&v.error==='rate' ? 'TOO MANY REQUESTS - WAIT '+(w>=120?Math.ceil(w/60)+' MIN':w+'S')
+                                           : 'INVALID ID - NO SUCH PLAYER';
+            _duelMsgAt=_msgNow(); Snd.sfxPlay('fail',cfg.music); _uiDirty=true;
+        });
+        return;
     }
     if(!nameStr.trim()) return;
     try{localStorage.setItem('lastSName',nameStr);}catch (e){}
@@ -97,6 +123,14 @@ function _submitName(){
 function _nameDelete(){
     // _syncDial re-homes the dial on the ACTIVE char set (hex digits in friend mode,
     // the name alphabet otherwise), so the highlighted slot always previews a real glyph.
+    // The cursor is a SLOT INDEX, so a FULL field leaves it sitting ON the last character
+    // rather than after it -- there is no slot past the end to hold it. Backspace there has
+    // to take that last character; deleting the one before it strands the final digit and
+    // no amount of retyping can put it right. A friend ID is always 8 of 8, so it meets this
+    // on every correction, while a 15-char name almost never fills up and hid it.
+    if(nameStr.length>=_entryMax() && nameCursorPos===_entryMax()-1){
+        nameStr=nameStr.slice(0,-1); _syncDial(); Snd.sfxPlay('nav',cfg.music); return;
+    }
     if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;_syncDial();Snd.sfxPlay('nav',cfg.music);}
 }
 function _duelExit(){
@@ -384,15 +418,15 @@ const UI_INPUT = {
         nav(key){
             if(key==='ArrowUp'||key==='ArrowDown'){ nameCharIdx=_navStep(key, nameCharIdx, _entryChars().length); }
             else if(key==='ArrowLeft'){ _placeName(); if(nameCursorPos>0)nameCursorPos--; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
-            else if(key==='ArrowRight'){ _placeName(); if(nameCursorPos<_entryMax()-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
+            else if(key==='ArrowRight'){ _placeName(); if(nameCursorPos<_entryLast())nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
         },
         // Hardware RETURN, the iPad keyboard's return key and the START button submit
         // directly (no-op while empty); OK/tap keeps the dial semantics via add().
         confirm(){ _submitName(); },
         add(){
             if(_scoreTainted && entryMode==='score'){ _submitName(); return; }   // no name to place on a debug run
-            if(_entryChars()[nameCharIdx]==='\r'){ _submitName(); }
-            else { _placeName(); if(nameCursorPos<_entryMax()-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
+            if(_entryOnOk() || _entryChars()[nameCharIdx]==='\r'){ _submitName(); }
+            else { _placeName(); if(nameCursorPos<_entryLast())nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music); }
         },
         back(key){
             // Backspace always deletes a character. ESC is BACK on the friend screen
@@ -408,7 +442,7 @@ const UI_INPUT = {
             if(!_entryChars().includes(ch)) return;   // friend mode: hex digits only
             if(nameCursorPos<nameStr.length) nameStr=nameStr.slice(0,nameCursorPos)+ch+nameStr.slice(nameCursorPos+1);
             else if(nameStr.length<_entryMax()) nameStr+=ch;
-            if(nameCursorPos<_entryMax()-1)nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music);
+            if(nameCursorPos<_entryLast())nameCursorPos++; _syncDial(); Snd.sfxPlay('nav',cfg.music);
         },
     },
 };

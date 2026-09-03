@@ -71,15 +71,23 @@ const HOOKS = (id) => `
   globalThis.__fire = ()=>{ for(const iv of __ivals){ if(iv.done) continue;
       while(__now >= iv.next){ iv.fn(); if(iv.once){ iv.done=true; break; } iv.next += iv.ms; } } };
   globalThis.__out = [];
-  globalThis.__p2pStart = (seed, role)=>{
+  // mine/theirs = this client's own worn windswept ids and the peer's. They are installed the
+  // way production supplies them -- mine in cfg.wornItems, the peer's on the exchanged profile --
+  // and the duel lists are then derived by the REAL _duelWsLists. That is the property under
+  // test: no windswept list ever crosses the wire, so each client must compute the identical
+  // [P0,P1] pair from the two profiles or the very first steal roll desyncs the match.
+  globalThis.__p2pStart = (seed, role, mine, theirs)=>{
     _netSync = { ofs:0, rtt:1, at:Date.now() };
     simTick = role==='host' ? 45000 : 3000; simNow = simTick*TICK_MS; inGame = true;
     _netSess = _netMkSess('ffffffff', role);
     _netSess.seed = seed>>>0; _netSess.game = true; _netSess.pc = null;
+    const _wmap = (a)=>{ const o={}; for(const id of (a||[])) o[id]=true; return o; };
+    cfg.wornItems = _wmap(mine);
+    _netSess.peerProfile = { name:'PEER', color:0, shopItems:_wmap(theirs), platform:'pc' };
     _netSess.dc = { readyState:'open', bufferedAmount:0, send(j){ __out.push(j); }, close(){} };
     _netMarkRecv(_netSess);
     _netLiveStart();
-    startDuel(seed>>>0, false);
+    startDuel(seed>>>0, _duelWsLists(role === 'host'));
     _rbReset();
     _netSess.startPts = Date.now();
   };
@@ -94,6 +102,15 @@ const HOOKS = (id) => `
   globalThis.__bsRev      = ()=> _netSess ? _netSess.bsRev : Infinity;   // the peer's min raw forward-delta (piggybacked)
   globalThis.__hostBurst  = (then)=> _netBurstThenStart(_netSess, then); // host side of a boundary: full burst engine (retries, low-pass, -R/2 apply) -> then(residual|null)
   globalThis.__tick1   = ()=>{ netTickPre(); update(); netTickPost(); };   // exactly ONE engine tick, real path
+  // The PRESENTATION half of a tick, which the RAF loop owns in the browser (game.js): dispatch
+  // this tick's sim events and fire the 2-tick-deferred cosmetic queue. Off by default -- every
+  // existing lane measures the netcode alone -- and opted into by opts.flushFx, which is what
+  // lets a windswept run exercise the pickup write-back into each device's own inventory.
+  globalThis.__flushFx = ()=>{
+    if(simEvents.length) drainSimEvents();
+    if(typeof flushSfxQ === 'function') flushSfxQ();
+    if(typeof flushFxQ === 'function') flushFxQ();
+  };
   globalThis.__tickCatchup = ()=>{
     const t = netTickTarget(); if(t === null) return;
     const d = t - simTick;
@@ -158,6 +175,12 @@ const HOOKS = (id) => `
              odx:O?O.dir.x:0, ody:O?O.dir.y:0, oalive:!!(O&&O.alive),
              obody:O?O.snake.map(c=>({x:c.x,y:c.y})):[],
              gemx: gem?gem.x:-1, gemy: gem?gem.y:-1,
+             bars: bars ? bars.map(c=>({x:c.x,y:c.y})) : [],
+             // The loose windswept item, once it has LANDED (in flight it cannot be taken).
+             // Sim state like the gem above: a director may steer by it, since a director only
+             // authors this client's own inputs and those cross the wire like any other.
+             wsx:(_ws&&_ws.it)?_ws.it.x:-1, wsy:(_ws&&_ws.it)?_ws.it.y:-1,
+             wsUp:!!(_ws&&_ws.it&&simTick>=_ws.it.at),
              waiting: phase === 'levelDone' && !!levelDoneWaiting };
   };
   // ---- divergence surface ----
@@ -166,7 +189,12 @@ const HOOKS = (id) => `
   globalThis.__silent  = ()=> _netSess ? Date.now() - _netSess.lastRecvWall : 0;   // wall-clock ms since our last inbound packet
   globalThis.__live    = ()=>{ _netLiveCheck(); };   // run ONE real liveness pass (kill/reconnect/keepalive) -- the driver pumps it at 250ms like production
   globalThis.__phase   = ()=> phase;
-  globalThis.__speedRound = ()=> !!_speedRound;   // is the CURRENT level a speed round? (seeded per-level roll)
+  globalThis.__speedRound = ()=> !!_speedRound;   // is the CURRENT spawn a speed round? (seeded per-spawn roll)
+  // The whole windswept wardrobe as one comparable string: "P0 gear|P1 gear|loose item@owner".
+  // Both clients must read the same one at the same tick -- it is hashed duel state, so a steal
+  // that resolved differently on the two sides shows up here (and in the ring hash) at once.
+  globalThis.__wsSt    = ()=> _ws ? (_ws.w[0].join('.') + '|' + _ws.w[1].join('.') + '|' + (_ws.it ? _ws.it.id + '@' + _ws.it.own : '')) : null;
+  globalThis.__worn    = ()=> Object.keys(cfg.wornItems || {}).join('.');   // this DEVICE's inventory: the pickup write-back's half
   globalThis.__hashNow = ()=> _rbHash(simSnapshot());
   globalThis.__simTick = ()=> simTick;
   globalThis.__gdue    = ()=> _gDue;   // ticks until the next game-step boundary (the double-gesture budget gate, see fireOnce)
@@ -234,7 +262,7 @@ function anchor(prof, rnd){
 // `extra` (optional): scenario-specific instrumentation appended AFTER the standard hooks,
 // so a debug run can wrap product internals (bare-name reassignment, like the hooks above)
 // without the driver growing per-bug tracing.
-function mk(id, seed, role, extra){ const c = runInGame(HOOKS(id) + (extra || '')); c.__p2pStart(seed, role); return c; }
+function mk(id, seed, role, extra, mine, theirs){ const c = runInGame(HOOKS(id) + (extra || '')); c.__p2pStart(seed, role, mine, theirs); return c; }
 
 // ---- torus geometry (shared by the autopilot) ----
 function torusDelta(a, b, n){ let d = b - a; if(d > n/2) d -= n; if(d < -n/2) d += n; return d; }
@@ -309,6 +337,61 @@ function autopilot(view){
     return out;
 }
 
+// JOUSTING director: the near-miss pilot. The autopilot deliberately keeps 2 cells of clearance,
+// so in a normal match the two heads NEVER pass within one cell and the windswept steal rules are
+// dead code -- this director is the opposite discipline. Each snake locks onto its own lane, the
+// two lanes one row apart, and runs it in the OPPOSITE direction to the other: they sweep past
+// each other once a lap, at exactly one cell, heading against each other. That is a near miss by
+// construction, so a match under this pilot rolls steal dice steadily -- and because the lanes
+// never overlap, the passes cost no lives and the match runs its full length.
+// Deterministic (a pure function of the view), like every director here: both clients log and
+// replay identical inputs, and the roll itself is the sim's, off the shared PRNG.
+function jouster(view){
+    if(!view || view.phase !== 'duel' || !view.alive) return {};
+    const lane = (Math.floor(view.rows/2) + view.mi) % view.rows;   // P0 and P1 one row apart
+    const run = view.mi === 0 ? 1 : -1;                             // ...running against each other
+    const cur = { x:view.dx, y:view.dy };
+    const blocked = new Set(view.body.slice(0, -1).map(c=> c.x + ',' + c.y));   // tail tip moves, so it is safe
+    for(const c of view.bars) blocked.add(c.x + ',' + c.y);
+    if(view.oalive) for(const c of view.obody) blocked.add(c.x + ',' + c.y);
+    // KEEP-1, the whole point: closing to one cell is wanted, sharing a cell is not.
+    const free = (s)=>{
+        const nx = (view.hx + s.x + view.cols) % view.cols, ny = (view.hy + s.y + view.rows) % view.rows;
+        if(blocked.has(nx + ',' + ny)) return false;
+        return !view.oalive || !(nx === view.ox && ny === view.oy);
+    };
+    // A landed item is a race, and the nearer snake takes it (ties to P0) -- the same role split
+    // the autopilot uses for the gem, and for the same reason: two snakes converging on one cell
+    // just kill each other. The loser keeps running its lane, so passes continue during the grab.
+    // Whoever wins may be the OWNER taking its own gear back or the thief taking it for real; both
+    // are real outcomes and the test asserts only that the two clients agree on which happened.
+    const myD = view.wsUp ? torusDist(view.hx, view.hy, view.wsx, view.wsy, view.cols, view.rows) : Infinity;
+    const opD = (view.wsUp && view.oalive) ? torusDist(view.ox, view.oy, view.wsx, view.wsy, view.cols, view.rows) : Infinity;
+    const chase = view.wsUp && (myD < opD || (myD === opD && view.mi === 0));
+    const cand = [];
+    if(chase){
+        const ddx = torusDelta(view.hx, view.wsx, view.cols), ddy = torusDelta(view.hy, view.wsy, view.rows);
+        if(ddx !== 0) cand.push({ x:Math.sign(ddx), y:0, mag:Math.abs(ddx) });
+        if(ddy !== 0) cand.push({ x:0, y:Math.sign(ddy), mag:Math.abs(ddy) });
+        cand.sort((a, b)=> b.mag - a.mag);
+    } else {
+        const dy = torusDelta(view.hy, lane, view.rows);
+        if(dy !== 0) cand.push({ x:0, y:Math.sign(dy) });   // get onto my lane first
+        cand.push({ x:run, y:0 });                          // then run it
+    }
+    let want = null;
+    for(const c of cand){ if(!rev(c, cur) && free(c)){ want = c; break; } }
+    if(!want && free(cur)) want = cur;                                             // hold if safe
+    if(!want){ for(const s of [{x:cur.y,y:-cur.x},{x:-cur.y,y:cur.x}]) if(free(s)){ want = s; break; } }
+    if(!want) want = cur;
+    const out = {};
+    if(!eq(want, cur)) out.steer = { x:want.x, y:want.y };
+    // Boost down the lane, brake into the turn: the pass then happens at every boost tier, which
+    // is what the three-step steal odds (neither / one / both boosting) need exercised.
+    else if(!view.boosting){ out.boost = { x:want.x, y:want.y }; out.now = true; }
+    if(out.steer && view.boosting) out.boost = 'end';
+    return out;
+}
 // DEATH-forcing director: both snakes make a beeline for board center, so they meet head-on
 // (or ram a body) and DIE -- the respawn path the autopilot deliberately dodges. Over a lossy
 // wire the peer's collision-deciding steer often arrives late, so a client mispredicts survival,
@@ -381,7 +464,12 @@ function runMatch(opts){
     const seed = (opts.seed >>> 0) || 0xD0E1;
     const dir = opts.director || autopilot;
     _rover[0] = 0; _rover[1] = 0;   // fresh circuit each match, so scenarios do not inherit progress
-    const A = mk('aaaaaaaa', seed, 'host', opts.hookA), B = mk('bbbbbbbb', seed, 'peer', opts.hookB);
+    // opts.ws = { A:[ids], B:[ids] }: each client's OWN worn windswept gear. A is the host (P0),
+    // B the joiner (P1), and each is told only its own list plus the peer's -- exactly what a real
+    // client has. Omitted, both snakes start bare and the steal rules never fire.
+    const WS = opts.ws || {};
+    const A = mk('aaaaaaaa', seed, 'host', opts.hookA, WS.A, WS.B),
+          B = mk('bbbbbbbb', seed, 'peer', opts.hookB, WS.B, WS.A);
     if(opts.noBurst){ A.__disableBurst(); B.__disableBurst(); }   // falsification control (see __disableBurst)
     const TICK = A.__TICK;
     const wire = { AB:[], BA:[] };
@@ -506,6 +594,7 @@ function runMatch(opts){
         const r0 = opts.recv ? S.c.__rbDbg().resim : 0;
         S.c.__tick1();
         if(CATCHUP) S.c.__tickCatchup();
+        if(opts.flushFx) S.c.__flushFx();   // run the browser's presentation half too (see __flushFx)
         if(opts.postAuthor && S.pend){
             // The held steer targets the same game-step boundary (simTick + _gDue) no matter which
             // interval of the window authors it -- so holding costs the pilot nothing and lets the
@@ -657,6 +746,23 @@ function runMatch(opts){
     const wallStepAt = wallStep ? Math.round(wallStep.at * 1000) : -1;
     const wallStepWho = wallStep ? (wallStep.who || 'B') : null;
     let wallStepped = false;
+    // WINDSWEPT coverage: watching one client's wardrobe is enough to say the rules FIRED (the
+    // two clients agreeing is a separate question, settled by the ring hash and the end-state
+    // compare below). A blow = an item came loose; a steal = it ended up worn by the OTHER snake,
+    // which is the full round trip -- roll, 500ms flight, pickup.
+    let wsBlows = 0, wsSteals = 0, wsPrev = A.__wsSt();
+    const sampleWs = ()=>{
+        const s = A.__wsSt(); if(s == null){ wsPrev = null; return; }
+        if(wsPrev !== null && wsPrev !== s){
+            const p = wsPrev.split('|'), c = s.split('|');
+            if(!p[2] && c[2]) wsBlows++;
+            if(p[2] && !c[2]){
+                const at = p[2].split('@'), id = at[0], own = +at[1];
+                if(c[1 - own].split('.').indexOf(id) >= 0) wsSteals++;   // crossed to the other snake
+            }
+        }
+        wsPrev = s;
+    };
     let sawConnLost = false, maxSilentMs = 0, splitRun = 0, maxSplitMs = 0, splitBlind = false;
     let speedA = false, speedB = false;   // did each client ever run a SPEED ROUND level?
     const CL = 'CONNECTION LOST';
@@ -742,6 +848,7 @@ function runMatch(opts){
         if(!speedA && A.__speedRound()) speedA = true;
         if(!speedB && B.__speedRound()) speedB = true;
         checkDiverge();
+        sampleWs();
         if(opts.desyncProbe) sampleRingAgree();
         // Banner + silence tracking: prove the outage actually surfaced CONNECTION LOST (the fault
         // was exercised, not skated past) and record the worst silence either side saw (must stay
@@ -776,6 +883,7 @@ function runMatch(opts){
             if(B.__simTick() < target) B.__tick1();
             pump();
             checkDiverge();
+            sampleWs();
             if(opts.desyncProbe) sampleRingAgree();
         }
     }
@@ -797,6 +905,24 @@ function runMatch(opts){
     };
     const converged = !ended && A.__simTick() === B.__simTick() && A.__hashNow() === B.__hashNow();
     bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // fold the final (post-last-level) tallies in
+    // Ownership cross-check, only meaningful with flushFx (the write-back is presentation-side).
+    // game.js _wsTransfer runs per DEVICE: each client applies only the half of a pickup that
+    // concerns its own player. So an id the sim says P0 wears must be in the HOST's wardrobe and
+    // gone from the joiner's, and vice versa. A count above 0 means a transfer landed one-sided --
+    // a copy left behind on the loser's device, or gear the winner never actually received.
+    const wsOwnBad = !opts.flushFx ? null : (() => {
+        const st = A.__wsSt();
+        if(st == null) return 0;
+        const worn = st.split('|'), dev = [A.__worn().split('.'), B.__worn().split('.')];
+        let bad = 0;
+        for(let s = 0; s < 2; s++){
+            for(const id of worn[s].split('.')){
+                if(!id) continue;
+                if(dev[s].indexOf(id) < 0 || dev[1 - s].indexOf(id) >= 0) bad++;
+            }
+        }
+        return bad;
+    })();
     const a = acc.A, b = acc.B;
     return {
         converged, firstDiverge, exitReason, diedAt,
@@ -804,6 +930,11 @@ function runMatch(opts){
         maxSplitMs, splitBlind, epA: A.__rbEpoch(), epB: B.__rbEpoch(),
         levelReached, levelUps, localJumps, localJumpsA: localJumpsBy.A, localJumpsB: localJumpsBy.B, maxLocalJump, rematched: rematchDone,
         speedRoundA: speedA, speedRoundB: speedB,
+        // Windswept: did the rules fire, and did both clients land on the SAME wardrobe? wsSame is
+        // read after the settle, where the two sims are tick- and hash-identical, so a mismatch
+        // here means the steal state diverged in a way the hash somehow did not carry.
+        wsBlows, wsSteals, wsA: A.__wsSt(), wsB: B.__wsSt(), wsSame: A.__wsSt() === B.__wsSt(),
+        wornA: A.__worn(), wornB: B.__worn(), wsOwnBad,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,
         rb: a.rb + b.rb, rbA: a.rb, rbB: b.rb,
@@ -817,4 +948,4 @@ function runMatch(opts){
     };
 }
 
-module.exports = { runInGame, HOOKS, mk, anchor, runMatch, autopilot, collider, torusDelta, NET_BASE };
+module.exports = { runInGame, HOOKS, mk, anchor, runMatch, autopilot, collider, jouster, torusDelta, NET_BASE };

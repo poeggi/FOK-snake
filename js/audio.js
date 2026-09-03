@@ -453,30 +453,71 @@ const Snd = (() => {
             oscs[oscs.length-1].onended = () => { oscs.forEach(o=>o.disconnect()); bp.disconnect(); g.disconnect(); };
         } else if (type === 'boom') {
             // Supersonic boom (heavy near-miss, both boosting): a lowpass-swept noise crack over
-            // a deep sine sweeping 120->38Hz plus a sub thump -- two snakes tearing past at boost.
-            const dur = 0.6;
+            // a deep sine sweeping 120->34Hz plus a sub thump -- two snakes tearing past at boost.
+            // The loudest and longest thing in the game on purpose: it only ever fires when both
+            // snakes are boosting through the same cell, which is the rarest pass there is.
+            const dur = 0.85;
             const src = _ctx.createBufferSource(); src.buffer = _ensureNoise();
             const lp = _ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.7;
             lp.frequency.setValueAtTime(2600, now);
-            lp.frequency.exponentialRampToValueAtTime(180, now + 0.28);
+            lp.frequency.exponentialRampToValueAtTime(180, now + 0.36);
             const ng = _ctx.createGain();
-            ng.gain.setValueAtTime(0.9 * vol, now);
-            ng.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
+            ng.gain.setValueAtTime(1.05 * vol, now);
+            ng.gain.exponentialRampToValueAtTime(0.001, now + 0.46);
             src.connect(lp); lp.connect(ng); ng.connect(_sfxGain);
-            src.start(now); src.stop(now + 0.36);
+            src.start(now); src.stop(now + 0.48);
             src.onended = () => { src.disconnect(); lp.disconnect(); ng.disconnect(); };
             const o = _ctx.createOscillator(); o.type = 'sine';
             o.frequency.setValueAtTime(120, now);
-            o.frequency.exponentialRampToValueAtTime(38, now + dur);
+            o.frequency.exponentialRampToValueAtTime(34, now + dur);
             const og = _ctx.createGain();
             og.gain.setValueAtTime(0.0001, now);
-            og.gain.exponentialRampToValueAtTime(0.9 * vol, now + 0.03);
+            og.gain.exponentialRampToValueAtTime(1.15 * vol, now + 0.03);
             og.gain.exponentialRampToValueAtTime(0.001, now + dur);
             o.connect(og); og.connect(_sfxGain);
             o.start(now); o.stop(now + dur + 0.02);
             o.onended = () => { o.disconnect(); og.disconnect(); };
-            t(70, now, 0.16, 'sine');   // front-loaded sub thump
+            t(70, now, 0.22, 'sine');   // front-loaded sub thump
         }
+    }
+
+    // SUSTAINED SCRAPE (duel, two snakes running side by side). NOT a one-shot: the renderer
+    // holds it on for as long as the two are rubbing along each other, so this is one voice
+    // ridden by its gain, never a short sound retriggered on a timer -- retriggering a 0.2s
+    // squeal is exactly what turns a grind into a machine gun. Same stressed-metal recipe as
+    // 'squeeze' (inharmonic sawtooth partials through a tight bandpass), but the one-shot
+    // pitch bend is replaced by a slow wander of the filter, so a hold of any length keeps
+    // moving instead of settling into a flat tone.
+    // The graph is built once and left running at silent gain: starting and stopping
+    // oscillators per contact would click, and contacts come and go every few frames.
+    let _scrape = null;
+    function _scrapeBuild() {
+        const bp = _ctx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.frequency.value = 2000; bp.Q.value = 4.5;
+        const g = _ctx.createGain(); g.gain.value = 0.0001;
+        bp.connect(g); g.connect(_sfxGain);
+        const lfo = _ctx.createOscillator(); lfo.type = 'triangle'; lfo.frequency.value = 7.3;
+        const lg = _ctx.createGain(); lg.gain.value = 620;   // +-620Hz of wander around the 2kHz band
+        lfo.connect(lg); lg.connect(bp.frequency); lfo.start();
+        for (const [f, dt] of [[523,0],[781,7],[1174,-6],[1893,5]]) {   // inharmonic ratios, cents
+            const o = _ctx.createOscillator();
+            o.type = 'sawtooth'; o.detune.value = dt; o.frequency.value = f;
+            o.connect(bp); o.start();
+        }
+        return { g, on:false };
+    }
+    // active: hold the grind on. Pass cfg.music folded in, like the `on` argument of sfxPlay --
+    // turning sound off mid-scrape then fades it out rather than cutting it.
+    function scrapeSet(active) {
+        if (!_ctx) return;
+        if (active && !_scrape) _scrape = _scrapeBuild();
+        if (!_scrape || !!active === _scrape.on) return;
+        _scrape.on = !!active;
+        const now = _ctx.currentTime, p = _scrape.g.gain;
+        p.cancelScheduledValues(now);
+        p.setValueAtTime(Math.max(p.value, 0.0001), now);
+        if (active) p.exponentialRampToValueAtTime(0.30, now + 0.05);   // quieter than a one-shot: it sustains
+        else        p.exponentialRampToValueAtTime(0.0001, now + 0.16);
     }
 
     function sfxSetVolume(vol) {
@@ -492,6 +533,6 @@ const Snd = (() => {
         audioInit, audioResume, audioSuspend,
         musicPlay, musicStop, musicFadeOut, duck, musicMute, musicUnmute, musicSetVolume, musicTick,
         setMusicSeekProvider: (fn) => { _seekProvider = fn; },
-        sfxPlay, sfxSetVolume, ctxTime, musicDriftMs,
+        sfxPlay, scrapeSet, sfxSetVolume, ctxTime, musicDriftMs,
     };
 })();

@@ -69,9 +69,16 @@ runTest('SMOKE-INPUT', `
     duelSel=3; press('Enter');
     if(phase!=='nameEntry'||entryMode!=='friend') throw 'ADD FRIEND did not open the entry (phase='+phase+' mode='+entryMode+')';
     press('g'); if(nameStr!=='') throw 'non-hex char must be ignored in friend mode';
-    for(const ch of '00ff00bb') press(ch);
+    for(const ch of '00ff00b') press(ch);
+    // The SUBMIT button is greyed short of 8 digits and has to be inert, not merely dim:
+    // even parked on it, an incomplete ID must not arm it.
+    nameCursorPos=_entryMax(); if(_entryOnOk()) throw 'the submit button armed with only 7 digits';
+    nameCursorPos=7; press('b');
     if(nameStr!=='00FF00BB') throw 'friend hex entry failed: '+nameStr;
-    press('Enter');
+    // The 8th digit lands the cursor on the SUBMIT key past the last slot, and OK there sends
+    // the ID: on a TV or a gamepad there is no RETURN key to reach for.
+    if(!_entryOnOk()) throw 'the last digit did not move the cursor onto the submit key (pos='+nameCursorPos+')';
+    press('NameAdd');
     if(phase!=='duelMenu') throw 'friend submit did not return to the 1:1 menu';
     if(entryMode!=='score') throw 'entryMode not reset after friend submit';
     if(!getFriends().includes('00ff00bb')) throw 'scanned/typed friend not stored';
@@ -83,7 +90,7 @@ runTest('SMOKE-INPUT', `
     press('Backspace'); if(nameStr!=='') throw 'Backspace must delete a friend digit';
     press('a'); press('Escape');
     if(phase!=='duelMenu'||entryMode!=='score') throw 'ESC must leave ADD FRIEND (back)';
-    log('friend add flow ok (hex filter, submit, back)');
+    log('friend add flow ok (hex filter, submit gated on 8 digits, back)');
 
     // A verified scanner hit locks first (field filled, success shown), then submits.
     duelSel=3; press('Enter');
@@ -98,6 +105,37 @@ runTest('SMOKE-INPUT', `
     _scanHit('https://poeggi.github.io/FOK-snake/#friend=00ff00dd');
     if(getFriends().includes('00ff00dd')) throw 'scan hit outside the entry screen must be ignored';
     log('scanner hit path ok (lock message + submit)');
+
+    // Server-checked ADD FRIEND (API 3.5): an id nobody ever registered must NOT leave
+    // the screen and must NOT reach the friend list, and a throttled request reports the
+    // wait the server asked for. netFriendVerify is stubbed with a SYNCHRONOUS thenable
+    // (the real one wraps a fetch) so this driver can see the outcome it resolves with.
+    const _oNetOk=_netOk, _oVerify=netFriendVerify;
+    _netOk=()=>true; let _vRes=null; netFriendVerify=()=>({ then:f=>f(_vRes) });
+    _vRes={ error:'unknown' };
+    phase='duelMenu'; duelSel=3; press('Enter');
+    for(const ch of '00ff0099') press(ch);
+    press('Enter');
+    if(phase!=='nameEntry') throw 'an unknown friend id must not leave ADD FRIEND';
+    if(getFriends().includes('00ff0099')) throw 'an unknown friend id must not be stored';
+    if(!/NO SUCH PLAYER/.test(_duelMsg)) throw 'missing no-such-id status: '+_duelMsg;
+    _vRes={ error:'rate', wait:60 };
+    press('Enter');
+    if(phase!=='nameEntry'||!/WAIT 60S/.test(_duelMsg)) throw 'throttled request must show the wait: '+_duelMsg;
+    _vRes={ ok:true, state:'pending' };
+    press('Enter');
+    if(phase!=='duelMenu'||!getFriends().includes('00ff0099')) throw 'a confirmed id must add and leave';
+    _netOk=_oNetOk; netFriendVerify=_oVerify;
+    log('friend id check ok (unknown blocks, throttle reported, confirmed adds)');
+
+    // Backspace on a FULL field takes the LAST character. The cursor is a SLOT index, so
+    // a full 8/8 friend id leaves it ON the last slot: deleting "the one before the
+    // cursor" stranded the final digit and no retyping could correct it (iPad report).
+    phase='nameEntry'; entryMode='friend'; nameStr='00FF00BB'; nameCursorPos=7;
+    press('Backspace'); if(nameStr!=='00FF00B') throw 'Backspace on a full field must take the last digit: '+nameStr;
+    press('Backspace'); if(nameStr!=='00FF00') throw 'Backspace below full must keep deleting: '+nameStr;
+    press('Escape'); phase='duelMenu'; entryMode='score';
+    log('full-field backspace ok');
 
     // Viewfinder tap CYCLES the camera on-x1 -> on-x2 -> off -> on-x1; taps elsewhere do not touch it.
     duelSel=3; press('Enter');

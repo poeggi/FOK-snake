@@ -74,7 +74,7 @@ function updateHUD() {
 // the pass) shakes harder and longer. Suppressed under SIMPLE gfx or the REDUCE MOTION toggle.
 // ================================================================
 let _shakeMag=0, _shakeAt=0, _shakeDur=0;
-const _NM_SHAKE=7,  _NM_DECAY=380;    // normal pass: px impulse, ms decay
+const _NM_SHAKE=5,  _NM_DECAY=380;    // normal pass: px impulse, ms decay (gentler than the boost pass)
 const _NM_SHAKE_HEAVY=12, _NM_DECAY_HEAVY=560;   // both boosting: bigger + longer
 function armNearMiss(heavy, now){
     _shakeMag = heavy ? _NM_SHAKE_HEAVY : _NM_SHAKE;
@@ -86,6 +86,348 @@ function shakeOffset(now){
     const age=now-_shakeAt; if(age<0||age>=_shakeDur){ _shakeMag=0; return null; }
     const k=_shakeMag*(1-age/_shakeDur);                           // linear decay to zero
     return { x:Math.round(k*Math.sin(age*0.085)), y:Math.round(k*Math.cos(age*0.13)) };
+}
+
+// ================================================================
+// STOLEN GEAR (duel). Juice hung off deferred, rollback-cancellable sim events. Everything
+// that MATTERS is the sim's: whether an item came off, which one, where it lands and the
+// tick it becomes takeable (see _ws / _duelStealRoll in sim.js). This file only draws the
+// 500ms tumble to the landing cell. Suppressed under SIMPLE gfx or REDUCE MOTION -- the item
+// then simply appears where it lands, which is the half a player has to see and act on.
+// ================================================================
+let _wsFly = null;      // { id, sx, sy, landAt }: the cell the item was knocked off at
+let _wsBlow = null;     // { own, at }: WHICH snake it came off; at is stamped on the first frame that draws it
+function armWsFly(e){
+    _wsBlow = { own:e.own|0, at:null };
+    _wsFly = (_simpleGfx()||_reduceMotion()) ? null : { id:e.id, sx:e.hx, sy:e.hy, landAt:null };
+}
+// The colour BOTH windswept cues are keyed on: the snake the gear came off. it.own / e.own
+// is sim state and the pair of colours is derived the same way on both devices, so the two
+// screens always agree. One accessor, so the tile and the shock ring can never disagree.
+function _wsOwnerHue(own){
+    const lk = _duelLook();
+    return SNAKE_COLORS[own ? lk.c1 : lk.c0].h;
+}
+// WHO just lost it. The tile on the board says whose gear is lying there; this says it at
+// the moment it happens -- a square shock ring in the victim's colour, snapped to their head
+// cell and riding it as they run on, so the loss is pinned to a snake and not just to a spot.
+// Same square language as the tile, and armed off the same deferred, rollback-cancellable
+// 'wsblow' event as the tumble. Under SIMPLE gfx or REDUCE MOTION the ring holds still and
+// only fades: the cue is worth keeping, the expansion is not.
+const _WS_BLOW_LIFE = 450;
+function _drawWsBlowFx(now){
+    if(!_wsBlow || !players) return;
+    if(_wsBlow.at===null) _wsBlow.at = now;
+    const t = (now-_wsBlow.at)/_WS_BLOW_LIFE;
+    if(t<0 || t>=1){ _wsBlow=null; return; }   // t<0: the clock jumped back under it (a level reset)
+    const P = players[_wsBlow.own];
+    if(!P || !P.snake.length) return;
+    const hue = _wsOwnerHue(_wsBlow.own);
+    const H = P.snake[0], still = _simpleGfx()||_reduceMotion();
+    const g = still ? 3 : 3+t*11;   // blows outward off the head
+    ctx.save();
+    ctx.strokeStyle=`hsla(${hue},100%,78%,${(1-t)*0.9})`;
+    ctx.lineWidth = still ? 2 : 1+2*(1-t);
+    ctx.strokeRect(H.x*CS-g+0.5, H.y*CS-g+0.5, CS+g*2-1, CS+g*2-1);
+    ctx.restore();
+}
+
+// ================================================================
+// SIDE-BY-SIDE SCRAPE (duel). Two snakes running the same way with one cell between their
+// flanks grind along each other: sparks and a metallic squeal, CONTINUOUSLY, for as long as
+// they stay alongside. Nothing here is a sim event and nothing here is lockstep -- no rng,
+// no state, nothing hashed, nothing that can change the outcome of a match. It is judged
+// fresh every FRAME from the positions already on screen, which is also why it can be
+// continuous: an effect that has no rising edge to catch cannot miss one, so a dropped or
+// doubled frame of it costs exactly nothing. (The near-miss STEAL is the opposite kind of
+// thing and stays in the sim: see _duelNearMiss.)
+// Sparks are suppressed under SIMPLE gfx or REDUCE MOTION; the squeal is not -- it is sound,
+// not motion, and it is the cue that tells you you are rubbing along the other snake.
+// ================================================================
+let _scrapePts = [];         // live sparks: { x, y, ang, spd, col, at }
+const _SCRAPE_LIFE = 300;    // ms per spark
+// The point the two are rubbing at, or null. A scrape needs the same heading and some cell of
+// the other snake exactly ONE cell ACROSS that heading from a head -- straight ahead or behind
+// is tailgating, not a scrape. Heads level is only the most obvious case; when one snake is
+// ahead, what the other rides is its BODY, which is the commoner way to end up alongside.
+function _scrapePoint(){
+    if(phase!=='duel' || !players || !players[0].alive || !players[1].alive) return null;
+    const d=players[0].dir, e=players[1].dir;
+    if(d.x!==e.x || d.y!==e.y) return null;   // different headings: that is a pass, not a scrape
+    return _flankPoint(players[0].snake[0], players[1].snake, d)
+        || _flankPoint(players[1].snake[0], players[0].snake, d);
+}
+function _flankPoint(h, other, d){
+    for(let i=0;i<other.length;i++){
+        const c=other[i];
+        const sx=((c.x-h.x+COLS+COLS/2)%COLS)-COLS/2;   // signed, the short way round
+        const sy=((c.y-h.y+ROWS+ROWS/2)%ROWS)-ROWS/2;
+        const across=d.x?sy:sx, along=d.x?sx:sy;
+        if(Math.abs(across)===1 && Math.abs(along)<=1)   // sparks fly from BETWEEN the two cells
+            return d.x ? { x:h.x*CS+CS/2, y:(h.y+across/2)*CS+CS/2 }
+                       : { x:(h.x+across/2)*CS+CS/2, y:h.y*CS+CS/2 };
+    }
+    return null;
+}
+function _duelScrapeFx(now){
+    const at = _scrapePoint();
+    // One sustained voice held for the length of the contact, not a sound retriggered per
+    // frame -- Snd.scrapeSet fades it in and out, and repeat calls with the same state are free.
+    Snd.scrapeSet(!!at && cfg.music);
+    if(at && !(_simpleGfx()||_reduceMotion()))
+        for(let i=0;i<3;i++) _scrapePts.push({ x:at.x, y:at.y, at:now,
+            ang:-Math.PI/2+(Math.random()-0.5)*2.4, spd:2+Math.random()*5,
+            col:['#ffffff','#ffe9a0','#cfd6dd','#ffc24a'][Math.floor(Math.random()*4)] });
+    _scrapePts = _scrapePts.filter(p=>{
+        const t=(now-p.at)/_SCRAPE_LIFE;
+        if(t<0 || t>=1) return false;   // t<0: the clock jumped back (level reset), drop the stragglers
+        ctx.globalAlpha=(1-t)*0.95; ctx.fillStyle=p.col;
+        ctx.fillRect(p.x+Math.cos(p.ang)*p.spd*t*16-1, p.y+Math.sin(p.ang)*p.spd*t*16+90*t*t-1, 2, 2);
+        return true;
+    });
+    ctx.globalAlpha=1;
+}
+// The loose item: tumbling through the air, then lying on the board waiting to be taken.
+// simTick vs the item's landing tick is the ONLY clock here, so a rollback that cancels or
+// re-times the steal corrects the picture for free.
+function _drawWsItem(now){
+    const it = (typeof _ws!=='undefined' && _ws) ? _ws.it : null;
+    if(!it){ _wsFly=null; return; }
+    if(_wsFly && _wsFly.id!==it.id) _wsFly=null;
+    const item = WS[it.id]; if(!item) return;
+    const left = it.at - simTick;
+    if(left > 0){
+        if(!_wsFly) return;                       // no local flight: stay hidden until it lands
+        const t = 1 - left/WS_LAND_TICKS;
+        // Shortest wrapped path, so an item blown across an edge tumbles over it rather than
+        // sweeping back across the whole board.
+        const dx = ((it.x-_wsFly.sx+COLS+COLS/2)%COLS)-COLS/2;
+        const dy = ((it.y-_wsFly.sy+ROWS+ROWS/2)%ROWS)-ROWS/2;
+        // The item is thrown UP as well as across: it grows toward the apex so it reads as
+        // near the camera, and shrinks back as it drops. The shadow stays on the ground track
+        // and is the only cue that separates "high up" from "further along".
+        const gx = (_wsFly.sx+dx*t)*CS+CS/2, gy = (_wsFly.sy+dy*t)*CS+CS/2;
+        const hgt = Math.sin(t*Math.PI);
+        const py = gy - hgt*CS*2.8;
+        const sc = 2*(1+0.9*hgt)*(1-0.05*t);
+        const turns = 5.5*(1-(1-t)*(1-t));   // spins hard off the snake, easing as it falls
+        ctx.save();
+        ctx.globalAlpha=0.30*(1-hgt*0.65); ctx.fillStyle='#000000';
+        ctx.beginPath(); ctx.ellipse(gx,gy+5,CS*0.42*(1-hgt*0.4),CS*0.17*(1-hgt*0.4),0,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+        if(t<0.34){   // the puff at the point of impact, fixed spokes so it does not boil
+            const pt=t/0.34, cx0=_wsFly.sx*CS+CS/2, cy0=_wsFly.sy*CS+CS/2;
+            ctx.save(); ctx.fillStyle='#e8e0d0';
+            for(let k=0;k<6;k++){
+                const a=k*(Math.PI/3)+0.4, r=4+pt*16, sz=3*(1-pt*0.6);
+                ctx.globalAlpha=(1-pt)*0.5;
+                ctx.fillRect(cx0+Math.cos(a)*r-sz/2, cy0+Math.sin(a)*r*0.6-sz/2, sz, sz);
+            }
+            ctx.restore();
+        }
+        ctx.save(); ctx.globalAlpha=0.55+0.45*t;
+        ctx.translate(gx,py); ctx.rotate(turns*Math.PI*2); ctx.translate(-4*sc,-4*sc);
+        drawPixelIcon(0,0,item.icon,sc);
+        ctx.restore(); ctx.globalAlpha=1;
+        return;
+    }
+    // Touchdown: only for a client that watched the tumble (_wsFly is null under SIMPLE gfx
+    // or REDUCE MOTION, and for anyone who came in late), so the item still just appears there.
+    if(_wsFly && _wsFly.landAt===null) _wsFly.landAt = now;
+    const lAge = _wsFly ? Math.max(0, now-_wsFly.landAt) : 1e9;   // a rollback can rewind the clock under it
+    const cx = it.x*CS+CS/2, cy = it.y*CS+CS/2;
+    if(lAge<260){
+        const rt=lAge/260;
+        ctx.save(); ctx.globalAlpha=(1-rt)*0.4; ctx.strokeStyle='#e8e0d0'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.ellipse(cx,cy+6,5+rt*16,2+rt*6,0,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+    }
+    const sq = lAge<90 ? 2*(0.86+0.14*(lAge/90)) : 2;   // squats on impact, springs back
+    // Loose loot has two jobs on a board that already holds bars, a gem and two snakes: be
+    // findable at a glance, and say WHOSE gear it is. One object does both -- a backlit floor
+    // TILE filling the cell it landed in, lit in the colour of the player it came off. it.own
+    // is sim state and the pair of colours is derived the same way on both devices, so the
+    // two screens light the same tile the same colour with nothing crossing the wire.
+    // Three cues, deliberately not all of them glow: a dark panel lifts the icon off whatever
+    // it landed on, a bright frame pins the tile to the grid, and a square bloom pulls the eye
+    // from across the board. Only the bloom spends the glow budget, so the drop still reads
+    // under SIMPLE gfx and DISABLE GLOW -- which is exactly where a shadowBlur-only marker
+    // used to vanish. The icon does NOT bob: vertical drift would unstick the tile from its
+    // cell, and sitting square in one cell is the whole point of drawing a tile. The
+    // BACKLIGHT breathes instead, which is also what a lit panel would actually do.
+    const hue = _wsOwnerHue(it.own);
+    const pulse = (_simpleGfx()||_reduceMotion()) ? 1 : 0.7+0.3*Math.sin(now/300);   // REDUCE MOTION keeps the backlight, just holds it steady
+    const x0 = it.x*CS, y0 = it.y*CS;
+    ctx.save();
+    if(!_simpleGfx() && !cfg.disableGlow)
+        for(let k=3;k>=1;k--){   // square bloom: the tile's own light spilling onto the board
+            ctx.fillStyle=`hsla(${hue},100%,60%,${0.10*pulse/k})`;
+            ctx.fillRect(x0-k*3, y0-k*3, CS+k*6, CS+k*6);
+        }
+    ctx.fillStyle='rgba(8,6,2,0.72)'; ctx.fillRect(x0,y0,CS,CS);
+    const lit = ctx.createLinearGradient(0,y0,0,y0+CS);   // brightest along the top edge, so it reads as lit from behind
+    lit.addColorStop(0,`hsla(${hue},100%,62%,${0.42*pulse})`);
+    lit.addColorStop(1,`hsla(${hue},100%,50%,${0.14*pulse})`);
+    ctx.fillStyle=lit; ctx.fillRect(x0,y0,CS,CS);
+    ctx.strokeStyle=`hsla(${hue},100%,72%,${0.55+0.45*pulse})`;
+    ctx.lineWidth=1; ctx.strokeRect(x0+0.5,y0+0.5,CS-1,CS-1);   // half-pixel: a 1px frame ON the grid line, not straddling it
+    ctx.shadowColor=`hsl(${hue},100%,70%)`; ctx.shadowBlur=_simpleGfx()?0:GLOW.TEXT;
+    drawPixelIcon(cx-4*sq, cy-4*sq, item.icon, sq);
+    ctx.restore();
+}
+
+// ================================================================
+// CRASH IMPACT (single player and duel). A death is staged from the deferred 'crash' sim
+// event, so a mispredicted kill that rolls back never wrecks anything on screen. All of it
+// is presentation: the dent is painted OVER the cached bars canvas and the tail fold is a
+// draw-time pixel offset, so neither the wall nor the snake's real cells ever move.
+// Suppressed under SIMPLE gfx or REDUCE MOTION.
+// ================================================================
+const CRASH_DUR = DEATH_DUR;   // the wreck plays for exactly as long as the sim holds in 'dying'
+const FOLD_STOP = 500;         // the buckle wave stops spreading here, well before the respawn
+let _crashFx = [];
+function armCrash(e, now){
+    if(_simpleGfx()||_reduceMotion()) return;
+    const dx = ((e.x-e.hx+COLS+COLS/2)%COLS)-COLS/2;   // shortest wrapped heading into the impact
+    const dy = ((e.y-e.hy+ROWS+ROWS/2)%ROWS)-ROWS/2;
+    _crashFx.push({ at:now, p:e.p, x:e.x, y:e.y,
+                    ax:Math.sign(dx), ay:Math.sign(dy),
+                    into:e.into, boost:!!e.boost });
+}
+function _crashFor(p){
+    for(const c of _crashFx) if(c.p===p) return c;
+    return null;
+}
+// Per-segment draw offset for a crashed snake: [dx, dy, headW, headH]. A train hitting a
+// wall does not shove backwards, it CONCERTINAS: the locomotive stops dead and squashes,
+// then a buckle wave runs back down the train, and each carriage in turn shortens its
+// coupling and kicks out to the alternate side. So a straight -------O folds into a jagged
+// /\/\/\o in about a fifth of a second. Two parts make that read:
+//   PILE  -- every link ahead of a carriage has shortened, so the displacement toward the
+//            impact ACCUMULATES down the body and the whole snake visibly gets shorter.
+//   KICK  -- the length lost axially goes sideways, alternating each carriage, which is what
+//            turns compression into a zigzag instead of a heap.
+// Both fade out along the body (exp(-i/reach)): the front folds, the tail is still straight.
+// And a wreck STAYS wrecked -- the fold holds for the whole beat, only the rattle settles.
+// Boosting hits far harder and reaches much further back; the impact itself times the same.
+function _crashJolt(p, now){
+    const e = _crashFor(p);
+    if(!e) return null;
+    const age = now-e.at;
+    if(age<0 || age>=CRASH_DUR) return null;
+    // Timed on a REAL body, not a round number: growth is +2 a gem over 10 gems a level and
+    // startLen runs 3/5/7/10 by level band, so a snake caught mid-level averages ~16 carriages
+    // (6.2 + 10). 16*7+90 lands the last of them at ~200ms. The wave is not capped: a very long
+    // snake simply keeps folding past that, and the beat ending is the only thing that stops it.
+    const wave  = 7;                 // ms before the buckle reaches the next carriage back
+    const buck  = 90;                // ms that one carriage takes to fold once the wave hits it
+    const reach = e.boost?7:3;       // carriages the fold is still violent at
+    const comp  = e.boost?0.48:0.18; // link shortening at full fold, as a fraction of a cell
+    const amp   = e.boost?0.5:0.2;   // sideways kick at full fold, as a fraction of a cell.
+    // 0.5 is the ceiling, not a taste call: neighbouring carriages swing to OPPOSITE sides, so
+    // a bigger kick puts more than CS between them and the fold breaks into loose blocks.
+    const rattle = Math.exp(-age/200)*Math.cos(age/34);   // the shake, not the fold: this is what settles
+    // Hard stop on the wave: past 500ms it recruits no further carriages and whatever it has
+    // not reached stays straight, so the fold can never still be creeping down the tail while
+    // the respawn is coming. A carriage already buckling finishes its 90ms -- aborting mid-fold
+    // would read as a glitch, not a stop. At 7ms a carriage, that reaches back to 71 -- past any
+    // real body, since a level caps at startLen+20 = 30 -- so it is a guarantee, not a normal path.
+    const k = i => { if(i*wave > FOLD_STOP) return 0; const s = age - i*wave; return s<=0 ? 0 : Math.min(1, s/buck); };
+    const pile = [0];                // prefix sum, built once per frame rather than per segment
+    const pileTo = i => { while(pile.length<=i){ const j=pile.length; pile.push(pile[j-1]+comp*CS*k(j)*Math.exp(-j/reach)); } return pile[i]; };
+    return i=>{
+        if(i===0){
+            const c = (e.boost?9:5)*(0.55+0.45*Math.exp(-age/180));   // stays squashed: it is a wreck
+            const back = (e.boost?4:2.5)*Math.exp(-age/180);
+            return [ -e.ax*back, -e.ay*back, e.ax?-c:c*0.8, e.ay?-c:c*0.8 ];
+        }
+        const kick = amp*CS*Math.exp(-i/reach)*k(i)*(i%2?1:-1)*(1+0.35*rattle);
+        const p2 = pileTo(i);
+        return [ e.ax*p2 - e.ay*kick, e.ay*p2 + e.ax*kick, 0, 0 ];
+    };
+}
+function _crashDent(e, age){
+    const amp = (e.boost?7:3.5)*Math.exp(-age/210)*Math.abs(Math.cos(age/60));
+    if(amp<0.6) return;
+    const bx = e.x*CS, by = e.y*CS;
+    const near = Math.max(1, Math.round(amp)), far = Math.max(1, Math.round(amp*0.6));
+    ctx.save();
+    ctx.fillStyle = '#4a1000';   // the struck face caves in
+    if(e.ax>0)      ctx.fillRect(bx, by, near, CS);
+    else if(e.ax<0) ctx.fillRect(bx+CS-near, by, near, CS);
+    else if(e.ay>0) ctx.fillRect(bx, by, CS, near);
+    else            ctx.fillRect(bx, by+CS-near, CS, near);
+    ctx.fillStyle = '#ff9944';   // and bulges out of the far side
+    if(e.ax>0)      ctx.fillRect(bx+CS-far, by, far, CS);
+    else if(e.ax<0) ctx.fillRect(bx, by, far, CS);
+    else if(e.ay>0) ctx.fillRect(bx, by+CS-far, CS, far);
+    else            ctx.fillRect(bx, by, CS, far);
+    ctx.restore();
+}
+// Chips thrown back out of the impact: brick off a wall, snake off a snake.
+function _crashChips(e, age){
+    const t = age/420;
+    if(t>=1) return;
+    const cx = e.x*CS+CS/2, cy = e.y*CS+CS/2;
+    const cols = e.into==='bar' ? ['#cc4400','#ff7700','#5a1a00','#ffbb66']
+                                : ['#7fff7f','#3aa03a','#ddffdd','#2a802a'];
+    ctx.save();
+    for(let k=0;k<10;k++){
+        const a = k*0.628+0.3, sp = 30+((k*37)%50);
+        const px = cx - e.ax*8 + Math.cos(a)*sp*t;
+        const py = cy - e.ay*8 + Math.sin(a)*sp*t + 150*t*t;
+        const sz = (2+(k%3))*(1-t*0.5);
+        ctx.globalAlpha = (1-t)*0.9; ctx.fillStyle = cols[k%cols.length];
+        ctx.fillRect(px-sz/2, py-sz/2, sz, sz);
+    }
+    ctx.restore();
+}
+// Normal speed: comic stars ring the head. Boosting: little birds circle it instead, and
+// they stay for the whole wreck -- the respawn gap exists so they can be seen.
+function _crashStars(age, hx, hy){
+    const dur = 700;
+    if(age>=dur) return;
+    const t = age/dur;
+    ctx.save(); ctx.globalAlpha=(1-t)*0.95; ctx.fillStyle='#ffe066';
+    for(let k=0;k<5;k++){
+        const a = k*(Math.PI*2/5) + age/260;
+        const r = 12+t*7;
+        const sx = hx+Math.cos(a)*r, sy = hy+Math.sin(a)*r*0.55-t*6;
+        ctx.fillRect(sx-3, sy-1, 6, 2);
+        ctx.fillRect(sx-1, sy-3, 2, 6);
+    }
+    ctx.restore();
+}
+function _crashBirds(age, hx, hy){
+    const dur = 1300;
+    if(age>=dur) return;
+    const fade = age>dur-300 ? (dur-age)/300 : 1;
+    ctx.save(); ctx.globalAlpha=fade*0.95; ctx.strokeStyle='#ffffff'; ctx.lineWidth=2;
+    for(let k=0;k<3;k++){
+        const a = k*(Math.PI*2/3) + age/420;
+        const r = 15+Math.sin(age/300+k)*3;
+        const bx = hx+Math.cos(a)*r, by = hy+Math.sin(a)*r*0.5-8;
+        const flap = Math.sin(age/70+k*2)*4;   // wings beat for as long as they circle
+        ctx.beginPath();
+        ctx.moveTo(bx-5, by+flap); ctx.lineTo(bx, by-2); ctx.lineTo(bx+5, by+flap);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+function _drawCrashFx(now){
+    _crashFx = _crashFx.filter(e=>{
+        const age = now-e.at;
+        if(age<0 || age>=CRASH_DUR) return false;
+        const segs = e.p<0 ? snake : (players && players[e.p] ? players[e.p].snake : null);
+        if(!segs || segs.length===0) return true;   // no snake to anchor on yet: keep the wreck queued
+        const j = _crashJolt(e.p, now);
+        const o = j ? j(0) : [0,0,0,0];
+        const hx = segs[0].x*CS+CS/2+o[0], hy = segs[0].y*CS+CS/2+o[1];
+        if(e.into==='bar') _crashDent(e, age);
+        _crashChips(e, age);
+        if(e.boost) _crashBirds(age, hx, hy); else _crashStars(age, hx, hy);
+        return true;
+    });
 }
 
 // ================================================================
@@ -524,12 +866,13 @@ function drawPacHead(x, y, facing) {
 // the belt/shoes/gown used to live in drawSnake() alone, which meant an online
 // opponent silently lost half their cosmetics. shimmer = draw the gown's travelling
 // sparkle (single player: beating the record; duel: leading -- both clients agree).
-function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer) {
+function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt) {
     const sc=SNAKE_COLORS[colorIdx||0];
     const cols = flash ? null : _bodyCols(segs.length, sc.h);
     const sw=CS-2,sh=CS-2,len=segs.length;
     segs.forEach((seg,i)=>{
-        const x=seg.x*CS+1,y=seg.y*CS+1;
+        const j=jolt?jolt(i):null;   // crash fold: a DRAW offset only, the cells themselves never move
+        const x=seg.x*CS+1+(j?j[0]:0),y=seg.y*CS+1+(j?j[1]:0);
         if(i>0){
             // Body: no shadow to set/reset -- just colour + fill.
             ctx.fillStyle=flash?`hsl(0,55%,${Math.round(41*(0.5+0.5*(1-i/Math.max(len,1))))+8}%)`:cols[i];
@@ -546,10 +889,11 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer) {
             drawPacHead(x, y, squeue.length>0?squeue[0]:sdir);
             return;
         }
+        const gw=j?j[2]:0, gh=j?j[3]:0;   // squashed flat against whatever it hit
         ctx.fillStyle=flash?'#bb2222':sc.head;
         if(!flash){ctx.shadowColor=sc.head;ctx.shadowBlur=10;}
-        if(_segPathHead){ ctx.translate(x,y); ctx.fill(_segPathHead); ctx.translate(-x,-y); }
-        else { rr(x,y,sw,sh,5); ctx.fill(); }
+        if(_segPathHead && !gw && !gh){ ctx.translate(x,y); ctx.fill(_segPathHead); ctx.translate(-x,-y); }
+        else { rr(x-gw/2,y-gh/2,sw+gw,sh+gh,5); ctx.fill(); }
         if(!flash){
             ctx.shadowBlur=0;
             const eyeDir=squeue.length>0?squeue[0]:sdir;
@@ -581,12 +925,13 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer) {
     if(flash) return;
     // Black belt wraps a mid-body segment (the snake's "waist")
     if(si.blackbelt && segs.length>=3){
-        const b=segs[Math.floor(segs.length/2)];
-        drawAccessoryBlackbelt(b.x*CS+1, b.y*CS+1);
+        const bi=Math.floor(segs.length/2), b=segs[bi], jb=jolt?jolt(bi):null;
+        drawAccessoryBlackbelt(b.x*CS+1+(jb?jb[0]:0), b.y*CS+1+(jb?jb[1]:0));
     }
     // Shoes ride the tail segment
     if(si.shoes && segs.length>0){
-        const t=segs[segs.length-1], x=t.x*CS+1, y=t.y*CS+1;
+        const ti=segs.length-1, t=segs[ti], jt=jolt?jolt(ti):null;
+        const x=t.x*CS+1+(jt?jt[0]:0), y=t.y*CS+1+(jt?jt[1]:0);
         ctx.fillStyle='#eeeeee'; ctx.fillRect(x+2,y+CS-7,5,3); ctx.fillRect(x+CS-8,y+CS-7,5,3);
         ctx.fillStyle='#cc2222'; ctx.fillRect(x+2,y+CS-5,5,1); ctx.fillRect(x+CS-8,y+CS-5,5,1);
         ctx.fillStyle='#333333'; ctx.fillRect(x+1,y+CS-4,6,2); ctx.fillRect(x+CS-9,y+CS-4,6,2);
@@ -605,9 +950,10 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer) {
     }
 }
 // Classic single-player wrapper: the globals, and the record-chase gown condition.
-function drawSnake(flash) {
+function drawSnake(flash, now) {
     drawSnakeG(snake, dir, dirQueue, cfg.snakeColor||0, cfg.wornItems||{}, flash,
-               phase==='playing' && score>=_shimmerThreshold);
+               phase==='playing' && score>=_shimmerThreshold,
+               now===undefined?null:_crashJolt(-1, now));
 }
 
 

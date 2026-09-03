@@ -31,10 +31,11 @@ try {
     beginOnlineDuel(0xABCD, false);
     if(!_duelNetHold) fail('online entry did not arm the net hold');
     phase = 'dying'; phaseAt = simNow; deathMsg = 'X';   // the duelStep death outcome, minus the collision
-    for(let i=0;i<80;i++) update();                      // crossing at tick 54 (DEATH_DUR), held 26 since
+    const DT = Math.round(DEATH_DUR/TICK_MS), HELD = 26;
+    for(let i=0;i<DT+HELD;i++) update();                  // crossing at DEATH_DUR, held HELD ticks since
     if(phase !== 'dying') fail('held sim left dying -> ' + phase + ' (rebuilt locally)');
-    const exp1 = 1 + Math.floor(26/_HALT_RE);            // the crossing announce + one per period held
-    if(halts() !== exp1) fail('held 26 ticks emitted ' + halts() + ' duelHalt != ' + exp1);
+    const exp1 = 1 + Math.floor(HELD/_HALT_RE);          // the crossing announce + one per period held
+    if(halts() !== exp1) fail('held ' + HELD + ' ticks emitted ' + halts() + ' duelHalt != ' + exp1);
     for(let i=0;i<2*_HALT_RE;i++) update();              // two more full periods
     if(halts() !== exp1+2) fail('re-announce cadence off (halts ' + halts() + ' != ' + (exp1+2) + ')');
     ok('online death holds in dying and re-announces duelHalt every _HALT_RE ticks');
@@ -100,7 +101,7 @@ try {
     if(_duelNetHold) fail('local duel armed the net hold');
     simEvents.length = 0;
     phase = 'dying'; phaseAt = simNow; deathMsg = 'X';
-    for(let i=0;i<80;i++) update();
+    for(let i=0;i<DT+HELD;i++) update();
     if(phase === 'dying') fail('local duel death never rebuilt (held without a net session)');
     if(halts() !== 0) fail('local duel emitted duelHalt');
     ok('a local duel death still rebuilds immediately (control)');

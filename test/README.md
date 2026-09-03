@@ -84,6 +84,22 @@ below. Pass `opts.director` to replace the autopilot, `opts.capture` to snapshot
 diverged tick's state and input logs, `opts.desyncProbe` to classify each product
 desync verdict as stale-vs-real against the ring-agreement history.
 
+   Two directors ship alongside the autopilot. `collider` drives both snakes head-on
+   into deaths (respawn/boundary coverage). `jouster` does the opposite of the
+   autopilot's clearance rule: it puts the two snakes in ADJACENT opposing lanes one
+   cell apart, boosting down the lane and braking into the turns, so they pass at
+   arm's length over and over -- the only way the driver ever stages a NEAR MISS, and
+   therefore the only way the windswept steal is reachable at all. When an item comes
+   loose the nearer snake chases it (ties break to P0, so they do not kill each other
+   over it), which keeps the sim's one-loose-item-at-a-time cooldown from parking the
+   whole rule set after the first blow.
+
+   `opts.ws: {A, B}` stocks the two wardrobes the production way -- written into
+   `cfg.wornItems` / the peer profile, with the lists then derived by the real
+   `_duelWsLists` -- and `opts.flushFx` runs the browser's presentation half (the
+   2-tick `_sfxQ`/`_fxQ` queues) inside the tick loop, which is what makes the pickup
+   write-back observable as `wornA`/`wornB` and `wsOwnBad`.
+
 ### duel-warn.js  (FAST tier -- the CONNECTION LOST banner guard)
 
 Drives the real receive path with crafted refused packets and asserts the banner text
@@ -97,7 +113,7 @@ this banner, so the debounce drops no real signal.
 
 ### duel-desync.js  (REGRESSION tier -- the boost-lockstep guard)
 
-Runs five scenarios through the driver and FAILS if a boosting duel does not stay
+Runs six scenarios through the driver and FAILS if a boosting duel does not stay
 in lockstep. This is the coverage the dir-only convergence test (`relay-sim.js`)
 never had: it never boosts, so the boost path shipped a desync no test could see.
 
@@ -119,11 +135,23 @@ never had: it never boosts, so the boost path shipped a desync no test could see
     headroom noburst same gap, apply disabled   -- RED control: rollbacks MUST appear
                                                    (minRb), proving the burst lane is
                                                    load-bearing, not vacuously green
+    windswept        jousting passes + 5% loss  -- the near-miss steal end to end. Flies
+                                                   the `jouster` director (the autopilot
+                                                   keeps two cells of clearance, so under
+                                                   it a near miss never happens at all)
+                                                   and asserts a blow AND a completed
+                                                   pickup occurred (expectWs), that both
+                                                   sims agree on the whole steal state,
+                                                   and -- with flushFx running the 2-tick
+                                                   presentation queues inside the loop --
+                                                   that the per-device wardrobe write-back
+                                                   moved the gear both ways (wsOwnBad 0)
 
 Fail gate (any one trips it): a local-head jump, a first-divergence, non-convergence
 at the end, a product desync verdict on either client, a session-end exit, the
-per-lane rollback bounds (maxRb / minRb), the start-sync gates (expectSync), or the
-level/speed-round gates (expectLevel / expectSpeed).
+per-lane rollback bounds (maxRb / minRb), the start-sync gates (expectSync), the
+level/speed-round gates (expectLevel / expectSpeed), or the windswept gates
+(expectWs, wsSame, wsOwnBad).
 
 ### duel-boundary.js  (REGRESSION tier -- the level-boundary guard)
 
@@ -264,6 +292,12 @@ run when tuning the rollback constants.
     rb / resim    rollbacks / re-simmed ticks (cost of the deferred-rollback design)
     lost          input records that never arrived (loss window exercised)
     levelReached  highest duel level the match got to
+    wsBlows       near-miss rolls that knocked a windswept item off a snake
+    wsSteals      of those, the ones a snake then ran over and took (a completed steal)
+    wsSame        both sims end on the SAME steal state: both worn lists AND the loose item
+    wsOwnBad      wardrobes that disagree with the sim (each id the sim says P0 wears must
+                  be on the HOST device and gone from the joiner's, and vice versa); null
+                  unless flushFx ran, since the write-back is presentation-side
     desyncProbe   {stale, real, unknown}: each desync verdict classified against the
                   settled ring-agreement history (stale = peer's frozen hash was
                   rewritten by a later rollback = a false positive)
