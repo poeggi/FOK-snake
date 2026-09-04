@@ -435,8 +435,9 @@ function tourneyRows(){
     if(!_tt){
         const ok = netTourneyOk();
         rows.push({ t:'CREATE TOURNAMENT', en:ok, act:() => tourneyCreate(_ttUi.stakes) });
-        rows.push({ t:'ITEM STAKES: ' + (_ttUi.stakes ? 'ON' : 'OFF'), en:ok, lr:true,
-                    note:_ttUi.stakes ? '(ITEMS CHANGE HANDS)' : '(FOR FUN)',
+        // The label names what the toggle does, so this row takes no note: a note is drawn
+        // at a fixed x and a row this long runs straight through that column.
+        rows.push({ t:'ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'), en:ok, lr:true,
                     act:() => { _ttUi.stakes = !_ttUi.stakes; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
         rows.push({ t:'JOIN BY CODE', en:ok, act:() => _entryOpen('tcode') });
         for(const l of tourneyLobbyList().slice(0, 6)){

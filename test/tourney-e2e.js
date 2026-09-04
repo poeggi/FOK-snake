@@ -377,14 +377,14 @@ async function lobby(){
     // Nothing held yet: the rows are the three offers plus BACK, and the announce is empty
     // because no lobby exists to announce.
     const r0 = C[1].rows();
-    A(r0.length === 4 && r0[0].t === 'CREATE TOURNAMENT' && r0[1].t === 'ITEM STAKES: OFF'
+    A(r0.length === 4 && r0[0].t === 'CREATE TOURNAMENT' && r0[1].t === 'ITEM STAKES (WINDSWEPPING): OFF'
       && r0[2].t === 'JOIN BY CODE' && r0[3].t === 'BACK',
       '1: an empty lobby offers ' + r0.map(x => x.t).join('/'));
     A(r0.every(x => x.en), '1: the tournament rows are greyed against a 4.1 server');
     C[1].draw();
 
     C[0].pick('ITEM STAKES');                  // stakes are the host's call, off by default
-    A(C[0].rows()[1].t === 'ITEM STAKES: ON', '1: the stakes row did not toggle');
+    A(C[0].rows()[1].t === 'ITEM STAKES (WINDSWEPPING): ON', '1: the stakes row did not toggle');
     await C[0].pick('CREATE TOURNAMENT');
     await settleAsync();
     const t0 = C[0].tt();

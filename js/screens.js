@@ -1589,7 +1589,7 @@ function drawTourneyLobby(){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
         if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
         else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
-        else ct('2 TO ' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
+        else ct('2 - ' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
         _ttDrawRows(84, 26);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
         // real message -- both at that band would overdraw each other.
@@ -1606,10 +1606,10 @@ function drawTourneyLobby(){
     (t.players || []).slice(0, tourneyMax()).forEach((p, i) => {
         const me = p && p.id === getPlayerId();
         ct((p && p.id === t.host ? '* ' : '') + String((p && p.name) || '').toUpperCase().slice(0, 15),
-           CW/2, 100 + i * 14, me ? '#7fff7f' : '#aaa', FONT.HINT);
+           CW/2, 100 + i * 18, me ? '#7fff7f' : '#aaa', FONT.MENU);
     });
     ct(n + (n === 1 ? ' PLAYER' : ' PLAYERS') + ' - ' + _ttMatches(n) + ' MATCHES IN ROUND 1'
-       + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, 100 + tourneyMax() * 14 + 8, '#4a7a4a', FONT.HINT);
+       + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, 100 + tourneyMax() * 18 + 6, '#4a7a4a', FONT.HINT);
     _ttDrawRows(272, 26);
     if(ui.msg) drawStatus(ui.msg);
     else if(!host) drawStatus('WAITING FOR THE HOST TO START' + _ttDots());
@@ -1634,17 +1634,20 @@ function drawTourneyBracket(){
         _ttCol('PTS',    CW/2 + 110, 78, '#666', FONT.HINT, 'right');
         _ttCol('DIFF',   CW/2 + 200, 78, '#666', FONT.HINT, 'right');
         rows.slice(0, tourneyMax()).forEach((r, i) => {
-            const y = 96 + i * 15, me = String(r.id) === getPlayerId();
+            const y = 96 + i * 20, me = String(r.id) === getPlayerId();
             // The advancing half is what everyone is actually reading the table for.
             const up = adv.length ? adv.indexOf(String(r.id)) >= 0 : (i < Math.max(2, Math.ceil(rows.length / 2)));
             const col = me ? '#7fff7f' : up ? '#ffd700' : '#888';
-            _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.HINT);
-            _ttCol(_ttName(r.id).slice(0, 15),              CW/2 - 180, y, col, FONT.HINT);
-            _ttCol(String(r.pts),                           CW/2 + 110, y, col, FONT.HINT, 'right');
-            _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.HINT, 'right');
+            _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.MENU);
+            _ttCol(_ttName(r.id).slice(0, 15),              CW/2 - 180, y, col, FONT.MENU);
+            _ttCol(String(r.pts),                           CW/2 + 110, y, col, FONT.MENU, 'right');
+            _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.MENU, 'right');
         });
         if(!rows.length) ct('NO MATCHES SETTLED YET' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     } else {
+        // The bracket keeps the smaller size the standings just left behind: a node draws a
+        // whole composed line (two names, then the result), which at menu size runs off the
+        // canvas, where the standings draw one short column each.
         (t.bracket || []).slice(0, 13).forEach((nd, i) => {
             const y = 82 + i * 15, live = String(nd.nid) === cur, st = String(nd.state || 'pending');
             // Six node states, three readings: one is being played, one produced a result,
