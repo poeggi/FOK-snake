@@ -373,13 +373,13 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _applyHello({api:'4.2'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.2: the same version must read as up to date';
+    _applyHello({api:'4.3'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.3: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
     // without it _netOk() is false and both halves of the assertion pass vacuously.
     const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==2 || !netTourneyOk()) throw 'a same-major 4.2 server must open the tournament gate';
+    if(netSrvMinor()!==3 || !netTourneyOk()) throw 'a same-major 4.3 server must open the tournament gate';
     // The tournament gate is a >= 4.1 gate, not an equality: a server that has tournament.php
     // but not the hello nets field must keep serving tournaments.
     _applyHello({api:'4.1'});
@@ -392,7 +392,7 @@ runTest('SMOKE-NET', `
     _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
     if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
     globalThis.fetch=_oFetchT;
-    _applyHello({api:'4.3'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:'4.4'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible

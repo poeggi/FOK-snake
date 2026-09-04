@@ -86,6 +86,60 @@ runTest('SMOKE-UI', `
     entryMode='score'; phase='menu';
     log('duel submenu + friend/invite screens render ok');
 
+    // TOURNAMENT screens draw, and the lobby roster reads like the FRIENDS list: an id on
+    // EVERY row plus a name column beside it, with a dimmed stand-in where a player never set
+    // a name -- which used to leave a blank line where a person was supposed to be.
+    {
+        const oRow=_drawRowName, oItem=menuItem, oCt=ct;
+        let names=[], ids=[], sum=null;
+        const cap=()=>{ names=[]; ids=[]; sum=null;
+            _drawRowName=(nm,y,sel,col)=>{ names.push({nm:nm,y:y,col:col||''}); };
+            menuItem=(t,y)=>{ ids.push({t:t,y:y}); };
+            ct=(t,x,y)=>{ if(/PLAYERS? - /.test(String(t))) sum=y; }; };
+        const rel=()=>{ _drawRowName=oRow; menuItem=oItem; ct=oCt; };
+        phase='tourneyLobby'; _ttUi.sel=0; _ttUi.msg='';
+        _tt={ tid:'t1', code:'PQKKSV', state:'open', host:'aaaa0001', max:8, stakes:false,
+              players:[{id:'aaaa0001',name:'KAI LAPTOP'},{id:'bbbb0002',name:'KAI MOBIL'},{id:'cccc0003',name:''}] };
+        cap(); drawTourneyLobby(); rel();
+        if(names.length!==3) throw 'every player needs a name column, the nameless included: '+names.length;
+        if(names[2].nm!=='NO NAME' || !names[2].col) throw 'a nameless player must get a DIMMED stand-in, not a blank row';
+        if(names[0].col) throw 'a player who HAS a name keeps the ordinary row colour';
+        if(ids[0].t!=='AAAA-0001'||ids[1].t!=='BBBB-0002'||ids[2].t!=='CCCC-0003') throw 'every roster row must show its id';
+        // A FULL room still fits its band: the roster may tighten its pitch, never overrun the
+        // join code above it or the action rows below.
+        _tt.max=10; _tt.players=[];
+        for(let i=0;i<10;i++) _tt.players.push({id:'0000000'+i,name:'PLAYER'+i});
+        cap(); drawTourneyLobby(); rel();
+        if(names.length!==10) throw 'a full room must draw every player';
+        for(let i=1;i<names.length;i++) if(names[i].y<=names[i-1].y) throw 'roster rows must descend';
+        if(names[0].y<88) throw 'the roster must clear the join code: '+names[0].y;
+        if(sum===null||sum<=names[9].y||sum>=266) throw 'the summary sits under the last player and above the action rows: '+sum;
+        // The other three screens draw at all, which nothing covered before.
+        _tt.state='running'; _tt.round=1; _tt.cursor='';
+        _tt.standings=[{id:'00000000',pts:2,diff:3,rank:1}];
+        _tt.schedule=[{nid:'r1m1',players:['00000000','00000001'],state:'settled',winner:'00000000'}];
+        phase='tourneyBracket'; drawTourneyBracket();
+        _tt.round=2; _tt.bracket=[{nid:'r2m1',players:['00000000','00000001'],state:'pending'}]; drawTourneyBracket();
+        _tt.roles={ round:2, match:1, of:1, nid:'r2m1', hm:2, players:['00000000','00000001'], you:'play', names:{} };
+        phase='tourneyCeremony'; drawTourneyCeremony();
+        _tt.roles.you='spectate'; drawTourneyCeremony();
+        _tt.state='done'; _tt.podium=['00000000','00000001'];
+        phase='tourneyPodium'; drawTourneyPodium();
+        // A tournament match ends on the SAME duelOver screen as any other duel, and there
+        // it must not offer a rematch: the bracket says what comes next, so a vote taken
+        // here could never be honoured.
+        const oYN=drawConfirmYesNo; let yn=0; drawConfirmYesNo=()=>{ yn++; };
+        simCommand({t:'startDuel', seed:0xd0e1});
+        phase='duelOver'; duelWinner=0; phaseAt=simNow-10000;
+        drawDuelBoard(simNow);
+        if(yn) throw 'a tournament match offered a 1:1 rematch vote';
+        _tt=null; drawDuelBoard(simNow);
+        if(yn!==1) throw 'an ordinary 1:1 lost its PLAY AGAIN vote';
+        drawConfirmYesNo=oYN; simCommand({t:'phase',phase:'menu'});
+        _tt=null; _ttUi.sel=0; phase='menu';
+        log('tournament screens ok: roster rows carry id + name, nameless players get a dimmed stand-in, a full room stays inside its band, and a tournament match ends without a rematch vote');
+    }
+
     // Multi-page newspaper: render and flip pages without error.
     phase='news'; _newsAt=0; newsPage=0; drawNews(1000);
     press('ArrowRight'); if(newsPage!==1) throw 'news: LEFT/RIGHT did not flip pages';

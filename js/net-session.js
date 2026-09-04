@@ -519,7 +519,7 @@ async function _netRequestStart(s, reason){
         // WHILE in game and is not.
         if(s.role === 'host'){
             const g = { t:'go', why:(reason === 'rematch') ? 'rematch' : 'match',
-                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:1,
+                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:_duelLvl(s.lvl0),
                         hm:s.hearts|0, sk:s.stakes ? 1 : 0 };
             if(theta != null) g.bth = Math.round(theta);
             _netTxShip(s, g);
@@ -538,7 +538,7 @@ async function _netRequestStart(s, reason){
         // the echo lands or the deadline kills. No !inGame guard: a rematch happens WHILE in game.
         _netArmBegin(s, s.startPts, () => {
             s.lvlPending = false;   // this boundary is done: the next OK press may open the level after it
-            s.lvl = 1;              // the level line restarts with the match (see _netStartNextLevel)
+            s.lvl = _duelLvl(s.lvl0);   // the level line restarts AT THE MATCH'S OWN LEVEL, which is 1 outside a tournament (see _netStartNextLevel)
             beginOnlineDuel(s.seed, true);
         });
     };
@@ -753,6 +753,19 @@ function _netHandleParsed(m, srcIdx){
             const sk = !netSpectating() && !!m.sk;
             if(s.stakesWant != null && sk !== s.stakesWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
             s.stakes = sk;
+            // The STARTING LEVEL rides the match go beside the cap, and is adopted the same
+            // way. It matters more than either: the board is a pure function of (seed, level),
+            // so two sides that opened on different levels are playing two different games and
+            // would read as a desync from tick 0. Outside a tournament it is always 1; the
+            // round ladder is the only thing that raises it, and there a preset exists, so a
+            // go that disagrees is a protocol fault rather than a difference to absorb.
+            // A level/respawn/resume go carries the level being PLAYED, which has moved past
+            // the match's own by then -- only a match or rematch opens the line.
+            if(m.why === 'match' || m.why === 'rematch'){
+                const lv0 = _duelLvl(m.lvl);
+                if(s.levelWant != null && lv0 !== s.levelWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
+                s.lvl0 = lv0; s.lvl = lv0;
+            }
             s.ctlEpoch = ep;
             s.seed = (m.seed>>>0) || s.seed;
             // A SPECTATOR pushes every boundary's origin its own bias into the future, so its sim

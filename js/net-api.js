@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 2;   // built against 4.2 (hello `nets`: we report our own public address in BOTH families); 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 3;   // built against 4.3 (the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears); 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -760,7 +760,7 @@ async function _netPollOnce(){
     // during a match either -- _netSess.game short-circuits above, so the eight people
     // watching hold nothing while they watch.
     const held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId'
-               || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
+               || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyRound' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;

@@ -339,6 +339,18 @@ Run any of them directly, or the whole regression tier:
 Sweeps wire profiles and reports latency/rollback cost. Not in the default suite;
 run when tuning the rollback constants.
 
+### tourney-full.js  (on-demand -- the whole tournament ladder)
+
+    bash test/checks.sh --tourney    # or: node test/tourney-full.js
+
+Ten real clients -- the player cap -- play all 27 matches of a 20+4+2+1 bracket, from
+the join code to the podium, on the same scripted world (`tourney-world.js`) that
+`tourney-e2e.js` drives on every `--full`. That suite owns the failure modes at six
+clients; this one owns the things only a full-length ladder has: a break at every round
+boundary (left by the host, by a forfeit during it, and by its own timeout), the level
+walking up one per round, the bracket halving, and all four stage captions in a single
+run. Not in the default tier -- run it after any change to the tournament flow.
+
 ## Metrics glossary
 
     converged     both sims end on ONE identical world (tick + full-state hash)

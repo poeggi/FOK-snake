@@ -191,7 +191,10 @@ function _netMkSess(peer, role){
              // first side and nothing anywhere can see that the two disagreed.
              // heartsWant/stakesWant are PRESETS (a tournament roles sheet): a go that
              // contradicts one is a protocol fault and ends the match.
+             // lvl0 is the level the MATCH opens at and lvl the one being played: a rematch
+             // restarts at lvl0, not wherever the last one got to.
              hearts:START_LIVES, stakes:true, heartsWant:null, stakesWant:null,
+             lvl0:1, levelWant:null,
              // Tournament matches and every spectator link are P2P-ONLY: the deprecated
              // server relay is not an acceptable transport for them (see _netRelayStart).
              p2pOnly:false,

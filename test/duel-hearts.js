@@ -1,7 +1,8 @@
-// The heart cap and the item stakes are PER-MATCH parameters, negotiated on the wire and
-// constant for the match's lifetime. An ordinary duel and a tournament final run at
-// START_LIVES; tournament round and knockout matches run at 2. Stakes off means a steal is
-// real on the board and nothing leaves the room.
+// The heart cap, the item stakes and the STARTING LEVEL are PER-MATCH parameters, negotiated
+// on the wire and constant for the match's lifetime. An ordinary duel and a tournament final
+// run at START_LIVES; tournament round and knockout matches run at 2. Stakes off means a
+// steal is real on the board and nothing leaves the room. An ordinary duel opens at level 1
+// and the tournament round ladder is the only thing that opens one deeper.
 //
 // The point of the design, and what this suite pins down:
 //   * ONE sim. The cap changes a number the existing rules already read (p.lives against a
@@ -14,6 +15,11 @@
 //     H2 lane below then gives the 2-heart rules a golden of their own.
 //   * A cap off the wire is untrusted: anything outside 1..START_LIVES reads as the default,
 //     so a malformed or absent hm can never hand a player extra lives.
+//   * The STARTING LEVEL is the same kind of parameter with the opposite standing: the board
+//     is a pure function of (seed, level) and `level` is a HASHED field, so unlike the cap it
+//     is agreed state -- two sides that opened on different levels are playing two different
+//     games from tick 0. Section G2 pins down both halves: the sim opens where it is told,
+//     and a go that contradicts the roles sheet ends the match rather than being absorbed.
 //   * STAKES are the same kind of parameter and ride the same packet: one host-authored bit,
 //     adopted before tick 0, absent reading as OFF. They cannot be left to each side to work
 //     out for itself -- a disagreement is silent on both screens, and the only place it ever
@@ -38,7 +44,7 @@ const GOLDEN_DUEL_H2 = '78e8513a:7575';
 // driven for real in section G; this catches the other one, which sits behind an awaited
 // server round trip that a synchronous suite cannot reach.
 const NS = fs.readFileSync(path.join(__dirname, '..', 'js', 'net-session.js'), 'utf8');
-const GO_FIELDS = ['hm', 'sk'];
+const GO_FIELDS = ['hm', 'sk', 'lvl'];
 const builders = NS.match(/\{\s*t:'go',[^}]*\}/g) || [];
 const missing = builders.map(g => [g, GO_FIELDS.filter(f => !new RegExp('\\b' + f + '\\s*:').test(g))])
                         .filter(x => x[1].length);
@@ -258,6 +264,67 @@ const driver = `
     A(badSk.sess===null || _netSess===null, 'a go contradicting the roles sheet stakes was accepted');
     A(_netLb.msg==='MATCH SETUP MISMATCH', 'the stakes mismatch did not surface: '+String(_netLb.msg));
     R.steps.push('a go whose stakes contradict the roles sheet ends the match too');
+
+    // ---- G2) the STARTING LEVEL: the third parameter, and the only AGREED one ----
+    // The cap and the stakes are config: adopted before tick 0 and deliberately out of the
+    // lockstep hash. The level cannot be, and must not be: the board is built from it.
+    A(RB_HASH_DUEL.indexOf('level')>=0,
+      'the level left the lockstep hash -- two sides opening on different boards would go unnoticed');
+    const lvlOf = (l)=>{ simCommand(l===undefined ? {t:'startDuel', seed:777, net:true}
+                                                  : {t:'startDuel', seed:777, net:true, lvl:l});
+                         return level; };
+    A(lvlOf(3)===3, 'a duel told to open at level 3 opened at '+level);
+    A(lvlOf(MAX_LEVELS)===MAX_LEVELS, 'a duel could not open on the last level');
+    A(lvlOf(1)===1, 'an ordinary duel did not open at level 1');
+    for(const bad of [undefined, 0, -1, MAX_LEVELS+1, 99, NaN, null])
+      A(lvlOf(bad)===1, 'a starting level of '+String(bad)+' was not rejected: got '+level);
+    R.steps.push('level: adopted 1..'+MAX_LEVELS+' from the startDuel command, anything else opens level 1');
+
+    // ONE sim, one board builder: the level is a PARAMETER of the shared duel start, so the
+    // same (seed, level) is the same board every time and a different level is a different one.
+    const board = (seed, l)=>{ simCommand({t:'startDuel', seed, net:true, lvl:l});
+                               return JSON.stringify([level, bars, gem, players.map(p=>p.snake)]); };
+    A(board(4242,5)===board(4242,5), 'the same (seed, level) built two different boards');
+    A(board(4242,5)!==board(4242,1), 'level 5 built the level-1 board: the parameter never reached the sim');
+    R.steps.push('the board stays a pure function of (seed, level)');
+
+    // The wire: the MATCH go carries the level the match OPENS at, the joiner adopts it
+    // clamped, and a preset it contradicts ends the match exactly like a wrong cap.
+    const joinLvl = (lv, want)=>{
+      const out = mkSess('peer');
+      inGame = false;                       // a 'match' go is refused against a running game
+      _netSess.levelWant = (want===undefined) ? null : want;
+      phase='lobby'; _netLb.msg='';
+      const m = { t:'go', why:'match', seed:777, startPts:Date.now()+250, epoch:9, bth:0,
+                  hm:START_LIVES, sk:0 };
+      if(lv!==undefined) m.lvl = lv;
+      _netHandleMsg(JSON.stringify(m));
+      return { sess:_netSess, echo: out.filter(o=>o.a===1 && o.t==='go').pop() };
+    };
+    const rl = joinLvl(3);
+    A(rl.sess && rl.sess.lvl0===3 && rl.sess.lvl===3,
+      'the joiner did not open the match on the level the go named: '+JSON.stringify(rl.sess && [rl.sess.lvl0, rl.sess.lvl]));
+    A(rl.echo && rl.echo.lvl===3, 'the echo verifier does not carry lvl back, so the agreement is not byte-checked');
+    A(joinLvl(99).sess.lvl0===1, 'the joiner adopted an out-of-range starting level off the wire');
+    A(joinLvl(undefined).sess.lvl0===1, 'a go with no lvl did not open the match at level 1');
+    A(joinLvl(3,3).sess.lvl0===3, 'a go matching the roles sheet level was refused');
+    const badLv = joinLvl(2, 3);
+    A(badLv.sess===null || _netSess===null, 'a go contradicting the roles sheet level was accepted');
+    A(_netLb.msg==='MATCH SETUP MISMATCH', 'the level mismatch did not surface: '+String(_netLb.msg));
+    R.steps.push('joiner: adopts the match level off the go (clamped, echoed), and refuses one the sheet contradicts');
+
+    // A LEVEL boundary is not a match opening. Its lvl is the level being PLAYED, which has
+    // moved past the one the match started on -- reading it as the match's own would make a
+    // tournament rematch restart wherever the last one got to, and would read as a mismatch
+    // against the very preset that is correct.
+    mkSess('peer');
+    _netSess.lvl0 = 3; _netSess.lvl = 3; _netSess.levelWant = 3;
+    phase='lobby'; _netLb.msg='';
+    _netHandleMsg(JSON.stringify({ t:'go', why:'level', seed:777, startPts:Date.now()+250, epoch:11,
+                                   bth:0, hm:START_LIVES, sk:0, lvl:4 }));
+    A(_netSess && _netSess.lvl0===3, 'a level boundary rewrote the level the match opened at');
+    A(_netLb.msg!=='MATCH SETUP MISMATCH', 'a level boundary inside a preset match read as a setup mismatch');
+    R.steps.push('a level boundary carries the level being played, never the one the match opened at');
 
     // ---- H) stakes off: the mechanic plays, nothing leaves the room ----
     mkSess('host');

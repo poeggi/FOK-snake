@@ -32,8 +32,8 @@ case "${1:-}" in
     ""|--fast)              TIER=--fast ;;
     --full|--regression)    TIER=--full ;;
     --profile|--netprofile) TIER=--full ;;
-    --live)                 TIER=--fast ;;
-    *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile|--live]"; exit 2 ;;
+    --live|--tourney)       TIER=--fast ;;
+    *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile|--live|--tourney]"; exit 2 ;;
 esac
 
 node test/run-suites.js "$TIER" "${@:2}"
@@ -55,6 +55,16 @@ fi
 if [ "${1:-}" = "--netprofile" ]; then
     echo "[checks] two-client duel netcode profile"
     node test/duel-profile.js
+fi
+
+# On-demand FULL TOURNAMENT LADDER (NOT part of the default run): bash test/checks.sh
+# --tourney. tourney-e2e.js already gates every --full with six clients and every failure
+# mode; this walks a full field of ten through every match of every round instead, which is
+# the only way the round ladder, the break between each pair of rounds, the level walking up
+# per round and all four stage captions are exercised in one run.
+if [ "${1:-}" = "--tourney" ]; then
+    echo "[checks] full tournament ladder, ten clients"
+    node test/tourney-full.js
 fi
 
 # On-demand LIVE server contract (NOT part of the default run, and never in CI):

@@ -316,6 +316,12 @@ let _duelHeartsMax = START_LIVES;
 // A cap off the wire is untrusted input: anything outside 1..START_LIVES reads as the
 // default, so a malformed or absent hm can never hand a player extra lives.
 function _duelHearts(h){ h = h|0; return (h >= 1 && h <= START_LIVES) ? h : START_LIVES; }
+// The level a match OPENS at, same treatment: negotiated on the 'go', untrusted off the
+// wire, anything outside 1..MAX_LEVELS reads as level 1. A tournament round ladder is the
+// only thing that ever sets it above 1 -- and it is a PARAMETER of the one shared duel
+// start, never a second way to start a duel: the board stays a pure function of
+// (seed, level), which is exactly why the two sides must agree on the number.
+function _duelLvl(l){ l = l|0; return (l >= 1 && l <= MAX_LEVELS) ? l : 1; }
 // Builds one player's worn windswept state from an untrusted list. Ids the cosmetics tables
 // do not know are dropped rather than trusted (the list arrives from a peer profile, and an
 // unknown id would have no steal chance to roll against), and so is a repeat of an id
@@ -346,7 +352,7 @@ const _HALT_RE = 6;   // held-death re-announce period in engine ticks (100ms) -
 // ws = the two players' worn windswept item ids, [P0, P1], already in the fixed table order
 // (_wsWorn on main). Both clients build BOTH lists from the same two exchanged profiles, so
 // no list crosses the wire; ids the tables do not know are dropped rather than trusted.
-function startDuel(seed, ws) {
+function startDuel(seed, ws, lvl) {
     // Tick zero. simTick free-runs from page load, so without this two online
     // clients would start a duel with wildly different counters -- and every piece
     // of state stamped from simNow (phaseAt, gemAt, spawnAt...) would
@@ -374,7 +380,7 @@ function startDuel(seed, ws) {
     const s0 = _wsSeed(ws && ws[0]), s1 = _wsSeed(ws && ws[1]);
     _ws = { w:[s0.w, s1.w], u:[s0.u, s1.u], it:null };
     gameSeed = (seed!=null) ? (seed>>>0) : ((Math.random()*0x100000000)>>>0); seedRng(gameSeed);
-    level = 1; duelWinner = -1;
+    level = _duelLvl(lvl); duelWinner = -1;
     players = [ _mkDuelPlayer(6, Math.floor(ROWS/2)-4,  1),      // P0 left, heading right
                 _mkDuelPlayer(COLS-7, Math.floor(ROWS/2)+4, -1) ];   // P1 right, heading left (mirror)
     _duelBeginLevel();
@@ -1044,7 +1050,7 @@ function simCommand(m){
         // (see _duelNetHold). Local duels send no flag and keep the immediate rebuild.
         // m.hearts is the negotiated cap (absent = START_LIVES). Set BEFORE startDuel:
         // _mkDuelPlayer reads it for the opening life count.
-        case 'startDuel': _duelNetHold = !!m.net; _duelHeartsMax = _duelHearts(m.hearts); startDuel(m.seed, m.ws); break;
+        case 'startDuel': _duelNetHold = !!m.net; _duelHeartsMax = _duelHearts(m.hearts); startDuel(m.seed, m.ws, m.lvl); break;
         // dir/boost carry an optional player index (m.p). In duel mode they route to
         // players[p]; classic mode keeps the original single-snake path untouched.
         // A remote peer's input will arrive as these SAME commands with p = their index.

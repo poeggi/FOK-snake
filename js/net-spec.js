@@ -362,7 +362,7 @@ function _spCtxBuild(){
     const me = getPlayerId();
     return { t:'sctx', g:_spGen | 0, hops:1, pids:(host ? [me, s.peer] : [s.peer, me]),
              seed:s.seed >>> 0, startPts:s.startPts || 0, ep:_netMyEpoch(),
-             hm:s.hearts, stakes:!!s.stakes,
+             hm:s.hearts, stakes:!!s.stakes, lvl:_duelLvl(s.lvl),
              ws:_duelWsLists(host), names:netPlayerNames(), look:netDuelLook() };
 }
 // One envelope. `p` is the AUTHOR's player index -- explicit, because a spectator
@@ -571,6 +571,10 @@ function _spBoot(){
     _netSess.p2pOnly = true;
     _netSess.seed = ctx.seed >>> 0;
     _netSess.hearts = _duelHearts(ctx.hm);
+    // The level the match is ON, not the one it started at: a spectator boots straight into
+    // the board it is about to be shown. The checkpoint 'rs' would correct it a moment later,
+    // and a moment of the wrong level is a moment of somebody else's game.
+    _netSess.lvl = _duelLvl(ctx.lvl);
     _netSess.stakes = false;             // a spectator claims nothing: no item ever changes hands here
     _netSess.epoch = ctx.ep | 0;
     _netSess.startPts = (ctx.startPts || 0) + SPEC_DELAY_MS * _spHops;

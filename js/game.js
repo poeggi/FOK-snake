@@ -757,6 +757,7 @@ const CONTROLS = {
     invite:       ['esc','ok','dpad'],
     tourneyLobby:    ['esc','ok','dpad'],
     tourneyBracket:  ['esc','ok','dpad'],
+    tourneyRound:    ['esc','ok','dpad'],
     tourneyCeremony: ['esc','ok','dpad'],
     tourneyPodium:   ['esc','ok','dpad'],
     // A duel's local player gets exactly the same controls as a classic player:
@@ -825,7 +826,8 @@ const SCREENS = {
     // freeze like every other menu. The lobby and the ceremony animate their waiting dots,
     // which is the only thing on them that moves while nothing happens.
     tourneyLobby:    { d:()=>drawTourneyLobby(),    hud:false, freeze:true, anim:()=> true },
-    tourneyBracket:  { d:()=>drawTourneyBracket(),  hud:false, freeze:true },
+    tourneyBracket:  { d:()=>drawTourneyBracket(),  hud:false, freeze:true, anim:()=> true },
+    tourneyRound:    { d:()=>drawTourneyRound(),    hud:false, freeze:true, anim:()=> true },
     tourneyCeremony: { d:()=>drawTourneyCeremony(), hud:false, freeze:true, anim:()=> true },
     tourneyPodium:   { d:()=>drawTourneyPodium(),   hud:false, freeze:true },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
@@ -1063,6 +1065,10 @@ function _rbPostRollback(barsChanged, keep){
 // The heart cap THIS match runs under, as negotiated on the go (net-session.js adopts it
 // onto the session before the begin fires). Ordinary duels never set it and get START_LIVES.
 function _duelMatchHearts(){ return _duelHearts(_netSess && _netSess.hearts); }
+// The level THIS match opens at, negotiated the same way on the same packet. Ordinary duels
+// never set it and open at level 1, so single-player, local 1:1 and online 1:1 all still run
+// the one startDuel -- the tournament round ladder only fills in a different number.
+function _duelMatchLvl(){ return _duelLvl(_netSess && _netSess.lvl); }
 // Online duel entry (called by net-session.js when the DataChannel opens on both ends).
 // BOTH clients start the same deterministic sim from the shared seed and run it
 // locally (in-process). There is no host and no authority: each side sends only
@@ -1088,7 +1094,7 @@ function beginOnlineDuel(seed, hosting){
         // sends it again with the fresh seed/startPts.
         _wDuel = true;
         _worker.postMessage(Object.assign({ t:'duelStartNet', seed:seed>>>0,
-            my: hosting ? 0 : 1, ws: _duelWsLists(hosting), hearts: _duelMatchHearts(),
+            my: hosting ? 0 : 1, ws: _duelWsLists(hosting), hearts: _duelMatchHearts(), lvl: _duelMatchLvl(),
             spec: netSpectating(),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 }, _duelClaimArgs(hosting)));
@@ -1101,7 +1107,7 @@ function beginOnlineDuel(seed, hosting){
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
-    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting), hearts:_duelMatchHearts() });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
+    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting), hearts:_duelMatchHearts(), lvl:_duelMatchLvl() });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
     const ca = _duelClaimArgs(hosting);
     if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it

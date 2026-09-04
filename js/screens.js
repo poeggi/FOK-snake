@@ -1410,13 +1410,15 @@ function drawLobby(){
 
 // Friend-row name column: right-aligned so it ends left of the centered ID;
 // long names truncate to 8 chars plus '..' and can never touch the columns.
-function _drawRowName(nm, y, sel){
+// `col` overrides the colour, for a caller drawing a STAND-IN rather than a real name:
+// a placeholder that looked like a name would read as somebody actually called that.
+function _drawRowName(nm, y, sel, col){
     if(!nm) return;
     const disp = nm.length > 10 ? nm.slice(0,8)+'..' : nm;
     // Right edge well CLEAR of the selection marker: the centered ID renders as
     // '> XXXX-XXXX <' whose '>' begins around CW/2-91 (9 id chars + marker).
     ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
-    ctx.textAlign='right'; ctx.fillStyle = sel ? '#7fff7f' : '#888';
+    ctx.textAlign='right'; ctx.fillStyle = col || (sel ? '#7fff7f' : '#888');
     ctx.fillText(disp, CW/2-112, y);
     ctx.textAlign='center';
 }
@@ -1539,9 +1541,18 @@ function drawDuelBoard(now) {
         const _wn=(typeof netPlayerNames==='function')?netPlayerNames():null;
         ctg(win===2?'DRAW!':((_wn?_wn[win]:'PLAYER '+(win+1))+' WINS!'), CW/2, CH/2-70, col, FONT.JUMBO, GLOW.BIG);
         if(players) ct(players[0].score+'  :  '+players[1].score, CW/2, CH/2-40, '#cccccc', FONT.MENU);
-        drawConfirmYesNo('PLAY AGAIN?', quitConfirmSel);
-        if(typeof netWaitingAgain==='function' && netWaitingAgain())
-            ct('WAITING FOR OPPONENT...', CW/2, CH/2+64, '#ffd700', FONT.HINT);
+        // A tournament match has no rematch to offer -- the bracket says what comes next --
+        // so the vote is replaced by what is actually about to happen. Offering it anyway
+        // invited a vote that could not be honoured, on a screen the tournament takes back
+        // by itself a moment later.
+        if(typeof tourneyActive === 'function' && tourneyActive()){
+            ctg('BACK TO THE TOURNAMENT' + _ttDots(), CW/2, CH/2-18, '#ff9900', FONT.MENU, GLOW.TITLE);
+            ctx.save(); ctx.shadowBlur=0; ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT); ctx.restore();
+        } else {
+            drawConfirmYesNo('PLAY AGAIN?', quitConfirmSel);
+            if(typeof netWaitingAgain==='function' && netWaitingAgain())
+                ct('WAITING FOR OPPONENT...', CW/2, CH/2+64, '#ffd700', FONT.HINT);
+        }
     }
     if((cfg.debug|0)>=3) drawTurnDebug();
     _drawDuelWarn();   // last: it must sit over the board, not under it
@@ -1600,16 +1611,31 @@ function drawTourneyLobby(){
     }
     // A lobby we hold. The join code is the whole point of the screen, so it is the
     // biggest thing on it -- somebody is reading it out loud across a room.
-    const n = (t.players || []).length, host = t.host === getPlayerId();
+    const ps = (t.players || []).slice(0, tourneyMax());
+    const n = ps.length, host = t.host === getPlayerId();
     ct('JOIN CODE', CW/2, 46, '#888', FONT.HINT);
     ctg(t.code || '------', CW/2, 72, '#ffd700', FONT.JUMBO, GLOW.BIG);
-    (t.players || []).slice(0, tourneyMax()).forEach((p, i) => {
-        const me = p && p.id === getPlayerId();
-        ct((p && p.id === t.host ? '* ' : '') + String((p && p.name) || '').toUpperCase().slice(0, 15),
-           CW/2, 100 + i * 18, me ? '#7fff7f' : '#aaa', FONT.MENU);
+    // The roster is a FRIENDS list in all but name -- people, by name and id, each with a note
+    // about them -- so it is drawn as one: name column, id centered, note on the right.
+    // The band it sits in is fixed (join code above, action rows below) but the roster is not,
+    // so it is CENTRED in the band and its pitch tightens only as far as a full lobby needs.
+    // Reserving the full-lobby height unconditionally is what left two players sitting above a
+    // hole; a room of ten still has to fit, hence the pitch and not a fixed row height.
+    const TT_TOP = 100, TT_BOT = 252, TT_SUM = 18;   // TT_SUM: the summary line's drop below the last row
+    const rowH = Math.max(15, Math.min(26, Math.floor((TT_BOT - TT_TOP) / Math.max(n, 1))));
+    const listY = TT_TOP + Math.max(0, Math.round((TT_BOT - TT_TOP - (n - 1) * rowH - TT_SUM) / 2));
+    ps.forEach((p, i) => {
+        const y = listY + i * rowH, nm = String((p && p.name) || '').toUpperCase();
+        // The ID is what every row is guaranteed to have, so it is what every row shows: a
+        // player who never set a name used to be an entirely blank line in the roster.
+        menuItem(fmtFriendId(String((p && p.id) || '')), y, false);
+        _drawRowName(nm || 'NO NAME', y, !!p && p.id === getPlayerId(), nm ? null : '#555');
+        if(p && p.id === t.host) ct('HOST', CW/2 + 180, y, '#ffd700', FONT.HINT);
     });
-    ct(n + (n === 1 ? ' PLAYER' : ' PLAYERS') + ' - ' + _ttMatches(n) + ' MATCHES IN ROUND 1'
-       + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, 100 + tourneyMax() * 18 + 6, '#4a7a4a', FONT.HINT);
+    const mn = _ttMatches(n);
+    ct(n + (n === 1 ? ' PLAYER' : ' PLAYERS') + ' - ' + mn + (mn === 1 ? ' MATCH' : ' MATCHES')
+       + ' IN ROUND 1' + (t.stakes ? ' - ITEM STAKES ON' : ''),
+       CW/2, listY + (n - 1) * rowH + TT_SUM, '#4a7a4a', FONT.HINT);
     _ttDrawRows(272, 26);
     if(ui.msg) drawStatus(ui.msg);
     else if(!host) drawStatus('WAITING FOR THE HOST TO START' + _ttDots());
@@ -1657,6 +1683,9 @@ function drawTourneyBracket(){
                       : st === 'frozen' ? '#ff5555' : st === 'void' ? '#666' : '#888';
             _ttCol(String(nd.nid || '').toUpperCase(), CW/2 - 210, y, col, FONT.HINT);
             _ttCol(_ttMatchLine(t, nd.nid, nd),        CW/2 - 140, y, col, FONT.HINT);
+            // Each stage is one level deeper than the one before it, so the bracket can say
+            // what a match will be played on before anybody plays it.
+            if(nd.lvl) _ttCol('L' + (nd.lvl | 0), CW/2 + 205, y, col, FONT.HINT, 'right');
         });
         if(!(t.bracket || []).length) ct('THE BRACKET IS BEING DEALT' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     }
@@ -1683,6 +1712,85 @@ function _ttMatchLine(t, nid, nd){
     if(nd.winner) return pair + '  ' + _ttName(nd.winner) + ' WON';
     return pair;
 }
+// A finished round stops on a scoreboard and waits for the host to clear it. Everything on
+// this screen is the server's: the rows arrive one per participant, already ordered as an
+// elimination ladder and already marked with who is through, so the cut drawn across the
+// table is READ off `adv` rather than worked out here -- the client never decides who is in.
+//
+// `stage` is a TOKEN, not a caption: the wording belongs to the client, and a token this
+// build has never heard of has to render as something true rather than as nothing.
+function _ttStage(tok, round){
+    switch(String(tok || '')){
+        case 'group':   return 'GROUP STAGE';
+        case 'quarter': return 'QUARTER FINALS';
+        case 'semi':    return 'SEMI FINALS';
+        case 'final':   return 'THE FINAL';
+    }
+    // 'ko' -- a round of 16 and wider has no common name -- and any token a newer server
+    // invents. Naming a round by its number is always true, which is why it is the fallback.
+    return 'ROUND ' + (round | 0);
+}
+// The board carries its own names, so it does not need the roster to render: a player who
+// left the lobby list behind is still on this table with the name they played under.
+function _ttRowName(r){
+    if(!r) return '?';
+    if(String(r.id) === getPlayerId()) return 'YOU';
+    return String(r.name || '').toUpperCase() || _ttName(r.id);
+}
+function _ttBreakName(b, id){
+    for(const r of ((b && b.rows) || [])) if(r && String(r.id) === String(id)) return _ttRowName(r);
+    return _ttName(id);
+}
+function drawTourneyRound(){
+    const t = tourneyView(), b = t && tourneyBreak();
+    if(!b){ drawTourneyBracket(); return; }
+    drawGrid(); drawOvBg(0.92);
+    // The headline is what is ABOUT to be played, not what just finished: the table below
+    // already says how the last round went, and the thing everybody wants first is whether
+    // they are still in it and what they are walking into.
+    ctg(_ttStage(b.stage, b.next), CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const mt = b.matches | 0, hm = _duelHearts(b.hm);
+    ct('LEVEL ' + (b.lvl | 0) + '  -  ' + mt + (mt === 1 ? ' MATCH' : ' MATCHES')
+       + '  -  ' + hm + (hm === 1 ? ' HEART' : ' HEARTS') + '  -  ' + (b.of | 0) + ' THROUGH',
+       CW/2, 48, '#ffd700', FONT.HINT);
+    ct('W-L-D IS ROUND ' + (b.done | 0) + ' ONLY  -  PTS AND DIFF ARE ROUND 1', CW/2, 64, '#4a7a4a', FONT.HINT);
+    // Hint size, not menu size: five columns and a name do not fit across the canvas at the
+    // size the four-column standings table uses.
+    _ttCol('#',      CW/2 - 215, 80, '#666', FONT.HINT);
+    _ttCol('PLAYER', CW/2 - 195, 80, '#666', FONT.HINT);
+    _ttCol('W-L-D',  CW/2 + 20,  80, '#666', FONT.HINT, 'right');
+    _ttCol('PTS',    CW/2 + 95,  80, '#666', FONT.HINT, 'right');
+    _ttCol('DIFF',   CW/2 + 170, 80, '#666', FONT.HINT, 'right');
+    const rows = (b.rows || []).slice(0, tourneyMax());
+    rows.forEach((r, i) => {
+        const y = 96 + i * 19, me = String(r.id) === getPlayerId();
+        // Four readings in the order they matter: this player forfeited, this is me, this
+        // player is through, this player is not.
+        const col = r.gone ? '#555' : me ? '#7fff7f' : r.adv ? '#ffd700' : '#888';
+        // THE CUT: the line between who is through and who is out, drawn where the server
+        // put it. Sitting it between the last `adv` row and the first that is not is what
+        // stops it from ever disagreeing with the colours above and below it.
+        if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 220, y - 10, 440, 1); }
+        _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 215, y, col, FONT.HINT);
+        _ttCol(_ttRowName(r).slice(0, 14),              CW/2 - 195, y, col, FONT.HINT);
+        _ttCol((r.w | 0) + '-' + (r.l | 0) + '-' + (r.d | 0), CW/2 + 20, y, col, FONT.HINT, 'right');
+        _ttCol(String(r.pts != null ? r.pts : 0),       CW/2 + 95,  y, col, FONT.HINT, 'right');
+        _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 170, y, col, FONT.HINT, 'right');
+        // How far a player got is the only consolation the table has to offer, so an
+        // eliminated row says it rather than simply going quiet.
+        if(r.gone)      _ttCol('GONE', CW/2 + 185, y, '#555', FONT.HINT);
+        else if(!r.adv) _ttCol('OUT R' + (r.until | 0), CW/2 + 185, y, '#666', FONT.HINT);
+    });
+    if(!rows.length) ct('NO STANDINGS' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
+    _ttDrawRows(268, 26);
+    const ui = tourneyUi();
+    if(ui.msg) drawStatus(ui.msg);
+    // Only the host has a button. Everyone else is told whose press they are waiting on --
+    // a board with no explanation and no way off it reads as a game that has stopped.
+    else if(String(b.host || '') !== getPlayerId())
+        drawStatus('WAITING FOR ' + _ttBreakName(b, b.host).slice(0, 12) + _ttDots());
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
 // Between two matches: who is up, at how many hearts, and what this player does about it.
 // It holds until the game itself takes the screen, so nobody is dropped into a duel cold.
 function drawTourneyCeremony(){
@@ -1690,7 +1798,7 @@ function drawTourneyCeremony(){
     if(!r){ drawTourneyBracket(); return; }
     drawGrid(); drawOvBg(0.92);
     const ps = r.players || [], you = String(r.you || 'idle');
-    ct('ROUND ' + (r.round | 0) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''),
+    ct(_ttStage(r.stage, r.round) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''),
        CW/2, 60, '#888', FONT.HINT);
     ctg(_ttName(ps[0]).slice(0, 12), CW/2, 116, '#7fff7f', FONT.TITLE, GLOW.TITLE);
     ct('vs', CW/2, 146, '#666', FONT.MENU);
@@ -1698,10 +1806,13 @@ function drawTourneyCeremony(){
     const hm = _duelHearts(r.hm);
     if(you === 'play'){
         ctg('YOU ARE UP', CW/2, 228, '#ffd700', FONT.JUMBO, GLOW.BIG);
-        ct(hm + (hm === 1 ? ' HEART' : ' HEARTS') + (r.stakes ? '  -  ITEM STAKES ON' : ''), CW/2, 258, '#ffaa44', FONT.HINT);
+        // The level is as much a part of "what am I walking into" as the heart count: a
+        // semi-final opens on a board the player has not seen since their last solo run.
+        ct('LEVEL ' + _duelLvl(r.lvl) + '  -  ' + hm + (hm === 1 ? ' HEART' : ' HEARTS')
+           + (r.stakes ? '  -  ITEM STAKES ON' : ''), CW/2, 258, '#ffaa44', FONT.HINT);
     } else if(you === 'spectate'){
         ctg('YOU SPECTATE', CW/2, 228, '#7fff7f', FONT.JUMBO, GLOW.BIG);
-        ct('THE MATCH REACHES YOU A MOMENT BEHIND THE PLAYERS', CW/2, 258, '#4a7a4a', FONT.HINT);
+        ct('LEVEL ' + _duelLvl(r.lvl) + '  -  A MOMENT BEHIND THE PLAYERS', CW/2, 258, '#4a7a4a', FONT.HINT);
     } else {
         ctg('SIT THIS ONE OUT', CW/2, 228, '#888', FONT.JUMBO, GLOW.TEXT);
     }

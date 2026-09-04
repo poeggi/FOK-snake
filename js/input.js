@@ -310,6 +310,7 @@ const UI_INPUT = {
     // the bottom are drawn and dispatched from the same list, so they can never disagree.
     tourneyLobby: _ttUiInput('duelMenu'),
     tourneyBracket: _ttUiInput('duelMenu'),
+    tourneyRound: _ttUiInput('duelMenu'),
     tourneyPodium: _ttUiInput('duelMenu'),
     tourneyCeremony: {
         // Nothing to choose here: the match is being set up and the next thing to happen

@@ -28,7 +28,10 @@ const TT_MSG_MS     = 6000;
 // came from the server; nothing here is derived except the match-count arithmetic the
 // lobby shows, which is the server's own formula quoted back at the player.
 var _tt = null;
-var _ttUi = { sel:0, msg:'', msgAt:0, stakes:false, busy:false };
+// `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
+// board's own `at` is a stamp from the server's clock, which this screen has no offset to
+// read, while `wait` is a duration and needs none.
+var _ttUi = { sel:0, msg:'', msgAt:0, stakes:false, busy:false, contAt:0 };
 var _ttPend = null;    // a roles sheet waiting for the previous match to leave the screen
 var _ttNid  = '';      // the node we are currently engaged with
 var _ttRep  = null;    // the pending result report {body, at, tries}
@@ -37,12 +40,16 @@ var _ttWant = null;    // the match parameters an inbound answer must be dressed
 var _ttOverAt = 0, _ttCerAt = 0, _ttTry = 0;
 var _ttStateAt = 0, _ttT = null;
 
-const _TT_PHASES = { tourneyLobby:1, tourneyBracket:1, tourneyCeremony:1, tourneyPodium:1 };
+const _TT_PHASES = { tourneyLobby:1, tourneyBracket:1, tourneyRound:1, tourneyCeremony:1, tourneyPodium:1 };
 
 // ---- small helpers -------------------------------------------------------------------
 function tourneyActive(){ return !!_tt; }
 function tourneyView(){ return _tt; }
 function tourneyUi(){ return _ttUi; }
+// The scoreboard between two rounds, or null when no break is open. It is a whole picture
+// in itself -- one row per participant, already ordered and already cut -- so it is handed
+// to the screen as it arrived rather than folded into the standings it partly repeats.
+function tourneyBreak(){ return (_tt && _tt.brk) || null; }
 function tourneyMax(){ return _tt && _tt.max ? (_tt.max|0) : TT_MAX; }
 // Round 1 is SPARSE above four players: every pair up to 4, then the two circulant
 // offsets, which is 2N matches. The lobby quotes this so nobody starts an eight-player
@@ -72,7 +79,8 @@ function _ttName(id){
 // picture, never to the 1:1 menu. '' means "not ours, keep your default".
 function tourneyExitPhase(){
     if(!_tt) return '';
-    return _tt.state === 'done' ? 'tourneyPodium' : 'tourneyBracket';
+    if(_tt.state === 'done') return 'tourneyPodium';
+    return _tt.brk ? 'tourneyRound' : 'tourneyBracket';
 }
 async function _ttPost(action, extra){
     const body = Object.assign({ id: getPlayerId(), action }, extra || {});
@@ -91,7 +99,7 @@ function _ttAdopt(o){
     if(!_tt || _tt.tid !== tid)
         _tt = { tid, code:'', host:'', state:'open', stakes:false, max:TT_MAX, players:[],
                 round:0, cursor:null, schedule:[], bracket:[], standings:[], advancers:[],
-                roles:null, you:'idle', podium:null, frozen:'', reason:'' };
+                roles:null, brk:null, you:'idle', podium:null, frozen:'', reason:'' };
     const t = _tt;
     if(o.code   != null) t.code   = String(o.code).toUpperCase();
     if(o.host   != null) t.host   = String(o.host);
@@ -105,7 +113,32 @@ function _ttAdopt(o){
     if(Array.isArray(o.schedule))  t.schedule  = o.schedule;
     if(Array.isArray(o.bracket))   t.bracket   = o.bracket;
     if(Array.isArray(o.standings)) t.standings = o.standings;
+    // The board is DERIVED on every state read, so an absent key means "this reply does not
+    // talk about breaks" (a lobby event) while an explicit null means "no break is open" --
+    // and that null is the only thing that ever takes the board down without a roles sheet.
+    if(o['break'] !== undefined) _ttSetBreak(o['break'] || null);
     _ttArm(); _uiDirty = true;
+}
+// A round ends on a scoreboard, and the next one starts when the HOST clears it. That makes
+// the board a deadline as well as a picture: the server refuses `continue` until `wait` ms
+// after the break opened, and drops the break itself `auto` ms after that, so a host who
+// closed their browser cannot wedge an evening everybody else is still in.
+function _ttSetBreak(b){
+    const same = !!(_tt.brk && b && (_tt.brk.done | 0) === (b.done | 0));
+    _tt.brk = b || null;
+    if(!b){
+        _ttUi.contAt = 0;
+        if(phase === 'tourneyRound') phase = _tt.state === 'done' ? 'tourneyPodium' : 'tourneyBracket';
+        return;
+    }
+    // The wait runs from the moment WE first saw the board rather than from the moment the
+    // server opened it. Seeing it late costs a second; reading a foreign clock costs a button
+    // that is either dark forever or live immediately. And re-reading the SAME break must not
+    // wind the deadline back, or a press refused a moment ago walks into the same refusal.
+    if(!same) _ttUi.contAt = _msgNow() + Math.max(0, b.wait | 0);
+    // A break we did not already have takes the screen -- from an event or from a state read
+    // alike, which is what makes the round screen survive a missed signal or a reload.
+    if(!same && !inGame && _TT_PHASES[phase] && phase !== 'tourneyPodium') phase = 'tourneyRound';
 }
 async function _ttSync(force){
     if(!_tt) return;
@@ -135,7 +168,7 @@ function _ttDrop(msg){
     if(typeof specNode === 'function') specNode('', '');
     if(typeof specGrant === 'function') specGrant([]);
     _ttDisarm();
-    _ttUi.sel = 0;
+    _ttUi.sel = 0; _ttUi.contAt = 0;
     if(_TT_PHASES[phase]) phase = 'tourneyLobby';
     if(msg) _ttMsg(msg, true); else _uiDirty = true;
 }
@@ -160,8 +193,19 @@ function _ttOnSignal(d){
         case 'standings':
             _tt.standings = d.rows || [];
             _tt.advancers = d.advancers || [];
-            if(_TT_PHASES[phase] && phase !== 'tourneyPodium') phase = 'tourneyBracket';
+            // A break may already be up: the two events describe the same moment from
+            // different distances, and whichever lands second must not undo the other.
+            if(_TT_PHASES[phase] && phase !== 'tourneyPodium' && phase !== 'tourneyRound') phase = 'tourneyBracket';
             _ttSync(true);
+            break;
+        case 'round':
+            // A round ended and the next one waits on the host. The rows arrive one per
+            // participant, already ordered as an elimination ladder and already marked with
+            // who is through, so they are stored whole and drawn as they stand.
+            _ttSetBreak(d);
+            if(Array.isArray(d.advancers)) _tt.advancers = d.advancers;
+            _tt.round = d.next | 0; _tt.cursor = null;
+            _uiDirty = true;
             break;
         case 'result':
             // The node is settled: whatever we still owed on it is owed no longer.
@@ -193,6 +237,10 @@ function _ttRoles(d){
     _tt.round  = d.round | 0;
     _tt.cursor = nid;
     _tt.you    = String(d.you || 'idle');
+    // A sheet is how a break ends: the next match is dealt. Clearing it here rather than
+    // waiting for the state read-back is what takes the scoreboard off the screen in time
+    // for the ceremony -- and for a player with nothing to do, back to the bracket.
+    if(_tt.brk) _ttSetBreak(null);
     if(_tt.state === 'open') _tt.state = 'running';
     // The sheet is the introduction. Everyone on it may connect to us for this node --
     // players, primaries and secondaries alike -- so a spectator link needs no friendship
@@ -229,7 +277,10 @@ function _ttEngage(d){
         const ps = (d.players || []).map(String);
         const peer = ps[0] === me ? ps[1] : ps[0];
         if(!/^[0-9a-f]{8}$/.test(String(peer || ''))){ _ttFail('BAD MATCH SHEET'); return; }
-        _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes };
+        // The round ladder: round 1 is level 1 and every round after it one deeper, capped
+        // at the game's last level. The sheet says which, and _duelLvl refuses anything that
+        // is not a level this build has.
+        _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes, lvl:_duelLvl(d.lvl) };
         netP2POnlySet(true);   // a tournament match is direct or nothing
         // _netMkSess is not the only moment a session can need dressing. Engagement is
         // deferred (the previous match has to be off the board first), and the feeder offers
@@ -269,6 +320,8 @@ function tourneyDressSession(s){
     s.heartsWant = _ttWant.hearts;
     s.stakes = _ttWant.stakes;
     s.stakesWant = _ttWant.stakes;
+    s.lvl0 = _ttWant.lvl;
+    s.levelWant = _ttWant.lvl;
     s.p2pOnly = true;
 }
 
@@ -348,6 +401,12 @@ function _ttTick(){
     const now = _msgNow();
     _ttFlushRep();
     if(_ttUi.msg && now - _ttUi.msgAt > TT_MSG_MS){ _ttUi.msg = ''; _uiDirty = true; }
+    // `_ttOverAt` means one thing: A FINISHED MATCH IS STILL ON THE BOARD. Every other way
+    // out of a duel -- the player pressing a key on the over screen, a peer's bye, a lost
+    // connection -- clears the board without going through _ttClearMatch, and the stamp then
+    // outlived the match it was made for. The next match inherited it and was torn down as a
+    // finished one seconds after it began: a live game killed and forfeited mid-play.
+    if(!inGame && _ttOverAt) _ttOverAt = 0;
     // A finished match must be OFF the board before the next one can be set up. The banner
     // still gets its moment -- unless the next sheet is already waiting, in which case the
     // tournament is what the player wants to be looking at.
@@ -362,6 +421,16 @@ function _ttTick(){
         }
         _ttEngage(d);
     }
+    // A break that arrived while a match was STILL ON THE BOARD never got to take the
+    // screen, and re-reading the same break deliberately does not move it either -- so this
+    // is the one moment left to act on it. Without it a player whose match ended by any
+    // route that does not run the duel exit (a no-show settled by the server, a peer's bye,
+    // a dead connection) is left sitting on a ceremony for a node the tournament has already
+    // walked past, with nothing on screen ever changing again.
+    if(_tt.brk && !inGame && !_ttPend && _TT_PHASES[phase]
+       && phase !== 'tourneyRound' && phase !== 'tourneyPodium'){
+        phase = 'tourneyRound'; _uiDirty = true;
+    }
     // A ceremony that never became a match: the offer was lost, or the peer is slow to
     // arrive. Re-offer a few times before handing it back to the server's walkover ladder,
     // which is the only thing entitled to decide that somebody did not show up.
@@ -369,7 +438,12 @@ function _ttTick(){
         if(++_ttTry >= TT_CONNECT_TRIES) _ttFail('MATCH DID NOT CONNECT');
         else { _ttCerAt = now; _ttPend = _tt.roles; }
     }
-    if(_tt.state === 'running' && !inGame) _ttSync();
+    // The state read-back is the safety net under the signal stream, and the roster needs one
+    // as much as the bracket does: nothing but an adopted `players` list ever SHRINKS the
+    // lobby, so a single `lobby` event that never arrived left a departed player on screen for
+    // good. Poll while the bracket runs (a roles sheet must not be missed) and whenever a
+    // tournament screen is actually being looked at; TT_STATE_MS is what keeps that cheap.
+    if(!inGame && (_tt.state === 'running' || _TT_PHASES[phase])) _ttSync();
 }
 
 // ---- lobby actions -------------------------------------------------------------------
@@ -426,6 +500,32 @@ async function tourneyStart(){
     }
     _ttSync(true);
 }
+// The break between rounds ends when the HOST says so, and only then: everybody else reads
+// the board until a roles sheet or the server's own deadline takes it away. That is why a
+// client which never implements this still works -- it simply waits the deadline out.
+async function tourneyContinue(){
+    if(!_tt || !_tt.brk || _ttUi.busy) return;
+    if(String(_tt.brk.host || '') !== getPlayerId()) return;
+    if(_msgNow() < _ttUi.contAt) return;
+    _ttUi.busy = true;
+    const r = await _ttPost('continue', { tid:_tt.tid });
+    _ttUi.busy = false;
+    if(!_tt || !_tt.brk) return;                 // the deadline cleared it while we asked
+    if(!r.json){
+        // Too early is not a mistake anybody made -- the board has simply not been up long
+        // enough yet -- so it re-arms the wait and says nothing. An error message for
+        // pressing too soon reads as a broken button.
+        if(r.status === 409){
+            _ttUi.contAt = _msgNow() + Math.max(250, (+((r.body && r.body.retry_ms) || 0)) || 500);
+            _uiDirty = true; return;
+        }
+        _ttMsg(r.status === 403 ? 'THE HOST STARTS THE NEXT ROUND' : 'COULD NOT CONTINUE', true);
+        return;
+    }
+    _ttSetBreak(null);   // what happens now is an ordinary roles sheet
+    Snd.sfxPlay('select', cfg.music);
+    _ttSync(true);
+}
 async function tourneyLeave(){
     if(!_tt) return;
     const tid = _tt.tid;
@@ -461,6 +561,15 @@ function tourneyRows(){
         // Nothing to leave: the tournament is over and the row just lets go of the picture.
         rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
     } else {
+        // The one row a whole field is waiting on. It belongs to the host and only while a
+        // break is open, and it stays dark until the server will accept it: an early press
+        // is refused, and a button that refuses looks like a broken one.
+        const b = _tt.brk;
+        if(b && String(b.host || '') === getPlayerId()){
+            const left = Math.max(0, _ttUi.contAt - _msgNow());
+            rows.push({ t:'CONTINUE', en:!left && !_ttUi.busy,
+                        note:left ? (Math.ceil(left / 1000) + 'S') : '', act:tourneyContinue });
+        }
         rows.push({ t:'LEAVE TOURNAMENT', en:true, act:tourneyLeave });
     }
     rows.push({ t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });

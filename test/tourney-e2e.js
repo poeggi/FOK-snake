@@ -5,374 +5,35 @@
 // things underneath a tournament: that a spectator's world is bit-for-bit the players'
 // world, and that the relay tree survives its nodes dying. Neither of them knows what a
 // tournament is. This one owns the layer above: the ROLES SHEET turning into a connection,
-// the result ladder, and every rule about who may do what -- driven through the real
-// hello/signal drain, the real _netPostRes, the real session minting and the real screens.
+// the round ladder, the break between rounds, the result ladder, and every rule about who
+// may do what -- driven through the real hello/signal drain, the real _netPostRes, the real
+// session minting and the real screens.
 //
-// THE CLIENTS ARE REAL. Each is a full harness sandbox with the whole game loaded. The only
-// things replaced are the four seams that need hardware we do not have: fetch (routed into
-// the scripted server), _netRtcOffer and _netSignal (recorded), and _duelExit (the sim
-// teardown a headless client cannot run). Everything else -- tourney.js, net-api.js's hello,
-// net-session.js's signal dispatch, net-rtc.js's _netMkSess, net-spec.js's grant/standdown/
-// orphan logic, screens.js's four tournament screens -- is the shipping code.
-//
-// THE SERVER IS A STAND-IN, and deliberately so: it is the CONTRACT written out as data
-// (docs/API.md's tournament section), not FOK-server's implementation. The bracket
-// arithmetic it performs is FOK-server's to get right and unit.php's to prove; what matters
-// here is that a client handed these events behaves. So every assertion below is about a
-// CLIENT: what it connected to, what it reported, what it drew, and -- just as often --
-// what it refused to do.
+// THE WORLD IS SHARED. test/tourney-world.js holds the scripted server and the six real
+// harness clients; this suite only drives them and asserts. The server there is a STAND-IN
+// and deliberately so: it is the CONTRACT written out as data (docs/API.md's tournament
+// section), not FOK-server's implementation. The bracket arithmetic it performs is
+// FOK-server's to get right and unit.php's to prove; what matters here is that a client
+// handed these events behaves. So every assertion below is about a CLIENT: what it
+// connected to, what it reported, what it drew, and -- just as often -- what it refused
+// to do.
 //
 // Run: node test/tourney-e2e.js
-const { runInGame } = require('./harness');
+const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
+        TT_OVER_MS, TT_STATE_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
 const NAMES = ['KAI', 'JO', 'ADA', 'LEO', 'MIA', 'ZED'];
 const N = IDS.length;
-const RESULT_MS = 15000;      // tournament_result_ms: how long a lone win is held
-const MAX_DIRECT = 2;         // SPEC_MAX_DIRECT, quoted so the expectation is readable here
 
 const rows = [];
 let fails = 0;
 const A = (c, m) => { if(!c){ rows.push('FAIL: ' + m); fails++; } };
 
 // ============================================================================
-// THE SCRIPTED SERVER
-// One tournament, held as plain data. Every response and every event is exactly the shape
-// docs/API.md documents, because that shape is the only thing the client is entitled to.
-// ============================================================================
-function mkServer(){
-    const T = { tid:'7f3c9a21b4d85e60c1f2a3b4c5d6e7f8', code:'K7MZ4Q', host:'', stakes:false,
-                max:10, state:'open', players:[], round:0, cursor:null,
-                nodes:{}, order:[], standings:[], advancers:[], podium:null };
-    const out = {};                 // player id -> queued signals, drained by hello
-    const names = {};               // the server's own player table
-    const log = [];                 // every ACCEPTED post: {id, action, nid}
-    const refused = [];             // every refusal: {id, action, status}
-    let NOW = 100000;
-
-    const ok   = (o) => ({ status:200, json:Object.assign({ ok:true }, o || {}) });
-    const bad  = (st, err) => ({ status:st, json:{ ok:false, error:err } });
-    const q    = (id, d) => { (out[id] || (out[id] = [])).push({ type:'tourney', from:'', payload:JSON.stringify(d) }); };
-    const all  = (d) => { for(const p of T.players) q(p.id, d); };
-    const ids  = () => T.players.map(p => p.id);
-    const seat = (id) => { for(const p of T.players) if(p.id === id) return p.seat; return -1; };
-
-    // ---- the schedule -------------------------------------------------------
-    // Round 1 is SPARSE above four players: every pair up to 4, then the two circulant
-    // offsets, which is the 2N the lobby quotes. Round 1 and every knockout but the final
-    // are played at 2 hearts; the final is an ordinary 3-heart duel.
-    function schedule(){
-        const p = ids(), n = p.length, out2 = [];
-        if(n <= 4){ for(let i = 0; i < n; i++) for(let j = i + 1; j < n; j++) out2.push([p[i], p[j]]); }
-        else for(const off of [1, 2]) for(let i = 0; i < n; i++) out2.push([p[i], p[(i + off) % n]]);
-        return out2;
-    }
-    function mkNode(nid, round, hm, pl){
-        T.nodes[nid] = { nid, round, hm, players:pl, state:'pending', winner:null, draw:false,
-                         score:null, reports:{}, heldAt:0, excl:{} };
-        return nid;
-    }
-    function summary(nd){
-        return { nid:nd.nid, round:nd.round, hm:nd.hm, players:nd.players.slice(),
-                 state:nd.state, winner:nd.winner, draw:nd.draw, score:nd.score };
-    }
-    function nodesOfRound(r){ return T.order.filter(nid => T.nodes[nid].round === r).map(nid => summary(T.nodes[nid])); }
-
-    // ---- roles --------------------------------------------------------------
-    // feeder = players[0], always. The two watchers at the head of the list serve the
-    // relay tree's first tier; everyone after them hangs off those two.
-    function tree(nd){
-        const watchers = ids().filter(x => nd.players.indexOf(x) < 0);
-        const primaries = watchers.filter(x => !nd.excl[x]).slice(0, MAX_DIRECT);
-        return { primaries, secondaries: watchers.filter(x => primaries.indexOf(x) < 0) };
-    }
-    function sheet(nid, forId){
-        const nd = T.nodes[nid], t = tree(nd);
-        const round = T.order.filter(x => T.nodes[x].round === nd.round);
-        return { event:'roles', tid:T.tid, round:nd.round, match:round.indexOf(nid) + 1, of:round.length,
-                 nid, hm:nd.hm, stakes:T.stakes, players:nd.players.slice(), feeder:nd.players[0],
-                 primaries:t.primaries, secondaries:t.secondaries, names:Object.assign({}, names),
-                 you: nd.players.indexOf(forId) >= 0 ? 'play' : (t.primaries.indexOf(forId) >= 0 || t.secondaries.indexOf(forId) >= 0 ? 'spectate' : 'idle') };
-    }
-    function deal(nid){
-        T.cursor = nid; T.round = T.nodes[nid].round; T.nodes[nid].state = 'live';
-        for(const p of T.players) q(p.id, sheet(nid, p.id));
-    }
-    function patch(nid){
-        const t = tree(T.nodes[nid]);
-        all({ event:'roles-patch', tid:T.tid, nid, primaries:t.primaries, secondaries:t.secondaries });
-    }
-
-    // ---- settling -----------------------------------------------------------
-    function standings(){
-        const pts = {}, diff = {};
-        for(const id of ids()){ pts[id] = 0; diff[id] = 0; }
-        for(const nid of T.order){
-            const nd = T.nodes[nid];
-            if(nd.round !== 1 || nd.state !== 'done') continue;
-            const [a, b] = nd.players, sc = nd.score || [0, 0];
-            diff[a] += sc[0] - sc[1]; diff[b] += sc[1] - sc[0];
-            if(nd.draw){ pts[a] += 0.5; pts[b] += 0.5; }
-            else if(nd.winner) pts[nd.winner] += 1;
-        }
-        const rank = ids().slice().sort((x, y) => (pts[y] - pts[x]) || (diff[y] - diff[x]) || (seat(x) - seat(y)));
-        T.standings = rank.map((id, i) => ({ seat:seat(id), id, pts:pts[id], diff:diff[id], rank:i + 1 }));
-        T.advancers = rank.slice(0, Math.max(2, Math.ceil(ids().length / 2)));
-    }
-    // Three advancers: the two below the top seed meet, and the winner meets the top seed
-    // in the final. The final's second slot is filled once ko1.1 settles.
-    function buildKo(){
-        const a = T.advancers;
-        T.order.push(mkNode('ko1.1', 2, 2, [a[1], a[2]]));
-        T.order.push(mkNode('final', 3, 3, [a[0], null]));
-    }
-    function settle(nid, winner, draw, score){
-        const nd = T.nodes[nid];
-        nd.state = 'done'; nd.winner = winner; nd.draw = !!draw; nd.score = score;
-        all({ event:'result', tid:T.tid, nid, winner, draw:!!draw, score });
-        advance();
-    }
-    function advance(){
-        const i = T.order.indexOf(T.cursor);
-        const fin = T.nodes['final'];
-        if(fin && !fin.players[1] && T.nodes['ko1.1'].state === 'done') fin.players[1] = T.nodes['ko1.1'].winner;
-        if(i + 1 < T.order.length){ deal(T.order[i + 1]); return; }
-        if(T.round === 1){
-            standings();
-            all({ event:'standings', tid:T.tid, rows:T.standings, advancers:T.advancers });
-            buildKo(); deal('ko1.1'); return;
-        }
-        T.state = 'done'; T.cursor = null;
-        const f = T.nodes['final'], k = T.nodes['ko1.1'];
-        T.podium = [f.winner, f.players[f.players[0] === f.winner ? 1 : 0], k.players[k.players[0] === k.winner ? 1 : 0]];
-        all({ event:'over', tid:T.tid, podium:T.podium });
-    }
-    // The result ladder. A reported LOSS settles at once. A lone win or draw is HELD: the
-    // peer may still agree, contradict, or never speak. Contradiction freezes the node.
-    function report(id, nid, outcome, score){
-        const nd = T.nodes[nid];
-        if(!nd) return bad(404, 'no such node');
-        if(nd.players.indexOf(id) < 0) return bad(403, 'not your match');
-        if(nd.state === 'done' || nd.state === 'frozen') return ok();     // a replay is a no-op
-        if(nid !== T.cursor) return bad(409, 'not the current node');
-        const me = nd.players.indexOf(id), peer = nd.players[1 - me];
-        // Reports arrive as [own, opponent]; the node holds them in players[] order.
-        const sc = me === 0 ? [score[0] | 0, score[1] | 0] : [score[1] | 0, score[0] | 0];
-        nd.reports[id] = { outcome, sc };
-        if(outcome === 'loss'){ settle(nid, peer, false, sc); return ok(); }
-        const other = nd.reports[peer];
-        if(!other){ nd.heldAt = NOW; return ok({ held:true }); }
-        if(outcome === 'draw' && other.outcome === 'draw'){ settle(nid, null, true, sc); return ok(); }
-        if(outcome === 'win' && other.outcome === 'loss'){ settle(nid, id, false, sc); return ok(); }
-        nd.state = 'frozen';
-        all({ event:'freeze', tid:T.tid, nid });
-        return ok({ frozen:true });
-    }
-    // The lazy deadline: nobody's timer, just the next request to arrive after it passed.
-    function deadlines(){
-        const nd = T.cursor ? T.nodes[T.cursor] : null;
-        if(!nd || nd.state !== 'live' || !nd.heldAt || NOW - nd.heldAt < RESULT_MS) return false;
-        for(const id of nd.players){
-            const r = nd.reports[id];
-            if(!r) continue;
-            if(r.outcome === 'draw') settle(nd.nid, null, true, r.sc);
-            else settle(nd.nid, id, false, r.sc);
-            return true;
-        }
-        return false;
-    }
-
-    const srv = {
-        T, log, refused,
-        now(v){ NOW = v; },
-        name(id, n){ names[id] = n; },
-        deadlines,
-        // An operator clearing a frozen node from the admin surface.
-        adminClear(nid, winner){ const nd = T.nodes[nid]; nd.state = 'live'; settle(nid, winner, false, nd.score || [0, 0]); },
-        post(url, body){
-            if(/hello\.php$/.test(url)){
-                const id = String(body.id || ''), sigs = out[id] || [];
-                out[id] = [];
-                const r = { ok:true, api:'4.1', now:Date.now(), online:N, playing:0,
-                            friends_playing:{}, signals:sigs };
-                if(body.tourneys) r.tourneys = (T.state === 'open' && T.players.length && ids().indexOf(id) < 0)
-                    ? [{ tid:T.tid, code:T.code, host:T.host, host_name:names[T.host] || '?',
-                         players:T.players.length, max:T.max, stakes:T.stakes }] : [];
-                return { status:200, json:r };
-            }
-            if(!/tournament\.php$/.test(url)) return bad(404, 'no such endpoint');
-            const id = String(body.id || ''), act = String(body.action || '');
-            const note = (r) => { if(r.status === 200) log.push({ id, action:act, nid:body.nid || '' });
-                                  else refused.push({ id, action:act, status:r.status }); return r; };
-            deadlines();
-            switch(act){
-                case 'create':
-                    if(T.state !== 'open' || T.players.length) return note(bad(409, 'you already host one'));
-                    T.host = id; T.stakes = !!body.stakes;
-                    T.players = [{ id, name:names[id] || '?', seat:0 }];
-                    return note(ok({ tid:T.tid, code:T.code, stakes:T.stakes, max:T.max }));
-                case 'join': {
-                    if(body.tid && body.tid !== T.tid) return note(bad(404, 'no such tournament'));
-                    if(body.code && String(body.code).toUpperCase() !== T.code) return note(bad(404, 'no such tournament'));
-                    if(ids().indexOf(id) >= 0) return note(ok({ tid:T.tid, code:T.code, stakes:T.stakes, max:T.max,
-                                                               players:T.players.map(p => ({ id:p.id, name:p.name })), host:T.host, state:T.state }));
-                    if(T.state !== 'open') return note(bad(409, 'already started'));
-                    if(T.players.length >= T.max) return note(bad(409, 'tournament is full'));
-                    T.players.push({ id, name:names[id] || '?', seat:T.players.length });
-                    all({ event:'lobby', tid:T.tid, code:T.code, host:T.host, state:T.state, stakes:T.stakes,
-                          max:T.max, players:T.players.map(p => ({ id:p.id, name:p.name })) });
-                    return note(ok({ tid:T.tid, code:T.code, stakes:T.stakes, max:T.max, host:T.host, state:T.state,
-                                     players:T.players.map(p => ({ id:p.id, name:p.name })) }));
-                }
-                case 'start':
-                    if(id !== T.host) return note(bad(403, 'host only'));
-                    if(T.state !== 'open') return note(bad(409, 'already started'));
-                    if(T.players.length < 2) return note(bad(409, 'need 2 players'));
-                    T.state = 'running';
-                    schedule().forEach((pl, i) => T.order.push(mkNode('r1.' + (i + 1), 1, 2, pl)));
-                    deal(T.order[0]);
-                    return note(ok({ tid:T.tid, state:T.state }));
-                case 'leave': {
-                    const i = ids().indexOf(id);
-                    if(i >= 0) T.players.splice(i, 1);
-                    return note(ok());
-                }
-                case 'state': {
-                    if(body.tid !== T.tid) return note(bad(404, 'no such tournament'));
-                    const r = { tid:T.tid, state:T.state, code:T.code, host:T.host, stakes:T.stakes, max:T.max,
-                                players:T.players.map(p => ({ id:p.id, name:p.name })), round:T.round,
-                                cursor:T.cursor, schedule:nodesOfRound(1),
-                                bracket:T.order.filter(x => T.nodes[x].round > 1).map(x => summary(T.nodes[x])),
-                                standings:T.standings };
-                    if(T.cursor) r.roles = sheet(T.cursor, id);
-                    if(T.podium) r.podium = T.podium;
-                    return note(ok(r));
-                }
-                case 'result':
-                    return note(report(id, String(body.nid || ''), String(body.outcome || ''), body.score || [0, 0]));
-                case 'standdown': {
-                    const nd = T.nodes[String(body.nid || '')];
-                    if(!nd || nd.nid !== T.cursor) return note(bad(409, 'not the current node'));
-                    nd.excl[id] = 1; patch(nd.nid);
-                    return note(ok());
-                }
-                case 'orphan': {
-                    const nd = T.nodes[String(body.nid || '')];
-                    if(!nd || nd.nid !== T.cursor) return note(bad(409, 'not the current node'));
-                    for(const p of tree(nd).primaries) nd.excl[p] = 1;   // the sources it could not reach
-                    patch(nd.nid);
-                    return note(ok());
-                }
-            }
-            return note(bad(400, 'unknown action'));
-        },
-    };
-    return srv;
-}
-
-// ============================================================================
-// THE CLIENTS
-// ============================================================================
-function driverSrc(id){
-    return '\n;(function(){\n'
-        + '  var REC = globalThis.__REC = { offers:[], watches:[], sigs:[], exits:0 };\n'
-        + '  var clock = 100000;\n'
-        + '  performance.now = function(){ return clock; };\n'
-        + '  cfg.offline = false; cfg.music = 0; cfg.sfx = 0;\n'
-        + '  getPlayerId = function(){ return "' + id + '"; };\n'
-        + '  globalThis.fetch = function(url, opt){\n'
-        + '      var r = globalThis.__srv(String(url), JSON.parse(opt.body));\n'
-        + '      return Promise.resolve({ status:r.status, json:function(){ return Promise.resolve(r.json); } });\n'
-        + '  };\n'
-        // The four seams a headless client cannot run for real.
-        + '  _netRtcOffer = function(peer){ REC.offers.push(String(peer)); };\n'
-        + '  _netSignal = function(to, type, payload){ REC.sigs.push({ to:String(to), type:String(type), payload:String(payload) }); };\n'
-        + '  _netTimeSync = function(){};\n'
-        + '  _duelExit = function(){ inGame = false; _netSess = null; REC.exits++; phase = (typeof tourneyExitPhase === "function" && tourneyExitPhase()) || "duel11"; };\n'
-        // specWatch is the REAL one, wrapped: it still grants, still signals, still sets
-        // p2p-only. Only the RTCPeerConnection it would open is missing from this world.
-        + '  var _realWatch = specWatch;\n'
-        + '  specWatch = function(peer, tid, nid){ REC.watches.push({ peer:String(peer), tid:String(tid||""), nid:String(nid||"") }); return _realWatch(peer, tid, nid); };\n'
-        + '  var C = globalThis.__C = {\n'
-        + '    now: function(v){ clock = v; },\n'
-        + '    hello: function(){ return _netHello(); },\n'
-        + '    tick: function(){ _ttTick(); },\n'
-        + '    phase: function(){ return phase; },\n'
-        + '    setPhase: function(p){ phase = p; },\n'
-        + '    msg: function(){ return _ttUi.msg; },\n'
-        + '    tt: function(){ return _tt ? JSON.parse(JSON.stringify(_tt)) : null; },\n'
-        + '    rec: function(){ return JSON.parse(JSON.stringify(REC)); },\n'
-        + '    clear: function(){ REC.offers = []; REC.watches = []; REC.sigs = []; REC.exits = 0; },\n'
-        + '    enter: function(){ return tourneyEnter(); },\n'
-        + '    create: function(s){ return tourneyCreate(s); },\n'
-        + '    join: function(c){ return tourneyJoin(c); },\n'
-        + '    start: function(){ return tourneyStart(); },\n'
-        + '    rows: function(){ return tourneyRows().map(function(r){ return { t:r.t, en:r.en !== false, note:r.note || "" }; }); },\n'
-        + '    pick: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return rs[i].act(); } throw "no row " + t; },\n'
-        + '    draw: function(){ var s = SCREENS[phase]; if(!s || !s.d) throw "no screen for " + phase; s.d(); return true; },\n'
-        + '    line: function(nd){ return _ttMatchLine(tourneyView() || {}, nd.nid, nd); },\n'
-        + '    snap: function(s){ return s ? { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, stakesWant:s.stakesWant, p2pOnly:s.p2pOnly } : null; },\n'
-        + '    sess: function(peer, role){ return C.snap(_netMkSess(peer, role)); },\n'
-        // A session that already EXISTS when the sheet is engaged, which is the case a fresh
-        // _netMkSess can never show: the offer is answered before the sheet comes off the queue.
-        + '    mint: function(peer, role){ _netSess = _netMkSess(peer, role); return C.snap(_netSess); },\n'
-        + '    sessNow: function(){ return C.snap(_netSess); },\n'
-        + '    p2p: function(){ return _netP2POnly; },\n'
-        + '    inGame: function(v){ inGame = !!v; },\n'
-        // The sim declaring a duel over, through the one path game.js uses: set the board,
-        // then call the hook the phase change fires.
-        + '    endMatch: function(role, peer, winner, sc){\n'
-        + '        _netSess = { role:role, peer:peer, mid:"m-" + Math.random().toString(16).slice(2, 8), game:true };\n'
-        + '        players = [{ score:sc[0] | 0 }, { score:sc[1] | 0 }]; duelWinner = winner; inGame = true;\n'
-        + '        phase = "duelOver"; tourneyMatchOver();\n'
-        + '    },\n'
-        + '    walkOut: function(role, peer, sc){\n'
-        + '        _netSess = { role:role, peer:peer, mid:"m-walk", game:true };\n'
-        + '        players = [{ score:sc[0] | 0 }, { score:sc[1] | 0 }]; duelWinner = -1; inGame = true;\n'
-        + '        tourneyMatchLeft();\n'
-        + '    },\n'
-        // net-spec state a headless client cannot reach on its own: a live feed that has
-        // gone quiet, and relay duty to stand down from.
-        + '    spFeedDead: function(){ _spOn = true; _spHops = 2; _spFeedAt = _spNow() - 9999; },\n'
-        + '    spServe: function(peer){ _spOut.push({ peer:peer, dc:null, pc:null }); },\n'
-        + '    spOut: function(){ return _spOut.length; },\n'
-        + '    spStandDown: function(){ specStandDown(); },\n'
-        + '    spOrphan: function(){ _spOrphan(); },\n'
-        + '    spGranted: function(pid){ return !!_spGrant[pid]; },\n'
-        + '    sigTo: function(d){ _netOnSignal({ type:"tourney", from:"", payload:JSON.stringify(d) }); },\n'
-        + '  };\n'
-        + '})();\n';
-}
-
-// ============================================================================
 // THE RUN
 // ============================================================================
-const srv = mkServer();
-const C = IDS.map((id, i) => {
-    const sb = runInGame(driverSrc(id));
-    sb.__srv = (url, body) => srv.post(url, body);
-    srv.name(id, NAMES[i]);
-    return sb.__C;
-});
-const idx = (id) => IDS.indexOf(id);
-let NOW = 100000;
-
-const TT_OVER_MS = 4000;       // tourney.js: how long a settled match holds the screen
-const flush = () => new Promise(r => setImmediate(r));
-const clearAll = () => { for(const c of C) c.clear(); };
-async function settleAsync(){ for(let i = 0; i < 8; i++) await flush(); }
-function clock(ms){ NOW += ms; srv.now(NOW); for(const c of C) c.now(NOW); }
-// One heartbeat for everyone: hello drains the signal mailbox through the real dispatcher,
-// then the housekeeping tick acts on whatever it left behind. Repeated until nothing new
-// arrives, because acting on an event routinely asks the server another question.
-async function pump(times){
-    for(let k = 0; k < (times || 3); k++){
-        for(const c of C){ c.hello(); }
-        await settleAsync();
-        for(const c of C){ c.tick(); }
-        await settleAsync();
-    }
-}
+const { srv, C, idx, clock, pump, settleAsync, clearAll } = mkWorld(IDS, NAMES);
 
 // ---- 1) the lobby ---------------------------------------------------------
 async function lobby(){
@@ -385,7 +46,7 @@ async function lobby(){
     A(r0.length === 4 && r0[0].t === 'CREATE TOURNAMENT' && r0[1].t === 'ITEM STAKES (WINDSWEPPING): OFF'
       && r0[2].t === 'JOIN BY CODE' && r0[3].t === 'BACK',
       '1: an empty lobby offers ' + r0.map(x => x.t).join('/'));
-    A(r0.every(x => x.en), '1: the tournament rows are greyed against a 4.1 server');
+    A(r0.every(x => x.en), '1: the tournament rows are greyed against a 4.3 server');
     C[1].draw();
 
     C[0].pick('ITEM STAKES');                  // stakes are the host's call, off by default
@@ -417,6 +78,20 @@ async function lobby(){
         A(t && t.players.length === N, '1: client ' + NAMES[i] + ' sees ' + (t ? t.players.length : 0) + ' of ' + N + ' players');
         A(t && t.stakes === true, '1: client ' + NAMES[i] + ' lost the stakes flag the host set');
     }
+    // Nothing but an adopted players list ever SHRINKS the roster, and a lobby event can go
+    // missing -- this scripted leave publishes none, exactly like the server's. So the open
+    // lobby has to re-read state on its own, or a player who walked out sits in the room for
+    // good and the screen shows a name nobody can play.
+    const gone = srv.T.players.pop();
+    clock(TT_STATE_MS + 1000);
+    await pump(1);
+    A(C[0].tt().players.length === N - 1,
+      '1: an open lobby never re-read state, so a departed player stayed on the roster');
+    srv.T.players.push(gone);
+    clock(TT_STATE_MS + 1000);
+    await pump(1);
+    A(C[0].tt().players.length === N, '1: the roster grew back on the read-back but did not');
+
     // A guest is offered no START row, ever.
     const rg = C[3].rows();
     A(!rg.some(x => x.t.indexOf('START') === 0), '1: a guest is offered START');
@@ -440,6 +115,11 @@ async function node(plan){
     const [pa, pb] = nd.players;
     const ia = idx(pa), ib = idx(pb);
     await pump(1);
+    // THE ROUND LADDER. Round 1 is level 1 and every round after it one deeper, so a node
+    // knows its level before anybody plays it and the two sides can preset the match to it.
+    const wantLvl = Math.min(nd.round, MAX_LEVEL);
+    A(nd.lvl === wantLvl, '2 ' + nid + ': a round-' + nd.round + ' node is at level ' + nd.lvl
+      + ', the ladder says ' + wantLvl);
 
     // -- the sheet reached everyone, and said the same thing to everyone --
     for(let i = 0; i < N; i++){
@@ -449,6 +129,8 @@ async function node(plan){
         const want = (i === ia || i === ib) ? 'play' : 'spectate';
         A(r.you === want, '2 ' + nid + ': ' + NAMES[i] + ' was told "' + r.you + '" instead of "' + want + '"');
         A(r.feeder === pa, '2 ' + nid + ': the feeder is ' + r.feeder + ', not players[0]');
+        A(r.lvl === nd.lvl, '2 ' + nid + ': ' + NAMES[i] + ' was told level ' + r.lvl + ' for a level-' + nd.lvl + ' node');
+        A(typeof r.stage === 'string' && r.stage, '2 ' + nid + ': the sheet carries no stage token');
         A(t.cursor === nid, '2 ' + nid + ': ' + NAMES[i] + ' points at node ' + t.cursor);
         A(C[i].phase() === 'tourneyCeremony', '2 ' + nid + ': ' + NAMES[i] + ' sat on ' + C[i].phase() + ' instead of the ceremony');
         C[i].draw();
@@ -466,6 +148,9 @@ async function node(plan){
     for(const [who, s] of [[NAMES[ia], sa], [NAMES[ib], sb]]){
         A(s.hearts === nd.hm && s.heartsWant === nd.hm,
           '2 ' + nid + ': ' + who + ' opened at ' + s.hearts + ' hearts, sheet says ' + nd.hm);
+        A(s.lvl0 === nd.lvl && s.levelWant === nd.lvl,
+          '2 ' + nid + ': ' + who + ' opens the match on level ' + s.lvl0 + ' and expects ' + s.levelWant
+          + ', the sheet says ' + nd.lvl);
         A(s.stakes === srv.T.stakes, '2 ' + nid + ': ' + who + ' lost the stakes flag');
         A(s.p2pOnly === true, '2 ' + nid + ': ' + who + ' minted a relay-capable tournament session');
     }
@@ -491,6 +176,9 @@ async function node(plan){
 // The two players declare the match over. `plan.win` is 0, 1 or 2 (draw) in players[] order.
 async function finish(m, plan){
     const before = srv.log.filter(x => x.action === 'result' && x.nid === m.nid).length;
+    // From here this client hears nothing: no result, no scoreboard, no sheet. Whatever it
+    // ends up knowing, it learned from the state read-back.
+    if(plan.miss != null) srv.mute(IDS[plan.miss], true);
     const sc = plan.score || [7, 4];
     if(plan.mode === 'walkout'){
         C[m.ia].walkOut('host', m.pb, sc);
@@ -519,6 +207,141 @@ async function finish(m, plan){
     for(let i = 0; i < N; i++)
         A(C[i].phase() !== 'tourneyCeremony' || srv.T.cursor,
           '2 ' + m.nid + ': ' + NAMES[i] + ' is still waiting on a ceremony for a finished tournament');
+}
+
+// ---- the break between rounds ---------------------------------------------
+// A round ends on a scoreboard everybody reads and only the HOST clears. The first break is
+// asserted in full; later ones are passed with the same helper. `opts.missed` is a client
+// whose signal stream has been muted, which is how the state read-back gets tested: it must
+// put the board up and take it down again with no events at all.
+async function passBreak(opts){
+    opts = opts || {};
+    await pump(1);
+    const b0 = C[0].brk();
+    A(!!b0, 'B: a round ended and no scoreboard went up');
+    if(!b0) return;
+    const hi = idx(b0.host), nextNid = srv.T.brkNext, nd = srv.T.nodes[nextNid];
+    A(hi >= 0 && b0.host === srv.T.host, 'B: the board names ' + b0.host + ' as the host');
+
+    // -- the same board reached everyone, and everyone can draw it --
+    for(let i = 0; i < N; i++){
+        const b = C[i].brk(), t = C[i].tt();
+        A(!!b && b.done === b0.done && b.next === b0.next,
+          'B: ' + NAMES[i] + ' holds ' + JSON.stringify(b && [b.done, b.next]) + ' instead of the board everyone else has');
+        A(C[i].phase() === 'tourneyRound', 'B: ' + NAMES[i] + ' sat on ' + C[i].phase() + ' rather than the scoreboard');
+        A(t.cursor === null, 'B: ' + NAMES[i] + ' still points at a node while the tournament is between rounds');
+        A(t.round === b0.next, 'B: ' + NAMES[i] + ' is on round ' + t.round + ', the board says ' + b0.next);
+        C[i].draw();
+        // Exactly one button in the whole field, and it is the host's.
+        A(C[i].has('CONTINUE') === (i === hi),
+          'B: ' + NAMES[i] + (i === hi ? ' was offered no CONTINUE' : ' was offered a CONTINUE that is not theirs'));
+    }
+
+    // -- the board says what the next round is, and where the cut fell --
+    A(b0.next === nd.round && b0.lvl === nd.lvl && b0.hm === nd.hm,
+      'B: the board describes round ' + b0.next + '/L' + b0.lvl + '/' + b0.hm + 'h, the next node is '
+      + nd.round + '/L' + nd.lvl + '/' + nd.hm + 'h');
+    A(b0.lvl === Math.min(b0.next, MAX_LEVEL), 'B: the ladder put round ' + b0.next + ' on level ' + b0.lvl);
+    A(b0.matches === srv.T.order.filter(x => srv.T.nodes[x].round === nd.round).length,
+      'B: the board promises ' + b0.matches + ' matches');
+    A(b0.rows.length === N, 'B: the board holds ' + b0.rows.length + ' rows for ' + N + ' participants');
+    A(b0.of === b0.advancers.length && b0.rows.filter(r => r.adv).length === b0.of,
+      'B: ' + b0.of + ' through, ' + b0.rows.filter(r => r.adv).length + ' rows marked as through');
+    // THE CUT is one line: every row that is through sits above every row that is not, which
+    // is what lets the screen draw the rule between two neighbours and never disagree with
+    // the colours around it.
+    const cut = b0.rows.map(r => r.adv ? 1 : 0);
+    A(JSON.stringify(cut) === JSON.stringify(cut.slice().sort((a, b) => b - a)),
+      'B: the ladder is not cut in one place: ' + cut.join(''));
+    // W-L-D is the round that just ended and nothing else: two of them per settled match.
+    const settled = srv.T.order.filter(x => srv.T.nodes[x].round === b0.done && srv.T.nodes[x].state === 'done').length;
+    const wld = b0.rows.reduce((a, r) => a + (r.w | 0) + (r.l | 0) + (r.d | 0), 0);
+    A(wld === 2 * settled, 'B: ' + wld + ' results across the rows for ' + settled + ' settled matches');
+    A(b0.rows.every(r => r.until >= 1), 'B: a row does not say how far that player got');
+    A(b0.rows.filter(r => r.adv).every(r => r.until === b0.next),
+      'B: a row that is through does not reach the round it is through to');
+
+    // -- the two who just played got here from the duel, not from the 1:1 menu --
+    if(opts.played) for(const i of opts.played)
+        A(C[i].phase() === 'tourneyRound',
+          'B: ' + NAMES[i] + ' left its match onto ' + C[i].phase() + ' instead of the tournament');
+
+    // -- a client with no signals at all found the board anyway --
+    if(opts.missed != null){
+        const mi = opts.missed, t = C[mi].tt();
+        A(!t.last || t.last.nid !== opts.node,
+          'B: the muted client got a result signal after all -- there is nothing left to test');
+        A(!!C[mi].brk() && C[mi].phase() === 'tourneyRound',
+          'B: a client with a dead signal stream never found the scoreboard in the state read-back');
+    }
+
+    if(opts.first){
+        // The button is dark until the board has been up long enough, and says how long for.
+        const rh = C[hi].rows().filter(r => r.t === 'CONTINUE')[0];
+        A(rh && !rh.en && /^[0-9]+S$/.test(rh.note),
+          'B: CONTINUE is live the instant the board goes up (' + JSON.stringify(rh) + ')');
+        // An early press is not the server's to refuse: it never leaves the client.
+        const q0 = srv.log.length + srv.refused.length;
+        await C[hi].cont();
+        await settleAsync();
+        A(srv.log.length + srv.refused.length === q0, 'B: an early CONTINUE was posted anyway');
+        // And nobody else's press is worth a request either, host row or no host row.
+        const gi = (hi + 1) % N;
+        await C[gi].cont();
+        await settleAsync();
+        A(srv.log.length + srv.refused.length === q0, 'B: a guest posted a CONTINUE');
+        A(!!C[gi].brk(), 'B: a guest pressing CONTINUE took its own board down');
+    }
+
+    clock(BREAK_MS + 100);
+    if(opts.first){
+        // OUR clock is not the server's. When ours says the wait is over and the server's
+        // does not, the refusal has to read as nothing at all -- a button that answers "no"
+        // for a second reads as a broken one, so it simply goes dark again for as long as
+        // the server asked for, and the press that follows works.
+        srv.T.brk.at = srv.at() + 400;
+        C[hi].clrMsg();
+        const before = srv.refused.filter(x => x.action === 'continue').length;
+        await C[hi].pick('CONTINUE');
+        await settleAsync();
+        A(srv.refused.filter(x => x.action === 'continue' && x.status === 409).length === before + 1,
+          'B: the press against a skewed server clock was not refused with a 409');
+        A(C[hi].msg() === '', 'B: being told "too early" surfaced as "' + C[hi].msg() + '"');
+        A(!!C[hi].brk() && !srv.T.cursor, 'B: a refused press moved the tournament on');
+        const rr = C[hi].rows().filter(r => r.t === 'CONTINUE')[0];
+        A(rr && !rr.en && rr.note, 'B: a refused CONTINUE stayed live (' + JSON.stringify(rr) + ')');
+        clock(2000);
+        rows.push('B refusal: a press the server called too early re-armed the wait silently and '
+                  + 'the next one went through');
+    }
+
+    // -- the host clears it, and the field walks into the next round --
+    await C[hi].pick('CONTINUE');
+    await settleAsync();
+    await pump(2);
+    A(!srv.T.brk, 'B: the board is still up after the host cleared it');
+    A(srv.T.cursor === nextNid, 'B: clearing the board dealt ' + srv.T.cursor + ' instead of ' + nextNid);
+    for(let i = 0; i < N; i++){
+        if(opts.missed === i) continue;              // deaf by design, see below
+        A(C[i].brk() === null, 'B: ' + NAMES[i] + ' is still holding a board the host cleared');
+        A(C[i].phase() !== 'tourneyRound', 'B: ' + NAMES[i] + ' is still sitting on a cleared board');
+    }
+    if(opts.missed != null){
+        // The other direction, and the one that would otherwise strand a player on a
+        // scoreboard for the rest of the evening: the sheet that ends a break can be missed
+        // too, and the read-back has to take the board down as surely as it put it up.
+        const mi = opts.missed;
+        clock(TT_STATE_MS + 1000);
+        await pump(1);
+        A(C[mi].brk() === null, 'B: the muted client is still holding a cleared board');
+        A(C[mi].tt().cursor === srv.T.cursor, 'B: the muted client never picked the next match up');
+        srv.mute(IDS[mi], false);
+        rows.push('B deaf client: with its signal stream muted, one client put the scoreboard up and '
+                  + 'took it down again off the state read-back alone');
+    }
+    rows.push('B break ' + b0.done + '->' + b0.next + ': ' + b0.rows.length + ' rows cut at ' + b0.of
+              + ' through, ' + b0.matches + ' match(es) at level ' + b0.lvl + '/' + b0.hm + ' hearts, '
+              + 'host-only CONTINUE held for ' + (BREAK_MS / 1000) + 's');
 }
 
 // ---- the whole thing ------------------------------------------------------
@@ -632,16 +455,25 @@ async function finish(m, plan){
     rows.push('8 interstitial: standings fanned out identically to all six, '
               + srv.T.advancers.length + ' of ' + N + ' advanced, bracket dealt');
 
-    // ---- the knockouts, and the 3-heart final -----------------------------
+    // ---- the break, then the knockouts and the 3-heart final --------------
+    await passBreak({ first:true });
     const ko = await node({});
     A(ko.nid === 'ko1.1' && srv.T.nodes[ko.nid].hm === 2, '9: ' + ko.nid + ' is not a 2-heart knockout');
-    await finish(ko, { win:0, score:[9, 3] });
+    // Somebody who is not playing this one loses their signal stream for the whole of it.
+    let deaf = 0;
+    while(deaf === ko.ia || deaf === ko.ib || IDS[deaf] === srv.T.host) deaf++;
+    await finish(ko, { win:0, score:[9, 3], miss:deaf });
+    await passBreak({ missed:deaf, node:ko.nid, played:[ko.ia, ko.ib] });
     const fin = await node({});
     A(fin.nid === 'final', '9: the bracket reached ' + fin.nid + ' instead of a final');
     A(srv.T.nodes.final.hm === 3, '9: the final is at ' + srv.T.nodes.final.hm + ' hearts, not 3');
+    A(srv.T.nodes['ko1.1'].lvl === 2 && srv.T.nodes.final.lvl === 3,
+      '9: the ladder played the knockouts at levels ' + srv.T.nodes['ko1.1'].lvl + '/' + srv.T.nodes.final.lvl);
+    A(C[fin.ia].sess(fin.pb, 'host').lvl0 === 3, '9: the final minted a session opening on level 1');
     A(C[fin.ia].sess(fin.pb, 'host').hearts === 3, '9: the final minted a 2-heart session');
     await finish(fin, { win:0, score:[11, 8] });
-    rows.push('9 knockouts: ko1.1 at 2 hearts and the final at 3, both dressed from the sheet');
+    rows.push('9 knockouts: ko1.1 at 2 hearts on level 2 and the final at 3 hearts on level 3, '
+              + 'both dressed from the sheet');
 
     // ---- the podium -------------------------------------------------------
     await pump(2);
@@ -734,6 +566,43 @@ async function finish(m, plan){
       '13: engaging the sheet left the live session playing for the wrong stakes');
     A(ls && ls.p2pOnly === true, '13: engaging the sheet left the live session relay-capable');
     rows.push('13 late sheet: a session minted before its roles sheet was engaged is dressed when it lands');
+
+    // ---- 14. a finished-match stamp must not outlive its match -----------------------
+    // _ttClearMatch is not the only way a duel leaves the board: a key pressed on the over
+    // screen, a peer's bye and a dead connection all clear it without telling tourney.js.
+    // The "a finished match is still on screen" stamp then belonged to a match that was
+    // already gone, and the NEXT match inherited it -- and was torn down as a finished one
+    // while it was being played, a few seconds after it started.
+    const st = C[5];
+    st.clear();
+    st.inGame(true);                   // a match on the board, the way the last one ended
+    st.sigTo({ event:'roles', tid:st.tt().tid, nid:'stale1', round:9, hm:2, stakes:false,
+               players:[IDS[0], IDS[1]], feeder:IDS[0], primaries:[], secondaries:[], you:'idle' });
+    st.endMatch('host', IDS[0], 0, [3, 1]);   // the sim declares it over: the stamp is made
+    st.exit();                               // ...and the player walks off the over screen
+    A(!st.live() && st.rec().exits === 1, '14: the walk-off did not take the match off the board');
+    st.tick();
+    st.inGame(true);                   // the NEXT match is live
+    clock(TT_OVER_MS + 1000);
+    st.tick();
+    A(st.live() && st.rec().exits === 1,
+      '14: a stamp from the previous match tore down the next one mid-play');
+    st.inGame(false);
+    rows.push('14 stale over-stamp: a match left by any other route does not take the next one down with it');
+
+    // ---- 15. the stage token is the SERVER's, the WORDING is ours --------------------
+    // `stage` is a token and never a caption: the server has no idea what language this
+    // client is reading, and a client that renders an unknown token as nothing leaves a
+    // headline blank on the one screen that exists to say what is about to be played.
+    const S = (tok, r) => C[1].stage(tok, r);
+    A(S('group', 1) === 'GROUP STAGE' && S('quarter', 2) === 'QUARTER FINALS'
+      && S('semi', 3) === 'SEMI FINALS' && S('final', 4) === 'THE FINAL',
+      '15: a named stage read as ' + [S('group', 1), S('quarter', 2), S('semi', 3), S('final', 4)].join('/'));
+    A(S('ko', 3) === 'ROUND 3', '15: a round of 16 read as "' + S('ko', 3) + '"');
+    A(S('octofinal', 7) === 'ROUND 7' && S('', 2) === 'ROUND 2' && S(null, 5) === 'ROUND 5',
+      '15: an unknown token did not fall back to a plain round number');
+    rows.push('15 stage tokens: the four named stages read as themselves, and anything else -- '
+              + 'including a token a newer server invents -- reads as a plain round number');
 
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }
