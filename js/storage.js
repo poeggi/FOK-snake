@@ -269,6 +269,10 @@ function fmtPlayerId() { return fmtFriendId(getPlayerId()); }
 // The friend-invite URL this client hands out (QR in SETTINGS > USER): opening it loads
 // the game with the friend's ID in the hash -- never sent to any server, PWA/cache-safe.
 function friendUrl() { return GAME_URL + '#friend=' + getPlayerId(); }
+// The same idea for a lobby: the QR on the JOIN CODE screen carries a WHOLE LINK, not the
+// six letters. A scanner handed bare text can only show it to you; handed this, the phone
+// opens the game already knowing which room it is walking into.
+function tourneyUrl(code) { return GAME_URL + '#tourney=' + String(code || '').toUpperCase(); }
 // ---- Friends: IDs collected from invite links (boot hash parse), the ADD FRIEND
 // entry and the QR scan (1:1 menu). A capped list of public player IDs -- the
 // future matchmaking server reads it; until then it is display-only.

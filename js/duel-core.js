@@ -67,11 +67,12 @@ const RB_RING = 26;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY (+ t
 const RB_FUTURE = 32;        // honest inputs are authored up to a GAME tick ahead (dir stamps its
                              // effective boundary, simTick + _gDue <= gPer) plus start-time skew;
                              // beyond half a second ahead is a connection problem -- refuse it
-const RB_SPEC_FUTURE = 192;  // ...but a SPECTATOR deliberately runs behind the live edge (its startPts
-                             // is biased per relay hop, net-spec.js), so every forwarded input is
-                             // authored far in its future BY DESIGN -- that lead is exactly what keeps
-                             // a spectator rollback-free. 192 ticks (3.2s) covers two relay hops of
-                             // bias plus wire jitter; beyond it the feed, not the input, is the problem.
+const RB_SPEC_FUTURE = 192;  // ...but a SPECTATOR deliberately runs behind the live edge (net-spec.js
+                             // offsets its startPts, by the same amount at every hop), so every
+                             // forwarded input is authored in its future BY DESIGN -- that lead is what
+                             // keeps a spectator rollback-free. Deliberately far wider than the offset
+                             // itself needs: a relayed CHECKPOINT can land a whole wire ahead of a
+                             // booting node, and past this the feed, not the input, is the problem.
 var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
 var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
 var _rbSeq = 0;              // our outgoing input sequence

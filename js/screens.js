@@ -20,10 +20,11 @@ function menuItem(text,y,sel,c=ctx,dim) {
     c.globalAlpha=1;
 }
 // The ONE in-menu status toaster. Every menu message (matchmaking, invites, cloud backup /
-// restore, ...) renders here: a single reserved line one row above BACK (which sits at CH-52),
-// the small FONT.HINT, coloured by kind -- red on failure, green on success, amber otherwise.
-// The slot stays blank when there is nothing to say, so it reads identically across menus.
-const STATUS_Y = CH - 76;
+// restore, ...) renders here: a single reserved line one row above BACK, the small FONT.HINT,
+// coloured by kind -- red on failure, green on success, amber otherwise. The slot stays blank
+// when there is nothing to say, so it reads identically across menus. The height itself is
+// screen furniture and comes from the shared UI band (js/assets.js).
+const STATUS_Y = UI.STATUS_Y;
 function drawStatus(msg, y){
     if(!msg) return;
     const col = /FAIL|INVALID|OFFLINE|WRONG|TOO LARGE|NO CLOUD|NO BACKUP|BAD|MISMATCH|BUSY|SYNC|UNREACHABLE|NOT SUPPORTED|CANNOT|LOST|DECLINE|EXPIRED/i.test(msg) ? '#ff5555'
@@ -242,7 +243,7 @@ function _composeMenu(diffLine){
     const msp=MENU_ITEMS.length<=5?38:30;
     MENU_ITEMS.forEach((item,i)=>menuItem(item,144+i*msp,i===menuSel,c));
     if(ANNOUNCEMENT) _drawNewspaper(c, menuSel===MENU_ITEMS.length);
-    ct(diffLine,CW/2,362,'#4a7a4a',FONT.HINT,c);
+    ct(diffLine,CW/2,BAND_Y,'#4a7a4a',FONT.HINT,c);   // the settings-summary band every screen uses
     c.save();
     c.font=`${FONT.HINT}px "Press Start 2P"`; c.textBaseline='bottom'; c.shadowBlur=0;
     c.fillStyle='#4a7a4a'; c.textAlign='left';
@@ -420,9 +421,9 @@ function drawSettings() {
     const title=inCat?'SETTINGS/'+_cats()[settingsCat].label:'SETTINGS';
     ctg(title,CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const list=_settingsList();
-    const startY=90, rowH=28;   // one empty line below the headline before the first entry
+    const startY=MENU_TOP, rowH=MENU_ROW;   // one empty line below the headline before the first entry
     list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel, ctx, inCat && it.dis && it.dis()));
-    menuItem('BACK', CH-52, settingsSel===list.length);   // BACK aligned toward the bottom
+    menuItem('BACK', BACK_Y, settingsSel===list.length);   // BACK aligned toward the bottom
     if(inCat){
         const it=list[settingsSel];
         // Volume bar under the selected slider row
@@ -491,10 +492,13 @@ function drawWinStar(cx, cy, r){
 // One scoreboard row, shared by the LOCAL and GLOBAL tabs (g = global). The hardening
 // casts (|0, %, typeof) exist for the untrusted server fields and are identity on
 // well-formed local rows; only score keeps a split, |0 would truncate past 2^31.
-// Row pitch has to clear the tallest cosmetic, not just the text: a wizard hat or a crown
-// on the head at the right reaches ~28px above its own row, so at the old 28px pitch it grew
-// into the row above. 34 gives the headgear its own air; 8 rows still end well clear of HINT_Y.
-const SCORE_ROW_Y = 90, SCORE_ROW_H = 34;
+// A scoreboard is a list, so it is drawn on the list pitch: the same MENU_TOP / MENU_ROW
+// every menu in the game uses, which is what makes room for the full TEN the storage keeps
+// (SCORES_KEPT) instead of the eight a wider pitch could fit. Tall headgear -- a wizard hat,
+// a crown -- reaches above its own row at this pitch and will need its own answer; the ten
+// rows come first because a top eight is the wrong list.
+const SCORES_SHOWN = 10;
+const SCORE_ROW_Y = MENU_TOP, SCORE_ROW_H = MENU_ROW;
 function _drawScoreRow(s, i, g){
     const y=SCORE_ROW_Y+i*SCORE_ROW_H;
     ctx.fillStyle=i===0?'#ffd700':i<3?'#dddddd':'#aaaaaa';
@@ -527,7 +531,7 @@ function drawScores() {
                 ct('NO GLOBAL SCORES YET - BE THE FIRST!',CW/2,CH/2,'#aaa',FONT.HINT);
             } else {
                 ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
-                gs.slice(0,8).forEach((s,i)=>_drawScoreRow(s,i,true));
+                gs.slice(0,SCORES_SHOWN).forEach((s,i)=>_drawScoreRow(s,i,true));
                 ctx.textAlign='center';
             }
         }
@@ -538,7 +542,7 @@ function drawScores() {
     if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',FONT.HINT); }
     else {
         ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
-        scores.slice(0,8).forEach((s,i)=>_drawScoreRow(s,i,false));
+        scores.slice(0,SCORES_SHOWN).forEach((s,i)=>_drawScoreRow(s,i,false));
         ctx.textAlign='center';
     }
     ct('L/R:tab   A/ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
@@ -608,7 +612,7 @@ function drawAchievements() {
     });
     ctx.textAlign='center'; ctx.textBaseline='middle';
     const total=list.filter(a=>achUnlocked[a.id]).length;
-    ctg(`${total} / ${list.length} UNLOCKED`,CW/2,CH-30,'#6aaa6a',FONT.HINT, GLOW.FAINT);
+    ctg(`${total} / ${list.length} UNLOCKED`,CW/2,BAND_Y,'#6aaa6a',FONT.HINT, GLOW.FAINT);
     const hint=expert?'L/R:page   A:back':'A:back';
     ct(hint,CW/2,HINT_Y,'#888',FONT.HINT);
 }
@@ -752,7 +756,7 @@ function drawShop() {
     }
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=6;
-    ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,CH-30,'#ffd700',FONT.HINT);
+    ct(`BALANCE: ${coins.toLocaleString()} FK`,CW/2,BAND_Y,'#ffd700',FONT.HINT);
     ctx.shadowBlur=0;
     ct(shopPage===BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back'
        : shopPage===GEAR_PAGE ? 'UP/DN:nav  L/R:tab  A/||:wear  ESC:back'
@@ -899,7 +903,7 @@ function drawNameEntry(now) {
         ct('\u21B5',ox+okW/2,oy+okH/2,on?'#0a1a0a':ready?'#cfeccf':'#3a3a4a',FONT.MENU);
     }
     const selY=sy+sh+90,ci=nameCharIdx;
-    const dialX=entryMode==='friend'?190:CW/2;   // friend mode: dial left, camera right -> pair centered
+    const dialX=_scanFor()?190:CW/2;   // with a camera: dial left, viewfinder right -> pair centered
     {
         ctx.fillStyle='#0d1e0d'; rr(dialX-20,selY-12,40,22,3); ctx.fill();
         ctx.strokeStyle='#2a5a2a'; ctx.lineWidth=1; rr(dialX-20,selY-12,40,22,3); ctx.stroke();
@@ -933,7 +937,7 @@ function drawNameEntry(now) {
         ctx.beginPath(); ctx.moveTo(ax,uay-5); ctx.lineTo(ax-6,uay+3); ctx.lineTo(ax+6,uay+3); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(ax,day+5); ctx.lineTo(ax-6,day-3); ctx.lineTo(ax+6,day-3); ctx.closePath(); ctx.fill();
     }
-    if(entryMode==='friend') _drawScanPanel();
+    if(_scanFor()) _drawScanPanel();
     // ADD FRIEND verdicts (checking / added / no such ID / rate limit) sit BELOW the
     // viewfinder and the dial, not at STATUS_Y -- that band is under both of them here.
     // Held longer than the menus' 2.6s: this one is read and acted on, not just noticed.
@@ -944,6 +948,8 @@ function drawNameEntry(now) {
 // Camera viewfinder (ADD FRIEND, right side): live preview while scanning; a
 // verified read auto-fills and submits (see the QR SCANNER source in input.js).
 const SCAN_VF={ s:150, x:270, y:180 };   // viewfinder rect (draw + tap hit-test); pairs with the dial at x=190
+// The panel is mode-agnostic on purpose: ADD FRIEND and JOIN TOURNAMENT are the same job with
+// a different payload, so they get the same half of the screen, not two designs to learn.
 function _drawScanPanel(){
     const vs=SCAN_VF.s, vx=SCAN_VF.x, vy=SCAN_VF.y;
     if(_scanOk){
@@ -951,7 +957,7 @@ function _drawScanPanel(){
         ctx.strokeStyle='#7fff7f'; ctx.lineWidth=2; rr(vx-4,vy-4,vs+8,vs+8,4); ctx.stroke();
         ctg('QR OK',vx+vs/2,vy+vs/2-16,'#7fff7f',FONT.MENU, GLOW.TEXT);
         ct(_scanOk,vx+vs/2,vy+vs/2+8,'#ffd700',FONT.HINT);
-        ct('ADDING...',vx+vs/2,vy+vs/2+28,'#4a7a4a',FONT.HINT);
+        ct(_scanFor()==='tcode'?'JOINING...':'ADDING...',vx+vs/2,vy+vs/2+28,'#4a7a4a',FONT.HINT);
         return;
     }
     scanTick();
@@ -1294,10 +1300,10 @@ function drawQuitConfirm() {
 function _ttMenuOk(){ return typeof netTourneyOk === 'function' && netTourneyOk(); }
 function drawDuelMenu() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
-    // at y=24 with glow 16, items from startY=90 in rowH steps, #888 hint at HINT_Y.
+    // at y=24 with glow 16, items from MENU_TOP in MENU_ROW steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
     ctg('MULTIPLAYER',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const startY=90, rowH=28;
+    const startY=MENU_TOP, rowH=MENU_ROW;
     const items=[
         {t:'1:1 DUEL',    en:true},
         {t:'TOURNAMENT',  en:_ttMenuOk(), note:_ttMenuOk()?null:(netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':'(NEEDS A CONNECTION)')},
@@ -1310,7 +1316,7 @@ function drawDuelMenu() {
         if(it.en) menuItem(it.t,y,sel);
         else ct(sel?('> '+it.t+' <'):it.t, CW/2, y, sel?'#777':'#555', FONT.MENU);
     });
-    menuItem('BACK', CH-52, duelSel===items.length);   // BACK toward the bottom, like drawSettings
+    menuItem('BACK', BACK_Y, duelSel===items.length);   // BACK toward the bottom, like drawSettings
     if(items[duelSel] && items[duelSel].note) ct(items[duelSel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
     if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -1320,7 +1326,7 @@ function drawDuelMenu() {
 function drawDuel11() {
     drawGrid(); drawOvBg(0.92);
     ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const startY=90, rowH=28;
+    const startY=MENU_TOP, rowH=MENU_ROW;
     const items=[
         {t:'1:1 ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
         {t:'1:1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'(PC + KEYBOARD ONLY)'},
@@ -1330,7 +1336,7 @@ function drawDuel11() {
         if(it.en) menuItem(it.t,y,sel);
         else ct(sel?('> '+it.t+' <'):it.t, CW/2, y, sel?'#777':'#555', FONT.MENU);
     });
-    menuItem('BACK', CH-52, duel11Sel===items.length);
+    menuItem('BACK', BACK_Y, duel11Sel===items.length);
     if(items[duel11Sel] && items[duel11Sel].note) ct(items[duel11Sel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
     if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -1386,7 +1392,7 @@ function drawLobby(){
         else ct(on?('ONLINE'+(e2e!=null?' ~'+e2e+'ms':'')):'OFF', CW/2+170, y, on?'#7fff7f':'#555', FONT.HINT);
     });
     if(!fr.length) ct('NO FRIENDS YET - SEE ADD FRIEND', CW/2, startY, '#555', FONT.HINT);
-    menuItem('BACK', CH-52, _netLb.sel===fr.length+1);   // BACK toward the bottom, like drawSettings
+    menuItem('BACK', BACK_Y, _netLb.sel===fr.length+1);   // BACK toward the bottom, like drawSettings
     // Connecting feedback: one dot grows every 200ms while something is pending.
     const dots='.'.repeat(1+Math.floor(((typeof performance!=='undefined')?performance.now():0)/200)%5);
     if(_netLb.seeking) drawStatus('SEEKING A MATCH'+dots+'  (A: CANCEL)');
@@ -1450,7 +1456,7 @@ function drawFriends(){
     });
     if(!rows.length) ct('NO FRIENDS YET - SEE ADD FRIEND', CW/2, startY+rowH, '#555', FONT.HINT);
     if(_netFr.msg) drawStatus(_netFr.msg);
-    menuItem('BACK', CH-52, _netFr.sel===rows.length);   // BACK toward the bottom, like drawSettings
+    menuItem('BACK', BACK_Y, _netFr.sel===rows.length);   // BACK toward the bottom, like drawSettings
     if(_netFr.confirm){
         // Local safety confirm before removing a friend (the SERVER removal itself
         // is silent/auto-confirmed, but the UI still guards an accidental delete).
@@ -1586,7 +1592,7 @@ function _ttDots(){ return '.'.repeat(1 + Math.floor(((typeof performance !== 'u
 function _ttDrawRows(startY, rowH){
     const rows = tourneyRows(), sel = Math.min(Math.max(tourneyUi().sel, 0), rows.length - 1);
     rows.forEach((r, i) => {
-        const last = i === rows.length - 1, y = last ? CH - 52 : startY + i * rowH;
+        const last = i === rows.length - 1, y = last ? BACK_Y : startY + i * rowH;
         if(r.en === false) ct(sel === i ? ('> ' + r.t + ' <') : r.t, CW/2, y, sel === i ? '#777' : '#555', FONT.MENU);
         else menuItem(r.t, y, sel === i);
         if(r.note && !last) ct(r.note, CW/2 + 176, y, sel === i ? '#ffd700' : '#666', FONT.HINT);
@@ -1601,7 +1607,7 @@ function drawTourneyLobby(){
         if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
         else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
         else ct('2 - ' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
-        _ttDrawRows(84, 26);
+        _ttDrawRows(84, MENU_ROW);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
         // real message -- both at that band would overdraw each other.
         if(ui.msg) drawStatus(ui.msg);
@@ -1609,37 +1615,70 @@ function drawTourneyLobby(){
         ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    // A lobby we hold. The join code is the whole point of the screen, so it is the
-    // biggest thing on it -- somebody is reading it out loud across a room.
-    const ps = (t.players || []).slice(0, tourneyMax());
+    // A lobby we hold. The ROWS come first because they are what a person does here; the
+    // roster is what the screen SAYS, so it sits with the rest of the status, directly above
+    // the way out. The join code is not on this screen at all any more -- it has one of its
+    // own, because reading it across a room or holding a phone up to it is a job rather than
+    // a glance, and it was pushing the people it is for into the middle of the screen.
+    // The host sits at the top of its own roster: it is the one row that is there from the
+    // first frame, and a list that re-sorts under a person as the room fills is a list nobody
+    // can read across a table. Everyone else keeps the order the server hands them in.
+    const ps = (t.players || []).slice(0, tourneyMax())
+        .sort((a, b) => (b && b.id === t.host ? 1 : 0) - (a && a.id === t.host ? 1 : 0));
     const n = ps.length, host = t.host === getPlayerId();
-    ct('JOIN CODE', CW/2, 46, '#888', FONT.HINT);
-    ctg(t.code || '------', CW/2, 72, '#ffd700', FONT.JUMBO, GLOW.BIG);
+    _ttDrawRows(56, MENU_ROW);
     // The roster is a FRIENDS list in all but name -- people, by name and id, each with a note
     // about them -- so it is drawn as one: name column, id centered, note on the right.
-    // The band it sits in is fixed (join code above, action rows below) but the roster is not,
-    // so it is CENTRED in the band and its pitch tightens only as far as a full lobby needs.
-    // Reserving the full-lobby height unconditionally is what left two players sitting above a
-    // hole; a room of ten still has to fit, hence the pitch and not a fixed row height.
-    const TT_TOP = 100, TT_BOT = 252, TT_SUM = 18;   // TT_SUM: the summary line's drop below the last row
-    const rowH = Math.max(15, Math.min(26, Math.floor((TT_BOT - TT_TOP) / Math.max(n, 1))));
-    const listY = TT_TOP + Math.max(0, Math.round((TT_BOT - TT_TOP - (n - 1) * rowH - TT_SUM) / 2));
+    // It FILLS FROM THE TOP at a fixed pitch: the row a person is on is theirs for as long as
+    // they are in the room, and a newcomer lands underneath everybody instead of pushing the
+    // whole list -- and the host with it -- up the screen. The pitch is the one that lets a
+    // full room of ten reach the last row while still clearing the status line.
+    const TT_TOP = 110, TT_ROW = 22;
     ps.forEach((p, i) => {
-        const y = listY + i * rowH, nm = String((p && p.name) || '').toUpperCase();
+        const y = TT_TOP + i * TT_ROW, nm = String((p && p.name) || '').toUpperCase();
         // The ID is what every row is guaranteed to have, so it is what every row shows: a
         // player who never set a name used to be an entirely blank line in the roster.
         menuItem(fmtFriendId(String((p && p.id) || '')), y, false);
         _drawRowName(nm || 'NO NAME', y, !!p && p.id === getPlayerId(), nm ? null : '#555');
         if(p && p.id === t.host) ct('HOST', CW/2 + 180, y, '#ffd700', FONT.HINT);
     });
+    // What the lobby AMOUNTS TO, on the line the whole game keeps for exactly that: SHOP puts
+    // its balance here, ACHIEVEMENTS its unlocked count. It reads as a footer to the screen
+    // rather than a caption under the last player, and it stops moving as people arrive.
     const mn = _ttMatches(n);
     ct(n + (n === 1 ? ' PLAYER' : ' PLAYERS') + ' - ' + mn + (mn === 1 ? ' MATCH' : ' MATCHES')
        + ' IN ROUND 1' + (t.stakes ? ' - ITEM STAKES ON' : ''),
-       CW/2, listY + (n - 1) * rowH + TT_SUM, '#4a7a4a', FONT.HINT);
-    _ttDrawRows(272, 26);
+       CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
     if(ui.msg) drawStatus(ui.msg);
     else if(!host) drawStatus('WAITING FOR THE HOST TO START' + _ttDots());
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// The join code, alone, big, with the link that carries it. Everything else about a lobby is
+// a list of people; this is the one thing somebody has to get ACROSS a room, by voice or by
+// camera, so it gets a screen instead of a line.
+function drawTourneyCode(){
+    const t = tourneyView();
+    if(!t){ phase = 'tourneyLobby'; drawTourneyLobby(); return; }
+    drawGrid(); drawOvBg(0.92);
+    ctg('JOIN CODE', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    // MAX players, not the count: this screen exists to be pointed a camera at, and what the
+    // person holding that camera needs to know is how big the room they are joining can get.
+    // The number of people already in it is on the lobby they land in a second later.
+    ct((t.code || '------') + '   MAX PLAYERS: ' + tourneyMax(), CW/2, 50, '#ffd700', FONT.MENU);
+    // Deliberately the MY ID screen's geometry, down to the module size: the two screens do the
+    // same job -- hold a phone up to this -- and a person who has held one up already should
+    // not have to work out that they are looking at the same thing again.
+    // The payload is the whole link, not the six letters: a scanner handed bare text can only
+    // show it to you, handed this it opens the game already walking into this lobby.
+    const q = qrMatrix(tourneyUrl(t.code || ''));
+    const mod = 8, quiet = 4, card = (q.size + quiet * 2) * mod;
+    const qx = Math.round((CW - card) / 2), qy = 64;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, card, card);
+    ctx.fillStyle = '#000000';
+    for(let r = 0; r < q.size; r++) for(let c = 0; c < q.size; c++)
+        if(q.m[r][c]) ctx.fillRect(qx + (quiet + c) * mod, qy + (quiet + r) * mod, mod, mod);
+    ct('SCAN TO JOIN THIS TOURNAMENT', CW/2, qy + card + 12, '#4a7a4a', FONT.HINT);
+    ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // Round 1 is a table of points; every round after it is a tree of nodes. Both are the
 // server's own words -- standings rows and bracket nodes, rendered, never recomputed.

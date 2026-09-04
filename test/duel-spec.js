@@ -3,13 +3,15 @@
 // wire packets forwarded verbatim. This suite is the proof of that claim -- and of the one
 // design idea the whole tree rests on.
 //
-// THE IDEA. A spectator biases its sim ORIGIN by SPEC_DELAY_MS per hop and delays its BOOT by
-// the same amount, so it runs ~24 ticks under the feeder. Every forwarded input for tick X
-// therefore arrives while X is still in its FUTURE: the log takes it and the tick loop applies
-// it on time. No rollback on a healthy feed, which is what makes relaying affordable at all.
-// The boot has to be late as well as biased because the tick loop steers FORWARD ONLY (game.js:
-// "the shared clock STEERS this, it does not gate it") -- a spectator that started on time
-// could never fall back to its target.
+// THE IDEA. A spectator offsets its sim ORIGIN by SPEC_DELAY_MS and delays its BOOT by the
+// same amount, so it runs ~6 ticks under the feeder. Every forwarded input for tick X therefore
+// arrives while X is still in its FUTURE: the log takes it and the tick loop applies it on time.
+// The offset is FLAT -- one hop or two, every watcher of a match sits on the SAME tick, because
+// relaying is cut-through and a second hop costs a wire crossing, not a second playback delay.
+// It is not what makes a spectator correct (rollback is, on the players' own intake); it is what
+// keeps that from having to happen. The boot has to be late as well as offset because the tick
+// loop steers FORWARD ONLY (game.js: "the shared clock STEERS this, it does not gate it") -- a
+// spectator that started on time could never fall back to its target.
 //
 // What each section pins down:
 //   A) A watcher stays byte-identical to the players' world across level boundaries, at every
@@ -18,7 +20,7 @@
 //      is the property a mid-match spectator and every relayed node depend on.
 //   C) The fan-out cap is what keeps a phone from serving eight channels mid-match. A refused
 //      watcher is REDIRECTED to a node already being served, and the two-tier tree falls out
-//      of that rule by itself: hops 2, double bias, same byte-identical world.
+//      of that rule by itself: hops 2, the SAME offset, same byte-identical world.
 //   D) The feeder's relay duty dying is not the match dying. Under lockstep the OTHER player
 //      holds both input streams, so the primaries pull it in as the BACKUP FEEDER under a
 //      bumped generation and the feed resumes -- still with zero divergence.
@@ -69,9 +71,9 @@ if(lane.step()){
     A(r.levelUps >= 1, 'A: no level boundary was crossed -- the run proves nothing about them');
     if(s){
         A(s.role === 'primary' && s.hops === 1, 'A: role/hops = ' + s.role + '/' + s.hops + ' (want primary/1)');
-        A(s.bias === 400, 'A: bias ' + s.bias + 'ms (want one hop)');
+        A(s.bias === 100, 'A: offset ' + s.bias + 'ms (want the flat spectator offset)');
         A(s.dbg.gen === 0, 'A: generation moved to ' + s.dbg.gen + ' on a healthy feed');
-        A(s.lag > 12 && s.lag < 45, 'A: settled ' + s.lag + ' ticks behind (want ~24 -- the bias)');
+        A(s.lag > 2 && s.lag < 13, 'A: settled ' + s.lag + ' ticks behind (want ~6 -- the offset)');
     }
     rows.push('A clean watch: ' + r.checks + ' hash checks, ' + r.levelUps + ' level-ups, lag '
               + (s ? s.lag : '?') + 't, rx ' + (s ? s.dbg.rx : '?') + ', authored ' + (s ? s.authored : '?'));
@@ -87,14 +89,14 @@ if(lane.step()){
     A(!r.exitReason, 'B: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
     if(s2) A(s2.hops === 1, 'B: the late joiner sits at hops ' + s2.hops + ' (the feeder had room)');
     rows.push('B late join @11s: ' + (s2 ? s2.cmp : '?') + ' checks after joining, lag '
-              + (s2 ? s2.lag : '?') + 't -- the checkpoint landed it within one bias');
+              + (s2 ? s2.lag : '?') + 't -- the checkpoint landed it within one offset');
 }
 
 // ---- C) the fan-out cap, the redirect, and the two-tier tree it produces ---------------
 if(lane.step()){
     const r = runSpec({ secs:16, seed:0x77C3, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }] });
-    common('C', r, 'S1'); common('C', r, 'S2');
+    const s1 = common('C', r, 'S1'); common('C', r, 'S2');
     const s3 = common('C', r, 'S3');
     noDiverge('C', r);
     A(!r.exitReason, 'C: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
@@ -102,7 +104,12 @@ if(lane.step()){
     if(s3){
         A(s3.hops === 2 && s3.role === 'secondary',
           'C: the redirected watcher is ' + s3.role + ' at hops ' + s3.hops + ' (want secondary/2)');
-        A(s3.bias === 800, 'C: a two-hop node runs at ' + s3.bias + 'ms bias (want twice one hop)');
+        // The tier is a ROUTING fact and must stay one: two people watching the same match see
+        // the same frame whichever one of them the feeder had room for.
+        A(s1 && s3.bias === s1.bias, 'C: a two-hop node runs at ' + s3.bias + 'ms against the primary\'s '
+                                     + (s1 ? s1.bias : '?') + 'ms -- a tier changed the pacing');
+        A(s1 && Math.abs(s3.lag - s1.lag) <= 3,
+          'C: the two tiers settled ' + (s1 ? Math.abs(s3.lag - s1.lag) : '?') + ' ticks apart');
     }
     rows.push('C fan-out cap: feeder serves ' + r.players.A.outN + ', the third watcher relays at hops '
               + (s3 ? s3.hops : '?') + '/' + (s3 ? s3.bias : '?') + 'ms, ' + r.checks + ' checks, no divergence');

@@ -105,6 +105,7 @@ const SPEC_HOOKS = `
   globalThis.__specGen  = ()=> _spGen | 0;
   globalThis.__specSrc  = ()=> _spSrc || '';
   globalThis.__specAge  = ()=> netSpecFeedAge();
+  globalThis.__askN     = ()=> _spAsk.length;
   globalThis.__outN     = ()=> _spOut.length;
   globalThis.__inN      = ()=> _spIn.length;
   globalThis.__subN     = ()=> _spIn.filter(l => l.sub).length;
@@ -297,6 +298,35 @@ function runSpec(opts){
         return Object.keys(fx).filter(k => fx[k] !== fy[k]);
     };
 
+    // ---- pacing: how far behind the players each spectator actually SITS ----
+    // Under a flat offset the interesting number is not any one node's distance from the
+    // players -- it is the distance between two SPECTATORS at the same instant, because a
+    // tier is a routing fact and must not decide which frame you are looking at. lagSpread
+    // is therefore sampled ACROSS the watchers, not accumulated per node: their common drift
+    // against the players cancels, and only disagreement between them survives.
+    // A node is judged only once SPEC_SETTLE_MS have passed since it came up, because the
+    // boot deliberately starts low and climbs onto the target from below. Rollbacks are
+    // banked because _rbReset zeroes the tally at every level boundary.
+    const SPEC_SETTLE_MS = 1500;
+    let lagSpread = 0;
+    const sampleLag = (now) => {
+        const ta = cl.A.c.__simTick(), tk = [];
+        for(const n of names){
+            const o = cl[n];
+            if(!o.spec || !o.c.__specOn() || !o.c.__alive()) continue;
+            const rb = o.c.__rbDbg().rb | 0;
+            if(rb < (o.rbLast | 0)) o.rbBank = (o.rbBank | 0) + (o.rbLast | 0);
+            o.rbLast = rb;
+            if(o.lagT0 == null) o.lagT0 = now;
+            if(now - o.lagT0 < SPEC_SETTLE_MS) continue;
+            const lag = ta - o.c.__simTick();
+            o.lagMin = o.lagMin == null ? lag : Math.min(o.lagMin, lag);
+            o.lagMax = o.lagMax == null ? lag : Math.max(o.lagMax, lag);
+            tk.push(o.c.__simTick());
+        }
+        if(tk.length > 1) lagSpread = Math.max(lagSpread, Math.max(...tk) - Math.min(...tk));
+    };
+
     // ---- level boundaries: the real P2P path, host-authored over the wire ----
     let lastBoundaryLevel = 0, levelUps = 0;
     const maybeLevelUp = () => {
@@ -361,6 +391,7 @@ function runSpec(opts){
         }
         maybeLevelUp();
         checkDiverge();
+        if(now % 50 === 0) sampleLag(now);
         const va = cl.A.c.__view(); if(va) levelReached = Math.max(levelReached, va.level);
         if(opts.onSample) opts.onSample(now, cl, trace);
     }
@@ -374,8 +405,10 @@ function runSpec(opts){
             bias: o.c.__specBias(), dbg: o.c.__specDbg(), authored: o.c.__authoredN(),
             cmp: o.cmp | 0, divFrom: o.divFrom == null ? null : o.divFrom, divTo: o.divTo == null ? null : o.divTo,
             divN: o.divN | 0, divClean: o.divClean == null ? null : o.divClean,
-            inN: o.c.__inN(), outN: o.c.__outN(), subN: o.c.__subN(), txB: o.txB | 0,
+            inN: o.c.__inN(), outN: o.c.__outN(), subN: o.c.__subN(), askN: o.c.__askN(), txB: o.txB | 0,
             lag: (o.c.__specOn() && o.c.__alive()) ? cl.A.c.__simTick() - o.c.__simTick() : null,
+            lagMin: o.lagMin == null ? null : o.lagMin, lagMax: o.lagMax == null ? null : o.lagMax,
+            rb: (o.rbBank | 0) + (o.rbLast | 0),
             warn: o.c.__warn(), sig: o.c.__sigDump(), gone: !!o.gone,
             // Nothing ever drains a spectator's DUEL outbox, so whatever sits in it is
             // every packet it tried to send toward the two players. The iron rule says none.
@@ -383,12 +416,13 @@ function runSpec(opts){
         };
     }
     const players = {};
-    for(const n of ['A', 'B']) players[n] = { outN:cl[n].c.__outN(), inN:cl[n].c.__inN(),
+    for(const n of ['A', 'B']) players[n] = { outN:cl[n].c.__outN(), inN:cl[n].c.__inN(), askN:cl[n].c.__askN(),
                                               role:cl[n].c.__specRole(), gen:cl[n].c.__specGen(),
                                               txB:cl[n].txB | 0,
                                               dbg:cl[n].c.__specDbg(), sig:cl[n].c.__sigDump() };
     return {
         firstDiverge, exitReason, diedAt, levelUps, levelReached, checks:cmp.checks, txSeries, pairB,
+        lagSpread,
         killed: kills.map(k => k.hit || null),
         spectators, players, cl, trace,
         rbA: cl.A.c.__rbDbg(), rbB: cl.B.c.__rbDbg(),

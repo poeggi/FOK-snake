@@ -477,9 +477,19 @@ function _ttTick(){
     // as well -- otherwise one keypress silently takes away both the re-offer and the
     // walkover, and the node hangs for everybody in the tournament, not just for the player
     // who pressed it.
+    // A SPECTATOR's ladder never ends. Giving up is a verdict a watcher is not entitled to:
+    // the match it cannot reach is most likely being played perfectly well by the two people
+    // in it, there is no result it owes anyone, and the node ends on its own the moment the
+    // server deals the next one. So it keeps asking, and says what it is doing rather than
+    // sitting on a ceremony that has stopped meaning anything.
     if(!inGame && !_ttPend && _ttCerAt && now - _ttCerAt > TT_CONNECT_MS){
-        if(++_ttTry >= TT_CONNECT_TRIES) _ttFail('MATCH DID NOT CONNECT');
-        else { _ttCerAt = now; _ttPend = _tt.roles; }
+        const spec = _tt.you === 'spectate';
+        if(++_ttTry >= TT_CONNECT_TRIES && !spec) _ttFail('MATCH DID NOT CONNECT');
+        else {
+            _ttCerAt = now; _ttPend = _tt.roles;
+            if(spec && _ttTry >= TT_CONNECT_TRIES && _ttUi.msg !== 'STILL LOOKING FOR A FEED')
+                _ttMsg('STILL LOOKING FOR A FEED', true);
+        }
     }
     // The state read-back is the safety net under the signal stream, and the roster needs one
     // as much as the bracket does: nothing but an adopted `players` list ever SHRINKS the
@@ -492,7 +502,18 @@ function _ttTick(){
 // ---- lobby actions -------------------------------------------------------------------
 function tourneyEnter(){
     _ttUi.sel = 0; _ttUi.msg = '';
-    if(typeof _netHello === 'function' && _netOk()) _netHello();   // picks up the tourneys list
+    // A tournament link parked a code at boot and this is the first screen that can spend it.
+    // It waits for the hello, because the join is gated on the server's minor version and an
+    // unanswered hello reads exactly like an old server. Unspent, it STAYS parked: a code is
+    // only worth burning against a server that could have taken it.
+    const spend = () => {
+        if(!_tourneyLink || _tt || !netTourneyOk()) return;
+        const c = _tourneyLink; _tourneyLink = ''; tourneyJoin(c);
+    };
+    if(typeof _netHello === 'function' && _netOk()){
+        const h = _netHello();   // picks up the tourneys list
+        if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
+    }
     if(_tt) _ttSync(true);
     _uiDirty = true;
 }
@@ -569,11 +590,13 @@ async function tourneyContinue(){
     Snd.sfxPlay('select', cfg.music);
     _ttSync(true);
 }
-async function tourneyLeave(){
+// Leaving mid-tournament drops back to the lobby list, where there is something else to do;
+// leaving the lobby ITSELF has nothing to stay for, so that caller names where it goes.
+async function tourneyLeave(to){
     if(!_tt) return;
     const tid = _tt.tid;
     _ttDrop('');
-    phase = 'tourneyLobby'; _ttUi.sel = 0;
+    phase = to || 'tourneyLobby'; _ttUi.sel = 0;
     Snd.sfxPlay('nav', cfg.music);
     await _ttPost('leave', { tid });
 }
@@ -590,7 +613,9 @@ function tourneyRows(){
         // at a fixed x and a row this long runs straight through that column.
         rows.push({ t:'ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'), en:ok, lr:true,
                     act:() => { _ttUi.stakes = !_ttUi.stakes; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
-        rows.push({ t:'JOIN BY CODE', en:ok, act:() => _entryOpen('tcode') });
+        // scanStart() rides the keypress/tap: a camera permission prompt is only allowed to
+        // appear inside a user gesture, exactly as ADD FRIEND opens its own.
+        rows.push({ t:'JOIN BY CODE', en:ok, act:() => { _entryOpen('tcode'); scanStart(); } });
         for(const l of tourneyLobbyList().slice(0, 6)){
             const n = l.players | 0, mx = l.max | 0;
             rows.push({ t:String(l.code || '') + '  ' + String(l.host_name || '?').toUpperCase(),
@@ -598,8 +623,14 @@ function tourneyRows(){
         }
     } else if(_tt.state === 'open'){
         const host = _tt.host === getPlayerId(), n = (_tt.players || []).length;
+        // START is the top row and therefore the pre-selected one (sel is 0 on entry): it is
+        // the thing the host is waiting to do, and the one press that should never need a
+        // journey down a list. Showing the code is what you do WHILE waiting for it.
         if(host) rows.push({ t:'START TOURNAMENT', en:n >= 2, note:n < 2 ? '(NEED 2)' : '', act:tourneyStart });
-        rows.push({ t:host ? 'CANCEL TOURNAMENT' : 'LEAVE TOURNAMENT', en:true, act:tourneyLeave });
+        // Anyone in the room can hand the code on, not just the host: the person standing
+        // next to the newcomer is the one who ends up showing it to them.
+        rows.push({ t:'SHOW JOIN CODE', en:true,
+                    act:() => { phase = 'tourneyCode'; Snd.sfxPlay('select', cfg.music); _uiDirty = true; } });
     } else if(_tt.state === 'done'){
         // Nothing to leave: the tournament is over and the row just lets go of the picture.
         rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
@@ -615,6 +646,14 @@ function tourneyRows(){
         }
         rows.push({ t:'LEAVE TOURNAMENT', en:true, act:tourneyLeave });
     }
-    rows.push({ t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
+    // BACK is the last row of every tournament screen, and on an OPEN lobby it is also the
+    // only way off it -- so it says what leaving actually costs. A lobby you walk away from
+    // is a lobby other people are still sitting in, waiting for a start that is never coming:
+    // walking away IS cancelling it, and the row is not allowed to pretend otherwise.
+    const open = !!_tt && _tt.state === 'open';
+    rows.push(open
+        ? { t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
+            en:true, act:() => tourneyLeave('duelMenu') }
+        : { t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
     return rows;
 }

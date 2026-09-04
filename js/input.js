@@ -188,7 +188,14 @@ function _ttUiInput(escTo){
             if(!r || !r.lr) return false;
             r.act(); return true;   // a two-way row toggles on LEFT/RIGHT exactly as it does on A
         },
-        back(){ phase = escTo; Snd.sfxPlay('nav', cfg.music); },
+        // ESC presses the BACK row rather than going around it. On the lobby that row also
+        // cancels or leaves, and an ESC that quietly slipped past it would strand a room of
+        // people in a tournament whose host had already walked out. escTo is the fallback for
+        // a row list that somehow has no last row at all.
+        back(){
+            const rows = tourneyRows(), r = rows[rows.length - 1];
+            if(r && r.act) r.act(); else { phase = escTo; Snd.sfxPlay('nav', cfg.music); }
+        },
     };
 }
 const UI_INPUT = {
@@ -309,6 +316,12 @@ const UI_INPUT = {
     // share one row model (tourneyRows): whatever the picture above them is, the rows at
     // the bottom are drawn and dispatched from the same list, so they can never disagree.
     tourneyLobby: _ttUiInput('duelMenu'),
+    tourneyCode: {
+        // Nothing to choose: the screen is one number and the link that carries it.
+        nav(){},
+        confirm(){ phase='tourneyLobby'; Snd.sfxPlay('nav',cfg.music); },
+        back(){ phase='tourneyLobby'; Snd.sfxPlay('nav',cfg.music); },
+    },
     tourneyBracket: _ttUiInput('duelMenu'),
     tourneyRound: _ttUiInput('duelMenu'),
     tourneyPodium: _ttUiInput('duelMenu'),
@@ -727,7 +740,7 @@ const _canvasDown = e => {
     e.preventDefault();
     // A camera-viewfinder click cycles the camera (on pointerup) -- it must NOT also add a
     // character to the friend ID. This guard was missing, so clicking the camera advanced the ID.
-    if (phase === 'nameEntry' && entryMode === 'friend' && _scanInVF(e.clientX, e.clientY)) return;
+    if (_scanFor() && _scanInVF(e.clientX, e.clientY)) return;
     // A pointer click (mouse / TV remote) acts as OK: start on splash, add-a-letter
     // in name entry, confirm/select in every other menu. Not during gameplay.
     if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
@@ -736,7 +749,7 @@ const _canvasDown = e => {
 };
 const _canvasUp = e => {
     if (e.pointerType === 'touch') return;
-    if (phase === 'nameEntry' && entryMode === 'friend' && _scanTapAt(e.clientX, e.clientY)) return;
+    if (_scanFor() && _scanTapAt(e.clientX, e.clientY)) return;
     if (phase === 'splash') { triggerSplashExit(); }
 };
 if (typeof window !== 'undefined' && window.PointerEvent) {
@@ -859,7 +872,7 @@ document.addEventListener('touchstart',e=>{
     // symptoms are that one line, so bail before either: no arm, no preventDefault, real clicks.
     if(!t || _ringEl || _inControlMask(t.clientX,t.clientY)) return;
     e.preventDefault();
-    if(phase==='nameEntry' && !(entryMode==='friend' && _scanTapAt(t.clientX, t.clientY))) nameInp.focus();
+    if(phase==='nameEntry' && !(_scanFor() && _scanTapAt(t.clientX, t.clientY))) nameInp.focus();
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
 },{passive:false});
 document.addEventListener('touchmove',e=>{
@@ -1090,9 +1103,9 @@ nameInp.addEventListener('keydown', e => {
 });
 
 // ================================================================
-// SOURCE: QR SCANNER  (ADD FRIEND: camera auto-starts, a verified read submits)
-// Heavy resources are strictly on-demand: getUserMedia runs only while the ADD
-// FRIEND screen is open and every track is stopped on leave. Detection prefers
+// SOURCE: QR SCANNER  (ADD FRIEND / JOIN TOURNAMENT: camera auto-starts, a verified read submits)
+// Heavy resources are strictly on-demand: getUserMedia runs only while one of
+// those screens is open and every track is stopped on leave. Detection prefers
 // the browser-native BarcodeDetector (Android/Chrome); otherwise frames go
 // through our own decoder in qr.js (iOS has no BarcodeDetector).
 // ================================================================
@@ -1108,7 +1121,7 @@ function scanStart(){
     _scanState='starting';
     try{
         navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false}).then(s=>{
-            if(phase!=='nameEntry'||entryMode!=='friend'){ s.getTracks().forEach(t=>t.stop()); _scanState='off'; return; }
+            if(!_scanFor()){ s.getTracks().forEach(t=>t.stop()); _scanState='off'; return; }
             _scanStream=s;
             const v=document.createElement('video');
             v.setAttribute('playsinline',''); v.muted=true; v.srcObject=s;
@@ -1120,7 +1133,7 @@ function scanStop(){
     if(_scanStream){ try{ _scanStream.getTracks().forEach(t=>t.stop()); }catch(e){} }
     _scanStream=null; _scanVideo=null; _scanBusy=false; _scanState='off';
 }
-// Called per frame by the ADD FRIEND screen; decodes roughly 10x per second.
+// Called per frame by whichever screen wants a code; decodes roughly 10x per second.
 function scanTick(){
     if(_scanState!=='live'||_scanBusy||!_scanVideo||!_scanVideo.videoWidth) return;
     if((_scanFrame++%6)!==0) return;
@@ -1156,12 +1169,20 @@ function _scanTapAt(cx,cy){
     return true;
 }
 function _scanHit(str){
-    const m=/#friend=([0-9a-f]{8})$/.exec(String(str||'').trim());
-    if(!m||phase!=='nameEntry'||entryMode!=='friend'||_scanOk) return;
-    nameStr=m[1].toUpperCase(); nameCursorPos=8;
-    _scanOk=fmtFriendId(m[1]); _scanOkAt=simNow;   // show the lock on-screen first...
+    const mode=_scanFor();
+    if(!mode||_scanOk) return;
+    const s=String(str||'').trim();
+    const m=mode==='friend' ? /#friend=([0-9a-f]{8})$/.exec(s) : /#tourney=([A-Za-z0-9]{4,12})$/.exec(s);
+    if(!m) return;
+    const code=m[1].toUpperCase();
+    // A link of the wrong length, or carrying a character this field cannot hold, is not the
+    // code this screen is waiting for: leave the camera running rather than fill the slots
+    // with something the submit would only bounce.
+    if(code.length!==_entryMax()||code.split('').some(c=>_entryChars().indexOf(c)<0)) return;
+    nameStr=code; nameCursorPos=code.length;
+    _scanOk=mode==='friend'?fmtFriendId(m[1]):code; _scanOkAt=simNow;   // show the lock on-screen first...
     scanStop(); Snd.sfxPlay('achievement',cfg.music); spawnConfetti();   // celebrate like an achievement
-    setTimeout(()=>{ if(phase==='nameEntry'&&entryMode==='friend') _submitName(); },1400);   // ...then submit
+    setTimeout(()=>{ if(_scanFor()===mode) _submitName(); },1400);   // ...then submit
 }
 
 // Mute button

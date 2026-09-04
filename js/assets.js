@@ -4,11 +4,28 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v3.3.1';
+const APP_VERSION = 'v3.3.2';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
-const HINT_Y = CH - 14;   // shared bottom Y for every keyboard-hint line (ct(), baseline middle)
+// Screen furniture: the heights every screen parks its menu list, status line, BACK row,
+// summary band and key hints at, read from css/style.css (:root --ui-*) so there is ONE
+// source of truth for all of them. Same CSS-token pattern as FONT/GLOW (js/text.js) and
+// ACH (js/screens.js): the defaults keep the headless harness, which has no
+// getComputedStyle, drawing the identical layout.
+const UI = (() => {
+    let rt = null; try { rt = getComputedStyle(document.documentElement); } catch(_) {}
+    const v = (n, def) => { try { return parseInt(rt.getPropertyValue(n)) || def; } catch(_) { return def; } };
+    return {
+        MENU_TOP: v('--ui-menu-top',90), MENU_ROW: v('--ui-menu-row',28),
+        STATUS_Y: v('--ui-status-y',324), BACK_Y: v('--ui-back-y',348),
+        BAND_Y:   v('--ui-band-y',370),   HINT_Y: v('--ui-hint-y',390),
+    };
+})();
+const MENU_TOP = UI.MENU_TOP, MENU_ROW = UI.MENU_ROW;
+const BACK_Y = UI.BACK_Y;     // BACK / the last row of a list
+const BAND_Y = UI.BAND_Y;     // SHOP balance, ACHIEVEMENTS tally, lobby summary, menu DIFF
+const HINT_Y = UI.HINT_Y;     // every keyboard-hint line (ct(), baseline middle)
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 // Fixed-timestep simulation clock. The whole game advances in integer sim-ticks;
 // everything time-based is expressed in ticks, not wall-clock milliseconds, so the

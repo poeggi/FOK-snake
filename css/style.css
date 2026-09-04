@@ -15,6 +15,20 @@
     --ach-gap-x:     4px;
     --ach-gap-y:     4px;
 }
+/* Canvas SCREEN-FURNITURE geometry -- SINGLE SOURCE OF TRUTH, read into the JS UI object
+   (js/assets.js), the same CSS-token pattern the font, glow and achievement scales use.
+   Every screen in the game parks the same four things: a list of menu items from the top,
+   the status toaster, the way out, and the key hints. They are only recognisable AS the
+   same furniture if they are at the same height on every screen, so the heights live here
+   and nowhere else -- change one, once, and the whole game follows. */
+:root {
+    --ui-menu-top:  90px;   /* first menu item: one empty line below the headline   */
+    --ui-menu-row:  28px;   /* menu-item pitch, and the high-score row pitch        */
+    --ui-status-y: 324px;   /* the one in-menu status/toaster line                 */
+    --ui-back-y:   348px;   /* BACK, parked at the bottom of every list             */
+    --ui-band-y:   370px;   /* what the screen AMOUNTS to: balance, tally, summary  */
+    --ui-hint-y:   390px;   /* key hints, the lowest line on every screen           */
+}
 /* Layout in two rules:
    R1 (fit): the visible game (canvas + chrome that is actually shown) must fit the
              viewport. #wrap is flex:1 and takes whatever space the chrome leaves, so

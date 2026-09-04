@@ -56,10 +56,15 @@ async function lobby(){
     const t0 = C[0].tt();
     A(t0 && t0.code === 'K7MZ4Q' && t0.stakes === true && t0.state === 'open',
       '1: the host does not hold the lobby it just created');
-    // The host's own rows: START greyed until somebody else is in the room.
+    // The host's own rows: START first, because it is the press the host is waiting to make
+    // and sel starts on it -- greyed until somebody else is in the room -- then the code,
+    // which is what you hand out WHILE waiting.
     const rh = C[0].rows();
     A(rh[0].t === 'START TOURNAMENT' && !rh[0].en && rh[0].note === '(NEED 2)',
       '1: START is offered to a host sitting alone (' + JSON.stringify(rh[0]) + ')');
+    A(rh[1].t === 'SHOW JOIN CODE' && rh[1].en, '1: the host cannot reach the code (' + rh[1].t + ')');
+    A(rh[rh.length - 1].t === 'BACK - CANCEL TOURNAMENT',
+      '1: the host exit does not say it cancels the room (' + rh[rh.length - 1].t + ')');
 
     // The announce reaches the others through the real hello, and only while the screen
     // that shows it is open -- that is the whole reason hello asks for it by flag.
@@ -92,10 +97,13 @@ async function lobby(){
     await pump(1);
     A(C[0].tt().players.length === N, '1: the roster grew back on the read-back but did not');
 
-    // A guest is offered no START row, ever.
+    // A guest is offered no START row, ever -- but the code is not the host's to keep: the
+    // person standing next to a newcomer is the one who ends up showing it to them.
     const rg = C[3].rows();
     A(!rg.some(x => x.t.indexOf('START') === 0), '1: a guest is offered START');
-    A(rg[0].t === 'LEAVE TOURNAMENT', '1: a guest is offered ' + rg[0].t + ' rather than LEAVE');
+    A(rg[0].t === 'SHOW JOIN CODE' && rg[0].en, '1: a guest cannot pass the code on (' + rg[0].t + ')');
+    A(rg[rg.length - 1].t === 'BACK - LEAVE TOURNAMENT',
+      '1: a guest is offered ' + rg[rg.length - 1].t + ' rather than one row that backs out and leaves');
     A(C[0].rows()[0].en, '1: START is greyed with a full room');
     C[0].draw();
 
@@ -697,6 +705,34 @@ async function passBreak(opts){
     es.clear();
     rows.push('18 ESC:bracket: leaving the ceremony to look at the bracket keeps both the '
               + 're-offer ladder and the walkover that ends it, and a match that played arms neither');
+
+    // ---- 19. a watcher's ladder never ends ------------------------------------------
+    // The connect ladder ends in a walkover: four tries, then the node goes back to the
+    // server. That verdict belongs to a PLAYER, who owes somebody a result. A watcher owes
+    // nobody anything, and the match it cannot reach is most likely being played perfectly
+    // well by the two people in it. Failing its ladder dropped it out of the ceremony and
+    // onto the standings for the rest of the node -- one client stuck on the bracket while
+    // the other spectator watched the same match without trouble.
+    es.clrMsg(); es.clear(); es.inGame(false); es.setPhase('tourneyBracket');
+    es.sigTo({ event:'roles', tid:es.tt().tid, nid:'spec1', round:9, stage:'ko', lvl:1, hm:2,
+               stakes:false, players:[IDS[0], IDS[1]], feeder:IDS[0], primaries:[],
+               secondaries:[IDS[2]], names:{}, you:'spectate' });
+    es.tick();
+    A(es.rec().watches.length === 1,
+      '19: the sheet asked ' + es.rec().watches.length + ' nodes for a feed instead of the feeder');
+    for(let t = 1; t <= TT_CONNECT_TRIES + 1; t++){
+        clock(TT_CONNECT_MS + 1000); es.tick(); es.tick();
+        A(es.rec().watches.length === t + 1,
+          '19: re-ask ' + t + ' never happened (' + es.rec().watches.length + ' asks)');
+        A(es.msg() !== 'MATCH DID NOT CONNECT',
+          '19: a watcher declared the match dead after ' + t + ' unanswered asks');
+        A(es.playNid() === '', '19: a spectated node took the board');
+    }
+    A(es.msg() === 'STILL LOOKING FOR A FEED',
+      '19: the watcher sat on a ceremony that had stopped meaning anything, msg "' + es.msg() + '"');
+    es.clrMsg(); es.clear();
+    rows.push('19 watcher ladder: a spectator that cannot reach the feed keeps asking and says '
+              + 'so, where a player hands the node back after four tries');
 
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }

@@ -4,8 +4,10 @@
 //
 // THE TREE. A phone cannot serve eight DataChannels mid-match, so a feeder serves
 // SPEC_MAX_DIRECT and redirects the rest to the nodes it is already serving. Those become
-// primaries; the redirected ones hang off them at hops 2 and pace themselves at twice the
-// bias. Nobody designs the tree: it falls out of that one refusal rule.
+// primaries; the redirected ones hang off them at hops 2 and pace themselves at exactly the
+// SAME offset -- relaying is cut-through, so a hop costs a wire crossing, not playback delay,
+// and a tier must not decide which frame you are looking at. Nobody designs the tree: it falls
+// out of that one refusal rule.
 //
 // THE THREE FAILURES IT HAS TO SURVIVE, none of which may cost a single wrong tick:
 //   A) Nothing. The steady state: a secondary dual-connected to both primaries, feeding
@@ -50,13 +52,21 @@ if(lane.step()){
     const r = runSpec({ secs:14, seed:0x77C3, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }] });
     A(!r.exitReason, 'A: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
-    alive('A', r, 'S1', 1); alive('A', r, 'S2', 1);
+    const s1 = alive('A', r, 'S1', 1), s2 = alive('A', r, 'S2', 1);
     const s3 = alive('A', r, 'S3', 2);
     A(r.players.A.outN === 2, 'A: the feeder serves ' + r.players.A.outN + ' links (SPEC_MAX_DIRECT is 2)');
     if(s3){
         A(s3.inN === 2, 'A: the secondary holds ' + s3.inN + ' feed links (want both primaries)');
         A(s3.subN === 1, 'A: ' + s3.subN + ' of them are subscribed -- a standby that talks is not a standby');
-        A(s3.bias === 800, 'A: a two-hop node paces at ' + s3.bias + 'ms (want twice one hop)');
+    }
+    // UNIFORMITY, the property the whole tier arrangement is allowed to exist under: nobody in
+    // the room is watching a different moment of the same match. The offset is flat, so this is
+    // not a tendency to check at the end -- it is true at every sample or it is not true.
+    if(s1 && s2 && s3){
+        A(s1.bias === s3.bias && s2.bias === s3.bias,
+          'A: offsets ' + [s1.bias, s2.bias, s3.bias].join('/') + 'ms -- a tier changed the pacing');
+        A(r.lagSpread <= 3, 'A: two watchers sat ' + r.lagSpread
+                            + ' ticks apart at one instant -- they are seeing different frames');
     }
     A(bytes(r, 'A', 'S3') === 0 && bytes(r, 'S3', 'A') === 0,
       'A: the feeder and the secondary exchanged ' + (bytes(r, 'A', 'S3') + bytes(r, 'S3', 'A'))
@@ -65,7 +75,9 @@ if(lane.step()){
     const feed = Math.max(bytes(r, 'S1', 'S3'), bytes(r, 'S2', 'S3'));
     A(standby * 6 < feed, 'A: the standby sent ' + standby + 'B against the feed\'s ' + feed
                           + 'B -- it is a second stream, not a standby');
-    rows.push('A tree: feeder serves 2, the secondary hangs off a primary at 800ms and holds a '
+    rows.push('A tree: feeder serves 2, all three watchers pace at ' + (s3 ? s3.bias : '?')
+              + 'ms, never more than ' + r.lagSpread + ' tick(s) apart (rb '
+              + [s1, s2, s3].map(s => s ? s.rb : '?').join('/') + '), the secondary holds a '
               + standby + 'B warm standby (feed ' + feed + 'B), ' + r.checks + ' hash checks');
 }
 
@@ -113,6 +125,39 @@ if(lane.step()){
     rows.push('C tier wipeout: both primaries died at 11s, the two orphans re-sourced from the '
               + 'players (' + fromPlayers + 'B) without a re-boot, ' + r.checks + ' checks, '
               + 'no settled tick wrong');
+}
+
+// ---- D) the tournament drain: every node asks at the same moment ----------------------
+// A roles sheet reaches players, primaries and secondaries in ONE signal drain, so a
+// secondary asks its primary while that primary is itself still several seconds of
+// offer/answer/ICE/go/boot away from having a timeline. The primary cannot serve yet and
+// PARKS the ask -- and a parked ask is only worth holding if something releases it. It is
+// released by the same rule that answers a live one, or the secondary watches nothing until
+// its own re-ask ladder happens to come round again, and nothing at all if that ladder runs
+// out first: exactly one spectator left on the bracket screen while the other watches fine.
+if(lane.step()){
+    const on = {};
+    const START = 2.2;
+    const r = runSpec({ secs:16, seed:0x2C0D, wire:WIRE, playersAt:START,
+                        watchers:[{ at:0.2, from:'A' }, { at:0.2, from:'A' }, { at:0.2, from:'S1' }],
+                        onSample:(now, c)=>{ for(const n of ['S1', 'S2', 'S3'])
+                                                 if(on[n] == null && c[n].c.__specOn()) on[n] = now; } });
+    A(!r.exitReason, 'D: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    alive('D', r, 'S1', 1); alive('D', r, 'S2', 1);
+    const s3 = alive('D', r, 'S3', 2);
+    A(on.S3 != null, 'D: the secondary asked a primary that was not ready and never got a feed at all');
+    // The park is the whole mechanism here: held while there is nothing to serve, gone the
+    // moment there is. One still sitting on a primary at the end of the match was never
+    // answered -- and it holds fan-out room the next watcher will be refused for.
+    for(const n of ['S1', 'S2'])
+        if(r.spectators[n]) A(r.spectators[n].askN === 0,
+                              'D: ' + n + ' still holds ' + r.spectators[n].askN + ' parked ask(s)');
+    // Promptly, too: its primary's boot plus one handshake, with no re-ask cycle in between.
+    if(on.S1 != null && on.S3 != null)
+        A(on.S3 - on.S1 < 1400, 'D: the secondary started ' + (on.S3 - on.S1)
+                                + 'ms after its primary -- it waited out its own re-ask');
+    rows.push('D one drain: all three ask at once, the secondary is fed ' + (on.S3 - on.S1)
+              + 'ms after the primary it hangs off, and no ask is left parked anywhere');
 }
 
 console.log(rows.join('\n'));

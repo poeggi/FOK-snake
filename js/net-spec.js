@@ -17,16 +17,32 @@
 // A feeder serves at most SPEC_MAX_DIRECT links: fanning eight channels out of
 // a phone mid-match is the one thing that would cost that player the match.
 //
-// WHY A SPECTATOR RUNS BEHIND. Its sim origin (startPts) is pushed SPEC_DELAY_MS
-// per hop into the future, so its tick counter sits ~24 ticks under the feeder's.
-// A forwarded input for tick X therefore arrives while X is still in the
-// spectator's FUTURE: it lands in the input log and the tick loop applies it on
-// time. No rollback, ever, on a healthy feed -- which is what makes a two-tier
-// tree affordable. The bias is only useful if the sim actually HOLDS it, and the
-// tick loop steers forward only (see game.js: "the shared clock STEERS this"),
-// so the boot is DELAYED by the same bias: we buffer the feed, start the sim
-// deliberately late, and the one-extra-tick-per-frame correction settles us onto
-// the biased target from below.
+// WHY A SPECTATOR RUNS BEHIND, AND WHY BY THE SAME AMOUNT AT EVERY HOP. Its sim
+// origin (startPts) is pushed SPEC_DELAY_MS into the future, so its tick counter
+// sits ~6 ticks under the feeder's: a forwarded input for tick X arrives while X
+// is still in its FUTURE, lands in the input log, and the tick loop applies it on
+// time.
+//
+// The offset is FLAT. One hop or two, every spectator sits the same distance back
+// and therefore on the SAME TICK as every other spectator -- which is what makes
+// two people watching one match see one frame. That is not a courtesy: relaying is
+// CUT-THROUGH (_spOnFeedMsg forwards an envelope before it delivers it to its own
+// sim, and before it has even booted), so a second hop costs one wire crossing,
+// not a second helping of playback delay. Charging per hop would bill steady-state
+// playback for a boot-time problem.
+//
+// The offset is not what makes a spectator CORRECT -- ROLLBACK is. A spectator runs
+// the players' own intake (_netPeerInput), so an input that does arrive late is
+// rewound in exactly as a duel client rewinds its peer's, anywhere inside RB_DEPTH
+// (~1s). What the offset buys is that this hardly ever has to happen -- and that is
+// worth more here than in a duel: a player authors its own snake and only ever sees
+// the PEER corrected, while a spectator authors nothing, so every rollback re-renders
+// both snakes at once.
+//
+// The offset is only useful if the sim actually HOLDS it, and the tick loop steers
+// forward only (see game.js: "the shared clock STEERS this"), so the boot is DELAYED
+// by the same amount: we buffer the feed, start the sim deliberately late, and the
+// one-extra-tick-per-frame correction settles us onto the target from below.
 // ============================================================================
 
 // One datagram is not the budget here: this channel is reliable and ordered, so
@@ -35,7 +51,7 @@
 // bar list is the largest honest envelope, and it fits several times over.
 const SPEC_PKT_MAX = 16384;
 const SPEC_MAX_DIRECT = 2;      // direct spectators one node will serve (the tree's branching factor)
-const SPEC_DELAY_MS = 400;      // how far behind the live edge a spectator runs, PER HOP
+const SPEC_DELAY_MS = 100;      // how far behind the live edge a spectator runs -- FLAT, at every hop
 // Pre-negotiated like the duel channel (no DCEP round trip), but ORDERED and
 // RELIABLE -- the opposite of the duel's. A spectator has no second copy of a
 // lost envelope to fall back on: it authors nothing, so there is no redundant
@@ -99,8 +115,10 @@ function netSpecDbg(){ return _spDbg; }
 // The spectator's equivalent of the duel's silence detector -- and the only thing its
 // banner needs, because a spectator has no second measure of "is this working".
 function netSpecFeedAge(){ return (_spOn && _spFeedAt) ? (_spNow() - _spFeedAt) : 0; }
-// The sim-origin bias in ms: how far behind the live edge we deliberately run.
-function netSpecBias(){ return _spOn ? SPEC_DELAY_MS * Math.max(1, _spHops|0) : 0; }
+// The sim-origin offset in ms: how far behind the live edge we deliberately run. Hop
+// count is deliberately NOT part of it (see the header) -- every spectator of a match
+// sits on the same tick, whichever tier of the tree it landed on.
+function netSpecBias(){ return _spOn ? SPEC_DELAY_MS : 0; }
 // The two players' worn-item lists / display names / snake looks, in PLAYER order,
 // taken from the bootstrap context. A spectator owns neither snake, so every
 // per-player presentation input has to come off the wire rather than from cfg.
@@ -135,6 +153,18 @@ function _spWantKeep(w){
     _spArm();
 }
 function _spGrantOk(peer){ const g = _spGrant[peer] || 0; return !!g && _spNow() - g <= SPEC_GRANT_MS; }
+// Have we got a timeline to hand out? A feeder builds one from its live session; a relaying
+// primary hands on the context it was given. Room is deliberately NOT part of it -- the two
+// callers bound their fan-out differently -- but the ANSWER must be one rule for both, or an
+// ask parked under one and released under the other is an ask nobody ever answers.
+function _spServable(){
+    return _spOn ? !!_spCtx : (netGameActive() && inGame && !!_spCtxBuild());
+}
+// Whatever we were holding for this peer, we are past it: the list says "not answered yet",
+// so an entry that outlives its answer is fan-out room held for a spectator already served.
+function _spAskDrop(from){
+    for(let i = _spAsk.length - 1; i >= 0; i--) if(_spAsk[i].from === from) _spAsk.splice(i, 1);
+}
 // Hold an ask we cannot serve yet. Re-asking refreshes it rather than stacking: the asker
 // gives up on its own deadline, and this list must not outlive that.
 function _spAskPark(from){
@@ -262,9 +292,8 @@ function _spOnSignal(type, from, d){
 function _spOnWatch(from, d){
     const k = d && d.k;
     if(k === 'req'){
-        const can = !_spOn && netGameActive() && inGame && !!_spCtxBuild() && _spOut.length < SPEC_MAX_DIRECT;
-        const relay = _spOn && !!_spCtx && _spOut.length < SPEC_MAX_DIRECT;
-        if(can || relay){
+        if(_spServable() && _spOut.length < SPEC_MAX_DIRECT){
+            _spAskDrop(from);   // answered now: the copy we were holding has served its purpose
             _spGrant[from] = _spNow();
             _spWatchSig(from, 'ok');
             _spArm();
@@ -349,8 +378,9 @@ function specWatch(peer, tid, nid){
 // ---- serving (feeder / primary) -----------------------------------------
 // The bootstrap context: everything a fresh sim needs before the first 'rs' can
 // mean anything. Built by the feeder from its live session; a relaying primary
-// re-sends the one it was given with hops incremented, so every node downstream
-// biases its own origin by its own depth.
+// re-sends the one it was given with hops incremented, so every node downstream knows
+// its own depth. That depth is a role LABEL and a fan-out fact, never a pacing input:
+// the offset it runs at is the same at every tier.
 function _spCtxBuild(){
     if(_spOn) return _spCtx ? Object.assign({}, _spCtx, { hops:(_spCtx.hops | 0) + 1, g:_spGen | 0 }) : null;
     const s = (typeof _netSess !== 'undefined') ? _netSess : null;
@@ -433,8 +463,12 @@ function _spServeOpen(l){
 // fill, because those packets are gone from every buffer in the tree.
 //
 // A relaying primary mints its OWN, and may: its world is byte-identical to the players'
-// (that is the claim this whole file rests on), just one bias older -- which puts the
-// state it hands down BEHIND its secondary's target, exactly where a boot needs it.
+// (that is the claim this whole file rests on). Under a FLAT offset it mints at its
+// subscriber's own target tick, so the state lands either side of that tick by however
+// long the wire took: ahead, and _rbResyncQ parks it until the sim arrives; behind, and
+// it is adopted on the spot. A spectator owns neither snake, so both branches take the
+// sender's frontier whole (duel-core: "A SPECTATOR owns NEITHER snake") and a boot is
+// clean whichever side of the tick the checkpoint falls on.
 function _spServeTail(l){
     const was = l.sub; l.sub = false;   // the checkpoint's own fan-out must not double-send here
     _spCkpt(true);
@@ -524,10 +558,9 @@ function _spOnCtx(l, ctx){
     // here would leave the silence ladder to discover the mistake SPEC_SILENCE_MS
     // later, and every tick of that is a tick with no inputs to apply.
     //
-    // _spHops and the bias it sets DO NOT MOVE. They are baked into this node's sim
-    // origin; re-deriving them from the new context would shift the timeline under a
-    // running world. Being one hop from the feeder while still pacing for two costs
-    // nothing but slack, and slack is the one thing a spectator can afford.
+    // _spHops does not move, and under a flat offset it no longer has to: hop count is a
+    // label for what this node IS, not for when it ticks. Re-deriving it from the new
+    // context would change what we call ourselves and nothing about our timeline.
     if(_spOn && l && !_spIn.some(x => x.sub)){
         l.sub = true;
         _spSrc = l.peer;
@@ -548,10 +581,10 @@ function _spOnCtx(l, ctx){
     _spHops = Math.max(1, ctx.hops | 0);
     _spRole = _spHops > 1 ? 'secondary' : 'primary';
     _spQ = [];
-    // Boot DELIBERATELY LATE by exactly the bias this node runs at (see the header):
-    // the sim then settles onto its biased target from BELOW, which is the only
+    // Boot DELIBERATELY LATE by exactly the offset this node runs at (see the header):
+    // the sim then settles onto its offset target from BELOW, which is the only
     // direction the tick loop's one-extra-tick correction can move it.
-    const wait = SPEC_DELAY_MS * _spHops;
+    const wait = SPEC_DELAY_MS;
     if(typeof setTimeout !== 'function'){ _spBoot(); return; }
     _spBootT = setTimeout(_spBoot, wait);
     _spArm();
@@ -577,7 +610,7 @@ function _spBoot(){
     _netSess.lvl = _duelLvl(ctx.lvl);
     _netSess.stakes = false;             // a spectator claims nothing: no item ever changes hands here
     _netSess.epoch = ctx.ep | 0;
-    _netSess.startPts = (ctx.startPts || 0) + SPEC_DELAY_MS * _spHops;
+    _netSess.startPts = (ctx.startPts || 0) + SPEC_DELAY_MS;
     _spOn = true;
     _spSeen = -1;
     _spDbg.boot++;
@@ -660,7 +693,7 @@ function _spFeedGone(peer){
 // too early and watches nothing at all, because nothing anywhere would ask again.
 function _spAskPump(now){
     if(!_spAsk.length) return;
-    const servable = !_spOn && netGameActive() && inGame && !!_spCtxBuild();
+    const servable = _spServable();
     for(let i = _spAsk.length - 1; i >= 0; i--){
         const a = _spAsk[i];
         if(now - a.at > SPEC_ASK_TTL_MS){ _spAsk.splice(i, 1); continue; }

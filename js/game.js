@@ -66,6 +66,14 @@ try {
         if (ios && !standalone) _inviteFid = fm[1];
     }
 } catch(e) {}
+// Arrived via a tournament link (the QR on the JOIN CODE screen). The code is PARKED, not
+// acted on: joining needs a network and a screen for the answer to land on, and the boot has
+// neither yet. tourneyEnter() spends it once the server has actually said hello.
+let _tourneyLink = '';
+try {
+    const tm = /^#tourney=([A-Za-z0-9]{4,12})$/.exec(location.hash);
+    if (tm) _tourneyLink = tm[1].toUpperCase();
+} catch(e) {}
 let inviteSel = 0, _inviteMsg = '', _inviteMsgAt = 0;
 let _friendIdBack = 'duelMenu';   // where the MY ID screen returns to (1:1 menu or SETTINGS > USER)
 if(cfg.wornItems === null){ cfg.wornItems = Object.assign({}, cfg.shopItems||{}); saveCfg(); }
@@ -85,7 +93,9 @@ let _splashExiting = false, _splashExitAt = 0;
 function updateSplashExit() {
     if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
         _splashExiting = false;
-        phase = _inviteFid ? 'invite' : 'menu'; inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
+        phase = _inviteFid ? 'invite' : _tourneyLink ? 'tourneyLobby' : 'menu';
+        inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
+        if (phase === 'tourneyLobby' && typeof tourneyEnter === 'function') tourneyEnter();
         // Hold menu music briefly for the clock sync (started during the coin drop), so it
         // opens on the globally-shared bar. Only when online and not yet synced; else no wait.
         if(typeof _netOk === 'function' && _netOk() && (typeof netPts !== 'function' || netPts() == null))
@@ -118,6 +128,12 @@ let _scoreTainted = false;
 // (TOURNAMENT join code: 6 characters off the unambiguous alphabet).
 let entryMode = 'score';
 function _entryFixed(){ return entryMode === 'friend' || entryMode === 'tcode'; }   // a known-length code, not free text
+// Which code the camera is hunting for right now, or '' when it does not belong on screen at
+// all. Both fixed-length codes are handed round the same way -- somebody holds up a phone --
+// so they get the same scanner: one viewfinder, one decode loop, one auto-submit, and only
+// the payload it will accept differs. That difference is the entry mode, like everything else
+// about this dialog.
+function _scanFor(){ return phase === 'nameEntry' && _entryFixed() ? entryMode : ''; }
 function _entryChars() { return entryMode === 'friend' ? HEX_CHARS : entryMode === 'tcode' ? CODE_CHARS : NAME_CHARS; }
 function _entryMax()   { return entryMode === 'friend' ? 8 : entryMode === 'tcode' ? CODE_LEN : MAX_NAME; }
 // A friend ID gets one cursor slot PAST the last digit: a SUBMIT button the cursor lands on
@@ -754,6 +770,7 @@ const CONTROLS = {
     friends:      ['esc','ok','dpad'],
     lobby:        ['esc','ok','dpad'],
     friendId:     ['esc','ok','dpad'],
+    tourneyCode:  ['esc','ok'],
     invite:       ['esc','ok','dpad'],
     tourneyLobby:    ['esc','ok','dpad'],
     tourneyBracket:  ['esc','ok','dpad'],
@@ -819,6 +836,7 @@ const SCREENS = {
     duelMenu:     { d:()=>drawDuelMenu(),        hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
     duel11:       { d:()=>drawDuel11(),          hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
     friendId:     { d:()=>drawFriendId(),        hud:false, freeze:true },
+    tourneyCode:  { d:()=>drawTourneyCode(),    hud:false, freeze:true },
     lobby:        { d:()=>drawLobby(),           hud:false },
     friends:      { d:()=>drawFriends(),         hud:false },
     invite:       { d:()=>drawInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
