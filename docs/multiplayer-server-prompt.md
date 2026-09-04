@@ -3,7 +3,7 @@
 > STATUS: superseded. This was the original brief for BUILDING a server, written
 > before both the realtime redesign and the server that actually shipped. The
 > server now EXISTS in production; its authoritative, current contract is
-> `FOK-server` `docs/API.md` (api v3) -- treat that as the source of truth, not
+> `FOK-server` `docs/API.md` (api v4.1) -- treat that as the source of truth, not
 > this file. Kept for the design history and the still-valid parts (anti-cheat,
 > news, FOK transfer, admin). Where this file and API.md disagree, API.md wins.
 >

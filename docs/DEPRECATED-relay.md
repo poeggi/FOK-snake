@@ -14,6 +14,18 @@ The replacement is coturn in the `iceServers` list. That keeps the IDENTICAL Dat
 same unreliable-unordered netcode, one forwarding hop -- and retires `relay.php` entirely.
 It is an infrastructure change (a host with open UDP), not a code change.
 
+## What already refuses it
+
+Two 2026 features never touch the relay, and their absence from the hook list below is
+deliberate rather than an omission:
+
+- SPECTATING and the relay tree (`js/net-spec.js`) are P2P-only by construction. A spectator
+  link is its own RTCPeerConnection with its own reliable ordered DataChannel; there is no
+  relay equivalent and none is to be built.
+- TOURNAMENT matches set `s.p2pOnly` on the session (`tourneyDressSession`), so a pairing
+  that cannot connect P2P fails outright instead of falling back. A tournament is watched by
+  everyone in it, and a relayed match cannot be forwarded to them.
+
 ## What removal looks like
 
 1. `rm js/net-relay.js` -- the whole relay transport and relay-mode handshake.
