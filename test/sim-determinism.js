@@ -38,7 +38,11 @@ const GOLDEN = 'bb02d65e:216';
 // move onto the other snake's head cell now kills both, where before only whichever of
 // them happened to be due that tick took the life. Hashed bytes only -- a mutual death
 // takes the same beat as a one-sided one, so the tick count does not move)
-const GOLDEN_DUEL = 'b9878561:31451';
+// -> 20ea507b:31451 (an item that comes down INSIDE a snake is collected by that snake on
+// the landing tick. It used to sit there stranded -- a body cell is one a head only reaches
+// by dying -- for as long as the tail took to clear it: 18 such ticks in this lane, 0 now,
+// and removing the new branch alone gives b9878561 back byte for byte)
+const GOLDEN_DUEL = '20ea507b:31451';
 
 const driver = `
 ;(function(){

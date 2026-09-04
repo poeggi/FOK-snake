@@ -183,11 +183,48 @@ function _ttAdopt(o){
     if(Array.isArray(o.schedule))  t.schedule  = o.schedule;
     if(Array.isArray(o.bracket))   t.bracket   = o.bracket;
     if(Array.isArray(o.standings)) t.standings = o.standings;
+    // A podium the reply KNOWS about. Never the other way round: an absent key is a reply
+    // that does not talk about podiums (every reply before the last one), and letting that
+    // clear a podium we already hold would take the result off the screen it just arrived on.
+    if(Array.isArray(o.podium)) t.podium = o.podium;
     // The board is DERIVED on every state read, so an absent key means "this reply does not
     // talk about breaks" (a lobby event) while an explicit null means "no break is open" --
     // and that null is the only thing that ever takes the board down without a roles sheet.
     if(o['break'] !== undefined) _ttSetBreak(o['break'] || null);
     _ttArm(); _uiDirty = true;
+}
+// The podium as this client can work it out, for the client that never saw the 'over' event.
+// Signals are one-shot and expire, and the state read-back is the safety net under all of
+// them -- but a server build need not name a podium in it, and a single lost signal then
+// ended an entire evening on NO PODIUM - THE BRACKET VOIDED, which is a real verdict for a
+// bracket that ran out of players and a lie for one that was won. Everything needed to tell
+// the two apart is in the bracket the read-back does carry: the final names the top two, and
+// third place is the better-ranked loser of the round that feeds it (the server's rule, and the standings it is
+// read off are in the same reply). An unfinished or absent final gives null -- NOT an empty
+// list, which is the one thing that legitimately means the bracket voided.
+function _ttDerivePodium(t){
+    const brk = Array.isArray(t.bracket) ? t.bracket : [];
+    let fin = null;
+    for(const n of brk) if(String(n.nid || '') === 'final') fin = n;
+    if(!fin || !fin.winner) return null;
+    const win = String(fin.winner), ps = (fin.players || []).map(v => v == null ? '' : String(v));
+    const out = [win];
+    const up = ps[0] === win ? ps[1] : ps[0];
+    if(up) out.push(up);
+    // The nodes that feed the final are the deepest ones below it, whatever they are called.
+    let deep = -1;
+    for(const n of brk) if((n.round | 0) < (fin.round | 0) && (n.round | 0) > deep) deep = n.round | 0;
+    const semis = [];
+    for(const n of brk){
+        if((n.round | 0) !== deep || !n.winner) continue;
+        const q = (n.players || []).map(v => v == null ? '' : String(v));
+        const l = q[0] === String(n.winner) ? q[1] : q[0];
+        if(l) semis.push(l);
+    }
+    if(semis.length === 1) out.push(semis[0]);
+    else if(semis.length > 1)
+        for(const row of (t.standings || [])) if(semis.indexOf(String(row.id)) >= 0){ out.push(String(row.id)); break; }
+    return out;
 }
 // A round ends on a scoreboard, and the next one starts when the HOST clears it. That makes
 // the board a deadline as well as a picture: the server refuses `continue` until `wait` ms
@@ -234,6 +271,10 @@ async function _ttSync(force){
     } else if(!r.json.cursor){
         _ttNid = ''; _ttPend = null;               // between nodes: nothing to be engaged with
     }
+    // The read-back is what puts a client on the podium screen when the 'over' event never
+    // reached it -- so it has to be what fills that screen in, too. Only when we hold no
+    // podium at all: one the server named outranks anything worked out from a bracket.
+    if(_tt.state === 'done' && !Array.isArray(_tt.podium)) _tt.podium = _ttDerivePodium(_tt);
     // Straight at `phase`, quit dialog included: a tournament that is over is not one
     // anybody can still be asked about leaving.
     if(_tt.state === 'done' && _TT_PHASES[phase] && phase !== 'tourneyPodium') phase = 'tourneyPodium';

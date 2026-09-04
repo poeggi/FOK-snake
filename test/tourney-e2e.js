@@ -184,6 +184,12 @@ async function node(plan){
 // The two players declare the match over. `plan.win` is 0, 1 or 2 (draw) in players[] order.
 async function finish(m, plan){
     const before = srv.log.filter(x => x.action === 'result' && x.nid === m.nid).length;
+    // A feeder serving its cap of watchers. The match it is serving OUT OF is about to end,
+    // and with it every timeline those links carry: nothing downstream of them will ever be
+    // fed again. Left standing they cost nothing visible -- they just quietly hold both
+    // fan-out slots, so every watcher of every LATER match is answered 'no' by a player who
+    // looks, correctly, like it is already serving as many as it can.
+    C[m.ia].spServe('dead0001'); C[m.ia].spServe('dead0002');
     // From here this client hears nothing: no result, no scoreboard, no sheet. Whatever it
     // ends up knowing, it learned from the state read-back.
     if(plan.miss != null) srv.mute(IDS[plan.miss], true);
@@ -215,6 +221,9 @@ async function finish(m, plan){
     for(let i = 0; i < N; i++)
         A(C[i].phase() !== 'tourneyCeremony' || srv.T.cursor,
           '2 ' + m.nid + ': ' + NAMES[i] + ' is still waiting on a ceremony for a finished tournament');
+    A(C[m.ia].spOut() === 0,
+      '2 ' + m.nid + ': the match ended and ' + NAMES[m.ia] + ' still serves '
+      + C[m.ia].spOut() + ' link(s) out of it');
 }
 
 // ---- the break between rounds ---------------------------------------------
@@ -479,13 +488,28 @@ async function passBreak(opts){
       '9: the ladder played the knockouts at levels ' + srv.T.nodes['ko1.1'].lvl + '/' + srv.T.nodes.final.lvl);
     A(C[fin.ia].sess(fin.pb, 'host').lvl0 === 3, '9: the final minted a session opening on level 1');
     A(C[fin.ia].sess(fin.pb, 'host').hearts === 3, '9: the final minted a 2-heart session');
-    await finish(fin, { win:0, score:[11, 8] });
+    // The one event that says who won is one-shot and expires like any other. Somebody who
+    // is not in the final is deaf for the whole of it, and this server never names a podium
+    // in the read-back either -- so the only thing left to work it out from is the bracket.
+    // A tournament somebody won must never read as one that voided.
+    let blind = 0;
+    while(blind === fin.ia || blind === fin.ib) blind++;
+    srv.T.quiet = true;
+    await finish(fin, { win:0, score:[11, 8], miss:blind });
     rows.push('9 knockouts: ko1.1 at 2 hearts on level 2 and the final at 3 hearts on level 3, '
               + 'both dressed from the sheet');
 
     // ---- the podium -------------------------------------------------------
+    srv.mute(IDS[blind], false);
     await pump(2);
     const champ = srv.T.podium[0];
+    const bp = C[blind].tt().podium;
+    A(Array.isArray(bp) && bp[0] === champ,
+      '10: ' + NAMES[blind] + ' missed the over event and holds podium ' + JSON.stringify(bp)
+      + ' instead of a podium led by ' + NAMES[idx(champ)]);
+    A(JSON.stringify(bp) === JSON.stringify(srv.T.podium),
+      '10: the bracket works out ' + JSON.stringify(bp) + ', the server settled '
+      + JSON.stringify(srv.T.podium));
     for(let i = 0; i < N; i++){
         A(C[i].phase() === 'tourneyPodium', '10: ' + NAMES[i] + ' ended on ' + C[i].phase());
         const t = C[i].tt();
@@ -497,9 +521,11 @@ async function passBreak(opts){
         // picture and stepping off the screen are the same press.
         A(r.length === 1 && r[0].t === 'DONE', '10: a finished tournament offers ' + r.map(x => x.t).join('/'));
     }
+    srv.T.quiet = false;
     C[0].pick('DONE');
     A(C[0].tt() === null && C[0].phase() === 'duelMenu', '10: DONE did not let go of the finished tournament');
-    rows.push('10 podium: ' + NAMES[idx(champ)] + ' took it, all six landed on the podium screen, DONE let go');
+    rows.push('10 podium: ' + NAMES[idx(champ)] + ' took it, all six landed on the podium screen '
+              + '(' + NAMES[blind] + ' off the bracket alone, having heard nothing), DONE let go');
 
     // ---- what a client must REFUSE to do ----------------------------------
     // Every one of these is a signal a client could receive and must not act on.

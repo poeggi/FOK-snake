@@ -1887,7 +1887,11 @@ function drawTourneyCeremony(){
     } else {
         ctg('SIT THIS ONE OUT', CW/2, 228, '#888', FONT.JUMBO, GLOW.TEXT);
     }
-    drawStatus(tourneyUi().msg || ('CONNECTING' + _ttDots()));
+    // A watch that has not started is one of five different situations with five different
+    // causes, and CONNECTING is what every one of them used to look like from here. Say
+    // which: a watcher staring at one word cannot tell anyone what they are looking at.
+    const st = (you === 'spectate' && typeof specStatus === 'function' && specStatus()) || 'CONNECTING';
+    drawStatus(tourneyUi().msg || (st + _ttDots()));
     ct('ESC:bracket', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The last screen of the tournament, built as the CEREMONY screen's other half: same title
@@ -1900,6 +1904,11 @@ function drawTourneyPodium(){
     if(!t){ drawTourneyLobby(); return; }
     drawGrid(); drawOvBg(0.92);
     ctg('TOURNAMENT OVER', CW/2, 24, '#ffd700', FONT.TITLE, GLOW.TITLE);
+    // NO podium and an EMPTY one are different answers. Empty is a verdict: the bracket ran
+    // out of players and voided all the way to the top. Null is ignorance -- the 'over' event
+    // has not reached us and the final is not settled in anything we have been told since --
+    // and telling a tournament somebody just won that it voided is the worse of the two lies.
+    const known = Array.isArray(t.podium);
     const pod = (t.podium || []).map(String), me = getPlayerId(), mine = pod.indexOf(me);
     const host = _ttRealName(t.host).slice(0, 12);
     if(host) ct('HOSTED BY ' + host, CW/2, 46, '#888', FONT.HINT);
@@ -1913,8 +1922,8 @@ function drawTourneyPodium(){
         ct(pl[0], CW/2 - 150, pl[2], pl[1], FONT.HINT);
         ctg(_ttRealName(pod[i]).slice(0, 12), CW/2, pl[2], pl[1], FONT.TITLE, i ? GLOW.FAINT : GLOW.TITLE);
     });
-    // An empty podium is an ENDING, not a wait: the bracket voided all the way to the top.
-    if(!pod.length) ct('NO PODIUM - THE BRACKET VOIDED', CW/2, 146, '#555', FONT.HINT);
+    if(!known) ct('FINAL RESULT NOT IN YET' + _ttDots(), CW/2, 146, '#555', FONT.HINT);
+    else if(!pod.length) ct('NO PODIUM - THE BRACKET VOIDED', CW/2, 146, '#555', FONT.HINT);
     // Where the ceremony says what you are about to do, the podium says what you did. Every
     // player gets that line, not just the winner: coming third in a field of eight is a
     // result, and a screen that speaks to one player says nothing at all to the rest.

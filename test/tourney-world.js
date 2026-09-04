@@ -38,7 +38,7 @@ function mkServer(opts){
     const T = { tid:'7f3c9a21b4d85e60c1f2a3b4c5d6e7f8', code:'K7MZ4Q', host:'', stakes:false,
                 max:10, state:'open', players:[], round:0, cursor:null,
                 nodes:{}, order:[], standings:[], advancers:[], podium:null,
-                brk:null, brkNext:'', seen:[], feeds:{}, cut:O.cut | 0 };
+                brk:null, brkNext:'', seen:[], feeds:{}, cut:O.cut | 0, quiet:!!O.quietPodium };
     const out = {};                 // player id -> queued signals, drained by hello
     const muted = {};               // ids whose signal stream is dead: state() is all they have
     const names = {};               // the server's own player table
@@ -356,7 +356,10 @@ function mkServer(opts){
                     // missed sheet.
                     r['break'] = board();
                     if(T.cursor) r.roles = sheet(T.cursor, id);
-                    if(T.podium) r.podium = T.podium;
+                    // docs/API.md puts the podium in the read-back. A server build that only
+                    // announces it in the one-shot 'over' event does not, and a client that
+                    // missed that event must still not call a won tournament a void one.
+                    if(T.podium && !T.quiet) r.podium = T.podium;
                     return note(ok(r));
                 }
                 case 'result':
@@ -461,6 +464,23 @@ function driverSrc(id){
         + '    spStandDown: function(){ specStandDown(); },\n'
         + '    spOrphan: function(){ _spOrphan(); },\n'
         + '    spGranted: function(pid){ return !!_spGrant[pid]; },\n'
+        // The watch handshake, which is signalling and nothing else. _spTick is driven by a
+        // setInterval the sandbox does not have, so the housekeeping that answers a parked
+        // ask has to be stepped by hand -- and every leg of it goes out through _netSignal,
+        // which the world can now actually deliver.
+        + '    spTick: function(){ _spTick(); },\n'
+        + '    spAsks: function(){ return _spAsk.map(function(a){ return a.from; }); },\n'
+        + '    spWants: function(){ return _spWant.map(function(w){ return w.to; }); },\n'
+        + '    spHs: function(){ return specHandshaking(); },\n'
+        + '    spStatus: function(){ return specStatus(); },\n'
+        + '    pollDue: function(){ return _netPollDue(); },\n'
+        // A LIVE match, as the feeder is in when a watcher reaches it: a session that says
+        // game, a board that says inGame, and the seed a bootstrap context is built from.
+        + '    goLive: function(peer, role){\n'
+        + '        _netSess = _netMkSess(peer, role); _netSess.game = true;\n'
+        + '        _netSess.seed = 0x51ec7a70; _netSess.startPts = 1000; _netSess.lvl = 1;\n'
+        + '        inGame = true; return true; },\n'
+        + '    takeSigs: function(){ var s = REC.sigs; REC.sigs = []; return JSON.parse(JSON.stringify(s)); },\n'
         + '    sigTo: function(d){ _netOnSignal({ type:"tourney", from:"", payload:JSON.stringify(d) }); },\n'
         // A signal from another PLAYER rather than from the server: the duel handshake types.
         + '    sigRaw: function(type, from, d){ _netOnSignal({ type:type, from:from, payload:JSON.stringify(d) }); },\n'
@@ -506,6 +526,22 @@ function mkWorld(ids, names, opts){
         idx: (id) => ids.indexOf(id),
         now: () => NOW,
         clearAll(){ for(const c of C) c.clear(); },
+        // Signals actually DELIVERED, peer to peer, through the real dispatcher. Without
+        // this the world records the watch handshake and drops it on the floor, which is
+        // precisely the leg -- ask, ok, offer, ice -- that has no carrier but the mailbox.
+        deliver(){
+            let n = 0;
+            for(let i = 0; i < C.length; i++){
+                for(const s of C[i].takeSigs()){
+                    const j = ids.indexOf(s.to);
+                    if(j < 0) continue;
+                    let d = {};
+                    try{ d = JSON.parse(s.payload || '{}'); }catch(e){ d = {}; }
+                    C[j].sigRaw(s.type, ids[i], d); n++;
+                }
+            }
+            return n;
+        },
         clock(ms){ NOW += ms; srv.now(NOW); for(const c of C) c.now(NOW); },
         async settleAsync(){ for(let i = 0; i < 8; i++) await flush(); },
         // One heartbeat for everyone: hello drains the signal mailbox through the real
@@ -515,6 +551,12 @@ function mkWorld(ids, names, opts){
             for(let k = 0; k < (times || 3); k++){
                 for(const c of C){ c.hello(); }
                 await w.settleAsync();
+                // The spectator housekeeping runs off a setInterval this sandbox does not
+                // have, so a heartbeat here is what stands in for it. It belongs in the
+                // shared beat rather than in the suites: on a real client it is running the
+                // whole time, and a world where it only runs where a suite remembers to ask
+                // is a world where anything it is responsible for looks like it works.
+                for(const c of C){ c.spTick(); }
                 for(const c of C){ c.tick(); }
                 await w.settleAsync();
             }

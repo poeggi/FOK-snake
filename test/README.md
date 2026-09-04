@@ -343,13 +343,25 @@ run when tuning the rollback constants.
 
     bash test/checks.sh --tourney    # or: node test/tourney-full.js
 
-Ten real clients -- the player cap -- play all 27 matches of a 20+4+2+1 bracket, from
-the join code to the podium, on the same scripted world (`tourney-world.js`) that
-`tourney-e2e.js` drives on every `--full`. That suite owns the failure modes at six
-clients; this one owns the things only a full-length ladder has: a break at every round
-boundary (left by the host, by a forfeit during it, and by its own timeout), the level
-walking up one per round, the bracket halving, and all four stage captions in a single
-run. Not in the default tier -- run it after any change to the tournament flow.
+Ten real clients -- above the client's own `TT_MAX` of 8, so the server-supplied cap is
+what they are held to -- play all 27 matches of a 20+4+2+1 bracket, from the join code to
+the podium, on the same scripted world (`tourney-world.js`) that `tourney-e2e.js` drives on
+every `--full`. That suite owns the failure modes at six clients; this one owns the things
+only a full-length ladder has: a break at every round boundary (left by the host, by a
+forfeit during it, and by its own timeout), the level walking up one per round, the bracket
+halving, and all four stage captions in a single run. Not in the default tier -- run it
+after any change to the tournament flow.
+
+### tourney-watch.js  (--full -- the watch handshake, delivered)
+
+Three clients, one of them a spectator, and signals that actually cross between them:
+`tourney-world.js` records everything a client sends and `deliver()` posts it into the
+addressee's real dispatcher. That closes the one leg every other tournament suite left
+open -- ask, park, answer -- which is also the only leg a spectator is made of, and the one
+whose only carrier is the signal mailbox. It owns the boundary rules that go with it: a
+parked ask reads as a handshake in flight (so the feeder keeps polling at speed for it), it
+survives the teardown that clears a finished match's served links, and a ladder that is
+answered by nobody keeps asking rather than giving the node back.
 
 ## Metrics glossary
 

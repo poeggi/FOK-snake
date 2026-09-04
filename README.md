@@ -77,7 +77,9 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - SPECTATING: watch a friend's online duel live. The watcher runs the very same
   sim as the two players, fed a forwarded copy of their inputs and deliberately
   held a little behind the live edge, so what it shows is the match itself and
-  not a re-telling of it
+  not a re-telling of it. A feed that has not started yet says which leg it is
+  waiting on -- nobody to ask, an unanswered ask, a link still opening, or the
+  shared clock -- rather than a bare CONNECTING
 - TOURNAMENT mode: create a tournament, everyone on the same network sees it
   announced (or joins with the 6-character code), 2 to 8 players. The server
   deals the schedule -- a sparse round-robin at 2 hearts, then knockouts, then

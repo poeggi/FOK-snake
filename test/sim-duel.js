@@ -257,7 +257,34 @@ const driver = `
     A(_ws.it===null && _ws.w[0].join()==='crown', 'a crash cost the crasher gear still in flight');
     crashWith(0);
     A(_ws.it===null && _ws.w[0].join()==='crown', 'a crash cost gear already lying on the board');
+    // ...and an item that comes down INSIDE a snake is that snake's. The landing cell is
+    // picked free of both bodies, but the item is in the air for WS_LAND_TICKS and the board
+    // it lands on is not the one it left. A body cell is one a head only reaches by dying,
+    // so nobody can ever walk over it: without this it just sits there, visibly inside the
+    // snake, until the tail moves off it.
+    const landedIn = (at, cell)=>{
+      startDuel(777, [[],[]]);
+      gem=null; heart=null; powerPellet=null; _powerMode=false;
+      phase='duel'; phaseAt=0; spawnAt=0; bars=[]; _barsV++;
+      const P=players[0];
+      P.snake=[{x:5,y:5},{x:4,y:5},{x:3,y:5},{x:2,y:5}]; P.dir={x:1,y:0}; P.dirQueue=[];
+      players[1].snake=[{x:20,y:18},{x:19,y:18}]; players[1].dir={x:1,y:0}; players[1].dirQueue=[];
+      _ws.w[0]=[]; _ws.w[1]=[]; _ws.u[0]={}; _ws.u[1]={};
+      _ws.it={ id:'crown', own:1, uid:'u9', x:cell.x, y:cell.y, at };
+      P.stepAccum=2; players[1].stepAccum=0;
+      duelStep(100000);
+    };
+    landedIn(0, {x:4,y:5});
+    A(phase==='duel', 'the landed-inside fixture killed somebody');
+    A(_ws.it===null && _ws.w[0].join()==='crown',
+      'an item that landed inside the snake was left stranded in it: '+JSON.stringify(_ws.w));
+    A(_ws.u[0].crown==='u9', 'the instance that landed inside was not the one handed over');
+    A(simEvents.some(e=>e.t==='wsget' && e.to===0 && e.from===1),
+      'taking an item off your own body announced nothing');
+    landedIn(simTick+WS_LAND_TICKS, {x:4,y:5});
+    A(_ws.it && _ws.w[0].length===0, 'an item still in flight was taken by the body under it');
     R.steps.push('pickup: finders keepers, same slot displaced, no grab in flight, rebuild returns it');
+    R.steps.push('an item landing inside a snake is collected by it on the landing tick');
     R.steps.push('a crash returns any loose item: dying never drops gear');
     // the lockstep contract: both new fields reach the hash, the cloner and the resync wire
     startDuel(4242,[['shades'],['crown']]);

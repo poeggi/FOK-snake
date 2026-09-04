@@ -36,6 +36,7 @@ process.chdir(path.join(__dirname, '..'));
 // costs packing efficiency, never correctness.
 const HEAVY = [
     ['test/tourney-e2e.js',       1900, 'a whole tournament end to end (six clients, a scripted server, lobby to podium)'],
+    ['test/tourney-watch.js',      400, 'the watch handshake between two real clients (ask, park, answer -- signals actually delivered)'],
     ['test/duel-spec-tree.js',   57000, 'the relay tree (fan-out cap, warm standby, primary death, whole-tier wipeout)'],
     ['test/duel-spec.js',        77000, 'spectating (a watcher runs the same sim one bias behind the players; relay tree, backup feeder)'],
     ['test/duel-desync.js',      81700, 'boosting duel stays in lockstep (two clients, real match, over a lossy wire)'],

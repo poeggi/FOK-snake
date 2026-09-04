@@ -180,6 +180,18 @@ function _duelStealRoll(){
     _ws.it = { id, uid, own:v, x:c.x, y:c.y, at:simTick + WS_LAND_TICKS };
     emit({t:'wsblow', id, own:v, hx:H.x, hy:H.y, x:c.x, y:c.y});
 }
+// Taking the loose item, whichever way it was reached. Only one item per wear slot stays
+// ON: a won hat pushes off the hat already worn. The displaced one is still OWNED (see
+// _wsTransfer) -- just not worn, so it is no longer on this snake to be stolen either.
+// uid names the exact instance that changed hands, which is what the server's items row is
+// keyed by -- the catalog id alone could be either player's copy.
+function _wsTake(i) {
+    const g = _ws.it; _ws.it = null;
+    const w = _ws.w[i], um = _ws.u[i], cat = WS[g.id].cat;
+    if (cat) for (let k = w.length - 1; k >= 0; k--) if (WS[w[k]].cat === cat) { delete um[w[k]]; w.splice(k, 1); }
+    w.push(g.id); um[g.id] = g.uid;
+    emit({t:'wsget', id:g.id, uid:g.uid, from:g.own, to:i});
+}
 function freeCell(blocked) {
     let p, tries=0;
     do { p={x:ri(COLS),y:ri(ROWS)}; } while(blocked.has(ck(p)) && ++tries<1000);
@@ -535,18 +547,7 @@ function duelStep(now) {
         }
         // A landed windswept item goes to whoever reaches it first -- including the snake it
         // came off, who can simply take it back. Nothing is collectible in flight (at).
-        if (_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) {
-            const g = _ws.it; _ws.it = null;
-            // Only one item per wear slot stays ON: a won hat pushes off the hat already
-            // worn. The displaced one is still OWNED (see _wsTransfer) -- just not worn,
-            // so it is no longer on this snake to be stolen either.
-            const w = _ws.w[i], um = _ws.u[i], cat = WS[g.id].cat;
-            if (cat) for (let k = w.length - 1; k >= 0; k--) if (WS[w[k]].cat === cat) { delete um[w[k]]; w.splice(k, 1); }
-            w.push(g.id); um[g.id] = g.uid;
-            // uid names the exact instance that changed hands, which is what the server's
-            // items row is keyed by -- the catalog id alone could be either player's copy.
-            emit({t:'wsget', id:g.id, uid:g.uid, from:g.own, to:i});
-        }
+        if (_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) _wsTake(i);
         if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
             heart = null;
             if (P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); }
@@ -578,6 +579,17 @@ function duelStep(now) {
         if (idx > 0) other.snake.length = Math.max(idx, SNAKE_MIN_LEN);
         players[i].slowUntil = now + T(120);
         emit({t:'sfx',name:'crash'}); emit({t:'bonus',label:'CHOMP!'});
+    }
+    // ...and a landed item can come down INSIDE a snake. It is thrown at a cell that was
+    // free, but it spends WS_LAND_TICKS in the air and the board it touches down on is not
+    // the board it left. A cell under a body is one that snake's head can only reach by
+    // dying, so the item is not still there to be won: it is stranded, sitting visibly
+    // inside the snake for as long as the tail takes to clear it. Whoever it came down
+    // inside HAS reached it. After the bites, so a segment already chewed off cannot
+    // collect; player 0 first if both cover it, which no rng draw depends on.
+    if (_ws && _ws.it && simTick >= _ws.it.at) {
+        const k = ck(_ws.it);
+        for (let i = 0; i < 2; i++) if (players[i].snake.some(s => ck(s) === k)) { _wsTake(i); break; }
     }
     if (eater >= 0) {
         players[eater].score += level * 100;

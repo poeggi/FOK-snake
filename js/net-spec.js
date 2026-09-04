@@ -228,6 +228,20 @@ function _spWatchSig(to, k, extra){
     if(k === 'ok') _spOkAt = _spNow();
     _netSignal(to, 'watch', JSON.stringify(Object.assign({ tid:_spTid, nid:_spNid, k }, extra || {})));
 }
+// WHICH LEG is a watch that has not started yet stuck on? Every one of them fails the same
+// way from the outside -- a spectator on CONNECTING while two people play a perfectly good
+// match -- and each has a different cause and a different cure, so the screen has to name
+// the one it is on rather than describe the whole thing as connecting. The tests are in
+// order of progress made, furthest first, so the first one that answers is the furthest
+// this watch has actually got.
+function specStatus(){
+    if(_spOn) return '';                                     // watching: nothing to report
+    if(_spCtx || _spBootT != null) return 'SYNCING';          // context in hand, waiting on the shared clock
+    for(const l of _spIn) if(!l.dead && l.dc && l.dc.readyState === 'open') return 'WAITING FOR THE FEED';
+    for(const l of _spIn) if(!l.dead) return 'OPENING THE LINK';   // signalling done, ICE still working
+    if(_spWant.length) return 'ASKED TO WATCH';               // the ask is out and unanswered
+    return 'NO FEEDER YET';
+}
 // Is somebody in the middle of reaching us? EVERY LEG OF THE WATCH HANDSHAKE IS A SIGNAL --
 // the ask, the offer, the answer, the ICE behind them -- and the node being asked is by
 // definition a node in a match, which polls the mailbox at a fifth of the usual rate inside
@@ -813,6 +827,11 @@ function _spWantPump(now){
 function _spTick(){
     const now = _spNow();
     _spPrune();
+    // Nothing left to feed. A served link only ever exists because the match behind it was
+    // servable, so one that is no longer servable is serving a timeline that ended -- and
+    // the tournament's own teardown cannot be relied on to say so, because a player leaving
+    // on the over screen, a peer's bye and a lost connection all end a match without it.
+    if(!_spOn && _spOut.length && !_spServable()) _spServeEnd();
     if(!_spOn && _spOut.length) _spCkpt(false);
     _spAskPump(now);
     _spWantPump(now);
@@ -848,16 +867,26 @@ function _spTick(){
     // deferred boot into a permanent one.
     if(!_spOn && !_spIn.length && !_spOut.length && !_spWant.length && !_spAsk.length) _spDisarm();
 }
+// Putting down everything we were serving. A feeder is not spectating, so specStop -- which
+// is a WATCHER putting its own feed down -- never covered this side, and at the end of a
+// match the links stayed open: still counted against the fan-out cap, and still pointed at a
+// timeline that had stopped existing. Two matches later the same player is the feeder again
+// and answers 'no' to every watcher in the tournament, because both its slots are held by
+// links to a node nobody is playing any more.
+// Parked ASKS are deliberately left alone: an ask is for whatever match this node has next,
+// which is precisely the boundary this runs on. They have their own TTL and their own pump.
+function _spServeEnd(){
+    for(const l of _spOut) _spKill(l);
+    _spOut = []; _spRs = null; _spBuf = [];
+    _spCkptAt = 0;
+}
 // Proactive stand-down: a backgrounded primary cannot forward, and the server can
 // re-deal the role long before anyone downstream notices the silence -- so we say so
 // instead of making everyone downstream discover it. Outside a tournament there is
 // nobody to tell and the hook is simply absent: a bare watch just loses its relay.
 function specStandDown(){
     const had = _spOut.length;
-    for(const l of _spOut) _spKill(l);
-    _spOut = [];
-    _spRs = null; _spBuf = [];
-    _spCkptAt = 0;
+    _spServeEnd();
     if(had && _spTid && typeof tourneyStandDown === 'function') tourneyStandDown(_spTid, _spNid);
 }
 // Local recovery is out of options: the feeder is gone, no standby answered, and the
