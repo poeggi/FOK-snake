@@ -17,6 +17,8 @@
 # The suite table lives in test/run-suites.js, which runs the suites ACROSS CORES: each
 # one is a pure, isolated process, so nothing but the old shell loop made them wait for
 # each other. Set JOBS=1 for a serial run when a failure is easier to read that way.
+# Arguments after the tier go straight to it, which is how the CI matrix asks for its
+# slice of the work: bash test/checks.sh --full --shard 2/5.
 #
 # CI runs --full on every push/PR, so the regression tier still gates the auto-deploy to
 # Pages. See test/README.md ("Test tiers") for which suites live where and why.
@@ -34,7 +36,7 @@ case "${1:-}" in
     *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile|--live]"; exit 2 ;;
 esac
 
-node test/run-suites.js "$TIER"
+node test/run-suites.js "$TIER" "${@:2}"
 
 if [ "$TIER" = --fast ]; then
     echo "[checks] (fast tier) skipping the heavy duel sweeps -- run 'bash test/checks.sh --full' after any netcode/sim rework"

@@ -24,6 +24,7 @@
 //      bumped generation and the feed resumes -- still with zero divergence.
 // Run: node test/duel-spec.js
 const { runSpec } = require('./spec-driver');
+const lane = require('./lanes');
 
 const WIRE = { base:20, jit:8, loss:0.05, asym:6 };
 const rows = [];
@@ -57,7 +58,7 @@ function noDiverge(tag, r){
 }
 
 // ---- A) a clean watch, across level boundaries --------------------------------------
-{
+if(lane.step()){
     const r = runSpec({ secs:20, seed:0x77C0, wire:WIRE, watchers:[{ at:1.2, from:'A' }] });
     const s = common('A', r, 'S1');
     noDiverge('A', r);
@@ -74,7 +75,7 @@ function noDiverge(tag, r){
 }
 
 // ---- B) a LATE joiner: context + fresh checkpoint + tail ------------------------------
-{
+if(lane.step()){
     const r = runSpec({ secs:18, seed:0x2B71, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:11.0, from:'A' }] });
     common('B', r, 'S1');
@@ -87,7 +88,7 @@ function noDiverge(tag, r){
 }
 
 // ---- C) the fan-out cap, the redirect, and the two-tier tree it produces ---------------
-{
+if(lane.step()){
     const r = runSpec({ secs:16, seed:0x77C3, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }] });
     common('C', r, 'S1'); common('C', r, 'S2');
@@ -105,7 +106,7 @@ function noDiverge(tag, r){
 }
 
 // ---- D) the feeder's relay duty dies: the other player takes over ----------------------
-{
+if(lane.step()){
     const r = runSpec({ secs:18, seed:0x51ED, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }],
                         kill:[{ at:7.0, who:'A' }] });

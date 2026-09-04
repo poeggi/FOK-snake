@@ -14,6 +14,7 @@
 // is judged by convergence AT SETTLE (the live state the resync repairs) + no kill + a cleared
 // banner, never by "never diverged".
 const { runMatch } = require('./duel-driver');
+const lane = require('./lanes');
 
 // RECOVER: a <RB_PERSIST_KILL_MS outage the match must ride out. 1.5s is the design floor the
 // user named; 2.5s stresses the wider 4s window; each over a distinct adversity so recovery is
@@ -41,7 +42,7 @@ const FATAL = { name:'6s outage (ctrl)', secs:16, seed:0x77C0, wire:{ base:5, ji
 const steps = [];
 let failed = 0;
 
-for(const sc of RECOVER){
+for(const sc of lane(RECOVER)){
     const r = runMatch(sc);
     // Recovered: converged at settle, the CONNECTION LOST banner actually showed during the outage
     // (fault exercised) and is clear at the end, no session-end, no own-head teleport, silence
@@ -61,6 +62,8 @@ for(const sc of RECOVER){
 
 // Load-bearing falsification: an over-long outage MUST kill the match. If it does not, the
 // deadline is dead and the recovery guard above is meaningless -- fail to force a look.
+// It is therefore OUTSIDE lane(): a lane's recovery claims are only worth anything next to
+// the control that shows this wire can still kill, so every lane pays for it.
 const f = runMatch(FATAL);
 const fatalBad = f.exitReason !== 'session-end';
 steps.push(FATAL.name.padEnd(18)

@@ -5,17 +5,37 @@
 # even though main auto-deploys to GitHub Pages. The local pre-commit hook runs
 # only the fast tier (bash test/checks.sh) for speed; CI is the full gate.
 #
-# The suites run concurrently across the runner's cores (test/run-suites.js), so the
-# tier costs roughly its longest sweep rather than the sum of all of them.
+# The tier is about a thousand core-seconds of pure simulation, and a runner has four
+# cores, so one machine cannot get near a minute however well it packs. The work is
+# split two ways instead. test/run-suites.js runs the suites concurrently across the
+# runner's cores, and inside that the longest sweeps are split into LANES (test/lanes.js)
+# so no single suite sets a floor; --shard k/N then gives each matrix job one Nth of the
+# whole table. Every shard computes the same packing from the same table and keeps its own
+# bucket, so the jobs need nothing from each other and between them run the tier exactly
+# once. Spending another machine on it means adding a number to the matrix below (and the
+# /5 in the job label, which is only a label -- the runner takes its count from the matrix).
 name: ci
 
 on:
   push:
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
 
 jobs:
   checks:
     runs-on: ubuntu-latest
+    strategy:
+      # Report every shard: cancelling the others on the first failure would hide which
+      # of the remaining sweeps also broke, which is the thing a divergence hunt needs.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    name: checks ${{ matrix.shard }}/5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,8 +43,10 @@ jobs:
           node-version: "20"
 
       - name: Code checks (full regression tier -- includes the heavy duel sweeps)
-        run: bash test/checks.sh --full
+        run: bash test/checks.sh --full --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
+      # Cheap enough (tens of milliseconds) that running it in every shard costs nothing
+      # and beats tying it to one shard number that a later re-shard could drop.
       - name: sw.js integrity
         run: node test/check-sw.js
 
@@ -32,11 +54,14 @@ jobs:
         if: always()
         run: |
           {
-            echo "### FOK-snake CI (full regression tier)"
+            echo "### FOK-snake CI (full regression tier, shard ${{ matrix.shard }} of ${{ strategy.job-total }})"
             echo "- JS syntax check (every shipped source parsed)"
             echo "- ASCII-only sources"
             echo "- sim determinism + invariants (golden hashes)"
             echo "- headless smoke test (menus + gameplay)"
             echo "- duel lockstep sweeps (desync / recovery / boundary / clock)"
             echo "- sw.js CACHE / ASSETS integrity"
+            echo ""
+            echo "Shards split the table by measured weight, so this job ran only its own"
+            echo "slice; the tier is covered once across all shards."
           } >> "$GITHUB_STEP_SUMMARY"

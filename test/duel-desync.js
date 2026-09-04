@@ -12,6 +12,7 @@
 //   3. re-convergence + no desync kill -- the sims end on one identical world, no DESYNC exit.
 // See test/README.md for the driver, the metrics, and how to run each scenario.
 const { runMatch, jouster } = require('./duel-driver');
+const lane = require('./lanes');
 
 const steps = [];
 const log = s => { steps.push(s); };
@@ -116,7 +117,7 @@ const SCEN = [
 ];
 
 let failed = 0;
-for(const sc of SCEN){
+for(const sc of lane(SCEN)){
     const r = runMatch(sc);
     const rbOver = sc.maxRb != null && r.rb > sc.maxRb;
     const rbUnder = sc.minRb != null && r.rb < sc.minRb;

@@ -20,6 +20,7 @@
 // too -- the multi-boundary accumulation the burst actually bounds is a slow sweep that lives in the
 // on-demand netprofile, not this fast guard.
 const { runMatch } = require('./duel-driver');
+const lane = require('./lanes');
 
 // Adversity scenarios that must STAY in lockstep across the real P2P boundary. levelReached>=2
 // guarantees at least one boundary was actually crossed (not just level-1 play). Durations are
@@ -40,7 +41,7 @@ const CONVERGE = [
 const steps = [];
 let failed = 0;
 
-for(const sc of CONVERGE){
+for(const sc of lane(CONVERGE)){
     const r = runMatch(sc);
     // A clean boundary: converged, no unhealed ring split, no product desync, no DESYNC exit, no
     // teleporting local head, and at least one boundary actually crossed. A gameplay duelOver is

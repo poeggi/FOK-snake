@@ -19,6 +19,7 @@
 //      arithmetic that displaced them.
 // Run: node test/duel-spec-tree.js
 const { runSpec } = require('./spec-driver');
+const lane = require('./lanes');
 
 const WIRE = { base:20, jit:8, loss:0.05, asym:6 };
 const rows = [];
@@ -45,7 +46,7 @@ function alive(tag, r, name, hops){
 }
 
 // ---- A) the steady-state tree, and the warm standby that makes it survivable ----------
-{
+if(lane.step()){
     const r = runSpec({ secs:14, seed:0x77C3, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }] });
     A(!r.exitReason, 'A: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
@@ -69,7 +70,7 @@ function alive(tag, r, name, hops){
 }
 
 // ---- B) the primary a secondary feeds from dies ---------------------------------------
-{
+if(lane.step()){
     const r = runSpec({ secs:14, seed:0x77C3, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }],
                         kill:[{ at:7.0, who:'@feed:S3' }] });
@@ -90,7 +91,7 @@ function alive(tag, r, name, hops){
 }
 
 // ---- C) a late joiner, then the whole middle tier dies at once ------------------------
-{
+if(lane.step()){
     const r = runSpec({ secs:17, seed:0x77C3, wire:WIRE,
                         watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' },
                                   { at:3.2, from:'A' }, { at:8.0, from:'A' }],

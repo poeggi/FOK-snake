@@ -18,6 +18,7 @@
 // stays in the RECOVERABLE band -- freezes short enough that the live peer never crosses the 4s
 // silence deadline -- so the ONLY thing on trial is whether the resync reconciles the tick base.
 const { runMatch } = require('./duel-driver');
+const lane = require('./lanes');
 
 const WIRE = { base:20, jit:10, loss:0.05, asym:8, spike:{ p:0.03, ms:60 } };
 const SEEDS = [0x51E0D000, 0x9E3779B1, 0xDEADBEEF].map(x => x >>> 0);
@@ -45,7 +46,7 @@ cases.push(...PINNED);
 
 const rows = [];
 let fails = 0, total = 0, sessionEnds = 0, jumps = 0;
-for(const { who, ms, seed } of cases){
+for(const { who, ms, seed } of lane(cases)){
     total++;
     // catchup:true models the fixed-timestep integer-lag close every real duel client runs
     // per tick (sim-worker._step): after the resync re-anchors the frozen side to the sender's

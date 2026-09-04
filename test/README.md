@@ -41,10 +41,11 @@ whole reason they are not on the commit hot path -- they are not weaker, just sl
 suite is a pure, isolated process -- it reads sources, simulates, asserts, and writes
 nothing -- so they run CONCURRENTLY, longest-first, one child per core:
 
-    node test/run-suites.js            # fast tier
-    node test/run-suites.js --full     # regression tier
-    node test/run-suites.js --list     # just name the suites in the tier
-    JOBS=1 bash test/checks.sh --full  # serial, when a failure reads better that way
+    node test/run-suites.js               # fast tier
+    node test/run-suites.js --full        # regression tier
+    node test/run-suites.js --list        # just name the suites in the tier
+    node test/run-suites.js --full --shard 2/5   # one fifth of the work (CI matrix)
+    JOBS=1 bash test/checks.sh --full     # serial, when a failure reads better that way
 
 Runtime is almost entirely SIMULATED MATCH TIME -- the heavy sweeps play minutes of
 lockstep duel between them and everything else in the suite adds up to seconds -- so
@@ -56,6 +57,33 @@ banner still has to.
 The smoke tests are discovered rather than listed, so a new `test/smoke-*.js` is picked up
 by existing. `weight` is a measured millisecond figure used only to dispatch the long
 sweeps first; a stale one costs packing efficiency, never correctness.
+
+### Lanes and shards  (how the regression tier fits in a CI minute)
+
+The tier is about a thousand core-seconds of simulation, so two limits set the wall time.
+The first is the machine: four cores on a CI runner cannot chew through that in a minute
+however well they pack. The second is sharper -- a suite is one process and a process is
+one core, so the LONGEST SINGLE SUITE is a floor that no amount of hardware lowers.
+
+Both are lifted, in that order:
+
+* **Lanes** (`test/lanes.js`) split one heavy suite's own cases across several processes:
+  `node test/duel-desync.js --lane 2/3` runs every third case starting at the second, and
+  the table registers that suite as three entries. This is sound only because the cases
+  were already independent -- each builds its own clients, wire and sim and shares nothing
+  with the case before it -- so splitting them changes which process a case runs in and
+  nothing else. A case that is a FALSIFICATION CONTROL for the others is the exception and
+  runs in EVERY lane rather than being dealt into one (`duel-outage.js` FATAL). An empty
+  lane fails the run: a suite that asserts nothing still prints its banner, and the runner
+  would read that as a pass.
+* **Shards** (`--shard k/N`) hand one Nth of the table to this process. Every shard packs
+  the same table the same way (longest-first onto the lightest bucket) and keeps only its
+  own bucket, so a CI matrix needs no coordination and covers the tier exactly once. An
+  empty shard fails for the same reason an empty lane does.
+
+`bash test/checks.sh --full --shard 2/5` is the CI form; arguments after the tier go
+straight through to the runner. To spend another machine on it, add a shard number to the
+matrix in `.github/workflows/ci.yml` -- nothing else changes.
 
 ## Files
 
