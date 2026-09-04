@@ -310,6 +310,7 @@ function driverSrc(id){
         + '    rows: function(){ return tourneyRows().map(function(r){ return { t:r.t, en:r.en !== false, note:r.note || "" }; }); },\n'
         + '    pick: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return rs[i].act(); } throw "no row " + t; },\n'
         + '    draw: function(){ var s = SCREENS[phase]; if(!s || !s.d) throw "no screen for " + phase; s.d(); return true; },\n'
+        + '    line: function(nd){ return _ttMatchLine(tourneyView() || {}, nd.nid, nd); },\n'
         + '    sess: function(peer, role){ var s = _netMkSess(peer, role); return { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, p2pOnly:s.p2pOnly }; },\n'
         + '    p2p: function(){ return _netP2POnly; },\n'
         + '    inGame: function(v){ inGame = !!v; },\n'
@@ -682,6 +683,25 @@ async function finish(m, plan){
     A(outsiders.length === 0, '11: ' + outsiders.length + ' results came from a non-player');
     rows.push('11 refusals: a sheet for another tournament and a sheet that benches us both '
               + 'changed nothing; not one result was reported by anyone who was not playing');
+
+    // ---- 12. the node states that never produce a match ------------------------------
+    // A bye, a void and a freeze all close a node without two players ever meeting, and the
+    // bracket has to say so: they used to render exactly like a match still awaiting its
+    // turn, which is the one thing they are not. The line is a pure function of one node,
+    // so it is checked as one, against the shape projectNodes() actually sends.
+    const L = nd => C[0].line(nd);
+    A(L({ nid:'ko1.1', players:[IDS[0], null], state:'settled', winner:IDS[0], draw:false, score:null })
+        .indexOf('BYE') > 0, '12: a node with one empty slot did not read as a bye');
+    A(L({ nid:'ko1.2', players:[null, IDS[1]], state:'settled', winner:IDS[1], draw:false, score:null })
+        .indexOf('BYE') > 0, '12: a bye in the other slot did not read as one');
+    A(L({ nid:'ko2.1', players:[null, null], state:'void', winner:null, draw:false, score:null })
+        .indexOf('VOID') === 0, '12: a void node did not say it was void');
+    A(L({ nid:'ko2.2', players:[IDS[0], IDS[1]], state:'frozen', winner:null, draw:false, score:null })
+        .indexOf('FROZEN') > 0, '12: a frozen node did not say it was frozen');
+    const pend = L({ nid:'final', players:[IDS[0], IDS[1]], state:'pending', winner:null, draw:false, score:null });
+    A(pend.indexOf('BYE') < 0 && pend.indexOf('VOID') < 0 && pend.indexOf('FROZEN') < 0,
+      '12: an ordinary pending node picked up a terminal label');
+    rows.push('12 node states: bye, void and frozen each read as themselves; a pending node still reads as a pairing');
 
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }

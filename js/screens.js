@@ -1646,9 +1646,12 @@ function drawTourneyBracket(){
         if(!rows.length) ct('NO MATCHES SETTLED YET' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     } else {
         (t.bracket || []).slice(0, 13).forEach((nd, i) => {
-            const y = 82 + i * 15, live = String(nd.nid) === cur;
-            const done = !!(nd.winner || nd.draw);
-            const col = live ? '#ffd700' : done ? '#7fff7f' : '#888';
+            const y = 82 + i * 15, live = String(nd.nid) === cur, st = String(nd.state || 'pending');
+            // Six node states, three readings: one is being played, one produced a result,
+            // and one closed without producing anything. A void or frozen node used to draw
+            // exactly like a match still waiting its turn, which is the one thing it is not.
+            const col = live ? '#ffd700' : (st === 'settled' || st === 'confirmed') ? '#7fff7f'
+                      : st === 'frozen' ? '#ff5555' : st === 'void' ? '#666' : '#888';
             _ttCol(String(nd.nid || '').toUpperCase(), CW/2 - 210, y, col, FONT.HINT);
             _ttCol(_ttMatchLine(t, nd.nid, nd),        CW/2 - 140, y, col, FONT.HINT);
         });
@@ -1658,13 +1661,21 @@ function drawTourneyBracket(){
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
-// One node as a line: the pairing, plus the result once there is one.
+// One node as a line: the pairing, plus the result once there is one. An empty slot is a
+// BYE -- a phantom seed in an odd round, or a void below that the bracket advanced past --
+// and a node that closed without producing a winner says which way it closed. Both are
+// terminal, and neither may read as a match still waiting to be played.
 function _ttMatchLine(t, nid, nd){
     if(!nd) for(const x of [].concat(t.schedule || [], t.bracket || [])) if(x && String(x.nid) === String(nid)){ nd = x; break; }
     if(!nd && t.roles && String(t.roles.nid) === String(nid)) nd = { players: t.roles.players };
     if(!nd) return String(nid || '');
+    const st = String(nd.state || '');
+    if(st === 'void') return 'VOID - NOBODY LEFT TO PLAY IT';
     const ps = nd.players || [], a = _ttName(ps[0]), b = _ttName(ps[1]);
+    if(a && !b) return a + '  BYE';
+    if(b && !a) return b + '  BYE';
     const pair = (a || '?') + ' vs ' + (b || '?');
+    if(st === 'frozen') return pair + '  FROZEN';
     if(nd.draw) return pair + '  DRAW';
     if(nd.winner) return pair + '  ' + _ttName(nd.winner) + ' WON';
     return pair;
@@ -1707,7 +1718,8 @@ function drawTourneyPodium(){
         ct(pl[0], CW/2 - 150, pl[3], pl[1], FONT.HINT);
         ctg(_ttName(pod[i]).slice(0, 14), CW/2, pl[3], pl[1], pl[2], GLOW.TEXT);
     });
-    if(!pod.length) ct('NO PODIUM' + _ttDots(), CW/2, 130, '#555', FONT.HINT);
+    // An empty podium is an ENDING, not a wait: the bracket voided all the way to the top.
+    if(!pod.length) ct('NO PODIUM - THE BRACKET VOIDED', CW/2, 130, '#555', FONT.HINT);
     _ttDrawRows(268, 26);
     if(tourneyUi().msg) drawStatus(tourneyUi().msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
