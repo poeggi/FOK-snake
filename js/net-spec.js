@@ -178,7 +178,7 @@ function _spWatchSig(to, k, extra){
     _netSignal(to, 'watch', JSON.stringify(Object.assign({ tid:_spTid, nid:_spNid, k }, extra || {})));
 }
 function _spMkPc(peer, arr, kind){
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.cloudflare.com:3478' }] });
+    const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
     const l = { peer, pc, dc:null, rdOk:false, iceQ:[], sub:false, kind, dead:false,
                 openAt:0, lastAt:_spNow(), live:false };
     pc.onicecandidate = e => { if(e.candidate) _spSignal(peer, 'ice', { c:e.candidate }); };

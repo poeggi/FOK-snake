@@ -373,13 +373,18 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _applyHello({api:'4.1'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.1: the same version must read as up to date';
+    _applyHello({api:'4.2'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.2: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
     // without it _netOk() is false and both halves of the assertion pass vacuously.
     const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==1 || !netTourneyOk()) throw 'a same-major 4.1 server must open the tournament gate';
+    if(netSrvMinor()!==2 || !netTourneyOk()) throw 'a same-major 4.2 server must open the tournament gate';
+    // The tournament gate is a >= 4.1 gate, not an equality: a server that has tournament.php
+    // but not the hello nets field must keep serving tournaments.
+    _applyHello({api:'4.1'});
+    if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.1) must read as up to date';
+    if(netSrvMinor()!==1 || !netTourneyOk()) throw 'a 4.1 server must still open the tournament gate';
     _applyHello({api:'3.5'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER major (server 3.5) must read as up to date';
     _applyHello({api:4});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags';
     // An OLDER minor still plays: only the features that need 4.1 are shut off, and the
@@ -387,7 +392,7 @@ runTest('SMOKE-NET', `
     _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
     if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
     globalThis.fetch=_oFetchT;
-    _applyHello({api:'4.2'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:'4.3'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible
@@ -395,6 +400,81 @@ runTest('SMOKE-NET', `
     _netApiNewer=false; _netApiOutdated=false;
     log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
     cfg.debug=0;
+
+    // ---- our own public addresses (hello nets, server 4.2) ----------------------
+    // The server sees us on ONE family per request; ICE can see both, so we gather them
+    // and report them. What must hold: only addresses the world could reach us on, at
+    // most one per family, a server-reflexive answer beating a host guess, and ONE
+    // RTCPeerConnection every few minutes rather than one per 30s heartbeat.
+    {
+        // Every address ICE hands out in the wild, each with the reason it is or is not
+        // ours to report. The mDNS name is Chrome's default for host candidates.
+        for(const bad of ['','10.0.0.5','172.16.4.9','172.31.255.254','192.168.1.7','127.0.0.1',
+                          '169.254.11.2','100.64.0.1','100.127.255.1','0.0.0.0','224.0.0.1',
+                          '9d8e1f2a-1234.local','fe80::1c2d','fd12:3456::1','fc00::9','::1',
+                          '2a02:1:2:3:4:5:6:7%eth0','256.1.1.1','1.2.3','1.2.3.4.5',
+                          '2001:0db8:0000:0000:0000:0000:0000:0001:0002:0003'])   // longer than the server's 45-char cap
+            if(_netAddrPublic(bad)) throw 'reported an address nobody outside this device can use: '+bad;
+        for(const good of ['198.51.100.7','172.15.0.1','172.32.0.1','100.128.0.1','9.9.9.9',
+                           '2a02:1:2:3:4:5:6:7','2001:db8::1','3ffe::1'])
+            if(!_netAddrPublic(good)) throw 'dropped a genuinely public address: '+good;
+        // A fake RTCPeerConnection that gathers exactly the candidates we hand it.
+        let _pcN=0, _pc=null;
+        const _oRtc=globalThis.RTCPeerConnection;
+        globalThis.RTCPeerConnection=function(c){
+            _pcN++; _pc=this; this.cfgArg=c; this.closed=false; this.chans=[]; this.onicecandidate=null;
+            this.createDataChannel=(n)=>{ this.chans.push(n); return {}; };
+            this.createOffer=()=>Promise.resolve({type:'offer',sdp:''});
+            this.setLocalDescription=()=>Promise.resolve();
+            this.close=()=>{ this.closed=true; };
+            // onicecandidate is assigned before the offer, so a candidate can arrive at once
+            this.emit=(addr,typ)=>this.onicecandidate({candidate:{ candidate:'candidate:1 1 udp 1 '+addr+' 5000 typ '+typ, address:addr }});
+            this.end=()=>this.onicecandidate({candidate:null});
+        };
+        const _reset=()=>{ _netNets=[]; _netNetsAt=0; _netNetsBusy=false; _pcN=0; _pc=null; };
+        _reset();
+        netNetsRefresh();
+        if(_pcN!==1) throw 'the first refresh must open exactly one RTCPeerConnection';
+        if(_pc.chans.length!==1) throw 'no m-line means nothing to gather for';
+        if(JSON.stringify(_pc.cfgArg)!==JSON.stringify({iceServers:[{urls:NET_STUN_URL}]})) throw 'the gather must use the one shared STUN host';
+        if(netPublicNets().length) throw 'nothing may be reported before the gather finishes';
+        _pc.emit('a1b2c3d4-0001.local','host');   // mDNS placeholder: not an address
+        _pc.emit('192.168.1.31','host');          // the LAN side of our own NAT
+        _pc.emit('198.51.100.7','host');          // a public v4 HOST candidate (no NAT): usable, but a guess
+        _pc.emit('2a02:1:2:3::42','host');        // routine on v6: a global-unicast host candidate IS public
+        _pc.emit('203.0.113.9','srflx');          // what the STUN server actually saw: the authority
+        _pc.end();
+        const nets=netPublicNets();
+        if(nets.length!==2) throw 'exactly one address per family, no more: '+JSON.stringify(nets);
+        if(nets[0]!=='203.0.113.9') throw 'a server-reflexive answer must beat a host guess';
+        if(nets[1]!=='2a02:1:2:3::42') throw 'the v6 address must survive: v6 rarely produces a srflx at all';
+        if(nets.length>NET_NETS_MAX||nets.some(a=>a.length>NET_NETS_ADDR_MAX)) throw 'the server caps the list at 4 short strings';
+        if(!_pc.closed||_netNetsBusy) throw 'end-of-candidates must close the pc and release the gather';
+        // ONE pc every few minutes: the 30s heartbeat calls refresh every time, and the TTL
+        // is the whole reason that is cheap. A network change is what overrides it.
+        const _seen=_pcN;
+        netNetsRefresh(); netNetsRefresh(); netNetsRefresh();
+        if(_pcN!==_seen) throw 'a fresh gather inside the TTL: one pc per hello is exactly what must not happen';
+        netNetsRefresh(true);
+        if(_pcN!==_seen+1) throw 'a network change must re-gather regardless of the TTL';
+        _pc.emit('203.0.113.9','srflx'); _pc.emit('2a02:1:2:3::42','host'); _pc.end();
+        // ...and a hello carries what was found, with no version gate: a 4.1 server ignores it.
+        let _body=null; const _oPost2=_netPost, _oFetch2=globalThis.fetch, _oSync=_netTimeSync;
+        globalThis.fetch=()=>({}); _netTimeSync=async()=>{};
+        _netPost=async(p,b)=>{ if(p==='/api/hello.php') _body=JSON.parse(JSON.stringify(b)); return null; };
+        _netHelloBusy=false; _netHello();
+        if(!_body||JSON.stringify(_body.nets)!==JSON.stringify(nets)) throw 'hello did not carry the addresses we found';
+        _reset(); _body=null; _netHelloBusy=false; _netHello();
+        _pc.end();   // release the gather the hello started, so no 2.5s timer outlives the suite
+        if(!_body||'nets' in _body) throw 'an empty gather must omit the field, never send []';
+        _netPost=_oPost2; globalThis.fetch=_oFetch2; _netTimeSync=_oSync; _netHelloBusy=false;
+        // Offline is offline: no STUN traffic from a client that opted out of the network.
+        _reset(); cfg.offline=true; netNetsRefresh(true); cfg.offline=false;
+        if(_pcN) throw 'an offline client must not open a peer connection';
+        _reset();
+        if(_oRtc===undefined) delete globalThis.RTCPeerConnection; else globalThis.RTCPeerConnection=_oRtc;
+        log('public nets ok: private/mDNS/CGNAT dropped, one per family, srflx over host, TTL throttles the gather, hello carries or omits');
+    }
 
     // The epoch MOVES with a rematch/level start. Missing that made the new round
     // SPRINT: startDuel rewinds simTick to 0 while the target was still measured from

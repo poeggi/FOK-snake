@@ -12,11 +12,15 @@
 // device offline, or these files deleted (all callers guard with typeof).
 // ============================================================================
 const NET_BASE = 'https://fok-server.poggensee.it';
+// The one STUN host, shared by every RTCPeerConnection in this client. It MUST resolve
+// BOTH A and AAAA: the p2p connect wants candidates on whichever family works, and the
+// public-address discovery in net-rtc.js can only name a family it gathered over.
+const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
 const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md: Versioning; v4 = the ITEM REGISTRY -- the server owns item-instance ownership, so a transfer moves one row instead of copying a flag)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 1;   // built against 4.1 (tournament.php + the 'watch'/'tourney' signal pair + friends_playing); every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 2;   // built against 4.2 (hello `nets`: we report our own public address in BOTH families); 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -644,6 +648,16 @@ async function _netHello(){
     if(phase === 'lobby' || phase === 'friends') body.friends = getFriends().slice(0,64);
     // The announce is served only when asked for, so ask only while it can be seen.
     if(phase === 'tourneyLobby') body.tourneys = true;
+    // Our own public addresses, both families (see net-rtc.js: the server can only observe the
+    // one the browser happened to use). Sent on every hello once discovered -- the server no-ops
+    // when nothing changed, so it costs nothing -- and needs no version gate: a 4.1 server
+    // ignores the unknown key. The refresh is throttled by its own ~5min TTL, so riding the
+    // heartbeat here is one RTCPeerConnection every few minutes, not one per hello.
+    if(typeof netNetsRefresh === 'function'){
+        netNetsRefresh();
+        const nets = netPublicNets();
+        if(nets.length) body.nets = nets;
+    }
     // auto_accept: presenting our QR / being on the add-friend screen IS the
     // consent, so the server accepts incoming friend requests immediately (the
     // contract mechanism; complements the client-side QR accept). Expires ~60s.
@@ -795,8 +809,15 @@ if(typeof document !== 'undefined' && document.addEventListener){
         // miss it on wake. Measure the away time on the WALL clock and rebuild if it was more
         // than a blink; a rebuild that turns out unnecessary just re-establishes cheaply.
         if(_netSess && _netSess.game && !_netSess.relay && !_netSess.reconnectAt && awayMs > RB_WARN_MS) _netReconnect(_netSess);
+        // A long background is where a phone changes network without ever going offline (wifi to
+        // cellular, or a different wifi on the way home). Re-gather rather than keep reporting an
+        // address that now belongs to somebody else's line.
+        if(typeof netNetsRefresh === 'function') netNetsRefresh(awayMs > NET_NETS_HIDE_MS);
     });
 }
+// Coming back online is the other network change worth re-gathering for, and the only one the
+// browser tells us about outright.
+if(typeof addEventListener === 'function') addEventListener('online', ()=>{ if(typeof netNetsRefresh === 'function') netNetsRefresh(true); });
 
 // ---- Unload: reload / tab close / browser quit. Every timeout we have is a JS
 // timer that dies with the page, so a leaving client can only be polite on the

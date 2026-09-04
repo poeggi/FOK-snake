@@ -68,6 +68,100 @@ function _netIceFlush(s){
     const q = s.iceQ; s.iceQ = [];
     for(const c of q) _netIceRelease(s, c);
 }
+// ---- OUR OWN PUBLIC ADDRESSES, in both families (the hello `nets` field, server 4.2) ----
+// The server only ever sees us on the ONE family the browser picked for that request, and a
+// browser gives us no way to ask for the other. On a dual-stack line Happy Eyeballs can sit on
+// v6 for hours, so our public v4 address is never observed -- which is exactly why "tournaments
+// nearby" stayed empty for a host talking v6 and a phone talking v4 in the SAME ROOM: two
+// networks that can never compare equal. ICE can see both, so we discover them ourselves and
+// report them; the server derives the network (v4 as-is, v6 collapsed to the /64).
+const NET_NETS_MAX = 4;            // the server's cap on the list; a longer one is a 400
+const NET_NETS_ADDR_MAX = 45;      // ...and on each entry (a full v6 literal is 45 chars)
+const NET_NETS_TTL_MS = 300000;    // ~5min. One RTCPeerConnection every few minutes, never one per hello
+const NET_NETS_HIDE_MS = 60000;    // a background longer than this may well be a different network
+const NET_NETS_GATHER_MS = 2500;   // give the gather up rather than hold a pc open waiting
+let _netNets = [], _netNetsAt = 0, _netNetsBusy = false;
+// What ICE gathers by nature but nobody outside this device can be reached on -- and what the
+// server would discard anyway. A `.local` is Chrome's mDNS placeholder: not an address at all.
+// The carrier-grade range is dropped for a different reason: it IS routable, but it is shared
+// across a whole region, so treating it as "this room" would make strangers look like neighbours.
+function _netAddrPublic(a){
+    a = String(a || '');
+    if(!a || a.length > NET_NETS_ADDR_MAX || /\.local$/i.test(a)) return false;
+    if(a.indexOf(':') >= 0){
+        if(!/^[0-9a-f:]+$/i.test(a)) return false;   // a zone id (%eth0) or any other decoration is not an address we can report
+        return /^[23][0-9a-f]{0,3}$/i.test(a.split(':')[0]);   // GLOBAL UNICAST 2000::/3 only -- drops fe80 link-local, fc/fd ULA, fec0 site-local, ::1
+    }
+    const o = a.split('.');
+    if(o.length !== 4 || o.some(p => !/^\d{1,3}$/.test(p) || +p > 255)) return false;
+    const n = o.map(Number);
+    if(n[0] === 0 || n[0] === 10 || n[0] === 127 || n[0] >= 224) return false;      // this-host, private, loopback, multicast and above
+    if(n[0] === 172 && n[1] >= 16 && n[1] <= 31) return false;                      // private
+    if(n[0] === 192 && n[1] === 168) return false;                                  // private
+    if(n[0] === 169 && n[1] === 254) return false;                                  // link-local
+    if(n[0] === 100 && n[1] >= 64 && n[1] <= 127) return false;                     // carrier-grade NAT: routable, but a whole region shares it
+    return true;
+}
+// The address and type off one gathered candidate. `address` is the modern field; the SDP line
+// is the fallback, and its 5th token is the address in every candidate ever written.
+function _netCandAddr(cand){
+    const line = (cand && cand.candidate) || '';
+    const m = line.match(/ typ (\w+)/);
+    return { addr: (cand && cand.address) || line.split(' ')[4] || '', type: m ? m[1] : '' };
+}
+// One-shot ICE gather against the dual-stack STUN host. No connection to the game server over
+// either family, no camera or microphone, nothing signalled to anyone. Soft-fail like every
+// other network path here: an empty result just means hello carries no `nets` and the server
+// keeps matching us exactly the way it does today.
+function _netNetsGather(){
+    if(_netNetsBusy || typeof RTCPeerConnection !== 'function' || typeof setTimeout !== 'function') return;
+    if(typeof netOffline === 'function' && netOffline()) return;
+    _netNetsBusy = true;
+    let pc = null, tmr = null, done = false;
+    // Best address per family. A SERVER-REFLEXIVE candidate is what the STUN server actually saw,
+    // so it is the authority; a host candidate qualifies only where there is no NAT to hide behind
+    // -- routine for v6, never for v4 -- and _netAddrPublic is what decides that. One per family:
+    // the server uses the first of each anyway, so a second is payload carrying no new meaning.
+    const best = {};
+    const finish = ()=>{
+        if(done) return;
+        done = true;
+        if(tmr != null && typeof clearTimeout === 'function') clearTimeout(tmr);
+        try{ if(pc) pc.close(); }catch(e){}
+        pc = null;
+        const out = [];
+        for(const f of [4, 6]) if(best[f]) out.push(best[f].addr);
+        _netNets = out.slice(0, NET_NETS_MAX);
+        _netNetsAt = Date.now();
+        _netNetsBusy = false;
+        if(typeof _netSigLog === 'function') _netSigLog('nets ' + (out.join(' ') || 'none'));
+    };
+    try{
+        pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
+        pc.onicecandidate = (e)=>{
+            const cand = e && e.candidate;
+            if(!cand || !((cand.candidate || '') + (cand.address || ''))){ finish(); return; }   // end-of-candidates
+            const c = _netCandAddr(cand);
+            if(!_netAddrPublic(c.addr)) return;
+            const fam = c.addr.indexOf(':') >= 0 ? 6 : 4;
+            const rank = c.type === 'srflx' ? 0 : (c.type === 'host' ? 1 : 2);
+            if(!best[fam] || rank < best[fam].rank) best[fam] = { addr:c.addr, rank:rank };
+        };
+        pc.createDataChannel('nets');   // gathering needs an m-line to gather for
+        Promise.resolve(pc.createOffer()).then(o => { if(pc) return pc.setLocalDescription(o); }).catch(()=>finish());
+        tmr = setTimeout(finish, NET_NETS_GATHER_MS);
+    }catch(e){ finish(); }
+}
+// Cadence: once shortly after startup, then whenever the cache is older than the TTL. The
+// heartbeat calls this every time and the TTL is what makes that cheap. `force` is for the
+// moments the network underneath us may have changed outright -- coming back online, or waking
+// from a long background -- which is precisely when the address we last reported goes stale.
+function netNetsRefresh(force){
+    if(!force && _netNetsAt && Date.now() - _netNetsAt < NET_NETS_TTL_MS) return;
+    _netNetsGather();
+}
+function netPublicNets(){ return _netNets.slice(0, NET_NETS_MAX); }
+
 // P2P-ONLY MODE. Tournament matches and every spectator link must run on a direct
 // DataChannel: the deprecated server relay's jittered HTTP round trips cannot hold the
 // spectator tree's forwarding budget, and a bracket must not score a match that ran on a
@@ -128,7 +222,7 @@ async function _netSignalIce(to, payload){
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.cloudflare.com:3478' }] });
+    const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
     _netSess.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignalIce(peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => {
@@ -592,7 +686,7 @@ function _netRtcRebuild(s){
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null;
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.cloudflare.com:3478' }] });
+    const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
     s.pc = pc;
     pc.onicecandidate = e => { if(e.candidate) _netSignalIce(s.peer, JSON.stringify(e.candidate)); };
     pc.onconnectionstatechange = () => { /* a failed rebuild is owned by the liveness timeout */ };
