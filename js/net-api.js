@@ -726,11 +726,21 @@ async function _netHello(){
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
 let _netPollTick = 0;
 function _netPollDue(){
-    // A tournament match still needs the mailbox: roles sheets, patches and the result of
-    // OUR OWN node all arrive as signals, and an undelivered one expires in 30s. So a
-    // tournament polls slowly through a game rather than not at all.
-    if(_netSess && _netSess.game && !_netSess.reconnecting)
-        return (typeof tourneyActive === 'function' && tourneyActive()) ? (_netPollTick % 5 === 0) : false;   // reconnecting: poll so the re-handshake signals flow
+    // A match still needs the mailbox, at a fifth of the rate. A tournament one has to have
+    // it -- roles sheets, patches and the result of OUR OWN node all arrive as signals, and
+    // an undelivered one expires in 30s -- and ANY of them can be asked to be watched, which
+    // is the same mailbox and the one leg of the watch handshake that has nowhere else to
+    // arrive. A duel that never polls is a duel nobody can ever start watching.
+    if(_netSess && _netSess.game && !_netSess.reconnecting){
+        // ...and once somebody IS reaching us, 1 Hz until they are through. Every leg of the
+        // handshake is a signal and the node being asked is by definition a node in a match,
+        // so the slow cadence lands on precisely the client that must answer fastest: the ask,
+        // the offer and the ICE behind them each wait a poll, which together outlives the ask
+        // itself, and the watcher sits on CONNECTING for the whole match with nothing wrong at
+        // either end for any ladder to find.
+        if(typeof specHandshaking === 'function' && specHandshaking()) return true;
+        return _netPollTick % 5 === 0;   // reconnecting: poll so the re-handshake signals flow
+    }
     if(phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId') return true;
     if(typeof tourneyActive === 'function' && tourneyActive()) return true;   // a held tournament reaches us wherever we are
     if(phase === 'tourneyLobby') return true;

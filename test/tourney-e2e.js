@@ -493,7 +493,9 @@ async function passBreak(opts){
           '10: ' + NAMES[i] + ' holds podium ' + JSON.stringify(t.podium));
         C[i].draw();
         const r = C[i].rows();
-        A(r[0].t === 'DONE' && r[1].t === 'BACK', '10: a finished tournament offers ' + r.map(x => x.t).join('/'));
+        // ONE row, where BACK sits: there is nothing left to leave, so letting go of the
+        // picture and stepping off the screen are the same press.
+        A(r.length === 1 && r[0].t === 'DONE', '10: a finished tournament offers ' + r.map(x => x.t).join('/'));
     }
     C[0].pick('DONE');
     A(C[0].tt() === null && C[0].phase() === 'duelMenu', '10: DONE did not let go of the finished tournament');
@@ -764,7 +766,7 @@ async function passBreak(opts){
         // allowed to move on from, because it is a match on the board -- and with the dialog
         // up, the name the guard reads is the dialog's own.
         H.setPhase('tourneyRound');
-        H.pick('END TOURNAMENT FOR ALL');
+        H.pick('BACK - END TOURNAMENT FOR ALL');
         H.sigTo({ event:'standings', tid:tid2, rows:[], advancers:[] });
         await W.settleAsync();
         A(H.phase() === 'tourneyQuit' && H.from() === 'tourneyRound',
@@ -776,9 +778,9 @@ async function passBreak(opts){
         // and unlike tourneyRound it is a screen the standings are allowed to move on from,
         // so the backdrop below has somewhere to go.
         H.setPhase('tourneyCeremony');
-        A(H.has('END TOURNAMENT FOR ALL'), '20: the host is not offered the ending mid-run');
-        A(G.has('LEAVE TOURNAMENT'), '20: a guest mid-run is not offered a leave');
-        H.pick('END TOURNAMENT FOR ALL');
+        A(H.has('BACK - END TOURNAMENT FOR ALL'), '20: the host is not offered the ending mid-run');
+        A(G.has('BACK - LEAVE TOURNAMENT'), '20: a guest mid-run is not offered a leave');
+        H.pick('BACK - END TOURNAMENT FOR ALL');
         A(H.phase() === 'tourneyQuit' && H.from() === 'tourneyCeremony',
           '20: the ending was not asked about (' + H.phase() + ' from ' + H.from() + ')');
 
@@ -808,7 +810,7 @@ async function passBreak(opts){
 
         // The one re-point that is still allowed through, because it leaves nothing to ask:
         // a tournament that is over is not one anybody can be asked about leaving.
-        G.setPhase('tourneyRound'); G.pick('LEAVE TOURNAMENT');
+        G.setPhase('tourneyRound'); G.pick('BACK - LEAVE TOURNAMENT');
         A(G.phase() === 'tourneyQuit', '20: the guest leave was not asked about');
         G.sigTo({ event:'over', tid:tid2, podium:[IDS[0], IDS[1], IDS[2]] });
         await W.settleAsync();
@@ -833,7 +835,7 @@ async function passBreak(opts){
         await W.settleAsync();
         A(R.tt() && R.tt().tid === tid2 && R.tt().state === 'running',
           '21: rejoining did not put the tournament back');
-        A(R.rows().some(x => x.t === 'LEAVE TOURNAMENT'), '21: the rejoined client is not really in it');
+        A(R.rows().some(x => x.t === 'BACK - LEAVE TOURNAMENT'), '21: the rejoined client is not really in it');
 
         // And a door that must not be offered: a tournament this device is no longer part of
         // forgets itself on the probe rather than showing a row that cannot be walked through.
@@ -847,7 +849,7 @@ async function passBreak(opts){
         W.srv.T.state = 'running';
 
         // ---- 20, the last answer: YES ends it, everywhere ------------------------------
-        H.setPhase('tourneyRound'); H.pick('END TOURNAMENT FOR ALL');
+        H.setPhase('tourneyRound'); H.pick('BACK - END TOURNAMENT FOR ALL');
         A(H.phase() === 'tourneyQuit', '20: the ending was not asked about the second time');
         await H.key('confirm', 0);                     // 0 is YES
         await W.settleAsync();

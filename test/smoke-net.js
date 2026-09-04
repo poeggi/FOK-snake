@@ -609,8 +609,55 @@ runTest('SMOKE-NET', `
     fakeSess('peer'); _netSess.game=false;   // session exists but the channel is not open yet
     if(!_netPollDue()) throw 'connecting (signaling in flight) must poll';
     _netSess.game=true; if(_netPollDue()) throw 'no polling during an online game';
-    _netSess=null;
-    log('adaptive poll ok: 1Hz lobby/1:1 + connecting, 10s main menu, never in-game');
+    // ...UNLESS somebody is trying to WATCH it. Every leg of the watch handshake is a signal
+    // and the node being asked is always a node in a match, so the slow cadence lands on
+    // exactly the client that has to answer fastest: three legs at a fifth of the rate
+    // outlive the ask itself, the feed never starts, and the watcher sits on CONNECTING for
+    // the whole match with nothing wrong at either end for any ladder to find.
+    phase='duel'; const oTt=_tt; _tt={tid:'t1',state:'running',players:[]}; _netPollTick=1;
+    if(_netPollDue()) throw 'a tournament match polls every 5th tick, not every one';
+    _spAsk.push({from:'00ff00aa', at:_spNow()});
+    if(!specHandshaking()) throw 'a parked watch ask is a handshake in flight';
+    if(!_netPollDue()) throw 'a parked watch ask must put the mailbox back to 1Hz';
+    _spAsk.length=0;
+    // The gap between answering ok and the offer it invites: no link, no ask, no want to
+    // point at -- and the one leg a slow mailbox stretches furthest.
+    _spOkAt=_spNow();
+    if(!_netPollDue()) throw 'the wait for an invited offer must poll at 1Hz';
+    _spOkAt=0;
+    if(_netPollDue()) throw 'nothing outstanding: back to the slow tournament cadence';
+    _tt=oTt;
+    _spAsk.push({from:'00ff00aa', at:_spNow()});
+    if(!_netPollDue()) throw 'a watched 1:1 must poll for the handshake it owes';
+    _spAsk.length=0;
+    // ...and an ORDINARY duel keeps the slow cadence for the same reason the tournament one
+    // does: the ask that starts a watch has nowhere to arrive but this mailbox, so a match
+    // that never polls is a match nobody can ever begin watching.
+    if(_netPollDue()) throw 'a duel polls every 5th tick, not every one';
+    _netPollTick=5;
+    if(!_netPollDue()) throw 'a duel that never polls can never be asked to be watched';
+    _netSess=null; phase='menu';
+    log('adaptive poll ok: 1Hz lobby/1:1 + connecting, 10s main menu, never in-game -- except while somebody is trying to watch');
+
+    // ---- a spectator boot with no shared clock WAITS for one ----
+    // The context is good while we wait: match constants, plus a tick base quoted on that
+    // very clock. Dropping it cost the whole feed -- the link stayed open and subscribed, the
+    // feeder went on serving it, and every envelope was discarded one layer up.
+    const oOfs=_netSync.ofs; _netSync.ofs=null;
+    _spCtx={t:'sctx',g:0,hops:1,pids:['00000001','00000002'],seed:1,startPts:0,ep:0,hm:3,lvl:1};
+    _spBootTry=0; _spBoot();
+    if(!_spCtx) throw 'a boot with no shared clock must keep the context, not throw the feed away';
+    if(_spBootT==null) throw 'a boot with no shared clock must arm a retry';
+    clearTimeout(_spBootT); _spBootT=null; _spCtx=null; _spQ=[]; _spBootTry=0; _netSync.ofs=oOfs;
+    // ...and the housekeeping that drives that retry must outlive an unbooted link.
+    window.setInterval=(f,ms)=>({f:f,ms:ms}); window.clearInterval=()=>{};   // the sandbox has none
+    _spArm(); _spIn.push({peer:'00ff00aa', pc:null, dc:null, dead:false, sub:true, iceQ:[]});
+    _spTick();
+    if(_spT==null) throw 'housekeeping must not stop under a link that has not booted yet';
+    _spIn.length=0; _spTick();
+    if(_spT!=null) throw 'with nothing in flight at all the housekeeping must stop';
+    delete window.setInterval; delete window.clearInterval;
+    log('spectator reach ok: a watched match polls for the handshake it owes, and a boot waiting on the clock keeps its feed');
 
     // ---- mutual invites: deterministic auto-accept, no dialog ----
     localStorage.setItem('fok-snake-pid','00000001');   // our ID < the peer's

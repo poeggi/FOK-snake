@@ -174,7 +174,7 @@ async function passBreak(mode){
         // there is no event for it -- and the tournament plays on without them.
         const out = b0.rows.filter(r => !r.adv && !r.gone)[0];
         const li = idx(out.id);
-        await C[li].pick('LEAVE TOURNAMENT');
+        await C[li].pick('BACK - LEAVE TOURNAMENT');
         // The row opens the QUESTION, it does not answer it: walking out of a tournament
         // mid-run costs the matches you were still due, so it is asked about first.
         A(C[li].phase() === 'tourneyQuit',

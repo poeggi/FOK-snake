@@ -203,6 +203,27 @@ runTest('SMOKE-UI', `
         if(tourneyRows()[0].t!=='SHOW JOIN CODE') throw 'a guest has no START, so the code is its top row: '+tourneyRows()[0].t;
         if(tail()!=='BACK - LEAVE TOURNAMENT') throw 'a guest exit must say what it does: '+tail();
         if(tourneyRows().some(r=>/^CANCEL/.test(r.t))) throw 'CANCEL must live in the back row, not beside it';
+        // ONE row once the bracket is RUNNING, for the same reason: there is no stepping off a
+        // board other people are still playing on and staying in it, so the way back IS the way
+        // out. It opens UNARMED -- the row appears the moment a match ends, under a player who
+        // is still pressing A -- and one press of anything arms it like any other list.
+        const oState=_tt.state, oBrk=_tt.brk, oSel=_ttUi.sel;
+        _tt.state='running'; _tt.brk=null; _ttUi.sel=-1;
+        const run=tourneyRows();
+        if(run.length!==1||run[0].t!=='BACK - LEAVE TOURNAMENT')
+            throw 'a running board ends on one row that both goes back and leaves: '+run.map(r=>r.t).join('/');
+        if(tourneySel(run)!==-1) throw 'a board must not open with the forfeit under the cursor';
+        _ttUi.sel=0;
+        if(tourneySel(run)!==0) throw 'navigating onto the exit row must still select it';
+        getPlayerId=()=>'aaaa0001';
+        if(tourneyRows()[0].t!=='BACK - END TOURNAMENT FOR ALL')
+            throw 'the host row must say it ends the whole tournament: '+tourneyRows()[0].t;
+        // The podium is the one exit that IS pre-selected: nothing is at stake behind it.
+        _tt.state='done'; _ttUi.sel=-1;
+        const fin=tourneyRows();
+        if(fin.length!==1||fin[0].t!=='DONE') throw 'the podium ends on one row: '+fin.map(r=>r.t).join('/');
+        if(tourneySel(fin)!==0) throw 'the way off the podium must be pre-selected';
+        _tt.state=oState; _tt.brk=oBrk; _ttUi.sel=oSel;
         getPlayerId=oPid;
         // ...and the code itself has a screen now, reached from that first row.
         phase='tourneyCode'; drawTourneyCode();
@@ -272,6 +293,13 @@ runTest('SMOKE-UI', `
             // rows themselves use, or it is a fourth column and the table has to make room.
             const left=Math.min.apply(null, row.map(o=>o.x));
             if(!(mine[0].x<left)) throw tc[0]+': the YOU marker sits at x '+mine[0].x+', not left of the list ('+left+')';
+            // ...and read ACROSS with the row it marks: one line, one size, and a gap the table
+            // does not close on. A marker set smaller than the name beside it reads as a note
+            // about the row instead of as part of it, and one crowding the first column reads
+            // as a column of its own that the table then has to make room for.
+            const nm=row.filter(o=>o.t==='KAI')[0];
+            if(mine[0].f!==nm.f) throw tc[0]+': the YOU marker is set at '+mine[0].f+', the row it marks at '+nm.f;
+            if(left-mine[0].x<24) throw tc[0]+': the YOU marker crowds the table ('+(left-mine[0].x)+' clear)';
             // Everybody else keeps the name they played under, and nobody else is marked.
             const others=cols.filter(o=>o.t==='JO'||o.t==='MO');
             if(others.length!==2) throw tc[0]+': the other players lost their names: '+others.length;

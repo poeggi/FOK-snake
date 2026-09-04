@@ -31,7 +31,7 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:0, msg:'', msgAt:0, stakes:false, busy:false, contAt:0, from:'', to:'' };
+var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, busy:false, contAt:0, from:'', to:'' };
 // The read-back of a tournament this device is still in but is not currently looking at --
 // what the REJOIN row is made of. Null until _ttProbe finds one.
 var _ttBack = null;
@@ -62,7 +62,14 @@ const _TT_PHASES = { tourneyLobby:1, tourneyBracket:1, tourneyRound:1, tourneyCe
 // that is the one drawTourneyQuit paints as its backdrop and the one NO returns to, so the
 // tournament carries on moving and the question carries on standing. The only routes that
 // bypass this are the ones that leave nothing to ask -- _ttDrop, and reaching 'done'.
-function _ttGo(p){ if(phase === 'tourneyQuit') _ttUi.from = p; else phase = p; _uiDirty = true; }
+// A screen the tournament moves us to opens on its OWN default row (see tourneySel), so the
+// selection is dropped on the way in: a screen arrives while the player is reading another
+// one, and inheriting a row index across that is inheriting a press.
+function _ttGo(p){
+    if(phase === 'tourneyQuit'){ if(_ttUi.from !== p){ _ttUi.from = p; _ttUi.sel = -1; } }
+    else if(phase !== p){ phase = p; _ttUi.sel = -1; }
+    _uiDirty = true;
+}
 // The tournament screen on SHOW, which is the backdrop while the quit dialog is up: a
 // re-point has to reason about the screen it is moving, not about the question over it.
 function _ttFace(){ return phase === 'tourneyQuit' ? (_ttUi.from || 'tourneyLobby') : phase; }
@@ -71,6 +78,17 @@ function _ttFace(){ return phase === 'tourneyQuit' ? (_ttUi.from || 'tourneyLobb
 function tourneyActive(){ return !!_tt; }
 function tourneyView(){ return _tt; }
 function tourneyUi(){ return _ttUi; }
+// The selection, resolved against the list as it stands -- it changes shape under the screen
+// and the input alike as the server talks. -1 is UNARMED, not "row zero": on most lists that
+// IS the top row, but a list whose first row is an exit that costs other people something
+// opens with NOTHING selected, so the A that ended a match cannot also end the evening. One
+// press of a direction (or of A) arms it, and from there it is an ordinary list.
+function tourneySel(rows){
+    rows = rows || tourneyRows();
+    if(!rows.length) return -1;
+    if(_ttUi.sel < 0) return rows[0].nosel ? -1 : 0;
+    return Math.min(_ttUi.sel, rows.length - 1);
+}
 // The scoreboard between two rounds, or null when no break is open. It is a whole picture
 // in itself -- one row per participant, already ordered and already cut -- so it is handed
 // to the screen as it arrived rather than folded into the standings it partly repeats.
@@ -231,7 +249,7 @@ function _ttDrop(msg){
     if(typeof specNode === 'function') specNode('', '');
     if(typeof specGrant === 'function') specGrant([]);
     _ttDisarm();
-    _ttUi.sel = 0; _ttUi.contAt = 0;
+    _ttUi.sel = -1; _ttUi.contAt = 0;
     if(_TT_PHASES[phase]) phase = 'tourneyLobby';
     if(msg) _ttMsg(msg, true); else _uiDirty = true;
 }
@@ -557,7 +575,7 @@ function _ttTick(){
 
 // ---- lobby actions -------------------------------------------------------------------
 function tourneyEnter(){
-    _ttUi.sel = 0; _ttUi.msg = '';
+    _ttUi.sel = -1; _ttUi.msg = '';
     // A tournament link parked a code at boot and this is the first screen that can spend it.
     // It waits for the hello, because the join is gated on the server's minor version and an
     // unanswered hello reads exactly like an old server. Unspent, it STAYS parked: a code is
@@ -597,7 +615,7 @@ function tourneyRejoin(){
     if(_tt || !_ttBack) return;
     const back = _ttBack; _ttBack = null;
     _ttAdopt(back);
-    _ttUi.sel = 0; _ttMsg('BACK IN');
+    _ttUi.sel = -1; _ttMsg('BACK IN');
     Snd.sfxPlay('select', cfg.music);
     _ttSync(true);
 }
@@ -614,7 +632,7 @@ async function tourneyCreate(stakes){
         return;
     }
     _ttAdopt(Object.assign({ host:getPlayerId(), state:'open' }, r.json));
-    _ttUi.sel = 0;
+    _ttUi.sel = -1;
     _ttMsg('CODE ' + (_tt ? _tt.code : ''));
     _ttSync(true);
 }
@@ -632,7 +650,7 @@ async function tourneyJoin(arg){
         return;
     }
     _ttAdopt(r.json);
-    _ttUi.sel = 0; _ttMsg('JOINED');
+    _ttUi.sel = -1; _ttMsg('JOINED');
     _ttSync(true);
 }
 async function tourneyStart(){
@@ -679,7 +697,7 @@ async function tourneyLeave(to){
     if(!_tt) return;
     const tid = _tt.tid;
     _ttDrop('');
-    phase = to || 'tourneyLobby'; _ttUi.sel = 0;
+    phase = to || 'tourneyLobby'; _ttUi.sel = -1;
     Snd.sfxPlay('nav', cfg.music);
     await _ttPost('leave', { tid });
 }
@@ -736,6 +754,9 @@ function tourneyRows(){
                     act:() => { phase = 'tourneyCode'; Snd.sfxPlay('select', cfg.music); _uiDirty = true; } });
     } else if(_tt.state === 'done'){
         // Nothing to leave: the tournament is over and the row just lets go of the picture.
+        // Acknowledging it and stepping off it are the same press, so they are one row -- and
+        // it is the one exit that IS pre-selected, because there is nothing left to lose by
+        // pressing it and nobody still playing behind it.
         rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
     } else {
         // The one row a whole field is waiting on. It belongs to the host and only while a
@@ -747,19 +768,23 @@ function tourneyRows(){
             rows.push({ t:'CONTINUE', en:!left && !_ttUi.busy,
                         note:left ? (Math.ceil(left / 1000) + 'S') : '', act:tourneyContinue });
         }
-        // The host's exit is not a leave, it is an ending, and the row says the whole of it.
+        // While a bracket is RUNNING there is no such thing as stepping off it and staying in
+        // it, so the exit and the way back are one row, at the height every screen keeps its
+        // way out. The host's exit is not a leave either, it is an ending, and the row says
+        // the whole of it. `nosel` is what keeps it from opening under the cursor: this row
+        // arrives the instant a match ends, which is the instant a player is still pressing A.
         rows.push(_tt.host === getPlayerId()
-            ? { t:'END TOURNAMENT FOR ALL', en:true, act:() => tourneyAsk() }
-            : { t:'LEAVE TOURNAMENT', en:true, act:() => tourneyAsk() });
+            ? { t:'BACK - END TOURNAMENT FOR ALL', en:true, nosel:true, act:() => tourneyAsk() }
+            : { t:'BACK - LEAVE TOURNAMENT', en:true, nosel:true, act:() => tourneyAsk() });
     }
-    // BACK is the last row of every tournament screen, and on an OPEN lobby it is also the
-    // only way off it -- so it says what leaving actually costs. A lobby you walk away from
-    // is a lobby other people are still sitting in, waiting for a start that is never coming:
-    // walking away IS cancelling it, and the row is not allowed to pretend otherwise.
-    const open = !!_tt && _tt.state === 'open';
-    rows.push(open
-        ? { t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
-            en:true, act:() => tourneyAsk('duelMenu') }
-        : { t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
+    // Every tournament screen ends on ONE way out, drawn at the height BACK is drawn at
+    // everywhere else -- the two screens above have already pushed theirs. On an OPEN lobby it
+    // says what leaving actually costs: a lobby you walk away from is a lobby other people are
+    // still sitting in, waiting for a start that is never coming, so walking away IS cancelling
+    // it. Off a tournament altogether, BACK is just BACK.
+    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
+    else if(_tt.state === 'open')
+        rows.push({ t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
+                    en:true, act:() => tourneyAsk('duelMenu') });
     return rows;
 }

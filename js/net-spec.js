@@ -78,6 +78,12 @@ const SPEC_GRANT_MS = 30000;       // how long a granted watch request stays goo
 // asker keeps asking ('watch' is not in the receipt set, so a lost one has to be re-sent).
 const SPEC_ASK_RETRY_MS = 1500;    // re-ask cadence for a watch nobody has answered
 const SPEC_ASK_TTL_MS = 20000;     // how long an unanswered ask stays live, at EITHER end
+// How long after answering 'ok' we still count as mid-handshake. There is no link to point
+// at across that gap -- the offer it invites has not arrived -- and it is exactly the gap a
+// slow mailbox makes longest, so it has to be named rather than inferred.
+const SPEC_HS_MS = 10000;
+const SPEC_BOOT_RETRY_MS = 250;    // a boot waiting on the shared clock re-tries at the tick rate
+const SPEC_BOOT_TRIES = 20;
 // What a spectator's sim actually needs. 'pi' (liveness) and 'bs' (clock burst) are
 // the two players' business; 'req' is an ask, never an effect. Everything else in
 // the duel protocol IS the timeline: 'go' opens boundaries, 'in' carries inputs,
@@ -103,6 +109,8 @@ var _spTid = '', _spNid = '';
 var _spGrant = {};      // peer id -> ms when we authorised it to open a spectator link
 var _spWant = [];       // MY outstanding watch requests: [{to, at, last}] -- a secondary asks BOTH primaries
 var _spAsk = [];        // asks PARKED on me, waiting for a match to serve: [{from, at}]
+var _spOkAt = 0;        // when we last answered 'ok' -- an offer is owed to us until it lands
+var _spBootTry = 0;     // boots deferred waiting for the shared clock
 var _spT = null;        // the 250ms housekeeping timer
 var _spSrc = '';        // peer id of the link currently feeding me
 var _spLostAt = 0;
@@ -213,7 +221,25 @@ function _spSignal(to, type, obj){
 // the step. 'watch' is not in the receipt set, so a lost one is simply a feed that
 // never starts -- failing to get a feed is not a failed connection.
 function _spWatchSig(to, k, extra){
+    // Answering 'ok' invites an offer, and until that offer lands there is nothing local to
+    // point at: no link, no parked ask, no want. Stamp the moment instead, so the poll
+    // cadence below knows a handshake is still in flight across the one gap that has no
+    // state of its own.
+    if(k === 'ok') _spOkAt = _spNow();
     _netSignal(to, 'watch', JSON.stringify(Object.assign({ tid:_spTid, nid:_spNid, k }, extra || {})));
+}
+// Is somebody in the middle of reaching us? EVERY LEG OF THE WATCH HANDSHAKE IS A SIGNAL --
+// the ask, the offer, the answer, the ICE behind them -- and the node being asked is by
+// definition a node in a match, which polls the mailbox at a fifth of the usual rate inside
+// a tournament and not at all outside one. Three legs at that cadence outlive the ask itself
+// (SPEC_ASK_TTL_MS), so the feed never starts: the watcher sits on CONNECTING for the whole
+// match while the two players play it, with nothing wrong at either end for any ladder to
+// find. _netPollDue reads this and goes back to 1 Hz for as long as it is true.
+function specHandshaking(){
+    if(_spAsk.length || _spWant.length) return true;
+    for(const l of _spOut) if(!l.dead && (!l.dc || l.dc.readyState !== 'open')) return true;
+    for(const l of _spIn)  if(!l.dead && (!l.dc || l.dc.readyState !== 'open')) return true;
+    return _spOkAt > 0 && _spNow() - _spOkAt < SPEC_HS_MS;
 }
 function _spMkPc(peer, arr, kind){
     const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
@@ -640,6 +666,7 @@ function _spOnCtx(l, ctx){
     // the sim then settles onto its offset target from BELOW, which is the only
     // direction the tick loop's one-extra-tick correction can move it.
     const wait = SPEC_DELAY_MS;
+    _spBootTry = 0;
     if(typeof setTimeout !== 'function'){ _spBoot(); return; }
     _spBootT = setTimeout(_spBoot, wait);
     _spArm();
@@ -648,7 +675,21 @@ function _spBoot(){
     _spBootT = null;
     const ctx = _spCtx;
     if(!ctx) return;
-    if(netPts() == null){ _spCtx = null; _spQ = []; return; }   // no shared clock, no timeline
+    // No shared clock YET rather than no shared clock: the sync specWatch asked for has not
+    // landed. The context stays good while we wait -- every field in it is a match constant
+    // except a tick base quoted on that very clock -- so waiting costs a few hundred ms and
+    // discarding it costs the whole feed. It used to discard: the link stayed open and
+    // subscribed, the feeder went on serving it, and every envelope was thrown away one layer
+    // up by the !_spOn gate in _spOnFeedMsg. No silence, no error, nothing for either end's
+    // ladder to find -- just a watcher on CONNECTING until the tournament dealt the next node.
+    if(netPts() == null){
+        if(typeof _netTimeSync === 'function') _netTimeSync();
+        if(typeof setTimeout === 'function' && ++_spBootTry <= SPEC_BOOT_TRIES){
+            _spBootT = setTimeout(_spBoot, SPEC_BOOT_RETRY_MS); _spArm(); return;
+        }
+        _spCtx = null; _spQ = []; return;
+    }
+    _spBootTry = 0;
     if(_netSess) _netTeardown();
     // peer stays EMPTY on purpose. The synthetic session's "peer" would be our feeder, and
     // every duel-side courtesy that signals s.peer -- the 'bye' on _netSessionEnd above all --
@@ -802,7 +843,10 @@ function _spTick(){
         // board. The deadline runs off _spLostAt, so a failover never postpones it.
         if(now - _spLostAt > RB_PERSIST_KILL_MS) specStop('CONNECTION LOST');
     } else if(_spOn) _spLostAt = 0;
-    if(!_spOn && !_spOut.length && !_spWant.length && !_spAsk.length) _spDisarm();
+    // _spIn belongs in this list as much as the rest of them: an inbound link that has not
+    // booted yet is work in progress, and stopping the housekeeping under it is what turned a
+    // deferred boot into a permanent one.
+    if(!_spOn && !_spIn.length && !_spOut.length && !_spWant.length && !_spAsk.length) _spDisarm();
 }
 // Proactive stand-down: a backgrounded primary cannot forward, and the server can
 // re-deal the role long before anyone downstream notices the silence -- so we say so

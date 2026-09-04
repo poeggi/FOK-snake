@@ -1607,7 +1607,7 @@ function _ttDots(){ return '.'.repeat(1 + Math.floor(((typeof performance !== 'u
 // The row strip every tournament screen ends with: the list from tourneyRows(), drawn from
 // startY, with its last entry (always BACK) parked at the bottom like every other menu.
 function _ttDrawRows(startY, rowH){
-    const rows = tourneyRows(), sel = Math.min(Math.max(tourneyUi().sel, 0), rows.length - 1);
+    const rows = tourneyRows(), sel = tourneySel(rows);
     rows.forEach((r, i) => {
         const last = i === rows.length - 1, y = last ? BACK_Y : startY + i * rowH;
         if(r.en === false) ct(sel === i ? ('> ' + r.t + ' <') : r.t, CW/2, y, sel === i ? '#777' : '#555', FONT.MENU);
@@ -1714,20 +1714,20 @@ function drawTourneyBracket(){
     if(t.frozen) ct('A MATCH IS FROZEN - THE TWO REPORTS DISAGREED', CW/2, 60, '#ff5555', FONT.HINT);
     if(!ko){
         const rows = t.standings || [], adv = (t.advancers || []).map(String);
-        _ttCol('#',      CW/2 - 210, 78, '#666', FONT.HINT);
-        _ttCol('PLAYER', CW/2 - 180, 78, '#666', FONT.HINT);
-        _ttCol('PTS',    CW/2 + 110, 78, '#666', FONT.HINT, 'right');
-        _ttCol('DIFF',   CW/2 + 200, 78, '#666', FONT.HINT, 'right');
+        _ttCol('#',      CW/2 - 194, 78, '#666', FONT.HINT);
+        _ttCol('PLAYER', CW/2 - 164, 78, '#666', FONT.HINT);
+        _ttCol('PTS',    CW/2 + 126, 78, '#666', FONT.HINT, 'right');
+        _ttCol('DIFF',   CW/2 + 216, 78, '#666', FONT.HINT, 'right');
         rows.slice(0, tourneyMax()).forEach((r, i) => {
             const y = 96 + i * 20, me = String(r.id) === getPlayerId();
             // The advancing half is what everyone is actually reading the table for.
             const up = adv.length ? adv.indexOf(String(r.id)) >= 0 : (i < Math.max(2, Math.ceil(rows.length / 2)));
             const col = me ? '#7fff7f' : up ? '#ffd700' : '#888';
-            if(me) _ttMine(CW/2 - 218, y);
-            _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.MENU);
-            _ttCol(_ttRealName(r.id).slice(0, 15),          CW/2 - 180, y, col, FONT.MENU);
-            _ttCol(String(r.pts),                           CW/2 + 110, y, col, FONT.MENU, 'right');
-            _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.MENU, 'right');
+            if(me) _ttMine(CW/2 - 226, y);
+            _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 194, y, col, FONT.MENU);
+            _ttCol(_ttRealName(r.id).slice(0, 15),          CW/2 - 164, y, col, FONT.MENU);
+            _ttCol(String(r.pts),                           CW/2 + 126, y, col, FONT.MENU, 'right');
+            _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 216, y, col, FONT.MENU, 'right');
         });
         if(!rows.length) ct('NO MATCHES SETTLED YET' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     } else {
@@ -1799,8 +1799,10 @@ function _ttRowName(r){
 // A ranked table is the same table for everyone reading it, so the PLAYER column says who
 // each row is and the margin says which one is yours. Swapping your name for YOU in the
 // column would leave you the only reader who cannot find yourself by the name you played
-// under -- and the only one who cannot read the board out to somebody else.
-function _ttMine(x, y){ _ttCol('YOU', x, y, '#7fff7f', FONT.HINT, 'right'); }
+// under -- and the only one who cannot read the board out to somebody else. It is set at the
+// size of the row it marks rather than at the size of a footnote: it is read ACROSS, in one
+// line with the name beside it, and it keeps a gap wide enough to stay out of the table.
+function _ttMine(x, y){ _ttCol('YOU', x, y, '#7fff7f', FONT.MENU, 'right'); }
 function _ttBreakName(b, id){
     for(const r of ((b && b.rows) || [])) if(r && String(r.id) === String(id)) return _ttRowName(r);
     return _ttName(id);
@@ -1823,10 +1825,10 @@ function drawTourneyRound(){
     // it is the same board it is during one, and reading it should not be a different job.
     // W-L-D is what kept it a fifth column too many to fit at that size, and it says in three
     // numbers what the points beside it say in one.
-    _ttCol('#',      CW/2 - 210, 68, '#666', FONT.HINT);
-    _ttCol('PLAYER', CW/2 - 180, 68, '#666', FONT.HINT);
-    _ttCol('PTS',    CW/2 + 110, 68, '#666', FONT.HINT, 'right');
-    _ttCol('DIFF',   CW/2 + 200, 68, '#666', FONT.HINT, 'right');
+    _ttCol('#',      CW/2 - 194, 68, '#666', FONT.HINT);
+    _ttCol('PLAYER', CW/2 - 164, 68, '#666', FONT.HINT);
+    _ttCol('PTS',    CW/2 + 126, 68, '#666', FONT.HINT, 'right');
+    _ttCol('DIFF',   CW/2 + 216, 68, '#666', FONT.HINT, 'right');
     const rows = (b.rows || []).slice(0, tourneyMax());
     rows.forEach((r, i) => {
         // A pitch that still clears the buttons with a full field of ten on the board.
@@ -1837,18 +1839,18 @@ function drawTourneyRound(){
         // THE CUT: the line between who is through and who is out, drawn where the server
         // put it. Sitting it between the last `adv` row and the first that is not is what
         // stops it from ever disagreeing with the colours above and below it.
-        if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 216, y - 10, 432, 1); }
-        if(me) _ttMine(CW/2 - 218, y);
-        _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.MENU);
-        _ttCol(_ttRowName(r).slice(0, 15),              CW/2 - 180, y, col, FONT.MENU);
-        _ttCol(String(r.pts != null ? r.pts : 0),       CW/2 + 110, y, col, FONT.MENU, 'right');
-        _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.MENU, 'right');
+        if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 200, y - 10, 424, 1); }
+        if(me) _ttMine(CW/2 - 226, y);
+        _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 194, y, col, FONT.MENU);
+        _ttCol(_ttRowName(r).slice(0, 15),              CW/2 - 164, y, col, FONT.MENU);
+        _ttCol(String(r.pts != null ? r.pts : 0),       CW/2 + 126, y, col, FONT.MENU, 'right');
+        _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 216, y, col, FONT.MENU, 'right');
         // The one thing the rule cannot say: this player is not out, they WALKED OUT. It is
         // an annotation on a row rather than a column of its own, so it sits in the margin
-        // opposite YOU and at the margin's size. Which round somebody went out in is not
-        // annotation, it is a fifth and sixth column of consolation, and the ladder is
+        // opposite YOU, at the size an annotation is set in. Which round somebody went out in
+        // is not annotation, it is a fifth and sixth column of consolation, and the ladder is
         // already in that order.
-        if(r.gone) _ttCol('GONE', CW/2 + 215, y, '#555', FONT.HINT);
+        if(r.gone) _ttCol('GONE', CW/2 + 231, y, '#555', FONT.HINT);
     });
     if(!rows.length) ct('NO STANDINGS' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     _ttDrawRows(274, 26);

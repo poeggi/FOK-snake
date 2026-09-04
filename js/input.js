@@ -174,17 +174,28 @@ function _navQC(key){ const s=_navLR(key); if(s>=0) quitConfirmSel=s; }
 // tourneyRows(), which the screens draw from as well, and the list changes shape under us
 // as the server talks -- so the selection is clamped on every use rather than trusted.
 function _ttUiInput(escTo){
-    const pick = () => { const rows = tourneyRows(); return { rows, i: Math.min(Math.max(_ttUi.sel, 0), rows.length - 1) }; };
+    const pick = () => { const rows = tourneyRows(); return { rows, i: tourneySel(rows) }; };
     return {
-        nav(key){ const n = tourneyRows().length; _ttUi.sel = _navStep(key, Math.min(Math.max(_ttUi.sel, 0), n - 1), n); },
+        // From UNARMED (tourneySel -1, a board that opens on an exit) a direction picks the
+        // end of the list it came from, exactly as if the cursor had been sitting off it.
+        nav(key){
+            const rows = tourneyRows(), n = rows.length, i = tourneySel(rows);
+            if(i >= 0){ _ttUi.sel = _navStep(key, i, n); return; }
+            if(key !== 'ArrowUp' && key !== 'ArrowDown') return;
+            _ttUi.sel = key === 'ArrowUp' ? n - 1 : 0; Snd.sfxPlay('nav', cfg.music);
+        },
         confirm(){
-            const p = pick(), r = p.rows[p.i];
+            const p = pick(), r = p.i >= 0 ? p.rows[p.i] : null;
+            // Nothing selected: the press ARMS the row rather than pressing it. The board that
+            // opens unarmed is the one that opens on a forfeit, and it arrives under a player
+            // who is still pressing A at the match they have just finished.
+            if(p.i < 0){ _ttUi.sel = 0; Snd.sfxPlay('nav', cfg.music); return; }
             if(!r || r.en === false){ Snd.sfxPlay('fail', cfg.music); return; }
             _ttUi.sel = p.i; r.act();
         },
         other(key){
             if(key !== 'ArrowLeft' && key !== 'ArrowRight') return false;
-            const p = pick(), r = p.rows[p.i];
+            const p = pick(), r = p.i >= 0 ? p.rows[p.i] : null;
             if(!r || !r.lr) return false;
             r.act(); return true;   // a two-way row toggles on LEFT/RIGHT exactly as it does on A
         },
