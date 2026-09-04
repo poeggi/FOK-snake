@@ -1589,10 +1589,12 @@ function drawTourneyLobby(){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
         if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
         else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
-        else ct('2 TO ' + tourneyMax() + ' PLAYERS - ONE MATCH AT A TIME, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
+        else ct('2 TO ' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
         _ttDrawRows(84, 26);
-        if(!tourneyLobbyList().length && netTourneyOk()) ct('NO OPEN LOBBIES NEARBY' + _ttDots(), CW/2, 84 + 3.5 * 26, '#555', FONT.HINT);
+        // The search line sits at STATUS_Y like every other menu's status, and yields to a
+        // real message -- both at that band would overdraw each other.
         if(ui.msg) drawStatus(ui.msg);
+        else if(!tourneyLobbyList().length && netTourneyOk()) ct('NO OPEN LOBBIES NEARBY' + _ttDots(), CW/2, STATUS_Y, '#555', FONT.HINT);
         ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }

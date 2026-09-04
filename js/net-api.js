@@ -750,7 +750,10 @@ if(_netTimers) setInterval(()=>{
     if(_netPollBusy && Date.now() - _netPollBusyAt > 15000) _netPollAbortNow();
     // The lobby's friend dots + counters live in the hello response: refresh
     // them every 5s while the screen is open (single-flight via _netHelloBusy).
-    if((phase === 'lobby' || phase === 'friends' || phase === 'friendId') && _netPollTick % 5 === 0){ _netHello(); if(phase === 'friends') _netFrRefresh(false); }   // keep auto_accept fresh on the QR screen
+    // The tournament lobby belongs in this set for the same reason: its announce list
+    // rides on hello and NOTHING else, so on the 30s heartbeat alone a tournament
+    // somebody just created stayed invisible for half a minute.
+    if((phase === 'lobby' || phase === 'friends' || phase === 'friendId' || phase === 'tourneyLobby') && _netPollTick % 5 === 0){ _netHello(); if(phase === 'friends') _netFrRefresh(false); }   // keep auto_accept fresh on the QR screen
     _netPollOnce();
 }, 1000);
 
