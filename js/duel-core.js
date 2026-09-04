@@ -161,7 +161,7 @@ function _rbSentAdd(rec){
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
-    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = [-1, -1]; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = []; _rbResyncQ = null;
+    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = [-1, -1]; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = []; _rbResyncQ = null; _rbFix = null;
     _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
     _netInRepeat = 0;
@@ -537,6 +537,15 @@ function _rbHashSettle(){
 // and its gem/RNG/power state is adopted. Corrections are applied at the SETTLED tick and
 // re-converge through the normal rollback resim -- so both worlds heal without a host.
 var _rbStateQ = [];          // [{tk,i,s,gd,...}] peer states parked until their tick settles
+// The last peer state we adopted, re-asserted at its own tick by every re-simulation.
+// A repair patches ONE ring entry; every older entry still holds the prediction it corrected,
+// so a rollback that lands behind it restores that prediction and silently un-repairs the
+// peer's snake. That is fatal rather than merely slow, because the input the peer applied and
+// we lost is by then too old to re-apply: the resim cannot rebuild the corrected snake from
+// our log, and only the repair we just discarded knew it. Re-asserting is not a guess -- it is
+// the same authoritative pack at the same tick. Cleared with the ring it points into: a reset
+// re-uses tick numbers, and a stale pack would then inject a dead snake into a fresh match.
+var _rbFix = null;           // {tk, i, pk} -- the peer index and its packed snake at that tick
 function _rbSendState(t, sn){
     if(!sn || !sn.players) return;
     const mi = netMyIndex(), me = sn.players[mi];
@@ -739,7 +748,7 @@ function _rbApplyResync(m){
         // BEFORE tick T runs). Anchoring at T put our _gDue countdown one decrement ahead -> a 1-tick
         // game-phase divergence. The residual to the live frontier is closed by the integer-lag catch-up.
         snap.simTick = T - 1; snap.simNow = (T - 1) * TICK_MS;
-        simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
+        simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbFix = null;
         _rbStateQ = []; _rbHashQ = [];
         _rbResyncQ = null;   // parked pre-jump, it is now an OLD state that would regress this adoption
         _rbResyncSend = 0; _rbResyncFull = false;   // adopting a catch-up cancels our own owed burst: a stale full-flag must not fire a later bogus recovery
@@ -787,7 +796,7 @@ function _rbApplyResync(m){
         // divergence (seen when a RESYNC-burst 'rs' lands here right after the catch-up wiped the
         // ring). Never rewind (T <= simTick: keep our tick so the shared world is not dragged back).
         const anchor = T > simTick ? T - 1 : simTick;
-        snap.simTick = anchor; snap.simNow = anchor * TICK_MS; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
+        snap.simTick = anchor; snap.simNow = anchor * TICK_MS; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbFix = null;
         if(!spec) _rbSendState(anchor, simSnapshot());
     }
     _rbStateQ = []; _rbHashQ = [];
@@ -819,12 +828,23 @@ function _rbStateSettle(){
             // lead and dictate the shared gem/RNG state; one st cycle is at most a level or two.
             if(q.gd > (e.snap.gemsDone|0) && q.gd <= (e.snap.gemsDone|0) + 30){
                 e.snap.gemsDone = q.gd; e.snap.gem = q.gem; e.snap._rngState = q.rng;
+                // gemAt is the adopted gem's OWN spawn instant -- the sim stamps
+                // `gemAt = gem.spawnAt = simNow` in one statement, so the value already rode
+                // here inside the gem. Taking the gem without it leaves this world holding the
+                // PREVIOUS gem's timestamp beside the new gem, and gemAt is hashed on its own:
+                // the verdict then names a field no repair touches, so it mismatches again
+                // every second until the escalation deadline ends a match that was otherwise
+                // fully converged.
+                if(q.gem && q.gem.spawnAt != null) e.snap.gemAt = q.gem.spawnAt;
                 e.snap.powerPellet = q.pp; e.snap.powerPelletAt = q.ppa;
                 e.snap._powerMode = q.pm; e.snap._powerModeAt = q.pma;
                 e.snap.heart = q.hb; e.snap.heartAt = q.hba;
                 changed = true;
             }
-            if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i); _rbRollback(q.tk); }
+            if(changed){ _rbDbg.fix = (_rbDbg.fix|0) + 1; _netSigLog('~ FIX @' + q.tk + ' i' + q.i);
+                // Sticky: a later rewind behind this tick must not undo it (see _rbFix).
+                _rbFix = { tk:q.tk, i:q.i, pk:_rbPackPlayer(e.snap.players[q.i]) };
+                _rbRollback(q.tk); }
         } else {
             // Aged out of the ring: too old to rewind to. Do NOT incrementally snap the snake
             // (that jumps every second and never heals the structural state); a divergence this
@@ -1105,6 +1125,9 @@ function _rbRollback(toTick){
     _rbRing.length = idx;                        // these states are void; re-recorded below
     _replaying = true;
     for(let t = from; t <= target; t++){
+        // Before the tick runs, so the re-assert lands on the same state the repair patched
+        // (ring entry tk holds the world BEFORE tick tk ran).
+        if(_rbFix && t === _rbFix.tk && players && players[_rbFix.i]) _rbUnpackPlayer(_rbFix.pk, players[_rbFix.i]);
         _rbNoteHeads(t, true);                   // re-record: the corrected past can move heads
         if(t % RB_SNAP_EVERY === 0 || (t & 63) === 0)   // same grid as _rbEnsureSnap, pinned hash ticks included
             _rbRing.push({ tk:t, snap:_rbCloneSnap(_rbDuelSnap()) });

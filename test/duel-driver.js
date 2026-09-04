@@ -205,6 +205,13 @@ const HOOKS = (id) => `
     const t = P.dirQueue.length > 0 ? P.dirQueue[P.dirQueue.length - 1] : P.dir;
     return { x:t.x, y:t.y, n:P.dirQueue.length };
   };
+  // gemAt vs the gem's OWN spawn stamp. The sim writes them in one statement
+  // (gemAt = gem.spawnAt = simNow), so they are the same instant by construction and
+  // nothing in a legal tick can part them. A repair that adopts the peer's gem without
+  // its timestamp does: gemAt is hashed on its own, and the pair then mismatches every
+  // hash tick with no repair that touches the field -- an unhealable OUT OF SYNC kill on
+  // two worlds that agree about everything the player can see.
+  globalThis.__gemSplit = ()=> !!(gem && gem.spawnAt != null && gemAt !== gem.spawnAt);
   globalThis.__rbBase  = ()=> _rbBase;
   globalThis.__rbEpoch = ()=> (typeof _rbEpoch === 'number') ? _rbEpoch|0 : -1;   // the epoch of our TICK BASE: the two clients sharing this is what lockstep means
   globalThis.__epoch   = ()=> _netSess ? (_netSess.epoch|0) : -1;                 // the session line, which runs ahead of the base between a halt and its start
@@ -514,6 +521,7 @@ function runMatch(opts){
     };
     // Continuous divergence: compare each client's ring snapshot at a settled PAST tick.
     let firstDiverge = null, maxLocalJump = 0, localJumps = 0;
+    let gemSplit = 0;   // sampled ticks on which either side held a gem timestamp its gem disowns
     const localJumpsBy = { A:0, B:0 };   // per-side: a frozen client legitimately snaps its own head ONCE on catch-up; a LIVE client must never
     const lastHead = { A:null, B:null };
     let levelReached = 1, exitReason = null;
@@ -861,6 +869,7 @@ function runMatch(opts){
         // Banner + silence tracking: prove the outage actually surfaced CONNECTION LOST (the fault
         // was exercised, not skated past) and record the worst silence either side saw (must stay
         // under RB_PERSIST_KILL_MS for the match to be recoverable rather than killed).
+        if(A.__gemSplit() || B.__gemSplit()) gemSplit++;
         if(A.__warn() === CL || B.__warn() === CL) sawConnLost = true;
         maxSilentMs = Math.max(maxSilentMs, A.__silent(), B.__silent());
         // EPOCH SPLIT: the two tick bases disagree, so the clients are simulating independent
@@ -942,7 +951,7 @@ function runMatch(opts){
         // read after the settle, where the two sims are tick- and hash-identical, so a mismatch
         // here means the steal state diverged in a way the hash somehow did not carry.
         wsBlows, wsSteals, wsA: A.__wsSt(), wsB: B.__wsSt(), wsSame: A.__wsSt() === B.__wsSt(),
-        wornA: A.__worn(), wornB: B.__worn(), wsOwnBad,
+        wornA: A.__worn(), wornB: B.__worn(), wsOwnBad, gemSplit,
         desyncA: a.desync, desyncB: b.desync,
         badA: A.__badSince() ? 1 : 0, badB: B.__badSince() ? 1 : 0,
         rb: a.rb + b.rb, rbA: a.rb, rbB: b.rb,

@@ -33,6 +33,19 @@ const RECOVER = [
       phase:8, tjit:4, recv:true, clock:{ drift:1000, err0:40, samples:8 }, outage:{ at:6, ms:1500 } },
     { name:'2.5s clean       ', secs:22, seed:0x77C2, wire:{ base:6, jit:3, loss:0.02 },
       phase:8, tjit:4, recv:true, outage:{ at:6, ms:2500 } },
+    // The STATE-REPAIR row. The others heal out of their outage on the redundant input log; this
+    // wire (a fat link, 5% loss, one-way asymmetry) puts the two worlds a gem apart across the
+    // silence, so recovery has to run the other repair -- the peer's gem/RNG cluster adopted
+    // wholesale by the world that fell behind. Seed-pinned to a trajectory that actually crosses
+    // a gem boundary inside the outage; without one, this row is just a slower clean row.
+    { name:'1.5s gem adopt   ', secs:13, seed:0x254c6, wire:{ base:20, jit:8, loss:0.05, asym:6 },
+      outage:{ at:6.8, ms:1500 } },
+    // Same wire, a seed whose recovery needs the OTHER repair to survive: an input that aged out
+    // during the silence leaves the two input logs permanently unequal, so the peer's snake can
+    // only come from an adopted state -- and the rewinds still landing behind that adoption must
+    // not throw it away. Without a repair that outlives a rewind this seed never re-converges.
+    { name:'1.5s repair keep  ', secs:13, seed:0x254d5, wire:{ base:20, jit:8, loss:0.05, asym:6 },
+      outage:{ at:6.8, ms:1500 } },
 ];
 
 // FATAL control: an outage past the 4s deadline must end the match (the kill is real).
@@ -47,14 +60,19 @@ for(const sc of lane(RECOVER)){
     // Recovered: converged at settle, the CONNECTION LOST banner actually showed during the outage
     // (fault exercised) and is clear at the end, no session-end, no own-head teleport, silence
     // peaked under the deadline. A gameplay duelOver is fine; only a session-end is a failure.
+    // gemSplit is the repair's own consistency, not the match's: the sim stamps gemAt and the
+    // gem's spawnAt from one simNow, so a world holding a gem that disowns its timestamp got it
+    // from a repair that adopted half a gem. It is hashed, so it reads as a permanent divergence
+    // in a field no repair touches -- a match killed OUT OF SYNC over state the players cannot see.
     const bad = !r.converged || r.exitReason === 'session-end' || !r.sawConnLost
-        || r.endWarn !== null || r.localJumps > 0 || r.maxSilentMs >= 4000;
+        || r.endWarn !== null || r.localJumps > 0 || r.maxSilentMs >= 4000 || r.gemSplit > 0;
     steps.push(sc.name.trim().padEnd(18)
         + ' recovered=' + (r.converged && r.exitReason !== 'session-end' ? 'yes' : 'NO')
         + ' sawCL=' + (r.sawConnLost ? 'yes' : 'no')
         + ' maxSilent=' + Math.round(r.maxSilentMs) + 'ms'
         + ' endWarn=' + (r.endWarn || 'none')
         + ' selfJumps=' + r.localJumps
+        + ' gemSplit=' + r.gemSplit
         + ' healed=' + (r.firstDiverge ? 'diverged->' + (r.converged ? 'yes' : 'NO') : 'never-split')
         + '   ' + (bad ? 'FAIL' : 'ok'));
     if(bad) failed++;
