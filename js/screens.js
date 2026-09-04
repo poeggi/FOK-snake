@@ -146,13 +146,16 @@ function drawSplash(now) {
         ctx.save();
         ctx.font = `${FONT.HINT}px "Press Start 2P"`; ctx.textBaseline = 'bottom';
         ctx.textAlign = 'left'; ctx.fillStyle = '#4a7a4a';   // version bottom-left, same spot/style as the menu
-        ctx.fillText(_swVersion, 10, CH - 8);
+        ctx.fillText(_swVersion, 10, CORNER_Y);
         ctx.restore();
         ct('ENTER:go  TAP:go  CLICK:go', CW/2, HINT_Y, '#888', FONT.HINT);
     }
 }
 
-const _NP_W=30, _NP_H=26, _NP_X=CW-30-20, _NP_Y=CH-26-30;   // newspaper icon rect
+// The newspaper icon rect. It is stacked on the NEWS label rather than placed against
+// the canvas edge on its own, so the icon and the word it labels stay one object and
+// move together with the corner line.
+const _NP_W=30, _NP_H=26, _NP_X=CW-25-_NP_W, _NP_Y=CORNER_Y-_NP_H-22;
 // Static newspaper (icon + NEWS label) drawn into the menu cache. No badge here.
 function _drawNewspaper(c, sel) {
     const w=_NP_W, h=_NP_H, x=_NP_X, y=_NP_Y;
@@ -169,7 +172,7 @@ function _drawNewspaper(c, sel) {
     c.save();
     c.globalAlpha=sel?1:0.78; c.shadowColor=sel?'#7fff7f':'#cccccc'; c.shadowBlur=sel?12:1;
     c.font=`${FONT.MENU}px "Press Start 2P"`; c.textAlign='right'; c.textBaseline='bottom';
-    c.fillStyle=sel?'#7fff7f':'#cccccc'; c.fillText('NEWS', CW-10, CH-8);
+    c.fillStyle=sel?'#7fff7f':'#cccccc'; c.fillText('NEWS', CW-15, CORNER_Y);
     c.restore();
 }
 // Animated unread badge -- drawn on the live canvas each frame (overlay).
@@ -247,7 +250,7 @@ function _composeMenu(diffLine){
     c.save();
     c.font=`${FONT.HINT}px "Press Start 2P"`; c.textBaseline='bottom'; c.shadowBlur=0;
     c.fillStyle='#4a7a4a'; c.textAlign='left';
-    c.fillText(_swVersion, 10, CH-8);
+    c.fillText(_swVersion, 10, CORNER_Y);
     ct('UP/DN:nav  A:ok  START:quick', CW/2, HINT_Y, '#888', FONT.HINT, c);
     c.restore();
 }

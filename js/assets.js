@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v3.3.3';
+const APP_VERSION = 'v3.3.4';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -20,12 +20,18 @@ const UI = (() => {
         MENU_TOP: v('--ui-menu-top',90), MENU_ROW: v('--ui-menu-row',28),
         STATUS_Y: v('--ui-status-y',324), BACK_Y: v('--ui-back-y',348),
         BAND_Y:   v('--ui-band-y',370),   HINT_Y: v('--ui-hint-y',390),
+        CORNER_Y: v('--ui-corner-y',382),
     };
 })();
 const MENU_TOP = UI.MENU_TOP, MENU_ROW = UI.MENU_ROW;
 const BACK_Y = UI.BACK_Y;     // BACK / the last row of a list
 const BAND_Y = UI.BAND_Y;     // SHOP balance, ACHIEVEMENTS tally, lobby summary, menu DIFF
 const HINT_Y = UI.HINT_Y;     // every keyboard-hint line (ct(), baseline middle)
+// The two bottom CORNERS: the version stamp on the left, the NEWS label on the right.
+// They flank the hint line rather than sharing it, so they sit a little above it --
+// baseline BOTTOM, unlike every other line here, because a corner stamp is measured
+// from the edge it is parked against.
+const CORNER_Y = UI.CORNER_Y;
 const GEMS_PER_LEVEL = 10, MAX_LEVELS = 10, START_LIVES = 3;
 // Fixed-timestep simulation clock. The whole game advances in integer sim-ticks;
 // everything time-based is expressed in ticks, not wall-clock milliseconds, so the

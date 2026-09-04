@@ -28,6 +28,7 @@
     --ui-back-y:   348px;   /* BACK, parked at the bottom of every list             */
     --ui-band-y:   370px;   /* what the screen AMOUNTS to: balance, tally, summary  */
     --ui-hint-y:   390px;   /* key hints, the lowest line on every screen           */
+    --ui-corner-y: 382px;   /* what sits in a BOTTOM CORNER: the version, NEWS      */
 }
 /* Layout in two rules:
    R1 (fit): the visible game (canvas + chrome that is actually shown) must fit the
