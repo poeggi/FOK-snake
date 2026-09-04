@@ -89,10 +89,15 @@ function _netMkSess(peer, role){
              tx:null,   // the ONE pending un-echoed transition ({pkt, since, lastAt, tries}; see _netTxShip)
              lastRecv:0, lastSent:0, liveT:null, warmT:null, myAgain:false, peerAgain:false, lvlPending:false,
              bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
-             // Per-MATCH negotiated parameters. hearts is the cap both sims open on (it rides
-             // every go); stakes says whether a steal really changes hands off the board;
-             // heartsWant is a PRESET (a tournament roles sheet) a received go must match.
-             hearts:START_LIVES, stakes:true, heartsWant:null,
+             // Per-MATCH negotiated parameters. BOTH ride every go, because neither survives a
+             // disagreement: hearts is the cap both sims open on, and stakes says whether a steal
+             // really changes hands off the board. Stakes is the sharper of the two -- a side that
+             // believes they are on attests its ownership digest and claims every gain, while a
+             // side that believes they are off never attests at all, so nothing corroborates the
+             // first side and nothing anywhere can see that the two disagreed.
+             // heartsWant/stakesWant are PRESETS (a tournament roles sheet): a go that
+             // contradicts one is a protocol fault and ends the match.
+             hearts:START_LIVES, stakes:true, heartsWant:null, stakesWant:null,
              // Tournament matches and every spectator link are P2P-ONLY: the deprecated
              // server relay is not an acceptable transport for them (see _netRelayStart).
              p2pOnly:false,

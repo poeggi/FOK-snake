@@ -14,6 +14,10 @@
 //     H2 lane below then gives the 2-heart rules a golden of their own.
 //   * A cap off the wire is untrusted: anything outside 1..START_LIVES reads as the default,
 //     so a malformed or absent hm can never hand a player extra lives.
+//   * STAKES are the same kind of parameter and ride the same packet: one host-authored bit,
+//     adopted before tick 0, absent reading as OFF. They cannot be left to each side to work
+//     out for itself -- a disagreement is silent on both screens, and the only place it ever
+//     surfaces is the item registry, as gains nobody corroborated.
 //   * P2P-ONLY. A tournament match and every spectator link refuse the deprecated server
 //     relay, at all three of its entry points.
 // Run: node test/duel-hearts.js
@@ -26,22 +30,26 @@ const { runTest } = require('./harness');
 // sim-determinism.js covers the default 3-heart lane and must NOT move when this one does.
 const GOLDEN_DUEL_H2 = '78e8513a:7575';
 
-// ---- static guard: hm rides EVERY go ------------------------------------------------
+// ---- static guard: the match parameters ride EVERY go -------------------------------
 // The go is the one timeline opener, authored in two places (the match/rematch start and the
-// boundary opener). The receive handler adopts the cap from whichever one arrives, so a
-// builder that forgot the field would silently reset a 2-heart match to 3 at the next level
-// boundary. The boundary builder is driven for real in section G; this catches the other one,
-// which sits behind an awaited server round trip that a synchronous suite cannot reach.
+// boundary opener). The receive handler adopts hm and sk from whichever one arrives, so a
+// builder that forgot a field would silently reset a 2-heart match to 3 at the next level
+// boundary, or drop a staked match to unstaked halfway through. The boundary builder is
+// driven for real in section G; this catches the other one, which sits behind an awaited
+// server round trip that a synchronous suite cannot reach.
 const NS = fs.readFileSync(path.join(__dirname, '..', 'js', 'net-session.js'), 'utf8');
+const GO_FIELDS = ['hm', 'sk'];
 const builders = NS.match(/\{\s*t:'go',[^}]*\}/g) || [];
-const missing = builders.filter(g => !/\bhm\s*:/.test(g));
+const missing = builders.map(g => [g, GO_FIELDS.filter(f => !new RegExp('\\b' + f + '\\s*:').test(g))])
+                        .filter(x => x[1].length);
 if (builders.length < 2 || missing.length) {
     console.log('DUEL-HEARTS FAIL: ' + (builders.length < 2
         ? 'expected 2 go builders in net-session.js, found ' + builders.length
-        : missing.length + ' go builder(s) do not carry hm:\n' + missing.join('\n')));
+        : missing.length + ' go builder(s) are missing a match parameter:\n'
+          + missing.map(x => 'no ' + x[1].join('/') + ' in: ' + x[0]).join('\n')));
     process.exit(1);
 }
-console.log('go builders carrying hm: ' + builders.length + '/' + builders.length);
+console.log('go builders carrying ' + GO_FIELDS.join(' + ') + ': ' + builders.length + '/' + builders.length);
 
 const driver = `
 ;(function(){
@@ -222,6 +230,34 @@ const driver = `
     A(bad.sess===null || _netSess===null, 'a go contradicting the roles sheet was accepted');
     A(_netLb.msg==='MATCH SETUP MISMATCH', 'the setup mismatch did not surface: '+String(_netLb.msg));
     R.steps.push('a go that contradicts the roles sheet ends the match (MATCH SETUP MISMATCH)');
+
+    // STAKES ride the same packet and are adopted the same way, and they need it more than the
+    // cap does: a wrong cap shows up on both HUDs within one death, while a stakes
+    // disagreement is invisible on both screens for the whole match -- the side that believes
+    // they are on claims every gain the side that believes they are off will never attest to.
+    const joinSk = (sk, want)=>{
+      const out = mkSess('peer');
+      _netSess.stakesWant = (want===undefined) ? null : want;
+      phase='lobby'; _netLb.msg='';
+      const m = { t:'go', why:'level', seed:777, startPts:Date.now()+250, epoch:7, lvl:4, bth:0, hm:2 };
+      if(sk!==undefined) m.sk = sk;
+      _netHandleMsg(JSON.stringify(m));
+      return { sess:_netSess, echo: out.filter(o=>o.a===1 && o.t==='go').pop() };
+    };
+    const skOn = joinSk(1);
+    A(skOn.sess && skOn.sess.stakes===true, 'the joiner did not adopt stakes-on from the go');
+    A(skOn.echo && skOn.echo.sk===1, 'the echo verifier does not carry sk back, so the agreement is not byte-checked');
+    A(joinSk(0).sess.stakes===false, 'the joiner did not adopt stakes-off from the go');
+    // A minted session opens with stakes ON, so an ABSENT field is the one case where the go
+    // has to overrule what the joiner already believed: an unstated stake is not one to play for.
+    A(joinSk(undefined).sess.stakes===false, 'a go with no sk left the joiner on its own guess');
+    R.steps.push('joiner: adopts stakes off the go (absent reads as off), and echoes it back');
+
+    A(joinSk(0, false).sess.stakes===false, 'a go matching the roles sheet stakes was refused');
+    const badSk = joinSk(1, false);
+    A(badSk.sess===null || _netSess===null, 'a go contradicting the roles sheet stakes was accepted');
+    A(_netLb.msg==='MATCH SETUP MISMATCH', 'the stakes mismatch did not surface: '+String(_netLb.msg));
+    R.steps.push('a go whose stakes contradict the roles sheet ends the match too');
 
     // ---- H) stakes off: the mechanic plays, nothing leaves the room ----
     mkSess('host');

@@ -311,7 +311,12 @@ function driverSrc(id){
         + '    pick: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return rs[i].act(); } throw "no row " + t; },\n'
         + '    draw: function(){ var s = SCREENS[phase]; if(!s || !s.d) throw "no screen for " + phase; s.d(); return true; },\n'
         + '    line: function(nd){ return _ttMatchLine(tourneyView() || {}, nd.nid, nd); },\n'
-        + '    sess: function(peer, role){ var s = _netMkSess(peer, role); return { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, p2pOnly:s.p2pOnly }; },\n'
+        + '    snap: function(s){ return s ? { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, stakesWant:s.stakesWant, p2pOnly:s.p2pOnly } : null; },\n'
+        + '    sess: function(peer, role){ return C.snap(_netMkSess(peer, role)); },\n'
+        // A session that already EXISTS when the sheet is engaged, which is the case a fresh
+        // _netMkSess can never show: the offer is answered before the sheet comes off the queue.
+        + '    mint: function(peer, role){ _netSess = _netMkSess(peer, role); return C.snap(_netSess); },\n'
+        + '    sessNow: function(){ return C.snap(_netSess); },\n'
         + '    p2p: function(){ return _netP2POnly; },\n'
         + '    inGame: function(v){ inGame = !!v; },\n'
         // The sim declaring a duel over, through the one path game.js uses: set the board,
@@ -702,6 +707,33 @@ async function finish(m, plan){
     A(pend.indexOf('BYE') < 0 && pend.indexOf('VOID') < 0 && pend.indexOf('FROZEN') < 0,
       '12: an ordinary pending node picked up a terminal label');
     rows.push('12 node states: bye, void and frozen each read as themselves; a pending node still reads as a pairing');
+
+    // ---- 13. a sheet engaged AFTER the offer it authorises ---------------------------
+    // _ttRoles never engages a sheet where it lands: the previous match has to be off the
+    // board first, so engagement waits for a tick. The feeder offers the moment IT engages,
+    // which can be a whole tick sooner -- or the very same signal drain, where our sheet is
+    // parked and the offer answered a few lines later. Either way the answerer can mint its
+    // session before it holds the sheet, and that session still has to end up carrying it:
+    // the go repairs hearts and stakes on its own, but only a preset can REFUSE a wrong one,
+    // and p2p-only has no wire representation at all. The peer here is a stranger id, so no
+    // leftover _ttWant from the tournament above can dress the session early by accident.
+    const late = C[4], lp = 'aaaa1234';
+    late.clear();
+    late.inGame(true);                 // the previous match is still on the board
+    late.sigTo({ event:'roles', tid:late.tt().tid, nid:'late1', round:9, hm:2, stakes:false,
+                 players:[lp, IDS[4]], feeder:lp, primaries:[], secondaries:[], you:'play' });
+    let ls = late.mint(lp, 'guest');   // the offer lands first and is answered
+    A(ls && ls.heartsWant === null && ls.stakesWant === null && ls.stakes === true && !ls.p2pOnly,
+      '13: the session was dressed before the sheet was engaged -- there is no window left to test');
+    late.inGame(false);
+    late.tick();
+    ls = late.sessNow();
+    A(ls && ls.hearts === 2 && ls.heartsWant === 2,
+      '13: engaging the sheet left the live session at ' + (ls && ls.hearts) + ' hearts');
+    A(ls && ls.stakes === false && ls.stakesWant === false,
+      '13: engaging the sheet left the live session playing for the wrong stakes');
+    A(ls && ls.p2pOnly === true, '13: engaging the sheet left the live session relay-capable');
+    rows.push('13 late sheet: a session minted before its roles sheet was engaged is dressed when it lands');
 
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }

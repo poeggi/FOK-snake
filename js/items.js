@@ -34,7 +34,7 @@ const ITEM_Q_MAX = 64;          // per queue: a backlog this long is a broken cl
 const ITEM_UID_RE = /^[0-9a-f]{32}$/;
 const ITEM_TAG_RE = /^[0-9a-f]{16}$/;
 const ITEM_TICK_MAX = 100000000;   // the server's accepted tick range
-const ITEM_RETRY_MIN = 20000;   // first retry after a failed drain
+const ITEM_RETRY_MIN = 1500;    // the FIRST retry after a failed drain; it doubles from there
 const ITEM_RETRY_MAX = 600000;  // ceiling: a long offline stretch costs one attempt every 10 min
 const ITEM_HELD_WAIT = 65000;   // re-send a parked gain claim just past claim_grace_ms (60s default)
 const ITEM_CLAIM_TRIES = 6;     // held re-sends before a gain claim is given up on
@@ -161,9 +161,16 @@ function itemKick(){
     if(_itemTimer) return;
     _itemTimer = setTimeout(() => { _itemTimer = 0; itemFlush(); }, wait);
 }
+// Retry at the current delay and THEN grow it, so the first attempt after a blip comes
+// back quickly. That first retry is the one that carries weight: a loss claim is what
+// settles its peer's gain, and the peer ships that gain unproven WS_CLAIM_WAIT (~2.1s)
+// after the very same tick. A first retry slower than that hands the server an
+// uncorroborated claim for every steal whose first post merely stumbled, which it then
+// has to hold for its whole grace period. Doubling still reaches the same ceiling, so a
+// genuinely offline client ends up costing what it always did.
 function _itemFail(){
-    _itemRetryMs = Math.min(ITEM_RETRY_MAX, _itemRetryMs * 2);
     _itemRetryAt = Date.now() + _itemRetryMs;
+    _itemRetryMs = Math.min(ITEM_RETRY_MAX, _itemRetryMs * 2);
 }
 function _itemWin(){ _itemRetryMs = ITEM_RETRY_MIN; _itemRetryAt = 0; }
 

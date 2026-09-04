@@ -231,6 +231,13 @@ function _ttEngage(d){
         if(!/^[0-9a-f]{8}$/.test(String(peer || ''))){ _ttFail('BAD MATCH SHEET'); return; }
         _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes };
         netP2POnlySet(true);   // a tournament match is direct or nothing
+        // _netMkSess is not the only moment a session can need dressing. Engagement is
+        // deferred (the previous match has to be off the board first), and the feeder offers
+        // the instant IT engages -- so a sheet and the offer it authorises can be handled in
+        // the same signal drain, the offer answered and the session minted before this runs.
+        // Dress that session here too: the go repairs hearts and stakes on its own, but only
+        // a preset can refuse a wrong one, and p2p-only has no wire representation at all.
+        if(typeof _netSess !== 'undefined' && _netSess) tourneyDressSession(_netSess);
         // players[0] is the feeder and the feeder is always the offerer, so the two sides
         // never both offer. This is the quick-match path verbatim -- an offer needs no
         // friendship, which is exactly why strangers can be drawn against each other.
@@ -261,6 +268,7 @@ function tourneyDressSession(s){
     s.hearts = _ttWant.hearts;
     s.heartsWant = _ttWant.hearts;
     s.stakes = _ttWant.stakes;
+    s.stakesWant = _ttWant.stakes;
     s.p2pOnly = true;
 }
 

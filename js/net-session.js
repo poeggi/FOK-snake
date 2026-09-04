@@ -519,7 +519,8 @@ async function _netRequestStart(s, reason){
         // WHILE in game and is not.
         if(s.role === 'host'){
             const g = { t:'go', why:(reason === 'rematch') ? 'rematch' : 'match',
-                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:1, hm:s.hearts|0 };
+                        seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:1,
+                        hm:s.hearts|0, sk:s.stakes ? 1 : 0 };
             if(theta != null) g.bth = Math.round(theta);
             _netTxShip(s, g);
         }
@@ -578,7 +579,8 @@ function _netOpenBoundary(s, why){
                                             : netPts() + NET_BURST_LEAD_MS;
         s.startPts = startPts;
         _netClockPush();            // anchor + startPts move together: the core must see both
-        const g = { t:'go', why, seed:s.seed, startPts:startPts, epoch:s.epoch|0, lvl:(s.lvl|0) || 1, hm:s.hearts|0 };
+        const g = { t:'go', why, seed:s.seed, startPts:startPts, epoch:s.epoch|0, lvl:(s.lvl|0) || 1,
+                    hm:s.hearts|0, sk:s.stakes ? 1 : 0 };
         if(theta != null) g.bth = Math.round(theta);
         _netTxShip(s, g);
         _netArmBegin(s, startPts, () => {
@@ -715,6 +717,18 @@ function _netHandleParsed(m, srcIdx){
             const hm = _duelHearts(m.hm);
             if(s.heartsWant != null && hm !== s.heartsWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
             s.hearts = hm;
+            // Item stakes ride the same packet for the same reason, and the reason is sharper:
+            // a wrong cap is at least visible on both HUDs, while a stakes disagreement is
+            // silent and one-sided for the whole match. The believing side attests and claims
+            // every gain; the other never attests, so it ships no tag to corroborate them and
+            // the registry holds each one as unwitnessed. Anything a session picked up before
+            // this packet is a local guess -- the go is where the two agree. Absent reads as
+            // OFF: an unstated stake is one nobody agreed to play for.
+            // A SPECTATOR pins it off whatever the players agreed: it holds neither wardrobe
+            // and has no match secret to attest with (net-spec.js mints its session that way).
+            const sk = !netSpectating() && !!m.sk;
+            if(s.stakesWant != null && sk !== s.stakesWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
+            s.stakes = sk;
             s.ctlEpoch = ep;
             s.seed = (m.seed>>>0) || s.seed;
             // A SPECTATOR pushes every boundary's origin its own bias into the future, so its sim

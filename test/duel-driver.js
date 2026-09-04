@@ -153,7 +153,8 @@ const HOOKS = (id) => `
       if(_netSess !== s || !s.game){ s.lvlPending = false; return; }
       const sp = netPts() + 250;   // author on the now-midpoint clock (production uses NET_BURST_LEAD_MS)
       s.startPts = sp; _netClockPush();
-      const g = { t:'go', why:'rematch', seed:s.seed, startPts:sp, epoch:s.epoch|0, lvl:1, hm:s.hearts|0 };
+      const g = { t:'go', why:'rematch', seed:s.seed, startPts:sp, epoch:s.epoch|0, lvl:1,
+                  hm:s.hearts|0, sk:s.stakes ? 1 : 0 };   // the same match parameters production ships
       if(theta != null) g.bth = Math.round(theta);   // starved burst -> NO bth, same as production
       _netTxShip(s, g);
       _netArmBegin(s, sp, ()=>{ s.lvlPending = false; s.lvl = 1; beginOnlineDuel(s.seed, true); });
