@@ -127,6 +127,15 @@ const RB_RECONNECT_MS = Math.round(64 * TICK_MS);     // ~1067ms (4 missed) -> s
 // the gap; unrecovered past this -> end. 4s: two heartbeats to notice, then a wide margin
 // for a p2p link rebuild -- a >=1.5s interruption must recover the match, not end it.
 const RB_PERSIST_KILL_MS = 4000;
+// A wedged sim is not a quiet wire. The radio-warm beat is a wall-clock interval that exists to
+// ping HARDEST when the sim is not ticking, so a peer whose sim died keeps the silence detector
+// perfectly happy ~15x a second while its world stands still -- silence can never be the verdict
+// on it. Its tick standing still is. The windows where a sim is ENTITLED to sit still (the burst
+// to tick 0, a level or respawn boundary, a resume negotiation) are all bounded by the go ladder
+// at RB_PERSIST_KILL_MS, so judge no faster than that ladder can end one, and kill at double: a
+// level-up can never read as a death, and a corpse is still called in seconds rather than never.
+const RB_SIM_STALL_MS = RB_PERSIST_KILL_MS;      // no proof the peer's sim moved -> CONNECTION LOST
+const RB_SIM_KILL_MS = RB_PERSIST_KILL_MS * 2;   // ... and past this the match ends, like any dead link
 // NET_PKT_MAX (the one-datagram payload budget) lives in duel-core.js: the core
 // enforces it too, and the sim worker loads the core WITHOUT this file.
 // Send-buffer congestion line: once the SCTP buffer already holds a few packets, a

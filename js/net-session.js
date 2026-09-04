@@ -601,7 +601,31 @@ function _netHandleMsg(txt){
     // re-serializing the parsed object reproduces the original text exactly. A no-op unless
     // someone is actually watching.
     if(typeof _spTapIn === 'function') _spTapIn(m);
+    // Proof of a LIVE peer sim, taken only here: this is the path for packets that came off our
+    // own wire from the duel peer. A spectator's forwarded packets reach _netHandleParsed
+    // directly and must never vouch for a peer they did not come from.
+    _netNotePeerSim(_netSess, m);
     _netHandleParsed(m);
+}
+// Every packet stamps the sender's OWN current tick, so a tick that MOVED is the proof -- and a
+// 'pi', which carries none, is correctly no proof at all. Movement rather than increase: a
+// boundary rebases the tick to 0, and a rebase is a sim doing something. The raw wire value is
+// enough; nothing here needs the tick's real magnitude.
+function _netNotePeerSim(s, m){
+    if(!s || typeof m.tk !== 'number' || m.tk === s.peerTk) return;
+    s.peerTk = m.tk;
+    s.simSeenWall = Date.now();
+}
+// The peer's wire is warm but its world stands still. Suppressed wherever the sim is entitled to
+// sit still or where the tick stream is not ours to read: a pending transition or a boundary in
+// flight (the liveness pass pushes the baseline forward through those, so the deadline starts at
+// the END of a legitimate pause), a reconnect, the relay path, a spectator -- whose feed has its
+// own silence ladder -- and a session with no baseline yet.
+function _netSimStalled(s, ms){
+    if(!s || !s.game || !inGame || s.relay || s.reconnecting || !s.simSeenWall) return false;
+    if(s.tx || s.lvlPending) return false;
+    if(typeof netSpectating === 'function' && netSpectating()) return false;
+    return Date.now() - s.simSeenWall > ms;
 }
 // The message body proper, split from the parse above so a SPECTATOR can feed it packets that
 // never came off its own DataChannel -- one dispatcher, one set of gates, for a duel peer and a
@@ -830,6 +854,10 @@ function netDuelWarn(){
     // flashes; a refused input is not a fault (it still arrived). Relay arrivals ride
     // jittered HTTP round trips, so relay warns at DOUBLE the p2p bar. DEPRECATED(relay)
     if(Date.now() - s.lastRecvWall > (s.relay ? RB_WARN_MS * 2 : RB_WARN_MS) && !(s.relay && performance.now() < s.relayGraceUntil)) return 'CONNECTION LOST';
+    // The SECOND way the other side stops reaching us, and the one silence structurally cannot
+    // catch: the peer's sim is wedged while its wall-clock keepalives chirp on. To a player it is
+    // the same event and deserves the same words -- nothing the opponent does arrives any more.
+    if(_netSimStalled(s, RB_SIM_STALL_MS)) return 'CONNECTION LOST';
     // OUT OF SYNC is the OTHER fault: the link is fine, the worlds diverged (a hash
     // disagreed). duel-core fires one targeted repair per verdict; this banner is its live
     // status. It clears the instant a hash agrees again (_rbBadSince -> 0); unhealed past

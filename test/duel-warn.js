@@ -26,6 +26,19 @@
 //   7. an unhealed hash divergence                  -> OUT OF SYNC (link fine, worlds not)
 //   8. that divergence heals (hash agrees again)    -> NO banner   (resync succeeded)
 //   9. divergence AND silence at once               -> CONNECTION LOST (silence outranks it)
+//
+// SILENCE IS NOT THE ONLY WAY THE OPPONENT STOPS REACHING US. The wall-clock keepalives -- the
+// radio-warm beat and the liveness ping -- are TIMERS, not sim work: they exist to chirp when the
+// sim is not ticking, so a peer whose sim wedged keeps the silence detector perfectly happy many
+// times a second while its world stands still. Silence structurally cannot be the verdict on it.
+// The proof of a live sim is the tick every packet stamps MOVING (movement, not increase -- a
+// boundary rebases to 0, and a rebase is a sim doing something); frozen, it is the same event to
+// a player as a dead link and says the same words:
+//  10. keepalives with no tick at all (worker home) -> CONNECTION LOST (a 'pi' proves nothing)
+//  11. keepalives carrying a FROZEN tick            -> CONNECTION LOST (a warm wire, a dead world)
+//  12. the same cadence with a tick that MOVES      -> NO banner   (that is just a live peer)
+//  13. a frozen tick across a pending boundary      -> NO banner   (a sim entitled to sit still)
+//  14. frozen past twice the bar                    -> the match ENDS (no reconnect rung exists)
 const { mk } = require('./duel-driver');
 
 const CL = 'CONNECTION LOST', OOS = 'OUT OF SYNC';
@@ -113,11 +126,84 @@ function inAt(c, tk, pts){
     check('divergence + silence -> silence wins', c.__warn(), CL);
 }
 
+// A bare liveness ping: the whole packet, carrying no tick -- and so no proof of anything but a
+// working radio. This is literally what the worker home's warm beat puts on the wire.
+const PI = JSON.stringify({ t:'pi' });
+
+// Drive wall time from `from` to `to` in 250ms steps (the production liveness cadence), delivering
+// whatever `pkt()` returns at every step so the SILENCE timer is never the thing under test. With
+// `live`, each step also runs one real liveness pass -- the pump that owns the kill.
+function keepalive(c, from, to, pkt, live){
+    for(let t = from; t <= to; t += 250){
+        c.__now = t;
+        c.__recv(pkt());
+        if(live) c.__live();
+    }
+}
+
+// 10. Worker home: the warm beat is a bare 'pi' with no tick at all, so after the one stamped
+// packet that sets the baseline nothing ever vouches for the peer's sim again.
+{
+    const c = client(0);
+    c.__recv(inAt(c, c.__simTick() + 1000));    // refused (far future) -- but it still stamps a tick
+    keepalive(c, 250, 5000, ()=> PI);
+    check('wedged sim, bare pings', c.__warn(), CL);
+}
+
+// 11. Non-worker home: the keepalive is a real 'in' carrying the sender's own tick -- which is
+// frozen, because the sender's sim is. Same verdict; the wire being warm changes nothing.
+{
+    const c = client(0);
+    const tk = c.__simTick() + 1000;
+    keepalive(c, 250, 5000, ()=> inAt(c, tk));
+    check('wedged sim, frozen tick', c.__warn(), CL);
+}
+
+// 12. The control that makes 10 and 11 mean something: identical traffic, identical cadence, one
+// difference -- the tick moves. A peer that is merely REFUSED (these are still far-future inputs)
+// is not a peer that is gone.
+{
+    const c = client(0);
+    let tk = c.__simTick() + 1000;
+    keepalive(c, 250, 5000, ()=> inAt(c, tk++));
+    check('moving tick (alive)', c.__warn(), null);
+}
+
+// 13. The other control: a boundary is the one place a sim is ENTITLED to sit still. The liveness
+// pass carries the baseline forward for as long as one is pending, so the deadline starts at the
+// END of a legitimate pause -- a level-up can never read as a death.
+{
+    const c = client(0);
+    const tk = c.__simTick() + 1000;
+    c.__recv(inAt(c, tk));
+    c.__reqNextLevel();
+    check('boundary armed -> lvlPending', c.__lvlPending(), true);
+    keepalive(c, 250, 5000, ()=> inAt(c, tk));
+    check('frozen tick across a boundary', c.__warn(), null);
+    // ...and for as long as one is pending it is not a matter of PATIENCE either: pumped past even
+    // the kill bar, a negotiating pair is still a pair. A slow boundary must never end a match.
+    keepalive(c, 5250, 12000, ()=> inAt(c, tk), true);
+    check('a long boundary never ends it', c.__alive(), true);
+}
+
+// 14. Past twice the bar the liveness pass stops waiting. There is no RECONNECT rung on this
+// ladder: the transport is healthy, so rebuilding it would repair nothing -- warn, then end.
+{
+    const c = client(0);
+    const tk = c.__simTick() + 1000;
+    keepalive(c, 250, 6000, ()=> inAt(c, tk), true);
+    check('warned, match still open', c.__alive() && c.__warn(), CL);
+    keepalive(c, 6250, 9000, ()=> inAt(c, tk), true);
+    check('past the kill bar the match ends', c.__alive(), false);
+}
+
 console.log(steps.join('\n'));
 if(failed){
-    console.log('\nDUEL-WARN FAIL: ' + failed + '/9 -- the duel banners are not clean: CONNECTION LOST'
-        + ' is not a pure silence detector (a refusal flashed, silence did not, or a packet failed to'
-        + ' refresh the timer), or OUT OF SYNC did not track an unhealed hash divergence.');
+    console.log('\nDUEL-WARN FAIL: ' + failed + '/' + steps.length + ' -- the duel banners are not'
+        + ' clean: CONNECTION LOST is not reporting exactly the two ways the opponent stops reaching'
+        + ' us (a refusal flashed, silence did not, a packet failed to refresh the timer, or a'
+        + ' wedged peer sim went uncalled / a live or pausing one was called), or OUT OF SYNC did'
+        + ' not track an unhealed hash divergence.');
     process.exit(1);
 }
 console.log('\nDUEL-WARN PASSED');

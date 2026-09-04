@@ -102,7 +102,10 @@ function _netMkSess(peer, role){
              // server relay is not an acceptable transport for them (see _netRelayStart).
              p2pOnly:false,
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
-             lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
+             lastRecvWall:0, reconnectAt:0, reconnecting:false,
+             // simSeenWall: the last time we had PROOF the peer's sim advanced (see _netSimStalled).
+             // 0 means "no baseline yet", which is never a fault -- a match that has not ticked cannot stall.
+             simSeenWall:0, peerTk:null };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
     // A tournament match's parameters live on the ROLES SHEET, and the offer carries none
     // of them. Both sides mint their session here, so this is the one point both paths
     // share -- and the answerer, which never gets to speak, is dressed by it too.
@@ -552,10 +555,17 @@ function _netLiveCheck(){
         if(silent > RB_PERSIST_KILL_MS) _netSessionEnd('CONNECTION LOST'); // relay has no transport to rebuild -> silence past the deadline ends it
         return;
     }
+    // A sim that is ENTITLED to sit still pushes the stall baseline forward instead of being
+    // judged by it, so the deadline starts at the end of a legitimate pause. Done here, on the
+    // one pass that already owns the liveness clocks, so the predicate itself stays pure.
+    if(s.tx || s.lvlPending || s.reconnecting) s.simSeenWall = nowW;
     // p2p ladder: WARN (netDuelWarn, ~RB_WARN_MS) -> RECONNECT (rebuild the link, ~RB_RECONNECT_MS)
     // -> hard KILL at the deadline. The kill is unconditional so "silence past the deadline ends
     // the match" holds even where no rebuild was possible; below it, start one rebuild or clear it.
     if(silent > RB_PERSIST_KILL_MS){ _netSessionEnd('CONNECTION LOST'); return; }
+    // The wedged-sim ladder has no RECONNECT rung: the transport is fine, so rebuilding it would
+    // repair nothing. Warn, then end the match -- there is no third thing to try.
+    if(_netSimStalled(s, RB_SIM_KILL_MS)){ _netSigLog('! peer sim stalled -> ending'); _netSessionEnd('CONNECTION LOST'); return; }
     if(silent > RB_RECONNECT_MS && !s.reconnectAt) _netReconnect(s);
     else if(s.reconnectAt && silent < RB_WARN_MS) _netReconnectDone(s);   // packets flowing again -- recovered
 }
