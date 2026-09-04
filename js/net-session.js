@@ -145,8 +145,31 @@ function _netOnSignal(sig){
     try {
         const from = String(sig.from||'');
         _netSigLog('< '+String(sig.type)+' '+from.slice(0,4));   // debug overlay
-        if(!/^[0-9a-f]{8}$/.test(from) && sig.type !== 'friend' && sig.type !== 'peer-net') return;   // server-generated: sender is in the payload
+        if(!/^[0-9a-f]{8}$/.test(from) && sig.type !== 'friend' && sig.type !== 'peer-net' && sig.type !== 'tourney') return;   // server-generated: sender is in the payload
         const pl = String(sig.payload||'');
+        // SPECTATOR signalling rides the duel's own offer/answer/ice types, told apart by the
+        // sp:1 marker the sender adds -- so the server contract needed exactly ONE new
+        // client-sendable type ('watch') rather than three. Routed off HERE, before the duel
+        // cases below, because a spectator link arriving as an 'offer' would otherwise read as
+        // a reconnect of the match and tear down a perfectly good session.
+        // 'tourney' is RESERVED: the server generates every one of them, so there is no
+        // player id to check and the payload is the whole message. tourney.js decides what
+        // is worth acting on -- and asks the server when it is not sure.
+        if(sig.type === 'tourney'){
+            if(typeof _ttOnSignal === 'function') _ttOnSignal(_netJson(pl));
+            return;
+        }
+        if(sig.type === 'watch'){
+            if(typeof _spOnWatch === 'function') _spOnWatch(from, _netJson(pl));
+            return;
+        }
+        if((sig.type === 'offer' || sig.type === 'answer' || sig.type === 'ice')){
+            const sd = _netJson(pl);
+            if(sd && sd.sp){
+                if(typeof _spOnSignal === 'function') _spOnSignal(sig.type, from, sd);
+                return;
+            }
+        }
         switch(sig.type){
             case 'invite':
             case 'invite-relay': {   // DEPRECATED(relay) signal type
@@ -571,6 +594,18 @@ function _netOpenBoundary(s, why){
 function _netHandleMsg(txt){
     let m; try{ m = JSON.parse(txt); }catch(e){ return; }
     if(!m || typeof m !== 'object') return;
+    // The INBOUND spectator tap: the opponent's packets, forwarded on parsed. Byte-identity
+    // downstream costs nothing -- every packet on this wire was produced by JSON.stringify, so
+    // re-serializing the parsed object reproduces the original text exactly. A no-op unless
+    // someone is actually watching.
+    if(typeof _spTapIn === 'function') _spTapIn(m);
+    _netHandleParsed(m);
+}
+// The message body proper, split from the parse above so a SPECTATOR can feed it packets that
+// never came off its own DataChannel -- one dispatcher, one set of gates, for a duel peer and a
+// spectator alike. srcIdx is the AUTHOR's player index, known only on the spectator path (its
+// envelope carries it); a duel peer passes nothing and every derivation below stays as it was.
+function _netHandleParsed(m, srcIdx){
     // Boundary clock-burst datagrams: handled BEFORE the pts future-gate below. Their whole point is
     // to measure a clock offset, so a stamp lands in our "future" exactly when there IS an offset --
     // the gate would drop the samples that matter most. They carry only NTP-style stamps and never
@@ -682,7 +717,12 @@ function _netHandleMsg(txt){
             s.hearts = hm;
             s.ctlEpoch = ep;
             s.seed = (m.seed>>>0) || s.seed;
-            s.startPts = m.startPts;   // the epoch tick 0 is measured from: every boundary moves it
+            // A SPECTATOR pushes every boundary's origin its own bias into the future, so its sim
+            // opens late by exactly the amount it runs behind (net-spec.js). Same one number, one
+            // addition: the whole "spectators are delayed" behaviour is this line plus the matching
+            // delay on the very first boot. A player's bias is 0 and this is the old assignment.
+            const gPts = m.startPts + netSpecBias();
+            s.startPts = gPts;         // the epoch tick 0 is measured from: every boundary moves it
             s.epoch = ep;              // stay on the pair's epoch line
             if(m.why === 'level') _lvlCover = true;
             // Nudge OUR clock half of the way onto the shared MIDPOINT BEFORE we read startPts, so
@@ -694,7 +734,12 @@ function _netHandleMsg(txt){
             // the clock steering absorbs it. An ABSENT bth is the host's on-wire confession of a
             // starved burst: log the failure and keep the prior in-play clock, itself
             // burst-verified at the previous boundary (bth 0 is an ordinary zero residual).
-            if(m.bth == null) _netSigLog('! BURST SYNC FAILED (host starved) -> prior clock');
+            // ...and a spectator applies NONE of it: bth is the residual of a burst measured
+            // between the two PLAYERS, and half of it is the host's half of a jump only those two
+            // agreed to take. Nudging a third party's clock by it would drag it off the shared
+            // timeline every boundary, in a direction that has nothing to do with its own offset.
+            if(netSpectating()){ /* not our burst, not our correction */ }
+            else if(m.bth == null) _netSigLog('! BURST SYNC FAILED (host starved) -> prior clock');
             else _netBurstApply(s, m.bth);
             // This boundary's burst is spent: forget its samples, so the NEXT boundary's arriving
             // 'bs' finds no usable theta and re-opens our run. Kept samples here would block that
@@ -704,7 +749,7 @@ function _netHandleMsg(txt){
             // one rebuild input, so both sims build the identical (seed, level) board however
             // their private counters drifted. `why` picks the rebuild; the begin stays CLOCK-
             // driven (armed here, fired at startPts), never gated on our echo landing.
-            _netArmBegin(s, m.startPts, () => {
+            _netArmBegin(s, gPts, () => {
                 if(m.why === 'level') beginOnlineDuelLevel(false, m.lvl);
                 else if(m.why === 'respawn') beginOnlineDuelRespawn(false);
                 else if(m.why === 'resume') resumeOnlineDuel();
@@ -733,7 +778,7 @@ function _netHandleMsg(txt){
             break;
         }
         case 'in': _netDbg.hbRx++;   // both ends apply the other's input
-            if(_netSess){ if(_netWD()) _wDuelSend({ t:'peerPkt', m }); else _netPeerInput(m); }
+            if(_netSess){ if(_netWD()) _wDuelSend({ t:'peerPkt', m, p:srcIdx }); else _netPeerInput(m, srcIdx); }
             break;
         case 'h':    // divergence check / state recovery / full resync: the core's
         case 'st':   // packets -- routed to wherever the core runs (worker or in-process)
@@ -755,6 +800,16 @@ function netDuelWarn(){
     const s = _netSess;
     if(!s || !s.game || !inGame) return null;
     if(s.reconnecting) return 'RECONNECTING...';
+    // Spectating has its own two-line vocabulary, and neither of the duel's warnings applies:
+    // there is no opponent whose silence could be OUR connection fault, and a disagreement with
+    // the feed is not the two players being OUT OF SYNC. The banner is persistent and lowest
+    // priority by design -- it tells a watcher what screen they are looking at, so it renders
+    // through the existing _drawDuelWarn with no new draw code at all.
+    if(netSpectating()){
+        const d = netSpecDbg();
+        if(!d.rx || (netSpecFeedAge() > RB_WARN_MS)) return 'RE-SYNCING...';
+        return 'SPECTATING';
+    }
     // CONNECTION LOST is a pure SILENCE detector: nothing on the wire for ~2 heartbeats
     // (RB_WARN_MS). Every inbound datagram -- the minimal 'pi' liveness ping included --
     // refreshes lastRecvWall before dispatch, so a link still carrying ANYTHING never
@@ -799,7 +854,11 @@ function netTickTarget(){
     // just chase a bad number, so report it and steer nowhere; the accumulator keeps the
     // game running at 60Hz either way, and the next start re-bases the origin.
     if(Math.abs(t - simTick) > 600){
-        _netSigLog('! tick target ' + (t - simTick) + 't off: bad start origin');
+        // A PENDING BEGIN means we have already adopted the next origin and are waiting for
+        // the clock to reach it: the old tick count measured against the new origin is
+        // meaningless BY DESIGN, not a bad number, so it earns no line in the overlay. A
+        // spectator waits its whole bias here, at every boundary.
+        if(!s.beginFn) _netSigLog('! tick target ' + (t - simTick) + 't off: bad start origin');
         return null;
     }
     return t;
@@ -948,7 +1007,8 @@ function _netSessionEnd(msg, remoteBye){
     _netTeardown();
     if(wasGame && inGame){   // only while the online duel is actually still on screen
         inGame = false; _wsend({ t:'phase', phase:'menu' });
-        phase = 'duel11'; showHUD(false); Snd.musicStop();
+        phase = (typeof tourneyExitPhase === 'function' && tourneyExitPhase()) || 'duel11';
+        showHUD(false); Snd.musicStop();
         _duelMsg = msg; _duelMsgAt = _msgNow();
         Snd.sfxPlay('fail', cfg.music); _uiDirty = true;
     } else if(phase === 'lobby'){ _netLb.msg = msg; _uiDirty = true; }

@@ -114,17 +114,19 @@ let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
 // latched at game start so it survives regardless of later setting access.
 let _scoreTainted = false;
 // What the name-entry dialog edits: 'score' (game-over high score), 'user' (SETTINGS >
-// USER player name), 'friend' (1:1 ADD FRIEND: 8 hex digits + live camera scan).
+// USER player name), 'friend' (1:1 ADD FRIEND: 8 hex digits + live camera scan), 'tcode'
+// (TOURNAMENT join code: 6 characters off the unambiguous alphabet).
 let entryMode = 'score';
-function _entryChars() { return entryMode === 'friend' ? HEX_CHARS : NAME_CHARS; }
-function _entryMax()   { return entryMode === 'friend' ? 8 : MAX_NAME; }
+function _entryFixed(){ return entryMode === 'friend' || entryMode === 'tcode'; }   // a known-length code, not free text
+function _entryChars() { return entryMode === 'friend' ? HEX_CHARS : entryMode === 'tcode' ? CODE_CHARS : NAME_CHARS; }
+function _entryMax()   { return entryMode === 'friend' ? 8 : entryMode === 'tcode' ? CODE_LEN : MAX_NAME; }
 // A friend ID gets one cursor slot PAST the last digit: a SUBMIT button the cursor lands on
 // when the 8th digit goes in, so the same OK that typed the ID also sends it -- on a TV or a
 // gamepad there is no RETURN key to hunt for. That slot only exists while all 8 digits are
 // in: an incomplete ID has no live key to press and none to walk onto, which is what the
 // greyed button on screen means. Name entry keeps its own return glyph on the dial, so it
 // stops at the last character as before.
-function _entryReady() { return entryMode === 'friend' && nameStr.length >= _entryMax(); }
+function _entryReady() { return _entryFixed() && nameStr.length >= _entryMax(); }
 function _entryLast()  { return _entryMax() - (_entryReady() ? 0 : 1); }
 function _entryOnOk()  { return _entryReady() && nameCursorPos >= _entryMax(); }
 // Transient confirmation line on the 1:1 menu. Stamped on the WALL clock, not the
@@ -582,6 +584,10 @@ function _shopToggleWear(item){
 // play: both players can legitimately wear a crown, and only the uid tells the server's two
 // rows apart. An id with no uid is an item bought while offline -- in play, just unattestable.
 function _duelWsLists(hosting){
+    // Spectating: neither list is ours to derive. Both players' worn gear comes off the wire
+    // in the bootstrap context, already in PLAYER order -- exactly what this returns.
+    const sw = (typeof netSpecWs === 'function') ? netSpecWs() : null;
+    if(sw) return sw;
     const wu = itemWornUids();
     const mine = _wsWorn(cfg.wornItems).map(id => ({ id, uid:wu.uids[id] || '' }));
     if(hosting == null) return [mine, []];
@@ -749,6 +755,10 @@ const CONTROLS = {
     lobby:        ['esc','ok','dpad'],
     friendId:     ['esc','ok','dpad'],
     invite:       ['esc','ok','dpad'],
+    tourneyLobby:    ['esc','ok','dpad'],
+    tourneyBracket:  ['esc','ok','dpad'],
+    tourneyCeremony: ['esc','ok','dpad'],
+    tourneyPodium:   ['esc','ok','dpad'],
     // A duel's local player gets exactly the same controls as a classic player:
     // duel mirrors playing, duelPaused mirrors paused. The dpad was excluded back
     // when a duel was always LOCAL (two players, one keyboard -- beginDuel() still
@@ -811,6 +821,13 @@ const SCREENS = {
     lobby:        { d:()=>drawLobby(),           hud:false },
     friends:      { d:()=>drawFriends(),         hud:false },
     invite:       { d:()=>drawInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
+    // The tournament screens are static pictures of what the server last said, so they
+    // freeze like every other menu. The lobby and the ceremony animate their waiting dots,
+    // which is the only thing on them that moves while nothing happens.
+    tourneyLobby:    { d:()=>drawTourneyLobby(),    hud:false, freeze:true, anim:()=> true },
+    tourneyBracket:  { d:()=>drawTourneyBracket(),  hud:false, freeze:true },
+    tourneyCeremony: { d:()=>drawTourneyCeremony(), hud:false, freeze:true, anim:()=> true },
+    tourneyPodium:   { d:()=>drawTourneyPodium(),   hud:false, freeze:true },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },
     duelPaused:   { d:()=>drawDuelBoard(simNow), hud:true, freeze:true },
@@ -938,7 +955,13 @@ function loop(rafNow) {
     // nothing is animating -- neither a global overlay nor the screen's own anim().
     if(phase!==_lastPhase){
         _uiDirty=true;
-        if(phase==='duelOver') quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
+        if(phase==='duelOver'){
+            quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
+            // A tournament match is over the instant the sim says so: report it now, from
+            // the one place that sees every ending (a win, a loss and a double knockout all
+            // land here), rather than from any of the paths that lead to it.
+            if(typeof tourneyMatchOver==='function') tourneyMatchOver();
+        }
         if(phase==='menu'){
             if(typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
             // Leaving 1:1 to the main menu: some exit paths (e.g. duelMenu Back) drop straight
@@ -1066,6 +1089,7 @@ function beginOnlineDuel(seed, hosting){
         _wDuel = true;
         _worker.postMessage(Object.assign({ t:'duelStartNet', seed:seed>>>0,
             my: hosting ? 0 : 1, ws: _duelWsLists(hosting), hearts: _duelMatchHearts(),
+            spec: netSpectating(),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 }, _duelClaimArgs(hosting)));
         // The epoch stamp + receive gate live on MAIN (_netSend/_netHandleMsg read
@@ -1100,7 +1124,7 @@ function beginOnlineDuelLevel(hosting, lvl){
     if(_useWorker()){
         _wDuel = true;
         _worker.postMessage({ t:'duelLevelNet',
-            my: hosting ? 0 : 1, lvl: lvn,
+            my: hosting ? 0 : 1, lvl: lvn, spec: netSpectating(),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
         // Main must mirror the worker's rebase (see beginOnlineDuel): the epoch
@@ -1125,7 +1149,7 @@ function beginOnlineDuelRespawn(hosting){
     if(_useWorker()){
         _wDuel = true;
         _worker.postMessage({ t:'duelRespawnNet',
-            my: hosting ? 0 : 1,
+            my: hosting ? 0 : 1, spec: netSpectating(),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 });
         // Main must mirror the worker's rebase (see beginOnlineDuel): the epoch
@@ -1182,6 +1206,9 @@ function _initWorker(){
         const m = e.data;
         if(m.t==='wire'){ if(netWorkerDuelOn() && typeof _netSend==='function') _netSend(m.o); return; }   // duel-core's outbound packet
         if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
+        // The worker-hosted spectator's one outbound: ask the feed for a fresh state. Not a
+        // wire packet -- nothing ever goes toward the two players -- so it has its own message.
+        if(m.t==='specReq'){ if(typeof netSpecResync==='function') netSpecResync(); return; }
         // An item handover the worker's duel-core attested and released. Only MAIN can post
         // it (the registry client owns cfg and the fetch), so it comes out as a message the
         // same way the wire packets do.

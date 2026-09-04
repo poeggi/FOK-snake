@@ -858,16 +858,19 @@ function drawNameEntry(now) {
         ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     } else {
         drawGrid(); drawOvBg(0.92);
-        ctg(entryMode==='friend'?'ADD FRIEND':'YOUR NAME',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-        ct(entryMode==='friend'?'FRIEND ID (8 HEX DIGITS):':'ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
+        ctg(entryMode==='friend'?'ADD FRIEND':entryMode==='tcode'?'JOIN TOURNAMENT':'YOUR NAME',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+        ct(entryMode==='friend'?'FRIEND ID (8 HEX DIGITS):':entryMode==='tcode'?'JOIN CODE (6 CHARACTERS):':'ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     }
-    const isFriend=entryMode==='friend';
+    // Two kinds of field share this dialog: FREE TEXT, which ends when the typist says so,
+    // and a FIXED code of known length, which ends by itself and so earns a SUBMIT pill the
+    // cursor walks onto. The friend id adds its own quad dash and camera panel on top.
+    const isFriend=entryMode==='friend', isFixed=_entryFixed();
     const sw=30,sh=40,gap=5,dashW=isFriend?18:0;                 // friend id shows as XXXX-XXXX
     // ...and ends in a SUBMIT button (_entryOnOk). Deliberately not a ninth slot: shorter,
     // wider, a pill rather than a box, and a clear step of its own away from the field, so it
     // reads as a control to press instead of somewhere else to type.
-    const okW=isFriend?46:0,okH=34,okGap=isFriend?22:0;
-    const totalW=max*(sw+gap)-gap+dashW+(isFriend?okGap+okW:0),sx0=Math.floor(CW/2-totalW/2),sy=122;
+    const okW=isFixed?46:0,okH=34,okGap=isFixed?22:0;
+    const totalW=max*(sw+gap)-gap+dashW+(isFixed?okGap+okW:0),sx0=Math.floor(CW/2-totalW/2),sy=122;
     if(isFriend){   // dash between the two 4-digit quads so the mask matches fmtFriendId / SHOW MY ID
         ct('-',sx0+3*(sw+gap)+sw+(gap+dashW)/2,sy+sh/2,'#4a7a4a',FONT.MENU);
     }
@@ -882,10 +885,10 @@ function drawNameEntry(now) {
             if(Math.floor(now/400)%2===0){ctx.fillStyle='#7fff7f55';ctx.fillRect(sx+5,sy+sh-6,sw-10,2);}
         }
     }
-    if(isFriend){
-        // The SUBMIT button: the 8th digit moves the cursor onto it rather than leaving it
-        // parked on the last digit, so the ID is sent with the same OK that typed it. Three
-        // states, and the dead one is dead for real -- short of 8 digits the cursor cannot
+    if(isFixed){
+        // The SUBMIT button: the last character moves the cursor onto it rather than leaving it
+        // parked on the last digit, so the code is sent with the same OK that typed it. Three
+        // states, and the dead one is dead for real -- short of a full code the cursor cannot
         // reach it (_entryLast), so the grey face is not bluffing. Live, it inverts against
         // the hollow slots: filled face, dark glyph.
         const ox=sx0+max*(sw+gap)-gap+dashW+okGap, oy=sy+(sh-okH)/2;
@@ -935,8 +938,8 @@ function drawNameEntry(now) {
     // viewfinder and the dial, not at STATUS_Y -- that band is under both of them here.
     // Held longer than the menus' 2.6s: this one is read and acted on, not just noticed.
     if(isFriend && _duelMsg && _msgNow()-_duelMsgAt<5000) drawStatus(_duelMsg, 354);
-    ct(isFriend?'UP/DN:letter  L/R:move  A:place  BKSP:del  ESC:back'
-              :'UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,HINT_Y,'#888',FONT.HINT);
+    ct(isFixed?'UP/DN:letter  L/R:move  A:place  BKSP:del  ESC:back'
+             :'UP/DN:letter  L/R:move  A:place  RETURN=submit  ESC:del',CW/2,HINT_Y,'#888',FONT.HINT);
 }
 // Camera viewfinder (ADD FRIEND, right side): live preview while scanning; a
 // verified read auto-fills and submits (see the QR SCANNER source in input.js).
@@ -1285,6 +1288,10 @@ function drawQuitConfirm() {
 // ================================================================
 // 1:1 DUEL SCREENS
 // ================================================================
+// The TOURNAMENT row needs a 4.1 server to mean anything, and until the first hello lands
+// we do not know what we are talking to -- so it greys out rather than promising something
+// the server may not have.
+function _ttMenuOk(){ return typeof netTourneyOk === 'function' && netTourneyOk(); }
 function drawDuelMenu() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
     // at y=24 with glow 16, items from startY=90 in rowH steps, #888 hint at HINT_Y.
@@ -1293,7 +1300,7 @@ function drawDuelMenu() {
     const startY=90, rowH=28;
     const items=[
         {t:'1:1 DUEL',    en:true},
-        {t:'TOURNAMENT',  en:false, note:'(COMING SOON)'},
+        {t:'TOURNAMENT',  en:_ttMenuOk(), note:_ttMenuOk()?null:(netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':'(NEEDS A CONNECTION)')},
         {t:'MY ID',       en:true},
         {t:'ADD FRIEND',  en:true},
         {t:'FRIENDS',     en:true},
@@ -1372,7 +1379,11 @@ function drawLobby(){
         // The ms figure is the estimated one-way path THEIR update travels to
         // reach us (their reported latency/2 + ours/2), not an RTT.
         const e2e=on&&typeof netFriendE2E==='function'?netFriendE2E(id):null;
-        ct(on?('ONLINE'+(e2e!=null?' ~'+e2e+'ms':'')):'OFF', CW/2+170, y, on?'#7fff7f':'#555', FONT.HINT);
+        // A friend mid-duel cannot take an invite, so the row offers the other thing you
+        // can do with them: watch. The status column IS the action label here.
+        const busy=typeof netFriendPlaying==='function'&&netFriendPlaying(id);
+        if(busy) ct('IN 1:1 - WATCH', CW/2+170, y, '#ffd700', FONT.HINT);
+        else ct(on?('ONLINE'+(e2e!=null?' ~'+e2e+'ms':'')):'OFF', CW/2+170, y, on?'#7fff7f':'#555', FONT.HINT);
     });
     if(!fr.length) ct('NO FRIENDS YET - SEE ADD FRIEND', CW/2, startY, '#555', FONT.HINT);
     menuItem('BACK', CH-52, _netLb.sel===fr.length+1);   // BACK toward the bottom, like drawSettings
@@ -1542,4 +1553,160 @@ function drawResetConfirm() {
                 : K==='id'       ? 'NEW ID -- your old friends can no longer invite you'
                 :                  'scores  fokoins  achievements  shop';
     drawConfirm({ title, note, sel:quitConfirmSel, behind:drawSettings, danger:true });
+}
+
+// ================================================================
+// TOURNAMENT SCREENS
+// Four static pictures of what the server last said, in the order a player meets them:
+// the lobby they create or join, the bracket they watch fill in, the ceremony that names
+// the next match, and the podium. None of them computes anything about the tournament --
+// every number on them came off the wire (see tourney.js).
+// ================================================================
+// Column text: the shared ct() is centered-only, and a table needs edges.
+function _ttCol(t, x, y, col, size, align){
+    ctx.font = `${size||FONT.HINT}px "Press Start 2P"`; ctx.textBaseline = 'middle';
+    ctx.textAlign = align || 'left'; ctx.fillStyle = col || '#cccccc';
+    ctx.fillText(t, x, y);
+    ctx.textAlign = 'center';
+}
+function _ttDots(){ return '.'.repeat(1 + Math.floor(((typeof performance !== 'undefined') ? performance.now() : 0) / 200) % 5); }
+// The row strip every tournament screen ends with: the list from tourneyRows(), drawn from
+// startY, with its last entry (always BACK) parked at the bottom like every other menu.
+function _ttDrawRows(startY, rowH){
+    const rows = tourneyRows(), sel = Math.min(Math.max(tourneyUi().sel, 0), rows.length - 1);
+    rows.forEach((r, i) => {
+        const last = i === rows.length - 1, y = last ? CH - 52 : startY + i * rowH;
+        if(r.en === false) ct(sel === i ? ('> ' + r.t + ' <') : r.t, CW/2, y, sel === i ? '#777' : '#555', FONT.MENU);
+        else menuItem(r.t, y, sel === i);
+        if(r.note && !last) ct(r.note, CW/2 + 176, y, sel === i ? '#ffd700' : '#666', FONT.HINT);
+    });
+}
+function drawTourneyLobby(){
+    drawGrid(); drawOvBg(0.92);
+    ctg('TOURNAMENT', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const t = tourneyView(), ui = tourneyUi();
+    if(!t){
+        const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
+        if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
+        else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
+        else ct('2 TO ' + tourneyMax() + ' PLAYERS - ONE MATCH AT A TIME, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
+        _ttDrawRows(84, 26);
+        if(!tourneyLobbyList().length && netTourneyOk()) ct('NO OPEN LOBBIES NEARBY' + _ttDots(), CW/2, 84 + 3.5 * 26, '#555', FONT.HINT);
+        if(ui.msg) drawStatus(ui.msg);
+        ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    // A lobby we hold. The join code is the whole point of the screen, so it is the
+    // biggest thing on it -- somebody is reading it out loud across a room.
+    const n = (t.players || []).length, host = t.host === getPlayerId();
+    ct('JOIN CODE', CW/2, 46, '#888', FONT.HINT);
+    ctg(t.code || '------', CW/2, 72, '#ffd700', FONT.JUMBO, GLOW.BIG);
+    (t.players || []).slice(0, tourneyMax()).forEach((p, i) => {
+        const me = p && p.id === getPlayerId();
+        ct((p && p.id === t.host ? '* ' : '') + String((p && p.name) || '').toUpperCase().slice(0, 15),
+           CW/2, 100 + i * 14, me ? '#7fff7f' : '#aaa', FONT.HINT);
+    });
+    ct(n + (n === 1 ? ' PLAYER' : ' PLAYERS') + ' - ' + _ttMatches(n) + ' MATCHES IN ROUND 1'
+       + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, 100 + tourneyMax() * 14 + 8, '#4a7a4a', FONT.HINT);
+    _ttDrawRows(272, 26);
+    if(ui.msg) drawStatus(ui.msg);
+    else if(!host) drawStatus('WAITING FOR THE HOST TO START' + _ttDots());
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// Round 1 is a table of points; every round after it is a tree of nodes. Both are the
+// server's own words -- standings rows and bracket nodes, rendered, never recomputed.
+function drawTourneyBracket(){
+    const t = tourneyView(), ui = tourneyUi();
+    if(!t){ drawTourneyLobby(); return; }
+    drawGrid(); drawOvBg(0.92);
+    const ko = (t.round | 0) >= 2;
+    ctg(ko ? 'KNOCKOUT' : 'STANDINGS', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const cur = t.cursor ? String(t.cursor) : '';
+    ct(cur ? ('NOW PLAYING: ' + _ttMatchLine(t, cur)) : ('ROUND ' + (t.round | 0) + _ttDots()),
+       CW/2, 46, '#ffd700', FONT.HINT);
+    if(t.frozen) ct('A MATCH IS FROZEN - THE TWO REPORTS DISAGREED', CW/2, 60, '#ff5555', FONT.HINT);
+    if(!ko){
+        const rows = t.standings || [], adv = (t.advancers || []).map(String);
+        _ttCol('#',      CW/2 - 210, 78, '#666', FONT.HINT);
+        _ttCol('PLAYER', CW/2 - 180, 78, '#666', FONT.HINT);
+        _ttCol('PTS',    CW/2 + 110, 78, '#666', FONT.HINT, 'right');
+        _ttCol('DIFF',   CW/2 + 200, 78, '#666', FONT.HINT, 'right');
+        rows.slice(0, tourneyMax()).forEach((r, i) => {
+            const y = 96 + i * 15, me = String(r.id) === getPlayerId();
+            // The advancing half is what everyone is actually reading the table for.
+            const up = adv.length ? adv.indexOf(String(r.id)) >= 0 : (i < Math.max(2, Math.ceil(rows.length / 2)));
+            const col = me ? '#7fff7f' : up ? '#ffd700' : '#888';
+            _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.HINT);
+            _ttCol(_ttName(r.id).slice(0, 15),              CW/2 - 180, y, col, FONT.HINT);
+            _ttCol(String(r.pts),                           CW/2 + 110, y, col, FONT.HINT, 'right');
+            _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.HINT, 'right');
+        });
+        if(!rows.length) ct('NO MATCHES SETTLED YET' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
+    } else {
+        (t.bracket || []).slice(0, 13).forEach((nd, i) => {
+            const y = 82 + i * 15, live = String(nd.nid) === cur;
+            const done = !!(nd.winner || nd.draw);
+            const col = live ? '#ffd700' : done ? '#7fff7f' : '#888';
+            _ttCol(String(nd.nid || '').toUpperCase(), CW/2 - 210, y, col, FONT.HINT);
+            _ttCol(_ttMatchLine(t, nd.nid, nd),        CW/2 - 140, y, col, FONT.HINT);
+        });
+        if(!(t.bracket || []).length) ct('THE BRACKET IS BEING DEALT' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
+    }
+    _ttDrawRows(296, 26);
+    if(ui.msg) drawStatus(ui.msg);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// One node as a line: the pairing, plus the result once there is one.
+function _ttMatchLine(t, nid, nd){
+    if(!nd) for(const x of [].concat(t.schedule || [], t.bracket || [])) if(x && String(x.nid) === String(nid)){ nd = x; break; }
+    if(!nd && t.roles && String(t.roles.nid) === String(nid)) nd = { players: t.roles.players };
+    if(!nd) return String(nid || '');
+    const ps = nd.players || [], a = _ttName(ps[0]), b = _ttName(ps[1]);
+    const pair = (a || '?') + ' vs ' + (b || '?');
+    if(nd.draw) return pair + '  DRAW';
+    if(nd.winner) return pair + '  ' + _ttName(nd.winner) + ' WON';
+    return pair;
+}
+// Between two matches: who is up, at how many hearts, and what this player does about it.
+// It holds until the game itself takes the screen, so nobody is dropped into a duel cold.
+function drawTourneyCeremony(){
+    const t = tourneyView(), r = t && t.roles;
+    if(!r){ drawTourneyBracket(); return; }
+    drawGrid(); drawOvBg(0.92);
+    const ps = r.players || [], you = String(r.you || 'idle');
+    ct('ROUND ' + (r.round | 0) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''),
+       CW/2, 60, '#888', FONT.HINT);
+    ctg(_ttName(ps[0]).slice(0, 12), CW/2, 116, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    ct('vs', CW/2, 146, '#666', FONT.MENU);
+    ctg(_ttName(ps[1]).slice(0, 12), CW/2, 176, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const hm = _duelHearts(r.hm);
+    if(you === 'play'){
+        ctg('YOU ARE UP', CW/2, 228, '#ffd700', FONT.JUMBO, GLOW.BIG);
+        ct(hm + (hm === 1 ? ' HEART' : ' HEARTS') + (r.stakes ? '  -  ITEM STAKES ON' : ''), CW/2, 258, '#ffaa44', FONT.HINT);
+    } else if(you === 'spectate'){
+        ctg('YOU SPECTATE', CW/2, 228, '#7fff7f', FONT.JUMBO, GLOW.BIG);
+        ct('THE MATCH REACHES YOU A MOMENT BEHIND THE PLAYERS', CW/2, 258, '#4a7a4a', FONT.HINT);
+    } else {
+        ctg('SIT THIS ONE OUT', CW/2, 228, '#888', FONT.JUMBO, GLOW.TEXT);
+    }
+    drawStatus(tourneyUi().msg || ('CONNECTING' + _ttDots()));
+    ct('ESC:bracket', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+function drawTourneyPodium(){
+    const t = tourneyView();
+    if(!t){ drawTourneyLobby(); return; }
+    drawGrid(); drawOvBg(0.92);
+    ctg('TOURNAMENT OVER', CW/2, 30, '#ffd700', FONT.TITLE, GLOW.TITLE);
+    const pod = (t.podium || []).map(String);
+    if(pod[0] === getPlayerId()) ctg('YOU WON IT', CW/2, 72, '#ffd700', FONT.JUMBO, GLOW.HERO);
+    const place = [['1ST', '#ffd700', FONT.JUMBO, 130], ['2ND', '#cccccc', FONT.TITLE, 176], ['3RD', '#cd7f32', FONT.TITLE, 216]];
+    place.forEach((pl, i) => {
+        if(!pod[i]) return;
+        ct(pl[0], CW/2 - 150, pl[3], pl[1], FONT.HINT);
+        ctg(_ttName(pod[i]).slice(0, 14), CW/2, pl[3], pl[1], pl[2], GLOW.TEXT);
+    });
+    if(!pod.length) ct('NO PODIUM' + _ttDots(), CW/2, 130, '#555', FONT.HINT);
+    _ttDrawRows(268, 26);
+    if(tourneyUi().msg) drawStatus(tourneyUi().msg);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

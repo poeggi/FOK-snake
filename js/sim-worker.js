@@ -31,6 +31,10 @@ self.cfg = { diff: 1, turbo: true };
 // debug go back over postMessage. duel-core references a handful of main-thread
 // globals -- this prelude gives them worker-appropriate homes.
 let _dcOn = false, _dcMy = 0, _dcOfs = null, _dcStartPts = 0;
+// SPECTATOR mode: the identical core, fed a relayed copy of two other people's duel
+// (net-spec.js on main). It authors nothing and transmits nothing -- the seat _dcMy
+// reports is a fiction the core knows to ignore while this is set.
+let _dcSpec = false;
 let _dcSnapN = 0, _dcSnapAt = 0;   // phase-set counter + moment, mirrored to the timing overlay
 let _dcEvents = [];   // [{tk, e}] tick-tagged sim events for the main-thread 2-tick queues
 let _dcRewTo = 0;     // deepest rewind since the last post (0 = none): main cancels stale fx
@@ -42,6 +46,15 @@ self._duelMsg = ''; self._duelMsgAt = 0;
 self._msgNow = () => performance.now();
 self.netGameActive = () => _dcOn;
 self.netMyIndex = () => _dcMy;
+self.netSpectating = () => _dcSpec;
+// The spectator's ONE outbound: "say the world again". It is not a wire packet (nothing
+// goes toward the players), so it crosses the seam as its own message and main asks the
+// feed, exactly as the in-process home calls _spReq directly.
+self.netSpecResync = () => { if(_dcSpec) postMessage({ t:'specReq' }); };
+// A spectator's sim origin is already biased on MAIN (net-session.js adds it to startPts
+// before the worker is told), so the worker needs no bias of its own -- it just ticks the
+// startPts it was handed. Declared for the core's benefit only.
+self.netSpecBias = () => 0;
 // Monotonic wall reading -- see net-api.js _wall(): the lockstep timeline must not ride the
 // OS-adjustable Date.now(), or NTP slews leak in as drift. timeOrigin pins performance.now()
 // to a one-time wall capture. The worker twin MUST match net-api.js exactly.
@@ -49,7 +62,7 @@ self._wall = () => (typeof performance !== 'undefined' && performance.now && per
     ? performance.timeOrigin + performance.now()
     : Date.now();
 self.netPts = () => _dcOfs == null ? null : Math.round(_wall() + _dcOfs);
-self._netSend = (o) => { if(_dcOn) postMessage({ t:'wire', o }); };
+self._netSend = (o) => { if(_dcOn && !_dcSpec) postMessage({ t:'wire', o }); };
 self._netSigLog = (line) => { if(_dcOn) postMessage({ t:'dsig', line }); };
 self._netDbg = { inRx:0, inTx:0, inLog:[], peerTkOfs:0, lag:0, hbRx:0, hbTx:0 };
 // Tick-tag events instead of game.js's direct dispatch: main replays them from its own
@@ -237,6 +250,7 @@ onmessage = (e) => {
         // ---- online duel (net-session.js on main forwards; duel-core here simulates) ----
         case 'duelStartNet':   // a (re)start: fresh seed/startPts, rollback state rebased
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? null : m.ofs); _dcStartPts = m.startPts || 0;
+            _dcSpec = !!m.spec;   // watching, not playing (net-spec.js): author nothing, send nothing
             _dcOn = true; self.inGame = true;
             simCommand({ t:'startDuel', seed:m.seed>>>0, net:true, ws:m.ws, hearts:m.hearts });   // net: deaths hold for the negotiated respawn boundary; hearts = the go's negotiated cap
             _rbReset();                                  // AFTER startDuel: it rewinds simTick, the base reads it
@@ -256,6 +270,7 @@ onmessage = (e) => {
         case 'duelLevelNet':   // online level-up (mirrors duelStartNet, but keeps players/score/lives)
             if (!_dcOn) break;
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? _dcOfs : m.ofs); _dcStartPts = m.startPts || _dcStartPts;
+            if(m.spec !== undefined) _dcSpec = !!m.spec;
             simCommand({ t:'startDuelLevel', level: m.lvl|0 });   // host-authored target level, carried on the go
             _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
@@ -267,6 +282,7 @@ onmessage = (e) => {
         case 'duelRespawnNet': // post-death restart (mirrors duelLevelNet; seed + level stay, board rebuilt)
             if (!_dcOn) break;
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? _dcOfs : m.ofs); _dcStartPts = m.startPts || _dcStartPts;
+            if(m.spec !== undefined) _dcSpec = !!m.spec;
             simCommand({ t:'startDuelRespawn' });
             _rbReset();   // startDuelRespawn rewound simTick; the rollback base reads it
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
@@ -279,12 +295,12 @@ onmessage = (e) => {
             if (_dcOn) _rbArmFullResync();
             break;
         case 'duelEndNet':
-            _dcOn = false; self.inGame = false; _rbReset(); _dcEvents.length = 0; _dcRewTo = 0;
+            _dcOn = false; _dcSpec = false; self.inGame = false; _rbReset(); _dcEvents.length = 0; _dcRewTo = 0;
             break;
         case 'peerPkt': {      // a wire packet from the peer (pts-gated on main already)
             if (!_dcOn) break;
             const p = m.m;
-            if (p.t === 'in'){ _netDbg.hbRx++; _netPeerInput(p); }
+            if (p.t === 'in'){ _netDbg.hbRx++; _netPeerInput(p, m.p); }   // m.p: the AUTHOR index, carried on the spectator path only
             else if (p.t === 'h')   _rbCheckHash(p);
             else if (p.t === 'st')  _rbCheckState(p);
             else if (p.t === 'rs')  _rbApplyResync(p);

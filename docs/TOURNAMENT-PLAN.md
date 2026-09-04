@@ -80,8 +80,29 @@ action by a second and a half.
   scenario ever reaches a powered self-bite (verified by arming the rule to
   throw and re-running them), so the rule is new ground rather than a silent
   rewrite of the recorded lanes.
-- Phases B..F: NOT STARTED. Order: B -> C -> E -> F. B onward is blocked on
-  the server speaking API 4.1.
+- Phase B (spectator core): DONE. js/net-spec.js holds the whole spectator
+  side; the sim is the players' sim with input authoring off and its origin
+  biased by SPEC_DELAY_MS per hop, so forwarded packets land in the watcher's
+  FUTURE and no rollback ever fires. Covered by test/duel-spec.js.
+- Phase C (two-tier relay tree + failover): DONE, in the same file. The feeder
+  serves SPEC_MAX_DIRECT primaries; everyone else hangs off those two, dual-
+  connected, and fails over locally on envelope silence. Escalations that need
+  the server (standdown, orphan) go through tourney.js. Covered by
+  test/duel-spec-tree.js.
+- Phase E (tournament flow + UI): DONE. js/tourney.js is orchestration only --
+  no sim code anywhere in it. Four screens (lobby, bracket, ceremony, podium)
+  in screens.js, four phases in UI_INPUT/SCREENS/CONTROLS, and the TOURNAMENT
+  menu row is live behind a runtime gate (netTourneyOk(): a reachable server
+  speaking API minor >= 1).
+- Phase F (end to end): DONE. test/tourney-e2e.js plays a whole six-player
+  tournament -- six real harness clients against a scripted server that is the
+  documented contract written out as data -- from the join code to the podium,
+  through the real hello/signal drain. Three client bugs came out of writing
+  it, all fixed: a sheet that arrived while the previous match was still on
+  screen never got its ceremony; a state() re-read wiped the freeze flag off
+  the node it belonged to; and nothing asked the server anything between
+  matches, so a walkover deadline (which the server settles lazily, on the
+  next request that touches the tournament) could sit there forever.
 
 Every phase is independently shippable and green-gated; each wire-surface
 phase is a MINOR bump via annotated tag (hook-managed versions - never

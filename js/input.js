@@ -83,6 +83,13 @@ function _friendAdded(id, state, added){
     _entryLeave('duelMenu'); Snd.sfxPlay('select',cfg.music);
 }
 function _submitName(){
+    if(entryMode==='tcode'){
+        const code=nameStr.toUpperCase();
+        if(code.length!==CODE_LEN){ Snd.sfxPlay('fail',cfg.music); return; }
+        _entryLeave('tourneyLobby');
+        if(typeof tourneyJoin==='function') tourneyJoin(code);
+        return;
+    }
     if(entryMode==='friend'){
         const id=nameStr.toLowerCase();
         // Malformed or our own ID needs no server and stays instant.
@@ -134,13 +141,17 @@ function _nameDelete(){
     if(nameCursorPos>0){nameStr=nameStr.slice(0,nameCursorPos-1)+nameStr.slice(nameCursorPos);nameCursorPos--;_syncDial();Snd.sfxPlay('nav',cfg.music);}
 }
 function _duelExit(){
+    // Walking out of a tournament match IS losing it, and saying so settles the node at
+    // once instead of making everyone wait out the walkover timer. Must run BEFORE the
+    // teardown: the report reads the score off the live session.
+    if(typeof tourneyMatchLeft === 'function') tourneyMatchLeft();
     if(typeof netEndSession === 'function') netEndSession();
     inGame=false; _wsend({t:'phase',phase:'menu'});
     // Leaving on purpose says nothing. _duelMsg is never cleared, only overwritten, so
     // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
     // follow us out and render on the menu as if it had just happened there.
     _duelMsg=''; _duelMsgAt=0;
-    phase='duel11';   // back to where the match was started from, not the main menu
+    phase=(typeof tourneyExitPhase==='function' && tourneyExitPhase()) || 'duel11';   // back to where the match was started from, not the main menu
     showHUD(false); Snd.musicStop(); Snd.sfxPlay('nav',cfg.music);
 }
 function _backToMenu(){ phase='menu'; Snd.sfxPlay('nav',cfg.music); }
@@ -159,6 +170,27 @@ function _navLR(key){
 }
 // The three YES/NO dialogs riding quitConfirmSel share one nav.
 function _navQC(key){ const s=_navLR(key); if(s>=0) quitConfirmSel=s; }
+// One input handler for every tournament screen with rows on it. The rows come from
+// tourneyRows(), which the screens draw from as well, and the list changes shape under us
+// as the server talks -- so the selection is clamped on every use rather than trusted.
+function _ttUiInput(escTo){
+    const pick = () => { const rows = tourneyRows(); return { rows, i: Math.min(Math.max(_ttUi.sel, 0), rows.length - 1) }; };
+    return {
+        nav(key){ const n = tourneyRows().length; _ttUi.sel = _navStep(key, Math.min(Math.max(_ttUi.sel, 0), n - 1), n); },
+        confirm(){
+            const p = pick(), r = p.rows[p.i];
+            if(!r || r.en === false){ Snd.sfxPlay('fail', cfg.music); return; }
+            _ttUi.sel = p.i; r.act();
+        },
+        other(key){
+            if(key !== 'ArrowLeft' && key !== 'ArrowRight') return false;
+            const p = pick(), r = p.rows[p.i];
+            if(!r || !r.lr) return false;
+            r.act(); return true;   // a two-way row toggles on LEFT/RIGHT exactly as it does on A
+        },
+        back(){ phase = escTo; Snd.sfxPlay('nav', cfg.music); },
+    };
+}
 const UI_INPUT = {
     menu: {
         nav(key){ menuSel=_navStep(key, menuSel, MENU_ITEMS.length+(ANNOUNCEMENT?1:0)); },
@@ -180,7 +212,10 @@ const UI_INPUT = {
         nav(key){ duelSel=_navStep(key, duelSel, 6); },
         confirm(){
             if(duelSel===0){ Snd.sfxPlay('select',cfg.music); phase='duel11'; duel11Sel=0; }
-            else if(duelSel===1) Snd.sfxPlay('fail',cfg.music);   // TOURNAMENT: greyed until it ships
+            else if(duelSel===1){
+                if(typeof netTourneyOk!=='function' || !netTourneyOk()){ Snd.sfxPlay('fail',cfg.music); _duelMsg=netOffline()?'OFFLINE MODE (SETTINGS > NETWORK)':'TOURNAMENTS UNAVAILABLE'; _duelMsgAt=_msgNow(); }
+                else { Snd.sfxPlay('select',cfg.music); phase='tourneyLobby'; tourneyEnter(); }
+            }
             else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; }
             else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
             else if(duelSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
@@ -241,7 +276,14 @@ const UI_INPUT = {
             if(_netLb.invite){ Snd.sfxPlay('select',cfg.music); _netInviteAnswer(_netLb.inviteSel===0); return; }
             const fr=getFriends();
             if(_netLb.sel===0){ Snd.sfxPlay('select',cfg.music); _netLb.seeking ? _netSeekStop() : _netSeekStart(); }   // QUICK MATCH: the top entry
-            else if(_netLb.sel<=fr.length){ Snd.sfxPlay('select',cfg.music); _netInviteSend(fr[_netLb.sel-1]); }
+            else if(_netLb.sel<=fr.length){
+                const fid=fr[_netLb.sel-1];
+                Snd.sfxPlay('select',cfg.music);
+                // Playing friend -> ask to watch; free friend -> invite. One row, and the
+                // status column already told the player which of the two it is.
+                if(typeof netFriendPlaying==='function'&&netFriendPlaying(fid)){ specWatch(fid,'',''); _netLb.msg='ASKING TO WATCH '+fmtFriendId(fid)+'...'; }
+                else _netInviteSend(fid);
+            }
             else this.back();
         },
         back(){ netLobbyLeave(); phase='duel11'; Snd.sfxPlay('nav',cfg.music); },
@@ -262,6 +304,19 @@ const UI_INPUT = {
             } else { _inviteFid=null; phase='menu'; Snd.sfxPlay('select',cfg.music); }
         },
         back(){ _inviteFid=null; phase='menu'; Snd.sfxPlay('nav',cfg.music); },
+    },
+    // The three tournament screens that offer a choice share ONE handler, because they
+    // share one row model (tourneyRows): whatever the picture above them is, the rows at
+    // the bottom are drawn and dispatched from the same list, so they can never disagree.
+    tourneyLobby: _ttUiInput('duelMenu'),
+    tourneyBracket: _ttUiInput('duelMenu'),
+    tourneyPodium: _ttUiInput('duelMenu'),
+    tourneyCeremony: {
+        // Nothing to choose here: the match is being set up and the next thing to happen
+        // is the game itself. ESC steps back to the bracket without cancelling anything.
+        nav(){},
+        confirm(){ Snd.sfxPlay('fail',cfg.music); },
+        back(){ phase='tourneyBracket'; Snd.sfxPlay('nav',cfg.music); },
     },
     settings: {
         nav(key){
@@ -418,6 +473,9 @@ const UI_INPUT = {
         nav: _navQC,
         confirm(){
             Snd.sfxPlay('select',cfg.music);
+            // A tournament match has no rematch to offer: the bracket says what comes next,
+            // and the only thing left to do here is go back and look at it.
+            if(typeof tourneyActive==='function' && tourneyActive()){ _duelExit(); return; }
             if(quitConfirmSel===0){
                 if(typeof netGameActive==='function' && netGameActive()) netAgain();   // online: agree first
                 else beginDuel();   // local rematch: fresh match, lives + scores reset
@@ -446,6 +504,7 @@ const UI_INPUT = {
             // (leave ADD FRIEND at any time); in the name/user modes it cancels only on
             // an EMPTY field, so a held Backspace never falls through and exits. Score
             // mode has no cancel at all: a run always ends in a submit.
+            if(key!=='Backspace' && entryMode==='tcode'){ _entryLeave('tourneyLobby'); Snd.sfxPlay('nav',cfg.music); return; }
             if(key!=='Backspace' && entryMode==='friend'){ _entryLeave('duelMenu'); Snd.sfxPlay('nav',cfg.music); return; }
             if(key!=='Backspace' && entryMode!=='score' && nameStr.length===0){ _entryLeave('settings'); Snd.sfxPlay('nav',cfg.music); }
             else _nameDelete();
@@ -476,6 +535,9 @@ function gameSteer(p, d){
 // (the answerer's own snake is players[1]), and local P2 keys are dead online --
 // the same input-player -> sim-index mapping every other input path uses.
 function _armIndex(p){
+    // Spectating: NO slot is ours. Both snakes belong to the feed, so every arm is dead --
+    // the input end of the same rule netLocalInput enforces at the authoring end.
+    if(typeof netSpectating === 'function' && netSpectating()) return -1;
     if(typeof netGameActive === 'function' && netGameActive()){ return p === 0 ? netMyIndex() : -1; }
     return p;
 }
@@ -1374,6 +1436,10 @@ function onBgHide() {
     // togglePause() refuses online too.
     const netLive = typeof netGameActive === 'function' && netGameActive();
     if (phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicMute('pause'); }
+    // A hidden tab cannot forward packets on time, and everyone downstream of us would
+    // spend seconds discovering that. Drop the relay duty the moment we go away; nothing
+    // about our OWN watch or duel changes, only what we serve.
+    if (typeof specStandDown === 'function') specStandDown();
     Snd.audioSuspend();
 }
 function onBgShow() {

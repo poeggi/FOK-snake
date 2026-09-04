@@ -350,6 +350,7 @@ runTest('SMOKE-NET', `
         const _m=_netApiMajor(r.api), _mn=_netApiMinor(r.api);
         _netApiNewer=(_m!==null && _m>NET_API_BUILT);
         _netApiOutdated=(_m===NET_API_BUILT && _mn>NET_API_BUILT_MINOR);
+        _netSrvMin=(_m===NET_API_BUILT && _mn!==null)?_mn:-1;
         if(typeof r.debug==='boolean'){
             if(_netDbgSrv!==null && r.debug!==_netDbgSrv){ cfg.debug=r.debug?Math.max(1,cfg.debug|0):0; }
             else if(_netDbgSrv===null && r.debug && !(cfg.debug|0)){ cfg.debug=1; }
@@ -372,18 +373,27 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _applyHello({api:'4.0'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.0: the same version must read as up to date';
+    _applyHello({api:'4.1'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.1: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
+    // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
+    // without it _netOk() is false and both halves of the assertion pass vacuously.
+    const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
+    if(netSrvMinor()!==1 || !netTourneyOk()) throw 'a same-major 4.1 server must open the tournament gate';
     _applyHello({api:'3.5'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER major (server 3.5) must read as up to date';
     _applyHello({api:4});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags';
-    _applyHello({api:'4.1'});   // newer MINOR: still compatible, but an update exists
+    // An OLDER minor still plays: only the features that need 4.1 are shut off, and the
+    // menu row that offers them greys out rather than failing at the first POST.
+    _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
+    if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
+    globalThis.fetch=_oFetchT;
+    _applyHello({api:'4.2'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible
     if(!_netApiNewer || netUpdateNotice()!=='UPDATE REQUIRED - PLEASE RELOAD') throw 'a newer major must flag UPDATE REQUIRED and gate online off';
     _netApiNewer=false; _netApiOutdated=false;
-    log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major');
+    log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
     cfg.debug=0;
 
     // The epoch MOVES with a rematch/level start. Missing that made the new round

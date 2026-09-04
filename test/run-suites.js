@@ -28,6 +28,9 @@ process.chdir(path.join(__dirname, '..'));
 // weight = measured milliseconds, used for longest-first dispatch only. A stale number
 // costs packing efficiency, never correctness.
 const HEAVY = [
+    ['test/tourney-e2e.js',     8000, 'a whole tournament end to end (six clients, a scripted server, lobby to podium)'],
+    ['test/duel-spec-tree.js', 44800, 'the relay tree (fan-out cap, warm standby, primary death, whole-tier wipeout)'],
+    ['test/duel-spec.js',      62400, 'spectating (a watcher runs the same sim one bias behind the players; relay tree, backup feeder)'],
     ['test/duel-desync.js',    39500, 'boosting duel stays in lockstep (two clients, real match, over a lossy wire)'],
     ['test/duel-suspend.js',   26900, 'one-sided suspend recovery (a backgrounded client re-anchors its tick base; the live side never jumps)'],
     ['test/duel-boundary.js',  26400, 'P2P level boundary holds lockstep (host bursts to the shared midpoint, ships bth on the go)'],

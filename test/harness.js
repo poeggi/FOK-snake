@@ -71,7 +71,7 @@ function runInGame(driver) {
     sandbox.window.matchMedia = sandbox.matchMedia;
     const ctx = vm.createContext(sandbox);
 
-    const src = ['hmac.js', 'assets.js', 'audio.js', 'sim.js', 'storage.js', 'game.js', 'text.js', 'qr.js', 'render.js', 'screens.js', 'input.js', 'duel-core.js', 'net-api.js', 'net-rtc.js', 'net-relay.js', 'net-session.js', 'items.js']
+    const src = ['hmac.js', 'assets.js', 'audio.js', 'sim.js', 'storage.js', 'game.js', 'text.js', 'qr.js', 'render.js', 'screens.js', 'input.js', 'duel-core.js', 'net-api.js', 'net-rtc.js', 'net-relay.js', 'net-session.js', 'net-spec.js', 'tourney.js', 'items.js']
         .map(f => fs.readFileSync(path.join(JS_DIR, f), 'utf8')).join('\n');
     vm.runInContext(src + '\n' + driver, ctx, { filename: 'fok-bundle.js' });
     return sandbox;

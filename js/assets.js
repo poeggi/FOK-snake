@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v3.1.0';
+const APP_VERSION = 'v3.1.1';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -97,6 +97,11 @@ const SPLASHES = [
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-!?.,\'"#$@&()[]:+ \r';
 const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs are hex)
+// JOIN TOURNAMENT entry dial. The server mints join codes from an alphabet with no 0/O,
+// 1/I/L in it, so nothing anyone reads out of a chat window or across a room is
+// ambiguous -- and the dial offers exactly the characters a code can contain.
+const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ\r';
+const CODE_LEN = 6;
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
 // boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2

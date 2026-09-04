@@ -67,10 +67,18 @@ const RB_RING = 26;          // ring ENTRIES kept, THINNED by RB_SNAP_EVERY (+ t
 const RB_FUTURE = 32;        // honest inputs are authored up to a GAME tick ahead (dir stamps its
                              // effective boundary, simTick + _gDue <= gPer) plus start-time skew;
                              // beyond half a second ahead is a connection problem -- refuse it
+const RB_SPEC_FUTURE = 192;  // ...but a SPECTATOR deliberately runs behind the live edge (its startPts
+                             // is biased per relay hop, net-spec.js), so every forwarded input is
+                             // authored far in its future BY DESIGN -- that lead is exactly what keeps
+                             // a spectator rollback-free. 192 ticks (3.2s) covers two relay hops of
+                             // bias plus wire jitter; beyond it the feed, not the input, is the problem.
 var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
 var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
 var _rbSeq = 0;              // our outgoing input sequence
-var _rbPeerSeq = -1;         // highest peer sequence applied
+var _rbPeerSeq = [-1, -1];   // highest sequence applied, PER AUTHOR index. A duel peer only ever
+                             // fills its own slot; a spectator receives BOTH players' streams on one
+                             // channel, and their sequence lines are independent -- one shared counter
+                             // let whichever player was ahead suppress the other's inputs entirely.
 var _lastLocalDir = null;    // last dir we AUTHORED for our snake -- the intent-change gate (netLocalInput)
 // Every packet repeats the recent inputs, so a lost one is repaired by the next without a
 // retransmit (the DataChannel is deliberately unreliable). 8 covers far more than any hand
@@ -152,7 +160,7 @@ function _rbSentAdd(rec){
 function _rbToWire(tk){ return tk - _rbBase; }
 function _rbFromWire(tk){ return (tk|0) + _rbBase; }
 function _rbReset(){
-    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = -1; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = []; _rbResyncQ = null;
+    _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbSeq = 0; _rbPeerSeq = [-1, -1]; _rbSent = []; _rbHashQ = []; _rbMyHash = []; _rbStateQ = []; _rbResyncQ = null;
     _lastLocalDir = null;   // a fresh match/level carries no authoring history
     _netInDirty = false;
     _netInRepeat = 0;
@@ -505,9 +513,19 @@ function _rbHashSettle(){
                 if(bad.indexOf('_ws') < 0) _wsPeerTagAdd(q.tk, q.g);
             }
         }
+        _rbDbg.desyncAt = where;
+        if(netSpectating()){
+            // A spectator disagreeing with its feeder is the spectator's problem, never the
+            // match's: it holds by construction the STALE copy and is not a party to the
+            // players' lockstep. The only repair it may fire is asking its source to say the
+            // world again -- and the banner stays the neutral RE-SYNCING cover, because
+            // nothing is wrong with the duel these two are playing.
+            if(typeof netSpecResync === 'function') netSpecResync();
+            _netSigLog('! spec drift @' + q.tk + ' ' + where);
+            continue;
+        }
         if(snakes && _rbRing.length){ const le = _rbRing[_rbRing.length - 1]; _rbSendState(le.tk, le.snap); }
         if(struct && netMyIndex() === 0) _rbResyncSend = 1;   // ONE rs, not a burst: the next verdict is the retry
-        _rbDbg.desyncAt = where;
         _netSigLog('! DESYNC @' + q.tk + ' ' + where);
         _duelMsg = 'DESYNC: ' + where.slice(0, 28); _duelMsgAt = _msgNow(); _uiDirty = true;
     }
@@ -618,6 +636,16 @@ function _rbFullState(sn, tk){
         hb:sn.heart, hba:sn.heartAt,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
 }
+// The spectator CHECKPOINT (net-spec.js): the same 'rs' the resync burst ships, taken from the
+// newest ring entry so a late joiner needs only [sctx, this, the tail since] rather than the whole
+// match. Deliberately the SAME builder -- a second "state for spectators" descriptor would be a
+// second thing to keep in step with RB_HASH_DUEL, and the first field forgotten there is a world
+// that never converges. Null before the ring has an entry (the first ticks of a level).
+function _rbSpecSnapshot(){
+    if(!_rbRing.length) return null;
+    const le = _rbRing[_rbRing.length - 1];
+    return _rbFullState(le.snap, le.tk);
+}
 // A loose windswept item off the wire, rebuilt in the sim's own key order. An unknown id or an
 // off-board cell drops the item rather than importing it: losing one cosmetic beats adopting
 // a state the local sim would then hash differently forever.
@@ -641,8 +669,12 @@ function _rbApplyResync(m){
     //   * ORDINARY (T at/behind our tick, or just ahead): a small structural divergence. Stays
     //     HOST-authoritative -- only the joiner (P1) adopts, or a peer 'rs' could overwrite the whole
     //     world (both snakes/level/rng/winner), bypassing the per-owner 'st' ownership guard.
+    // A SPECTATOR owns NEITHER snake -- it authors nothing, so it has no copy of anything
+    // worth defending against the sender. Every branch below adopts the sender's frontier
+    // whole for it; the host-authoritative ownership rules are between the two PLAYERS.
+    const spec = netSpectating();
     const catchUp = T > simTick + RB_DEPTH;
-    if(!catchUp && netMyIndex() !== 1) return;
+    if(!catchUp && !spec && netMyIndex() !== 1) return;
     if(!catchUp && T > simTick){ _rbResyncQ = m; return; }   // early, not aged-out: park (see _rbResyncQ)
     // The FULL authoritative snapshot AT tick T: the whole SHARED world (level/gems/rng/bars/
     // power/heart/timers) plus the HOST's own snake (p0). How we treat OUR snake (p1) depends on
@@ -699,7 +731,11 @@ function _rbApplyResync(m){
         // Both sims land byte-identical at the frontier and STAY converged (a rollback renders
         // final-only, so no visible jump). Adopting the host's stale copy here is what re-yanked
         // our head after a preceding hard-apply had wiped the log the replay needs.
-        if(e.snap && e.snap.players && e.snap.players[1]) snap.players[1] = e.snap.players[1];
+        // ...unless we are SPECTATING: there is no "our snake" here. Both snakes belong to the
+        // feed, so take the sender's copy of p1 as well and let the replay of the forwarded log
+        // re-derive it forward, exactly as the feeder's own sim did.
+        if(spec) _rbUnpackPlayer(m.p1, snap.players[1]);
+        else if(e.snap && e.snap.players && e.snap.players[1]) snap.players[1] = e.snap.players[1];
         e.snap = _rbCloneSnap(snap); _rbRollback(T);
     } else {
         // AGED OUT (a long doze / far clock drift): T is gone from the ring, so there is NO log to
@@ -711,8 +747,11 @@ function _rbApplyResync(m){
         // where it froze -- no teleport -- and the shared spawnAt respawns BOTH sides to the spawn
         // cell in lockstep. One 'st' pushes our snake to the host so it converges to us (the hash
         // would otherwise flag 'players' next second and the host would re-resync): no resync-forever.
+        // Spectating: nothing here is ours to keep -- adopt the whole frontier (same reason as
+        // the in-ring branch above) and never push a correction back at the players.
+        if(spec) _rbUnpackPlayer(m.p1, snap.players[1]);
         const mine = snap.players[1];
-        mine.lives = m.p1.l|0; mine.alive = m.p1.al !== false; mine.score = m.p1.sc|0;
+        if(!spec){ mine.lives = m.p1.l|0; mine.alive = m.p1.al !== false; mine.score = m.p1.sc|0; }
         // Re-anchor our tick to the host's frontier when T is AHEAD (the doze case: we froze, the
         // shared clock ran on, so netTickTarget is already out there). Catching up stops our inputs
         // from landing in the host's deep past -- which is what made it re-resync every second. Same
@@ -724,7 +763,7 @@ function _rbApplyResync(m){
         // ring). Never rewind (T <= simTick: keep our tick so the shared world is not dragged back).
         const anchor = T > simTick ? T - 1 : simTick;
         snap.simTick = anchor; snap.simNow = anchor * TICK_MS; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map();
-        _rbSendState(anchor, simSnapshot());
+        if(!spec) _rbSendState(anchor, simSnapshot());
     }
     _rbStateQ = []; _rbHashQ = [];
     _rbResyncSend = 0; _rbResyncFull = false;   // adopting a resync cancels our own owed sends (and any stale full-flag with them)
@@ -734,7 +773,9 @@ function _rbApplyResync(m){
 // Called each live tick beside _rbHashSettle: apply any peer state whose tick has settled.
 function _rbStateSettle(){
     if(!_rbStateQ.length) return;
-    const mine = netMyIndex();
+    // -1 while spectating: neither snake is ours, so no incoming patch is ever refused as
+    // "the peer overwriting our own snake" -- both players' corrections must land here.
+    const mine = netSpectating() ? -1 : netMyIndex();
     for(let i = _rbStateQ.length - 1; i >= 0; i--){
         const q = _rbStateQ[i];
         if(simTick < q.tk + RB_STATE_SETTLE) continue;   // authoritative: apply almost immediately (not the hash wait)
@@ -1072,11 +1113,14 @@ function _rbPeerSteppedSince(pi, tk){
     const a = players[pi].snake[0];
     return a.x !== h[pi*2] || a.y !== h[pi*2 + 1];
 }
-// The peer's inputs -> our log, always under the OTHER index: a hostile peer can
-// steer nothing but its own snake. Each packet repeats the last few inputs, so a
-// lost one is repaired by the next without a retransmit (the DataChannel is
-// deliberately unreliable).
-function _netPeerInput(m){
+// Inputs off the wire -> our log, under the AUTHOR's index. In a duel that is always
+// the other seat: a hostile peer can steer nothing but its own snake, so the caller
+// passes nothing and we derive it. A SPECTATOR receives both players' packets on one
+// forwarded channel and cannot derive the author from its own seat, so its feed layer
+// passes srcIdx explicitly (the envelope's `p`, stamped by the feeder that owns the tap).
+// Each packet repeats the last few inputs, so a lost one is repaired by the next without
+// a retransmit (the DataChannel is deliberately unreliable).
+function _netPeerInput(m, srcIdx){
     if(!netGameActive() || !inGame || !Array.isArray(m.l)) return;
     // An honest peer sends at most RB_RX_MAX records; a hostile one could pack tens of
     // thousands into one `l` (each an unbounded _rbLog append + a re-sim cost). Cap it.
@@ -1098,16 +1142,21 @@ function _netPeerInput(m){
         // burst to catch its tick base forward. Cheap; _rbNoteBehindPeer no-ops unless truly deep.
         _rbNoteBehindPeer(_rbFromWire(m.tk));
     }
-    const oP = 1 - netMyIndex();
+    const oP = (srcIdx === 0 || srcIdx === 1) ? srcIdx : (1 - netMyIndex());
+    // A spectator's own seat is a fiction (it authors nothing), so a forwarded packet
+    // claiming OUR index is simply another author's stream, not an attempt to steer us.
+    // In a live duel it still is: refuse it there.
+    if(!netSpectating() && oP === netMyIndex()){ _rbDbg.drop++; return; }
+    const fut = netSpectating() ? RB_SPEC_FUTURE : RB_FUTURE;
     let earliest = Infinity;
     for(const r of m.l){
         const q = r.q|0;
-        if(q <= _rbPeerSeq) continue;            // already applied (redundant copy)
+        if(q <= _rbPeerSeq[oP]) continue;        // already applied (redundant copy)
         // Sequence gap the redundancy window could NOT cover = inputs truly lost. Every
         // packet repeats the last RB_REDUNDANCY inputs, so a gap only survives to here once
         // the missing q has been shifted off the sender's log (>RB_REDUNDANCY packets in a
         // row lost). The gap size IS the lost-input count. (_rbPeerSeq < 0 = first ever.)
-        if(_rbPeerSeq >= 0 && q > _rbPeerSeq + 1) _rbDbg.lost += (q - _rbPeerSeq - 1);
+        if(_rbPeerSeq[oP] >= 0 && q > _rbPeerSeq[oP] + 1) _rbDbg.lost += (q - _rbPeerSeq[oP] - 1);
         const tk = _rbFromWire(r.tk);            // their duel-relative tick -> our counter
         const d = (r.d && typeof r.d === 'object') ? { x:r.d.x|0, y:r.d.y|0 } : null;
         const okDir = d && Math.abs(d.x) + Math.abs(d.y) === 1;
@@ -1120,8 +1169,8 @@ function _netPeerInput(m){
         // at the wrong tick would desync the two worlds silently. Refuse, visibly.
         if(tk <= simTick - RB_DEPTH){ _rbRefused(); _netSigLog('! input too old @' + tk); continue; }
         // Authored far ahead of us: an honest peer stamps its OWN current tick.
-        if(tk > simTick + RB_FUTURE){ _rbRefused(); _netSigLog('! input from the future @' + tk); continue; }
-        _rbPeerSeq = q;
+        if(tk > simTick + fut){ _rbRefused(); _netSigLog('! input from the future @' + tk); continue; }
+        _rbPeerSeq[oP] = q;
         _rbAdd(tk, cmd);
         _netDbg.inRx++;
         _netDbg.inLog.unshift(String(r.k) + '@' + tk);
@@ -1178,6 +1227,10 @@ function _netPeerInput(m){
 // Returns true when the online path consumed it; p!==0 is swallowed (no local P2).
 function netLocalInput(kind, p, d, now){
     if(!netGameActive()) return false;
+    // Spectating: swallowed, never authored. This is the authoring end of the same rule
+    // _armIndex enforces at the input end -- belt and braces, because a spectator that
+    // authored even one record would fork its world off the feed it is meant to mirror.
+    if(netSpectating()) return true;
     if(p !== 0) return true;
     if(!inGame) return true;
     // Worker-hosted duel (main thread only): the core lives in the sim worker, so the

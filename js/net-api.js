@@ -16,7 +16,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 0;   // built against 4.0 (items.php list/mint/seed/claim + the mid/secret pair on start.php); every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 1;   // built against 4.1 (tournament.php + the 'watch'/'tourney' signal pair + friends_playing); every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -495,6 +495,9 @@ function netDebugQuad(){
     for(const e of _netDbg.sigLog.slice(-3)) Nx.push(e);   // last few only -- ICE floods it mid-game
     return { net:{main:Nm,more:Nx}, time:{main:Tm,more:Tx}, sim:{main:Sm,more:Sx} };
 }
+// Watchable = playing AND online. A stale 'playing' with the friend gone offline would
+// otherwise offer a watch that can only time out.
+function netFriendPlaying(id){ return _netFriendsPlaying[id] === true && _netFriendsOnline[id] === true; }
 function netFriendE2E(id){
     const theirs = _netFriendsLat ? _netFriendsLat[id] : null;
     const ours = _netLat.value != null ? _netLat.value : (_netDbg.rtt >= 0 ? _netDbg.rtt : null);
@@ -505,6 +508,10 @@ function netFriendE2E(id){
 // joiner), for the HUD and the winner banner. null when not in an online game.
 function netPlayerNames(){
     if(!netGameActive()) return null;
+    // Spectating: neither name is ours. Both arrive in the bootstrap context, already in
+    // player order -- there is no "mine" to place at P0 or P1.
+    const sn = (typeof netSpecNames === 'function') ? netSpecNames() : null;
+    if(sn) return sn;
     const mine = (_netMyName() || 'YOU').slice(0, MAX_NAME);
     const peer = (_netSess.peerProfile && _netSess.peerProfile.name) || netFriendName(_netSess.peer) || fmtFriendId(_netSess.peer);
     return netHosting() ? [mine, peer] : [peer, mine];
@@ -531,6 +538,11 @@ function netDuelPlatforms(){
 var _netLookC = null;
 function netDuelLook(){
     if(!netGameActive()) return null;
+    // Spectating: the feeder already resolved the pair (including its own same-colour nudge),
+    // so adopt it verbatim -- deriving it again here from a config that belongs to neither
+    // player would show the watcher two snakes the players themselves never saw.
+    const sl = (typeof netSpecLook === 'function') ? netSpecLook() : null;
+    if(sl) return sl;
     const _pp = _netSess.peerProfile || null, _host = netHosting();
     if(_netLookC && _netLookC.pp === _pp && _netLookC.host === _host && _netLookC.col === (cfg.snakeColor|0)
        && _netLookC.wi === cfg.wornItems && _netLookC.nrc === !!cfg.noRemoteCosmetics) return _netLookC.val;
@@ -581,12 +593,24 @@ function netDebugInfo(){
 let _netCounts = { online:0, playing:0 };
 let _netFriendsOnline = {};
 let _netFriendsLat = {};
+// Accepted friends currently IN a 1:1, from the same authorization-gated hello block as
+// friends_online. It is the entire discovery surface for spectating: a friend you can
+// watch is a friend the server says is playing right now.
+let _netFriendsPlaying = {};
+// Open tournament lobbies the server announces to us: hosts whose address reaches it the
+// same way ours does, i.e. the people in this room. Asked for only while a screen that
+// shows them is open, and empty on a pre-4.1 server.
+let _netTourneys = [];
+// The server's contract MINOR, or -1 before the first hello. Features that need a newer
+// server than 4.0 gate on this rather than on a failed POST.
+let _netSrvMin = -1;
+function netSrvMinor(){ return _netSrvMin; }
 // Enabling STRICTLY OFFLINE stops the heartbeat, so presence stops being refreshed and
 // would otherwise FREEZE at its last-known values -- friends left showing "online", a live-
 // looking player count. Drop it all now so offline reads as offline, not as a stale snapshot.
 function netOfflineClear(){
     _netCounts = { online:0, playing:0 };
-    _netFriendsOnline = {}; _netFriendsLat = {};
+    _netFriendsOnline = {}; _netFriendsLat = {}; _netFriendsPlaying = {}; _netTourneys = []; _netSrvMin = -1;
     if(_netFr.list) for(const f of _netFr.list){ f.online = false; f.latency = null; }
     _uiDirty = true;
 }
@@ -609,6 +633,8 @@ async function _netHello(){
     if(Date.now() - _netLat.at > 180000) _netTimeSync(true);                     // re-measure every few minutes (lands next hello)
     if(_netSess && _netSess.game) body.duel_with = _netSess.peer;
     if(phase === 'lobby' || phase === 'friends') body.friends = getFriends().slice(0,64);
+    // The announce is served only when asked for, so ask only while it can be seen.
+    if(phase === 'tourneyLobby') body.tourneys = true;
     // auto_accept: presenting our QR / being on the add-friend screen IS the
     // consent, so the server accepts incoming friend requests immediately (the
     // contract mechanism; complements the client-side QR accept). Expires ~60s.
@@ -629,6 +655,7 @@ async function _netHello(){
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
     _netSrvErr = false;
     const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
+    _netSrvMin = (_srvMaj === NET_API_BUILT && _srvMin !== null) ? _srvMin : -1;   // only a same-MAJOR minor means anything to us
     _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // newer MAJOR gates online off
     _netApiOutdated = (_srvMaj === NET_API_BUILT && _srvMin > NET_API_BUILT_MINOR);   // newer MINOR: still works, but flag an update
     // HONOUR the server's debug instruction: an operator flips it per player to
@@ -648,6 +675,8 @@ async function _netHello(){
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
     _netCounts = { online:r.online|0, playing:r.playing|0 };
     if(r.friends_online) _netFriendsOnline = r.friends_online;
+    _netFriendsPlaying = r.friends_playing || {};   // absent on a pre-4.1 server: nobody is watchable
+    if(body.tourneys) _netTourneys = Array.isArray(r.tourneys) ? r.tourneys : [];
     if(r.friends_latency) _netFriendsLat = r.friends_latency;
     if(r.friends_name) for(const k in r.friends_name) _netNameSeen(k, r.friends_name[k]);   // authorization-gated: accepted friends only
     _netFrFlushRemovals();
@@ -661,8 +690,14 @@ async function _netHello(){
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
 let _netPollTick = 0;
 function _netPollDue(){
-    if(_netSess && _netSess.game && !_netSess.reconnecting) return false;   // reconnecting: poll so the re-handshake signals flow
+    // A tournament match still needs the mailbox: roles sheets, patches and the result of
+    // OUR OWN node all arrive as signals, and an undelivered one expires in 30s. So a
+    // tournament polls slowly through a game rather than not at all.
+    if(_netSess && _netSess.game && !_netSess.reconnecting)
+        return (typeof tourneyActive === 'function' && tourneyActive()) ? (_netPollTick % 5 === 0) : false;   // reconnecting: poll so the re-handshake signals flow
     if(phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId') return true;
+    if(typeof tourneyActive === 'function' && tourneyActive()) return true;   // a held tournament reaches us wherever we are
+    if(phase === 'tourneyLobby') return true;
     if(_netSess) return true;                        // offer/answer/ice in flight
     if(phase === 'menu') return _netPollTick % 10 === 0;
     return false;

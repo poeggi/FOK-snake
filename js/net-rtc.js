@@ -78,7 +78,7 @@ let _netP2POnly = false;
 function netP2POnlySet(v){ _netP2POnly = !!v; }
 function netP2POnly(){ return _netP2POnly || !!(_netSess && _netSess.p2pOnly); }
 function _netMkSess(peer, role){
-    return { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
+    const s = { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
              // DEPRECATED(relay): session slots owned by net-relay.js -- drop with it.
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
@@ -98,6 +98,11 @@ function _netMkSess(peer, role){
              p2pOnly:false,
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
+    // A tournament match's parameters live on the ROLES SHEET, and the offer carries none
+    // of them. Both sides mint their session here, so this is the one point both paths
+    // share -- and the answerer, which never gets to speak, is dressed by it too.
+    if(typeof tourneyDressSession === 'function') tourneyDressSession(s);
+    return s;
 }
 // Stamp a received packet on BOTH clocks. lastRecvWall (Date.now) is the wall clock: it keeps
 // advancing while a tab is suspended, so on wake the real silence is visible even when
@@ -219,6 +224,11 @@ function _netIsCtl(t){ return t === 'go' || t === 'req' || t === 'bye'; }
 function _netSend(o){
     const s = _netSess;
     if(!s) return;
+    // A SPECTATOR IS SILENT. Its session is synthetic -- there is no duel peer at the other end
+    // of it -- and its whole contract with the match it watches is that the match cannot tell it
+    // is there. One choke point rather than a condition on each of the eight send sites in the
+    // tick schedule: whatever is added there later inherits the silence for free.
+    if(typeof netSpectating === 'function' && netSpectating()) return;
     // Tick-stream packets are epoch-scoped (see the gate in _netHandleMsg): simTick and the
     // rollback tick-base reset at every level boundary, so stamp the epoch this copy was
     // authored under. The receiver drops a copy that crossed a boundary instead of mapping
@@ -279,6 +289,10 @@ function _netSend(o){
             return;
         }
         s.dc.send(j); s.lastSent = performance.now();
+        // The OUTBOUND spectator tap, at the one point where the packet is finished: a
+        // spectator receives the exact object the opponent does, stamps and all. A no-op
+        // with nobody watching, which is every duel nobody watches.
+        if(typeof _spTapOut === 'function') _spTapOut(o);
     }catch(e){}
 }
 // ---- boundary clock burst (raw measurement, host residual; see NET_BURST_* above) ----
@@ -492,6 +506,12 @@ function _netLiveStart(){
 // re-implementation. Production calls it every 250ms; the driver pumps it off its fake clock.
 function _netLiveCheck(){
     const s = _netSess; if(!s || !s.game) return;
+    // A SPECTATOR's session is synthetic: no DataChannel, no peer, nothing to ping or
+    // reconnect to. Its liveness is the FEED's, and net-spec's own 250ms pass owns that
+    // ladder (silence -> warm standby -> fresh-state ask -> backup feeder). Running the
+    // duel ladder here would read permanent silence off a channel that never existed and
+    // kill the watch a few seconds in.
+    if(typeof netSpectating === 'function' && netSpectating()) return;
     const nowMs = performance.now();
     if(!s.pathAt || nowMs - s.pathAt > 2000){ s.pathAt = nowMs; _netPathStat(s); }   // refresh the ICE-path readout ~0.5Hz
     // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
