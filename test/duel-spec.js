@@ -22,6 +22,9 @@
 //   D) The feeder's relay duty dying is not the match dying. Under lockstep the OTHER player
 //      holds both input streams, so the primaries pull it in as the BACKUP FEEDER under a
 //      bumped generation and the feed resumes -- still with zero divergence.
+//   E) The ask that arrives BEFORE the match does. Every watcher above joins a duel already
+//      in progress, which is the one arrival a tournament never produces: the roles sheet
+//      reaches players and spectators in the same drain, so the ask always lands first.
 // Run: node test/duel-spec.js
 const { runSpec } = require('./spec-driver');
 const lane = require('./lanes');
@@ -124,6 +127,31 @@ if(lane.step()){
     }
     rows.push('D backup feeder: B took over at generation ' + (s1 ? s1.gen : '?') + ', serving '
               + r.players.B.outN + ', ' + r.checks + ' checks, no divergence');
+}
+
+// ---- E) the ask that arrives before the match does --------------------------------------
+// The sheet names the feeder, the spectator asks it immediately, and the feeder is still
+// several seconds of offer/answer/ICE/go away from having anything to serve. Nothing about
+// that is exceptional -- it is what EVERY tournament spectator does -- so the watch has to
+// survive being early. The claim is not merely that it eventually connects: it connects
+// promptly once there IS a match, and then it is the same byte-identical watcher as A.
+if(lane.step()){
+    let onAt = null;
+    const START = 2.2;
+    const r = runSpec({ secs:16, seed:0x2C0D, wire:WIRE, playersAt:START,
+                        watchers:[{ at:0.2, from:'A' }],
+                        onSample:(now, c)=>{ if(onAt == null && c.S1.c.__specOn()) onAt = now; } });
+    const s1 = common('E', r, 'S1');
+    noDiverge('E', r);
+    A(!r.exitReason, 'E: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    A(onAt != null, 'E: the watcher asked before the match existed and never got a feed at all');
+    // One SPEC_ASK_RETRY_MS to re-ask plus the signal round trip and the boot delay. A
+    // spectator that only arrives on the ceremony's own 20s re-offer has missed the match.
+    A(onAt == null || onAt - START * 1000 < 2500,
+      'E: the feed only started ' + (onAt - START * 1000) + 'ms after the match did');
+    A(r.players.A.outN === 1, 'E: the feeder serves ' + r.players.A.outN + ' links (want 1)');
+    rows.push('E early ask: watching ' + (onAt - START * 1000) + 'ms after the match began, '
+              + r.checks + ' checks, no divergence');
 }
 
 console.log(rows.join('\n'));

@@ -165,9 +165,20 @@ function runSpec(opts){
     };
     add('A', P_ID.A, mkClient(P_ID.A, opts.hookA), false);
     add('B', P_ID.B, mkClient(P_ID.B, opts.hookB), false);
-    cl.A.c.__p2pStart(seed, 'host', null, null);
-    cl.B.c.__p2pStart(seed, 'peer', null, null);
-    cl.A.c.__setPeer(P_ID.B); cl.B.c.__setPeer(P_ID.A);
+    // The players' duel can be made to start LATE. A tournament deals the roles sheet to
+    // every node in ONE signal drain, so a spectator asks for its feed while the two
+    // players are still working through an offer/answer/ICE/go handshake -- the node it
+    // asks has no timeline to serve yet. That window is the ordinary case rather than an
+    // edge, so it belongs in the driver and not in a test that fakes it.
+    let started = false;
+    const startPlayers = ()=>{
+        cl.A.c.__p2pStart(seed, 'host', null, null);
+        cl.B.c.__p2pStart(seed, 'peer', null, null);
+        cl.A.c.__setPeer(P_ID.B); cl.B.c.__setPeer(P_ID.A);
+        started = true;
+    };
+    const playersAt = Math.round((opts.playersAt || 0) * 1000);
+    if(!playersAt) startPlayers();
     watchers.forEach((w, i) => {
         const name = 'S' + (i + 1);
         const o = add(name, S_ID[i], mkClient(S_ID[i], opts.hookS), true);
@@ -177,6 +188,10 @@ function runSpec(opts){
         o.asked = false;
     });
     const names = Object.keys(cl);
+    // The roles sheet is the introduction, and it reaches every node: tourney.js grants
+    // players, primaries and secondaries on each of them the moment it lands. Mirror that
+    // here, or a driver watcher would be a stranger to the node it is about to ask.
+    for(const n of names) cl[n].c.__grant(names.filter(m => m !== n).map(m => cl[m].id));
     const TICK = cl.A.c.__TICK;
 
     // ---- wires ----
@@ -298,6 +313,7 @@ function runSpec(opts){
     const trace = [], txSeries = [], pairB = {};
     for(let now = 0; now <= secs * 1000; now++){
         for(const n of names) cl[n].c.__now = now;
+        if(!started && now >= playersAt) startPlayers();
         for(const n of names) cl[n].c.__fire();
         if(now >= nextLive){   // production's 250ms liveness pass (warn / reconnect / keepalive / kill)
             for(const n of names) if(cl[n].c.__alive()) cl[n].c.__live();
@@ -331,7 +347,7 @@ function runSpec(opts){
             victim.gone = true;
         }
 
-        if(!cl.A.c.__alive() || !cl.B.c.__alive()){ exitReason = 'session-end'; diedAt = now / 1000; break; }
+        if(started && (!cl.A.c.__alive() || !cl.B.c.__alive())){ exitReason = 'session-end'; diedAt = now / 1000; break; }
         if(cl.A.c.__phase() === 'duelOver' || cl.B.c.__phase() === 'duelOver'){ exitReason = 'duelOver'; diedAt = now / 1000; break; }
 
         for(const n of names){ const o = cl[n]; while(now >= o.next) fireOnce(o); }

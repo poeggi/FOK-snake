@@ -47,6 +47,13 @@ const SPEC_FEED_SILENCE_MS = 2000; // the FEEDER is quiet: primaries pull the ba
 const SPEC_CKPT_MS = 10000;        // checkpoint 'rs' cadence, so a late joiner needs a bounded tail
 const SPEC_BUF_MAX = 900;          // envelopes held since the checkpoint (~45s of duel traffic)
 const SPEC_GRANT_MS = 30000;       // how long a granted watch request stays good
+// A watch that arrives BEFORE the match it names is the ORDINARY case, not an error: a
+// tournament deals the roles sheet to players and spectators in one signal drain, and the
+// two players still have an offer/answer/ICE/go handshake in front of them. So neither end
+// treats "not yet" as a verdict -- the node parks the ask until it has a timeline, and the
+// asker keeps asking ('watch' is not in the receipt set, so a lost one has to be re-sent).
+const SPEC_ASK_RETRY_MS = 1500;    // re-ask cadence for a watch nobody has answered
+const SPEC_ASK_TTL_MS = 20000;     // how long an unanswered ask stays live, at EITHER end
 // What a spectator's sim actually needs. 'pi' (liveness) and 'bs' (clock burst) are
 // the two players' business; 'req' is an ask, never an effect. Everything else in
 // the duel protocol IS the timeline: 'go' opens boundaries, 'in' carries inputs,
@@ -69,7 +76,8 @@ var _spBootT = null;    // the pending boot timer
 var _spRole = '';       // '' | 'feeder' | 'primary' | 'secondary'
 var _spTid = '', _spNid = '';
 var _spGrant = {};      // peer id -> ms when we authorised it to open a spectator link
-var _spWant = [];       // outstanding watch requests: [{to, at}] -- a secondary asks BOTH primaries
+var _spWant = [];       // MY outstanding watch requests: [{to, at, last}] -- a secondary asks BOTH primaries
+var _spAsk = [];        // asks PARKED on me, waiting for a match to serve: [{from, at}]
 var _spT = null;        // the 250ms housekeeping timer
 var _spSrc = '';        // peer id of the link currently feeding me
 var _spLostAt = 0;
@@ -112,10 +120,27 @@ function _spSend(l, o){
     }catch(e){ return false; }
 }
 function _spFind(arr, peer){ for(const l of arr) if(l.peer === peer) return l; return null; }
-// Take a pending watch request off the list, answering "was this reply ours to act on".
+// Take a pending watch request off the list, answering "was this reply ours to act on" --
+// and handing back the entry, because a refusal we mean to retry has to keep its deadline.
 function _spWantDrop(peer){
-    for(let i = _spWant.length - 1; i >= 0; i--) if(_spWant[i].to === peer){ _spWant.splice(i, 1); return true; }
-    return false;
+    for(let i = _spWant.length - 1; i >= 0; i--) if(_spWant[i].to === peer) return _spWant.splice(i, 1)[0];
+    return null;
+}
+// Put an unanswered ask back on the ladder, keeping its ORIGINAL deadline: a re-ask is a
+// retry of one request, not a new one, and must not buy itself more time. Pointless once we
+// have a source -- a booted spectator chases nothing.
+function _spWantKeep(w){
+    if(!w || _spOn || _spCtx || _spBootT != null) return;
+    _spWant.push({ to:w.to, at:w.at, last:_spNow() });
+    _spArm();
+}
+function _spGrantOk(peer){ const g = _spGrant[peer] || 0; return !!g && _spNow() - g <= SPEC_GRANT_MS; }
+// Hold an ask we cannot serve yet. Re-asking refreshes it rather than stacking: the asker
+// gives up on its own deadline, and this list must not outlive that.
+function _spAskPark(from){
+    for(const a of _spAsk) if(a.from === from){ a.at = _spNow(); return; }
+    _spAsk.push({ from, at:_spNow() });
+    _spArm();
 }
 function _spKill(l){
     if(!l) return;
@@ -243,12 +268,22 @@ function _spOnWatch(from, d){
             _spGrant[from] = _spNow();
             _spWatchSig(from, 'ok');
             _spArm();
-        } else {
-            // Refused, but not turned away: hand back EVERY node we are already serving.
-            // The asker takes the first as its feed and the rest as warm standbys, which
-            // is what makes a primary's death cost one flag instead of a fresh connect.
-            _spWatchSig(from, 'no', { alt:(_spOut.length ? _spOut[0].peer : ''), alts:_spOut.map(l => l.peer) });
+            return;
         }
+        // Not servable YET rather than not servable. Our own sheet named this peer, and we
+        // are still working through the handshake that will give us something to serve --
+        // so PARK the ask and answer it the moment there is a timeline (_spAskPump). The
+        // grant is the gate: only a peer the sheet introduced can make us hold state, and
+        // that is exactly the set with a reason to be early. A FULL fan-out is a different
+        // answer and keeps the redirect below: room is what it is short of, not time.
+        if(_spOut.length + _spAsk.length < SPEC_MAX_DIRECT && _spGrantOk(from)){
+            _spAskPark(from);
+            return;
+        }
+        // Refused, but not turned away: hand back EVERY node we are already serving.
+        // The asker takes the first as its feed and the rest as warm standbys, which
+        // is what makes a primary's death cost one flag instead of a fresh connect.
+        _spWatchSig(from, 'no', { alt:(_spOut.length ? _spOut[0].peer : ''), alts:_spOut.map(l => l.peer) });
         return;
     }
     if(k === 'ok'){
@@ -257,14 +292,18 @@ function _spOnWatch(from, d){
         return;
     }
     if(k === 'no'){
-        if(!_spWantDrop(from)) return;
+        const w = _spWantDrop(from);
+        if(!w) return;
         const list = Array.isArray(d.alts) ? d.alts : [d.alt];
         const alts = [];
         for(const a of list){
             const v = String(a || '');
             if(/^[0-9a-f]{8}$/.test(v) && v !== getPlayerId() && !_spFind(_spIn, v)) alts.push(v);
         }
-        if(!alts.length){ _netSigLog('! watch refused'); return; }
+        // Refused with nowhere else to send us. Stay on the ladder instead of taking it as
+        // the answer: a node with no room says so by naming who does, so a bare refusal
+        // means it had nothing to serve -- which is a state that ends in seconds.
+        if(!alts.length){ _netSigLog('! watch refused'); _spWantKeep(w); return; }
         for(const a of alts.slice(0, SPEC_MAX_DIRECT)) specWatch(a, _spTid, _spNid);
         return;
     }
@@ -435,7 +474,15 @@ function _spCkpt(force){
 function _spOnFeedMsg(l, txt){
     let d; try{ d = JSON.parse(txt); }catch(e){ return; }
     if(!d || typeof d !== 'object') return;
-    if(d.t === 'sno'){ _spDrop(_spIn, l.peer); return; }
+    if(d.t === 'sno'){
+        // The link came up and the node had nothing to serve after all -- its match ended,
+        // or had not started. A race with that match, not a verdict: drop the link and go
+        // back on the ladder rather than sitting on a dead one.
+        const peer = l.peer;
+        _spDrop(_spIn, peer);
+        _spWantKeep(_spWantDrop(peer) || { to:peer, at:_spNow() });
+        return;
+    }
     if(d.t === 'sctx'){ _spOnCtx(l, d); return; }
     if(d.t !== 'sp') return;
     _spDbg.rx++;
@@ -561,7 +608,7 @@ function specStop(msg){
     for(const l of _spIn) _spKill(l);
     for(const l of _spOut) _spKill(l);
     _spIn = []; _spOut = [];
-    _spWant = []; _spQ = []; _spRs = null; _spBuf = [];
+    _spWant = []; _spAsk = []; _spQ = []; _spRs = null; _spBuf = [];
     if(_spBootT != null){ clearTimeout(_spBootT); _spBootT = null; }
     const was = _spOn;
     _spOn = false; _spCtx = null; _spRole = ''; _spSeen = -1; _spFeedAt = 0; _spLostAt = 0; _spSrc = ''; _spOrphanG = -1;
@@ -604,13 +651,43 @@ function _spFeedGone(peer){
 }
 
 // ---- housekeeping --------------------------------------------------------
+// Asks parked on us, answered the moment we have a timeline to hand out. Until then each
+// costs one list entry -- against which the alternative is a spectator that asked one second
+// too early and watches nothing at all, because nothing anywhere would ask again.
+function _spAskPump(now){
+    if(!_spAsk.length) return;
+    const servable = !_spOn && netGameActive() && inGame && !!_spCtxBuild();
+    for(let i = _spAsk.length - 1; i >= 0; i--){
+        const a = _spAsk[i];
+        if(now - a.at > SPEC_ASK_TTL_MS){ _spAsk.splice(i, 1); continue; }
+        if(!servable || _spOut.length >= SPEC_MAX_DIRECT) continue;
+        _spAsk.splice(i, 1);
+        _spGrant[a.from] = now;
+        _spWatchSig(a.from, 'ok');
+    }
+}
+// Our own outstanding asks, re-sent until the deadline. Two ordinary things make one ask too
+// few: 'watch' carries no receipt, so a lost one is simply a feed that never starts; and the
+// node we are asking may be seconds from having a match at all. Silence stops the instant we
+// have a source, so this never runs alongside a working feed.
+function _spWantPump(now){
+    for(let i = _spWant.length - 1; i >= 0; i--){
+        const w = _spWant[i];
+        if(now - w.at > SPEC_ASK_TTL_MS){ _spWant.splice(i, 1); continue; }
+        if(_spOn || _spCtx || _spBootT != null) continue;
+        if(now - (w.last || w.at) < SPEC_ASK_RETRY_MS) continue;
+        w.last = now;
+        _spWatchSig(w.to, 'req');
+    }
+}
 // One pass every 250ms: checkpoints, silence detection, failover, and the
 // escalation ladder when local recovery has run out of options.
 function _spTick(){
     const now = _spNow();
     _spPrune();
     if(!_spOn && _spOut.length) _spCkpt(false);
-    for(let i = _spWant.length - 1; i >= 0; i--) if(now - _spWant[i].at > 8000) _spWant.splice(i, 1);
+    _spAskPump(now);
+    _spWantPump(now);
     if(_spOn && _spCtx && _spFeedAt && now - _spFeedAt > SPEC_SILENCE_MS){
         if(!_spLostAt) _spLostAt = _spFeedAt;
         // The feeder's heartbeat runs at 16 ticks, so silence this long is unambiguous:
@@ -637,7 +714,7 @@ function _spTick(){
         // board. The deadline runs off _spLostAt, so re-asking never postpones it.
         if(now - _spLostAt > RB_PERSIST_KILL_MS) specStop('CONNECTION LOST');
     } else if(_spOn) _spLostAt = 0;
-    if(!_spOn && !_spOut.length && !_spWant.length) _spDisarm();
+    if(!_spOn && !_spOut.length && !_spWant.length && !_spAsk.length) _spDisarm();
 }
 // Proactive stand-down: a backgrounded primary cannot forward, and the server can
 // re-deal the role long before anyone downstream notices the silence -- so we say so
