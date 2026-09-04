@@ -295,9 +295,28 @@ function armCrash(e, now){
     if(_simpleGfx()||_reduceMotion()) return;
     const dx = ((e.x-e.hx+COLS+COLS/2)%COLS)-COLS/2;   // shortest wrapped heading into the impact
     const dy = ((e.y-e.hy+ROWS+ROWS/2)%ROWS)-ROWS/2;
-    _crashFx.push({ at:now, p:e.p, x:e.x, y:e.y,
-                    ax:Math.sign(dx), ay:Math.sign(dy),
-                    into:e.into, boost:!!e.boost });
+    const fx = { at:now, p:e.p, x:e.x, y:e.y, hx:e.hx, hy:e.hy,
+                 ax:Math.sign(dx), ay:Math.sign(dy),
+                 into:e.into, boost:!!e.boost, lean:0 };
+    _crashFx.push(fx);
+    if(e.into === 'headon') _crashPair(fx);
+}
+// A head-on is the one crash whose two wrecks are drawn against EACH OTHER rather than
+// against something already on the board, so the daylight between them is the thing that
+// has to read as none. The sim leaves both heads standing on the cells they met from, and
+// how far apart that is depends on the step phase: an even closing course meets in a shared
+// cell and leaves them TWO apart with an empty one between, an odd one meets on a shared
+// edge and leaves them touching already. So the lean is not a constant -- it is half of
+// whatever gap is left, which puts both on the same edge either way. A constant CS/2 draws
+// the odd case straight through itself.
+function _crashPair(fx){
+    for(const o of _crashFx){
+        if(o === fx || o.p === fx.p || o.into !== 'headon' || o.at !== fx.at) continue;
+        const dx = ((o.hx-fx.hx+COLS+COLS/2)%COLS)-COLS/2;
+        const dy = ((o.hy-fx.hy+ROWS+ROWS/2)%ROWS)-ROWS/2;
+        o.lean = fx.lean = Math.max(0, CS*(Math.max(Math.abs(dx), Math.abs(dy))-1)/2);
+        return;
+    }
 }
 function _crashFor(p){
     for(const c of _crashFx) if(c.p===p) return c;
@@ -351,7 +370,7 @@ function _crashJolt(p, now){
             // clear block apart under a message saying they had collided. Lean the head half a
             // cell into that shared cell so the two meet on its edge, and run the recoil
             // FORWARD from that contact instead of backward from the cell behind it.
-            const push = e.into==='headon' ? CS/2 - b0*(1-decay) : -b0*decay;
+            const push = e.into==='headon' ? e.lean - b0*(1-decay) : -b0*decay;
             return [ e.ax*push, e.ay*push, e.ax?-c:c*0.8, e.ay?-c:c*0.8 ];
         }
         const kick = amp*CS*Math.exp(-i/reach)*k(i)*(i%2?1:-1)*(1+0.35*rattle);

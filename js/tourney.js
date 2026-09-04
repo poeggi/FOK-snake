@@ -55,6 +55,18 @@ var _ttStateAt = 0, _ttT = null;
 const _TT_PHASES = { tourneyLobby:1, tourneyBracket:1, tourneyRound:1, tourneyCeremony:1,
                      tourneyPodium:1, tourneyQuit:1 };
 
+// Where a re-point actually lands. The tournament screens follow the tournament as it moves,
+// but tourneyQuit is a QUESTION, and taking it off the screen ANSWERS it for the player --
+// which is what an ordinary state poll landing a moment after the press did, with no press
+// of theirs in between. So while it is up, a re-point moves the screen BEHIND it instead:
+// that is the one drawTourneyQuit paints as its backdrop and the one NO returns to, so the
+// tournament carries on moving and the question carries on standing. The only routes that
+// bypass this are the ones that leave nothing to ask -- _ttDrop, and reaching 'done'.
+function _ttGo(p){ if(phase === 'tourneyQuit') _ttUi.from = p; else phase = p; _uiDirty = true; }
+// The tournament screen on SHOW, which is the backdrop while the quit dialog is up: a
+// re-point has to reason about the screen it is moving, not about the question over it.
+function _ttFace(){ return phase === 'tourneyQuit' ? (_ttUi.from || 'tourneyLobby') : phase; }
+
 // ---- small helpers -------------------------------------------------------------------
 function tourneyActive(){ return !!_tt; }
 function tourneyView(){ return _tt; }
@@ -178,7 +190,7 @@ function _ttSetBreak(b){
     if(!same) _ttUi.contAt = _msgNow() + Math.max(0, b.wait | 0);
     // A break we did not already have takes the screen -- from an event or from a state read
     // alike, which is what makes the round screen survive a missed signal or a reload.
-    if(!same && !inGame && _TT_PHASES[phase] && phase !== 'tourneyPodium') phase = 'tourneyRound';
+    if(!same && !inGame && _TT_PHASES[_ttFace()] && _ttFace() !== 'tourneyPodium') _ttGo('tourneyRound');
 }
 async function _ttSync(force){
     if(!_tt) return;
@@ -204,6 +216,8 @@ async function _ttSync(force){
     } else if(!r.json.cursor){
         _ttNid = ''; _ttPend = null;               // between nodes: nothing to be engaged with
     }
+    // Straight at `phase`, quit dialog included: a tournament that is over is not one
+    // anybody can still be asked about leaving.
     if(_tt.state === 'done' && _TT_PHASES[phase] && phase !== 'tourneyPodium') phase = 'tourneyPodium';
 }
 function _ttDrop(msg){
@@ -244,7 +258,7 @@ function _ttOnSignal(d){
             _tt.advancers = d.advancers || [];
             // A break may already be up: the two events describe the same moment from
             // different distances, and whichever lands second must not undo the other.
-            if(_TT_PHASES[phase] && phase !== 'tourneyPodium' && phase !== 'tourneyRound') phase = 'tourneyBracket';
+            if(_TT_PHASES[_ttFace()] && _ttFace() !== 'tourneyPodium' && _ttFace() !== 'tourneyRound') _ttGo('tourneyBracket');
             _ttSync(true);
             break;
         case 'round':
@@ -303,7 +317,7 @@ function _ttRoles(d){
     // fresh debt, which leaving that match then pays with a forfeit of the node just dealt.
     _ttNid = nid; _ttTry = 0; _tt.frozen = ''; _ttOffer = null;
     _ttPend = d;                 // engaged by _ttTick, once the previous match is off the board
-    if(_tt.you !== 'idle' && !inGame){ phase = 'tourneyCeremony'; _ttCerAt = _msgNow(); }
+    if(_tt.you !== 'idle' && !inGame){ _ttGo('tourneyCeremony'); _ttCerAt = _msgNow(); }
     _ttArm();
 }
 // A re-deal of the CURRENT node's tree (a primary stood down, a secondary was orphaned).
@@ -382,7 +396,7 @@ function tourneyParkOffer(from, od){
 function _ttFail(msg){
     _ttPend = null; _ttCerAt = 0; _ttWant = null; _ttPlayNid = ''; _ttOffer = null;
     netP2POnlySet(false);
-    if(_TT_PHASES[phase]) phase = _tt ? tourneyExitPhase() : 'tourneyLobby';
+    if(_TT_PHASES[_ttFace()]) _ttGo(_tt ? tourneyExitPhase() : 'tourneyLobby');
     _ttMsg(msg, true);
 }
 // The answerer never sees the roles sheet at offer time -- the offer carries no match
@@ -496,8 +510,8 @@ function _ttTick(){
         // A sheet that landed while the last match was still on screen never got its
         // ceremony -- _ttRoles will not take the screen away from a live game. The board is
         // clear now, so it gets one here instead: nobody is dropped into a duel cold.
-        if(String(d.you || 'idle') !== 'idle' && phase !== 'tourneyCeremony'){
-            phase = 'tourneyCeremony'; _ttCerAt = now; _uiDirty = true;
+        if(String(d.you || 'idle') !== 'idle' && _ttFace() !== 'tourneyCeremony'){
+            _ttGo('tourneyCeremony'); _ttCerAt = now;
         }
         _ttEngage(d);
     }
@@ -507,9 +521,9 @@ function _ttTick(){
     // route that does not run the duel exit (a no-show settled by the server, a peer's bye,
     // a dead connection) is left sitting on a ceremony for a node the tournament has already
     // walked past, with nothing on screen ever changing again.
-    if(_tt.brk && !inGame && !_ttPend && _TT_PHASES[phase]
-       && phase !== 'tourneyRound' && phase !== 'tourneyPodium'){
-        phase = 'tourneyRound'; _uiDirty = true;
+    if(_tt.brk && !inGame && !_ttPend && _TT_PHASES[_ttFace()]
+       && _ttFace() !== 'tourneyRound' && _ttFace() !== 'tourneyPodium'){
+        _ttGo('tourneyRound');
     }
     // A ceremony that never became a match: the offer was lost, or the peer is slow to
     // arrive. Re-offer a few times before handing it back to the server's walkover ladder,
@@ -677,7 +691,7 @@ async function tourneyLeave(to){
 function tourneyAsk(to){
     if(!_tt) return;
     if(_tt.host !== getPlayerId() && _tt.state === 'open'){ tourneyLeave(to); return; }
-    _ttUi.from = _TT_PHASES[phase] ? phase : 'tourneyLobby';
+    _ttUi.from = _TT_PHASES[_ttFace()] ? _ttFace() : 'tourneyLobby';
     _ttUi.to = to || '';
     quitConfirmSel = 1;                                // NO: the safe answer is the offered one
     phase = 'tourneyQuit';

@@ -34,7 +34,11 @@ const GOLDEN = 'bb02d65e:216';
 // -> 2a6bf65:31451 (contract 4.0: _ws carries a per-side {itemId: uid} map alongside the
 // worn lists, because a server item INSTANCE is what a steal moves. Hashed bytes only --
 // the tick count is untouched, and the pilots wear unregistered gear so every uid is '')
-const GOLDEN_DUEL = '2a6bf65:31451';
+// -> b9878561:31451 (a frontal is mutual whatever the STEP PHASE the two met in: a closing
+// move onto the other snake's head cell now kills both, where before only whichever of
+// them happened to be due that tick took the life. Hashed bytes only -- a mutual death
+// takes the same beat as a one-sided one, so the tick count does not move)
+const GOLDEN_DUEL = 'b9878561:31451';
 
 const driver = `
 ;(function(){

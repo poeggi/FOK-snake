@@ -373,21 +373,27 @@ runTest('SMOKE-UI', `
             const j=_crashJolt(p,now), o=j?j(0):[0,0,0,0];
             return cx*CS+1+o[0]+(CS-2)/2;
         };
-        for(const boost of [false,true]){
+        // The sim leaves the two heads where they met FROM, and where that is depends on the
+        // step phase: an even gap meets in a shared cell and leaves an empty one between them,
+        // an odd gap meets on a shared edge and leaves them already touching. Both are drawn
+        // by the same rule and both have to land on the same answer -- one cell apart, centre
+        // to centre. A fixed forward lean is right for the first and draws the second through
+        // itself, which is the whole reason the lean is measured rather than assumed.
+        const HO=[{ n:'even gap (5 and 7, both entering 6)', a:{hx:5,x:6}, b:{hx:7,x:6}, ca:5, cb:7 },
+                  { n:'odd gap (5 entering 6, which is where the other is standing)',
+                    a:{hx:5,x:6}, b:{hx:6,x:5}, ca:5, cb:6 }];
+        for(const g of HO) for(const boost of [false,true]){
             _crashFx=[];
-            // Cells 5 and 7, both moving into 6: the shared cell neither of them reaches.
-            armCrash({p:0,hx:5,hy:5,x:6,y:5,into:'headon',boost:boost}, 1000);
-            armCrash({p:1,hx:7,hy:5,x:6,y:5,into:'headon',boost:boost}, 1000);
+            armCrash({p:0,hx:g.a.hx,hy:5,x:g.a.x,y:5,into:'headon',boost:boost}, 1000);
+            armCrash({p:1,hx:g.b.hx,hy:5,x:g.b.x,y:5,into:'headon',boost:boost}, 1000);
             if(_crashFx.length!==2) throw 'the head-on wreck was not staged';
             for(const age of [0,40,120,300]){
-                const d=headMid(1,7,1000+age)-headMid(0,5,1000+age);
-                // Their cells are two apart. Drawn touching, they are ONE apart; anything from
-                // one and a half up is the clear block of daylight the bug showed.
-                if(d>=CS*1.6) throw 'head-on at '+age+'ms ('+(boost?'boost':'normal')+'): the heads are '
-                                    +d.toFixed(1)+'px apart, more than a cell and a half, under a '
-                                    +'message saying they collided';
-                if(d<=CS*0.5) throw 'head-on at '+age+'ms ('+(boost?'boost':'normal')+'): the heads are '
-                                    +d.toFixed(1)+'px apart -- they are through each other, not against';
+                const d=headMid(1,g.cb,1000+age)-headMid(0,g.ca,1000+age);
+                const at=g.n+' at '+age+'ms ('+(boost?'boost':'normal')+'): the heads are '+d.toFixed(1)+'px apart';
+                // Drawn against each other they are ONE cell apart; anything from one and a
+                // half up is the clear block of daylight the bug showed.
+                if(d>=CS*1.6) throw at+', more than a cell and a half, under a message saying they collided';
+                if(d<=CS*0.5) throw at+' -- they are through each other, not against';
             }
         }
         // ...and the lean is specific to a head-on: a snake that hit a BAR is already against
@@ -396,7 +402,7 @@ runTest('SMOKE-UI', `
         const bj=_crashJolt(0,1000);
         if(!bj||!(bj(0)[0]<0)) throw 'a bar crash must still recoil backwards, not lean forward';
         _crashFx=[]; _simpleGfx=oSimple; _reduceMotion=oMotion;
-        log('head-on wreck ok: both heads lean into the cell they both tried to enter and meet on its edge, bar crashes still recoil');
+        log('head-on wreck ok: an even gap and an odd one both draw the two heads one cell apart, bar crashes still recoil');
     }
 
     // ---- the menu snake is the game's snake, dimmed -----------------------------------

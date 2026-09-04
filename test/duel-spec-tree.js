@@ -294,6 +294,57 @@ if(lane.step()){
               + ' ticks on the checkpoint stream alone, ' + r.checks + ' checks');
 }
 
+// ---- G) ARRIVING LATE, at a tier, after the timeline has already moved -----------------
+// F watches a node that was already attached when the boundary went past. This is the other
+// half: a watcher that turns up AFTERWARDS, and is handed its bootstrap context by a primary
+// rather than by a player.
+//
+// That context is mostly match CONSTANTS -- seed, players, hearts, names -- and a relaying
+// primary may pass those on exactly as it received them. Two of the fields are not constants:
+// the epoch and the start moment the tick base is measured from, and a boundary moves both.
+// Handed on as first captured they describe a match that has since moved, so the newcomer
+// boots onto a timeline nobody is playing; from there the epoch gate drops every tick packet
+// it is sent -- the checkpoint above all, which is the one thing that could have put it right.
+//
+// What makes this worth its own case is that NOTHING NOTICES. The feed is not silent, so the
+// silence ladder never fires, and the split ladder that ends a stuck duel belongs to
+// _netLiveCheck, which returns early for a spectator by design. So the failure is not a wrong
+// board that heals: it is a watcher that is not even COMPARABLE -- envelopes pour in, every
+// one is discarded, and its ring never covers a tick the players settled -- until the next
+// boundary 'go', which carries its own epoch, rebuilds the level out from under it.
+// cmp is therefore what this case reads, not divN: being merely WRONG would have been visible.
+// A tournament is where this is the ordinary case rather than a corner, because the field
+// hangs off two primaries and everybody outside the first wave arrives late.
+if(lane.step()){
+    let epAt = 0;
+    const LATE = 21.5;
+    const r = runSpec({ secs:26, seed:0x77C0, wire:WIRE,
+                        watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:LATE, from:'A' }],
+                        onSample:(now, c)=>{ if(!epAt && c.A.c.__rbEpoch() > 0) epAt = now; } });
+    A(!r.exitReason, 'G: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    // Without a boundary BEFORE the late arrival this case asserts nothing, so both are asserted.
+    A(r.levelUps === 1 && epAt > 0 && epAt < LATE * 1000,
+      'G: the late watcher did not arrive after a boundary (' + r.levelUps + ' level up(s), the tick '
+      + 'base moved at ' + epAt + 'ms, it joined at ' + (LATE * 1000) + 'ms)');
+    // The two that arrived BEFORE it: the same context, taken at the moment it was still true.
+    alive('G', r, 'S1', 1); alive('G', r, 'S2', 1);
+    const s3 = alive('G', r, 'S3', 2);
+    if(s3){
+        A(s3.dbg.rx > 100, 'G: the late watcher was fed only ' + s3.dbg.rx + ' envelopes');
+        A(s3.cmp > 500, 'G: the late watcher reached ' + s3.cmp + ' of the ticks the players settled, '
+                        + 'off ' + s3.dbg.rx + ' envelopes -- it booted onto a timeline the match had '
+                        + 'left, and everything sent since was gated off as a foreign epoch');
+        A(s3.dbg.boot === 1, 'G: the late watcher booted ' + s3.dbg.boot + ' times -- arriving late is '
+                             + 'one boot, not a repair loop');
+        const extra = s3.upTypes.filter(t => t !== 'ssub');
+        A(extra.length === 0, 'G S3: said ' + extra.join('/') + ' to the node feeding it');
+    }
+    rows.push('G late join: a watcher that turned up at ' + (LATE * 1000) + 'ms, ' + (LATE * 1000 - epAt)
+              + 'ms after the tick base moved, was handed the tree\'s context by a primary and still '
+              + 'landed on the players\' own timeline (' + (s3 ? s3.cmp : '?') + ' settled ticks '
+              + 'compared off ' + (s3 ? s3.dbg.rx : '?') + ' envelopes, none wrong)');
+}
+
 console.log(rows.join('\n'));
 if(fails){ console.log('\nDUEL-SPEC-TREE FAIL: ' + fails + ' assertion(s)'); process.exit(1); }
 console.log('\nDUEL-SPEC-TREE PASSED');

@@ -467,10 +467,28 @@ function duelStep(now) {
             }
         }
     }
-    // head-on: both moving into the same cell (also covers a simultaneous gem grab)
-    if (moves[0] && moves[1] && !protect && ck(moves[0]) === ck(moves[1])) {
+    // A HEAD-ON is mutual, and it stays mutual whatever the step phase the two met in. The
+    // two clauses below are ONE collision seen at two offsets: snakes on a closing course
+    // meet in a shared CELL when the gap between them is even and both are due, and on a
+    // shared EDGE when it is odd, where only one of them is due and it puts its head on the
+    // other's. Judging only the mover -- which is all the per-player loop above can do, since
+    // a snake that is not due has no move to judge -- charged that crash to whoever happened
+    // to be out of step phase and let the other one drive away from it. Boosting alone puts
+    // the two out of phase, so the edge case is the ordinary one, not a corner.
+    // Only a CLOSING course counts. Running into a head that is crossing or fleeing is a
+    // T-bone or a rear-end, and those stay the mover's own fault, exactly as before.
+    const closing = (a, b) => a.dir.x === -b.dir.x && a.dir.y === -b.dir.y;
+    let headOn = !protect && !!moves[0] && !!moves[1] && ck(moves[0]) === ck(moves[1]);
+    if (!headOn && !protect && players[0].alive && players[1].alive)
+        for (let i = 0; i < 2; i++)
+            if (moves[i] && ck(moves[i]) === ck(players[1-i].snake[0]) && closing(players[i], players[1-i]))
+                headOn = true;
+    if (headOn) {
         dead[0] = dead[1] = true;
-        for (let i = 0; i < 2; i++) { into[i] = 'headon'; hitAt[i] = moves[i]; }
+        // The one whose turn it was not has no move to point at, so its impact is the other
+        // head: that is the cell it is being crushed against, and the renderer reads this to
+        // decide which way the wreck leans.
+        for (let i = 0; i < 2; i++) { into[i] = 'headon'; hitAt[i] = moves[i] || players[1-i].snake[0]; }
     }
     if (dead[0] || dead[1]) {
         // A crash NEVER costs gear. The pass that leads into a collision has already rolled

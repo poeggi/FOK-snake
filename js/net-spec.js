@@ -390,7 +390,29 @@ function specWatch(peer, tid, nid){
 // its own depth. That depth is a role LABEL and a fan-out fact, never a pacing input:
 // the offset it runs at is the same at every tier.
 function _spCtxBuild(){
-    if(_spOn) return _spCtx ? Object.assign({}, _spCtx, { hops:(_spCtx.hops | 0) + 1, g:_spGen | 0 }) : null;
+    // A RELAYING PRIMARY re-states the LIVE tick base, and does not hand on the one it booted
+    // on. Everything in this context is a match CONSTANT -- seed, players, hearts, names --
+    // except the two fields that describe WHERE THE TIMELINE IS, and those move at every
+    // boundary. Re-sent as first captured they describe a match that has since moved on: the
+    // newcomer boots on a dead epoch, and the gate in _netHandleParsed then drops every
+    // 'in'/'h'/'st'/'rs' that follows -- the checkpoint included, which is the one packet
+    // that could have repaired it.
+    // Nothing notices, which is what made this the watcher's DEAD END rather than a stutter.
+    // Its feed is not silent -- every envelope arrives and is thrown away one layer up -- so
+    // net-spec's silence ladder never fires; and the split ladder that ends a stuck duel is
+    // _netLiveCheck's, which returns early for a spectator by design (no channel, no peer,
+    // nothing to ping). So it watched a board nobody was playing until the next boundary
+    // 'go' -- not gated here, it carries and checks its own epoch -- rebuilt the level out
+    // from under it. In a tournament that is the ordinary case, not a corner: the field
+    // hangs off two primaries, and anyone who arrives after the first level-up arrives late.
+    // startPts sheds OUR bias on the way past. The offset is FLAT at every tier, so the node
+    // downstream adds its own on boot and at every boundary; a carried one would count twice.
+    if(_spOn){
+        if(!_spCtx) return null;
+        const ls = (typeof _netSess !== 'undefined') ? _netSess : null;
+        const live = (ls && ls.game) ? { ep:_netMyEpoch(), startPts:(ls.startPts || 0) - netSpecBias() } : {};
+        return Object.assign({}, _spCtx, { hops:(_spCtx.hops | 0) + 1, g:_spGen | 0 }, live);
+    }
     const s = (typeof _netSess !== 'undefined') ? _netSess : null;
     if(!s || !s.game || !inGame) return null;
     const host = netMyIndex() === 0;

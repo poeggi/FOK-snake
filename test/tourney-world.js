@@ -465,6 +465,23 @@ function driverSrc(id){
         // A signal from another PLAYER rather than from the server: the duel handshake types.
         + '    sigRaw: function(type, from, d){ _netOnSignal({ type:type, from:from, payload:JSON.stringify(d) }); },\n'
         + '    playNid: function(){ return _ttPlayNid; },\n'
+        // The leave dialog: opening it, the screen it is standing over, and the two
+        // answers as the real input handler gives them.
+        + '    ask: function(to){ return tourneyAsk(to); },\n'
+        + '    from: function(){ return _ttUi.from; },\n'
+        + '    key: function(a, sel){ if(sel !== undefined) quitConfirmSel = sel;\n'
+        + '                           var h = UI_INPUT[phase];\n'
+        + '                           if(!h || !h[a]) throw "no " + a + " on " + phase;\n'
+        + '                           return h[a](); },\n'
+        // The way back into a tournament this device walked out of: what is on disk,
+        // and what the probe made of it.
+        + '    held: function(){ return _ttHeld(); },\n'
+        + '    back: function(){ return _ttBack ? JSON.parse(JSON.stringify(_ttBack)) : null; },\n'
+        + '    probe: function(){ return _ttProbe(); },\n'
+        // A RELOAD, which is the only way the way-back ever gets exercised for real:
+        // the picture of the tournament is gone from memory, the id on disk is not.
+        // Deliberately not _ttDrop -- that is the terminal route, and it wipes the id.
+        + '    forget: function(){ _tt = null; _ttPend = null; _ttNid = ""; _ttPlayNid = ""; _ttBack = null; },\n'
         + '  };\n'
         + '})();\n';
 }

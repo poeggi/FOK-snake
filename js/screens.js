@@ -1623,7 +1623,7 @@ function drawTourneyLobby(){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
         if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
         else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
-        else ct('2 - ' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
+        else ct('2-' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
         _ttDrawRows(84, MENU_ROW);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
         // real message -- both at that band would overdraw each other.
@@ -1931,9 +1931,10 @@ function drawTourneyQuit(){
                     : 'YOUR REMAINING MATCHES ARE HANDED TO YOUR OPPONENTS',
         sel: quitConfirmSel, danger: true,
         behind: () => {
-            if(from === 'tourneyRound')        drawTourneyRound();
-            else if(from === 'tourneyBracket') drawTourneyBracket();
-            else if(from === 'tourneyPodium')  drawTourneyPodium();
+            if(from === 'tourneyRound')          drawTourneyRound();
+            else if(from === 'tourneyBracket')  drawTourneyBracket();
+            else if(from === 'tourneyPodium')   drawTourneyPodium();
+            else if(from === 'tourneyCeremony') drawTourneyCeremony();
             else drawTourneyLobby();
         },
     });

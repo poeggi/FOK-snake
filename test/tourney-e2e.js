@@ -734,6 +734,133 @@ async function passBreak(opts){
     rows.push('19 watcher ladder: a spectator that cannot reach the feed keeps asking and says '
               + 'so, where a player hands the node back after four tries');
 
+    // ---- 20+21) the leave dialog, and the way back into a tournament left behind ------
+    // A SECOND world, because both of these need a tournament that is RUNNING and the one
+    // above has been played to its podium. Three clients, started and then left alone: what
+    // is under test here is the tournament SCREENS, not another bracket.
+    {
+        const W = mkWorld(IDS.slice(0, 3), NAMES.slice(0, 3));
+        const [H, G, R] = W.C;                         // host, guest, and the one who reloads
+        for(const c of W.C){ c.setPhase('tourneyLobby'); c.enter(); }
+        await W.settleAsync();
+        await H.pick('CREATE TOURNAMENT');
+        await W.settleAsync();
+        const code2 = H.tt().code;
+        for(const c of [G, R]){ await c.join(code2); await W.settleAsync(); }
+        await W.pump(1);
+        await H.pick('START TOURNAMENT');
+        await W.settleAsync();
+        await W.pump(1);
+        const tid2 = H.tt().tid;
+        A(H.tt().state === 'running', '20: the second world never started (' + H.tt().state + ')');
+
+        // ---- 20) the dialog is a QUESTION, and the tournament may not answer it ---------
+        // The reported bug exactly: the confirmation appeared and was gone again before a
+        // second press, with nothing pressed in between. Every tournament screen follows the
+        // tournament as it moves, and the dialog had been made one of them.
+        for(const c of W.C){ c.inGame(false); c.clrMsg(); c.clear(); }
+        // A guard that reads the QUESTION instead of the screen under it gets this wrong in
+        // the other direction too: tourneyRound is the one screen the standings are NOT
+        // allowed to move on from, because it is a match on the board -- and with the dialog
+        // up, the name the guard reads is the dialog's own.
+        H.setPhase('tourneyRound');
+        H.pick('END TOURNAMENT FOR ALL');
+        H.sigTo({ event:'standings', tid:tid2, rows:[], advancers:[] });
+        await W.settleAsync();
+        A(H.phase() === 'tourneyQuit' && H.from() === 'tourneyRound',
+          '20: standings pulled a backdrop that was a match on the board (' + H.from() + ')');
+        H.key('back');
+        A(H.phase() === 'tourneyRound', '20: NO left the match on the board behind');
+
+        // Asked from the ceremony, which is where a host between matches actually stands --
+        // and unlike tourneyRound it is a screen the standings are allowed to move on from,
+        // so the backdrop below has somewhere to go.
+        H.setPhase('tourneyCeremony');
+        A(H.has('END TOURNAMENT FOR ALL'), '20: the host is not offered the ending mid-run');
+        A(G.has('LEAVE TOURNAMENT'), '20: a guest mid-run is not offered a leave');
+        H.pick('END TOURNAMENT FOR ALL');
+        A(H.phase() === 'tourneyQuit' && H.from() === 'tourneyCeremony',
+          '20: the ending was not asked about (' + H.phase() + ' from ' + H.from() + ')');
+
+        // The poll. This is the one that did it: _ttSync runs off a timer, so the dialog was
+        // overwritten within one cadence of opening it.
+        W.clock(TT_STATE_MS + 1000); H.tick(); await W.settleAsync();
+        A(H.phase() === 'tourneyQuit', '20: a state poll answered the question by itself (now ' + H.phase() + ')');
+        // ...and a signal, which arrives on nobody's schedule at all.
+        H.sigTo({ event:'standings', tid:tid2, rows:[], advancers:[] });
+        await W.settleAsync();
+        A(H.phase() === 'tourneyQuit', '20: a standings signal took the question off the screen');
+        A(H.from() === 'tourneyBracket',
+          '20: the screen BEHIND the question never moved with the tournament (' + H.from() + ')');
+        // ...and a fresh roles sheet, which is the tournament moving on of its own accord.
+        H.sigTo({ event:'roles', tid:tid2, nid:'m9', round:2, stage:'ko', lvl:1, hm:2,
+                  stakes:false, players:[IDS[1], IDS[2]], feeder:IDS[1], primaries:[],
+                  secondaries:[IDS[0]], names:{}, you:'spectate' });
+        H.tick(); await W.settleAsync();
+        A(H.phase() === 'tourneyQuit', '20: a roles sheet took the question off the screen');
+        A(H.from() === 'tourneyCeremony',
+          '20: the backdrop did not follow the tournament on to the ceremony (' + H.from() + ')');
+        H.draw();                                      // the moved backdrop still paints
+
+        // NO is "carry on", and carrying on means the tournament as it stands NOW.
+        H.key('back');
+        A(H.phase() === 'tourneyCeremony', '20: NO did not return to the screen behind the question');
+
+        // The one re-point that is still allowed through, because it leaves nothing to ask:
+        // a tournament that is over is not one anybody can be asked about leaving.
+        G.setPhase('tourneyRound'); G.pick('LEAVE TOURNAMENT');
+        A(G.phase() === 'tourneyQuit', '20: the guest leave was not asked about');
+        G.sigTo({ event:'over', tid:tid2, podium:[IDS[0], IDS[1], IDS[2]] });
+        await W.settleAsync();
+        A(G.phase() === 'tourneyPodium', '20: a finished tournament left its leave dialog standing');
+
+        // ---- 21) the way back in -------------------------------------------------------
+        // Walking OUT of the screens is not leaving: the id stays on disk, and a reload --
+        // which is what actually happens when somebody puts the phone down -- has to find it.
+        A(R.held() === tid2, '21: a joined tournament was never written down (' + R.held() + ')');
+        R.setPhase('duelMenu');
+        A(R.held() === tid2, '21: stepping off the screens threw the way back away');
+        R.forget();
+        R.setPhase('tourneyLobby');
+        await R.probe();
+        await W.settleAsync();
+        A(R.back() && R.back().tid === tid2, '21: the probe did not find the tournament on disk');
+        const rr = R.rows();
+        A(rr[0].t === 'REJOIN TOURNAMENT' && rr[0].en && rr[0].note === code2,
+          '21: the way back is not the first row of the list (' + rr.map(x => x.t).join('/') + ')');
+        R.draw();
+        R.pick('REJOIN TOURNAMENT');
+        await W.settleAsync();
+        A(R.tt() && R.tt().tid === tid2 && R.tt().state === 'running',
+          '21: rejoining did not put the tournament back');
+        A(R.rows().some(x => x.t === 'LEAVE TOURNAMENT'), '21: the rejoined client is not really in it');
+
+        // And a door that must not be offered: a tournament this device is no longer part of
+        // forgets itself on the probe rather than showing a row that cannot be walked through.
+        R.forget();
+        W.srv.T.state = 'done';
+        await R.probe();
+        await W.settleAsync();
+        A(R.back() === null && R.held() === '',
+          '21: a finished tournament kept offering a way back into itself');
+        A(R.rows()[0].t === 'CREATE TOURNAMENT', '21: REJOIN outlived the tournament it pointed at');
+        W.srv.T.state = 'running';
+
+        // ---- 20, the last answer: YES ends it, everywhere ------------------------------
+        H.setPhase('tourneyRound'); H.pick('END TOURNAMENT FOR ALL');
+        A(H.phase() === 'tourneyQuit', '20: the ending was not asked about the second time');
+        await H.key('confirm', 0);                     // 0 is YES
+        await W.settleAsync();
+        A(H.tt() === null && H.held() === '', '20: YES did not end the tournament for the host');
+        A(H.phase() === 'tourneyLobby', '20: the host was left on a screen for a tournament it left');
+    }
+    rows.push('20 leave dialog: a state poll, a standings signal and a roles sheet all reason '
+              + 'about the screen BEHIND the confirmation instead of the confirmation -- moving '
+              + 'it where they should and leaving a match on the board alone -- NO returns to it, '
+              + 'YES ends the tournament, and one that finishes underneath still takes it down');
+    rows.push('21 the way back: walking off the screens keeps the id, a reload finds it through '
+              + 'the probe and REJOIN is the first row, and a tournament that has ended forgets it');
+
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }
     console.log('\nTOURNEY-E2E PASSED');

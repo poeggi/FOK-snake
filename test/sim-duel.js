@@ -275,6 +275,80 @@ const driver = `
     A(_rbWsItem({id:_ws.it.id,own:0,x:-1,y:1,at:0})===null, 'an off-board item survived the resync validator');
     R.steps.push('steal state rides the hash, the cloner and the resync wire (all five duel lists)');
 
+    // ---- E) a frontal is MUTUAL whatever the step phase the two snakes met in ----
+    // Boosting, or simply being spawned a tick out of phase, means the two do not step on
+    // the same ticks. The head-on rule used to need both of them due at once, so an odd-gap
+    // frontal was judged on the mover alone: it ran into a snake that was standing still by
+    // accident of phase, died on its own, and the other drove off intact.
+    const RIGHT={x:1,y:0}, LEFT={x:-1,y:0}, DOWN={x:0,y:1};
+    const lay=(x,y,d)=>{ const s=[]; for(let k=0;k<3;k++) s.push({x:(x-d.x*k+COLS)%COLS, y:(y-d.y*k+ROWS)%ROWS}); return s; };
+    const stage=(a,b,prot)=>{
+      startDuel(7777);
+      gem=null; heart=null; powerPellet=null; _powerMode=false; bars=[]; _barsV++;
+      phase='duel'; phaseAt=0; spawnAt=prot?100000:0; deathMsg=''; simEvents.length=0;
+      const P=players[0], Q=players[1];
+      P.snake=lay(a.x,a.y,a.d); P.dir=a.d; P.dirQueue=[]; P.stepAccum=a.acc; P.boosting=false;
+      Q.snake=lay(b.x,b.y,b.d); Q.dir=b.d; Q.dirQueue=[]; Q.stepAccum=b.acc; Q.boosting=false;
+      return { P, Q, l0:P.lives, l1:Q.lives };
+    };
+    const crashOf=(p)=>simEvents.filter(e=>e.t==='crash'&&e.p===p)[0]||null;
+    const bothPaid=(s,tag)=>{
+      A(players[0].lives===s.l0-1 && players[1].lives===s.l1-1,
+        tag+': a frontal cost '+(s.l0-players[0].lives)+'/'+(s.l1-players[1].lives)+' lives, not one each');
+      A(deathMsg==='BOTH LOSE A LIFE', tag+': the board says "'+deathMsg+'" after a frontal');
+      for(let i=0;i<2;i++){ const c=crashOf(i);
+        A(c && c.into==='headon', tag+': side '+i+' was not classified as a head-on ('+(c?c.into:'no crash')+')'); }
+    };
+    const frontal=(a,b)=>{ const s=stage(a,b); duelStep(100000); return s; };
+    // even gap, both due: they meet IN a cell -- the case that always worked
+    bothPaid(frontal({x:10,y:5,d:RIGHT,acc:2},{x:12,y:5,d:LEFT,acc:2}), 'gap 2, both due');
+    // odd gap: they meet on an EDGE, and only one of them is due to take the step
+    bothPaid(frontal({x:10,y:5,d:RIGHT,acc:2},{x:11,y:5,d:LEFT,acc:0}), 'gap 1, only P1 due');
+    bothPaid(frontal({x:10,y:5,d:RIGHT,acc:0},{x:11,y:5,d:LEFT,acc:2}), 'gap 1, only P2 due');
+    // and the same collision arrived at over two ticks: the first mover closes the gap into
+    // the empty cell between them, the second walks into the head now waiting there. The
+    // first mover must not get away with it for being early.
+    {
+      const s=stage({x:10,y:5,d:RIGHT,acc:2},{x:12,y:5,d:LEFT,acc:0});
+      duelStep(100000);
+      A(players[0].lives===s.l0 && players[1].lives===s.l1, 'closing into an empty cell already killed somebody');
+      A(s.P.snake[0].x===11, 'the early mover did not advance into the gap');
+      s.P.stepAccum=0; s.Q.stepAccum=2; simEvents.length=0;
+      duelStep(100100);
+      bothPaid(s, 'gap 2 closed over two ticks');
+    }
+    // the impact each wreck leans toward: the mover's is the cell ahead, and the one that
+    // was not due points BACK at the head it is being crushed against. The renderer reads
+    // these two to decide which way each wreck folds, so a wrong one leans into open board.
+    {
+      stage({x:10,y:5,d:RIGHT,acc:2},{x:11,y:5,d:LEFT,acc:0});
+      duelStep(100000);
+      const a=crashOf(0), b=crashOf(1);
+      A(a.hx===10 && a.x===11, 'the mover does not lean into the cell it was entering');
+      A(b.hx===11 && b.x===10, 'the snake that was not due leans at '+b.x+', not at the head that hit it');
+    }
+    R.steps.push('frontal collisions are mutual on an even gap, an odd gap and one closed over two ticks');
+    // CONTROLS -- not every touch of an opponent's head is a head-on. Only a CLOSING course
+    // is: crossing it or clipping its body stays the mover's own fault, exactly as before.
+    {
+      const s=stage({x:10,y:5,d:RIGHT,acc:2},{x:11,y:5,d:DOWN,acc:0});
+      duelStep(100000);
+      A(players[0].lives===s.l0-1 && players[1].lives===s.l1, 'a T-bone into a crossing head was charged to both');
+      A(crashOf(0).into==='snake', 'a T-bone was dressed as a head-on');
+    }
+    {
+      // a vertical opponent clipped side-on: the cell entered is its BODY, not its head
+      const s=stage({x:10,y:5,d:RIGHT,acc:2},{x:11,y:3,d:{x:0,y:-1},acc:0});
+      duelStep(100000);
+      A(players[0].lives===s.l0-1 && players[1].lives===s.l1, 'clipping a body was charged to both');
+    }
+    {
+      const s=stage({x:10,y:5,d:RIGHT,acc:2},{x:11,y:5,d:LEFT,acc:0}, true);
+      duelStep(100000);
+      A(players[0].lives===s.l0 && players[1].lives===s.l1, 'spawn protection stopped covering a frontal');
+    }
+    R.steps.push('a crossing head, a clipped body and a protected spawn are still not head-ons');
+
     R.ok=true;
   } catch(e){ R.err=String(e && e.stack || e); }
 })();
