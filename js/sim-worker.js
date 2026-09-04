@@ -47,10 +47,6 @@ self._msgNow = () => performance.now();
 self.netGameActive = () => _dcOn;
 self.netMyIndex = () => _dcMy;
 self.netSpectating = () => _dcSpec;
-// The spectator's ONE outbound: "say the world again". It is not a wire packet (nothing
-// goes toward the players), so it crosses the seam as its own message and main asks the
-// feed, exactly as the in-process home calls _spReq directly.
-self.netSpecResync = () => { if(_dcSpec) postMessage({ t:'specReq' }); };
 // A spectator's sim origin is already biased on MAIN (net-session.js adds it to startPts
 // before the worker is told), so the worker needs no bias of its own -- it just ticks the
 // startPts it was handed. Declared for the core's benefit only.

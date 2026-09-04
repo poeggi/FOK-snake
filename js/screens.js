@@ -290,12 +290,16 @@ function _drawMenuSnake(now){
     const sc=SNAKE_COLORS[_mSnakeCol]||SNAKE_COLORS[0];
     const body=`hsl(${sc.h},65%,30%)`;   // same hue/sat as the real snake body, one dim mid shade
     ctx.save();
+    // The SAME block as a real snake: CS-2 at a one-pixel inset, with the same corner radii
+    // drawSnakeG uses. It is meant to read as a snake on this board, and a smaller square on
+    // the same grid reads as a different thing that happens to move like one. Dimness is what
+    // makes it background -- alpha, not size, and the alpha is untouched.
     ctx.globalAlpha=0.12;
-    const p=CS*0.72, off=(CS-p)/2;
+    const sw=CS-2;
     for(let i=0;i<_mSnake.body.length;i++){
         const c=_mSnake.body[i];
         ctx.fillStyle=i===0?sc.head:body;
-        ctx.fillRect(c.x*CS+off, c.y*CS+off, p, p);
+        rr(c.x*CS+1, c.y*CS+1, sw, sw, i===0?5:3); ctx.fill();
     }
     ctx.restore();
 }
@@ -1167,12 +1171,23 @@ function drawLevelDoneFx(now){
         ctx.save(); ctx.shadowBlur=0; ct('A:next  TAP:next',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
     }
 }
+// deathMsg is WIRE STATE: it is hashed and it rides the rs snapshot, so both sides must
+// hold the same bytes for it and the sim can only ever write the slot number. The name goes
+// in HERE, at the last possible moment, where each client is free to answer "who is P2" with
+// whatever it happens to know.
+function _duelDeathMsg(m){
+    m = String(m || '');
+    if(m === 'P1 LIFE LOST') return duelSideName(0) + ' LIFE LOST';
+    if(m === 'P2 LIFE LOST') return duelSideName(1) + ' LIFE LOST';
+    return m;
+}
 function drawDeathFx(now){
     if(now-phaseAt < FX_SETTLE_MS) return;   // 2-tick hold: a rolled-back death never flashes
     const t=(now-phaseAt)/DEATH_DUR;
     ctx.save(); ctx.globalAlpha=Math.min(1,t*2.5); ctx.shadowColor='#ff4444';
-    if(!players && lives===0){ctx.shadowBlur=GLOW.BIG;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.JUMBO);}   // a duel death always reads as a heart lost; its winner banner follows at duelOver
-    else{ctx.shadowBlur=GLOW.TITLE;ct(deathMsg,CW/2,CH/2,'#ff5555',FONT.TITLE);}
+    const dm=_duelDeathMsg(deathMsg);
+    if(!players && lives===0){ctx.shadowBlur=GLOW.BIG;ct(dm,CW/2,CH/2,'#ff5555',FONT.JUMBO);}   // a duel death always reads as a heart lost; its winner banner follows at duelOver
+    else{ctx.shadowBlur=GLOW.TITLE;ct(dm,CW/2,CH/2,'#ff5555',FONT.TITLE);}
     ctx.restore();
 }
 // The one paused overlay: classic 'paused' and duel 'duelPaused' draw the same thing.
@@ -1544,8 +1559,7 @@ function drawDuelBoard(now) {
         drawGlass();
         const win=duelWinner;
         const col=win===2?'#cccccc':SNAKE_COLORS[win===0?lk.c0:lk.c1].head;
-        const _wn=(typeof netPlayerNames==='function')?netPlayerNames():null;
-        ctg(win===2?'DRAW!':((_wn?_wn[win]:'PLAYER '+(win+1))+' WINS!'), CW/2, CH/2-70, col, FONT.JUMBO, GLOW.BIG);
+        ctg(win===2?'DRAW!':(duelSideName(win)+' WINS!'), CW/2, CH/2-70, col, FONT.JUMBO, GLOW.BIG);
         if(players) ct(players[0].score+'  :  '+players[1].score, CW/2, CH/2-40, '#cccccc', FONT.MENU);
         // A tournament match has no rematch to offer -- the bracket says what comes next --
         // so the vote is replaced by what is actually about to happen. Offering it anyway
@@ -1703,8 +1717,9 @@ function drawTourneyBracket(){
             // The advancing half is what everyone is actually reading the table for.
             const up = adv.length ? adv.indexOf(String(r.id)) >= 0 : (i < Math.max(2, Math.ceil(rows.length / 2)));
             const col = me ? '#7fff7f' : up ? '#ffd700' : '#888';
+            if(me) _ttMine(CW/2 - 218, y);
             _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.MENU);
-            _ttCol(_ttName(r.id).slice(0, 15),              CW/2 - 180, y, col, FONT.MENU);
+            _ttCol(_ttRealName(r.id).slice(0, 15),          CW/2 - 180, y, col, FONT.MENU);
             _ttCol(String(r.pts),                           CW/2 + 110, y, col, FONT.MENU, 'right');
             _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.MENU, 'right');
         });
@@ -1773,9 +1788,13 @@ function _ttStage(tok, round){
 // left the lobby list behind is still on this table with the name they played under.
 function _ttRowName(r){
     if(!r) return '?';
-    if(String(r.id) === getPlayerId()) return 'YOU';
-    return String(r.name || '').toUpperCase() || _ttName(r.id);
+    return String(r.name || '').toUpperCase() || _ttRealName(r.id);
 }
+// A ranked table is the same table for everyone reading it, so the PLAYER column says who
+// each row is and the margin says which one is yours. Swapping your name for YOU in the
+// column would leave you the only reader who cannot find yourself by the name you played
+// under -- and the only one who cannot read the board out to somebody else.
+function _ttMine(x, y){ _ttCol('YOU', x, y, '#7fff7f', FONT.HINT, 'right'); }
 function _ttBreakName(b, id){
     for(const r of ((b && b.rows) || [])) if(r && String(r.id) === String(id)) return _ttRowName(r);
     return _ttName(id);
@@ -1809,7 +1828,8 @@ function drawTourneyRound(){
         // THE CUT: the line between who is through and who is out, drawn where the server
         // put it. Sitting it between the last `adv` row and the first that is not is what
         // stops it from ever disagreeing with the colours above and below it.
-        if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 220, y - 10, 440, 1); }
+        if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 216, y - 10, 432, 1); }
+        if(me) _ttMine(CW/2 - 223, y);
         _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 215, y, col, FONT.HINT);
         _ttCol(_ttRowName(r).slice(0, 14),              CW/2 - 195, y, col, FONT.HINT);
         _ttCol((r.w | 0) + '-' + (r.l | 0) + '-' + (r.d | 0), CW/2 + 20, y, col, FONT.HINT, 'right');
@@ -1858,22 +1878,60 @@ function drawTourneyCeremony(){
     drawStatus(tourneyUi().msg || ('CONNECTING' + _ttDots()));
     ct('ESC:bracket', CW/2, HINT_Y, '#888', FONT.HINT);
 }
+// The last screen of the tournament, built as the CEREMONY screen's other half: same title
+// height, same context line under it, the same three-line name band at the same heights, the
+// same verdict line at the same height. The two screens are the before and the after of one
+// event, and reading the second should feel like the first one settling, not like arriving
+// somewhere else.
 function drawTourneyPodium(){
     const t = tourneyView();
     if(!t){ drawTourneyLobby(); return; }
     drawGrid(); drawOvBg(0.92);
-    ctg('TOURNAMENT OVER', CW/2, 30, '#ffd700', FONT.TITLE, GLOW.TITLE);
-    const pod = (t.podium || []).map(String);
-    if(pod[0] === getPlayerId()) ctg('YOU WON IT', CW/2, 72, '#ffd700', FONT.JUMBO, GLOW.HERO);
-    const place = [['1ST', '#ffd700', FONT.JUMBO, 130], ['2ND', '#cccccc', FONT.TITLE, 176], ['3RD', '#cd7f32', FONT.TITLE, 216]];
+    ctg('TOURNAMENT OVER', CW/2, 24, '#ffd700', FONT.TITLE, GLOW.TITLE);
+    const pod = (t.podium || []).map(String), me = getPlayerId(), mine = pod.indexOf(me);
+    const host = _ttRealName(t.host).slice(0, 12);
+    if(host) ct('HOSTED BY ' + host, CW/2, 46, '#888', FONT.HINT);
+    // ONE size for all three places: a podium is a ranking and the colours already carry it.
+    // Drawing first place bigger than the rest made the screen top-heavy and left the other
+    // two looking like a footnote to it.
+    const place = [['1ST', '#ffd700', 116], ['2ND', '#cccccc', 146], ['3RD', '#cd7f32', 176]];
     place.forEach((pl, i) => {
         if(!pod[i]) return;
-        ct(pl[0], CW/2 - 150, pl[3], pl[1], FONT.HINT);
-        ctg(_ttName(pod[i]).slice(0, 14), CW/2, pl[3], pl[1], pl[2], GLOW.TEXT);
+        if(pod[i] === me) _ttMine(CW/2 - 190, pl[2]);
+        ct(pl[0], CW/2 - 150, pl[2], pl[1], FONT.HINT);
+        ctg(_ttRealName(pod[i]).slice(0, 12), CW/2, pl[2], pl[1], FONT.TITLE, i ? GLOW.FAINT : GLOW.TITLE);
     });
     // An empty podium is an ENDING, not a wait: the bracket voided all the way to the top.
-    if(!pod.length) ct('NO PODIUM - THE BRACKET VOIDED', CW/2, 130, '#555', FONT.HINT);
-    _ttDrawRows(268, 26);
+    if(!pod.length) ct('NO PODIUM - THE BRACKET VOIDED', CW/2, 146, '#555', FONT.HINT);
+    // Where the ceremony says what you are about to do, the podium says what you did. Every
+    // player gets that line, not just the winner: coming third in a field of eight is a
+    // result, and a screen that speaks to one player says nothing at all to the rest.
+    else if(mine === 0) ctg('YOU WON IT',   CW/2, 228, '#ffd700', FONT.JUMBO, GLOW.HERO);
+    else if(mine === 1) ctg('SECOND PLACE', CW/2, 228, '#cccccc', FONT.JUMBO, GLOW.BIG);
+    else if(mine === 2) ctg('THIRD PLACE',  CW/2, 228, '#cd7f32', FONT.JUMBO, GLOW.BIG);
+    else ctg(_ttRealName(pod[0]).slice(0, 10) + ' WON IT', CW/2, 228, '#ffd700', FONT.JUMBO, GLOW.BIG);
+    _ttDrawRows(296, MENU_ROW);
     if(tourneyUi().msg) drawStatus(tourneyUi().msg);
+    const n = (t.players || []).length;
+    if(n) ct(n + ' PLAYERS' + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+
+// The one exit that costs other people something, so it is asked rather than taken. The
+// board stays behind the glass because what is at stake is exactly what is drawn on it.
+function drawTourneyQuit(){
+    const t = tourneyView(), from = tourneyUi().from;
+    const host = !!t && String(t.host) === getPlayerId();
+    drawConfirm({
+        title: host ? 'END IT FOR EVERYONE?' : 'LEAVE AND FORFEIT?',
+        note:  host ? 'EVERY PLAYER IS DROPPED OUT OF THIS TOURNAMENT'
+                    : 'YOUR REMAINING MATCHES ARE HANDED TO YOUR OPPONENTS',
+        sel: quitConfirmSel, danger: true,
+        behind: () => {
+            if(from === 'tourneyRound')        drawTourneyRound();
+            else if(from === 'tourneyBracket') drawTourneyBracket();
+            else if(from === 'tourneyPodium')  drawTourneyPodium();
+            else drawTourneyLobby();
+        },
+    });
 }

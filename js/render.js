@@ -39,9 +39,10 @@ function updateHUD() {
     // MIRROR can linger after leaving a 1:1 (the worker may be paused and never post a clearing
     // frame), and a stale mirror must not paint duel names onto the menu HUD.
     const mode = (players && inGame) ? 'duel' : 'classic';
-    const nms = (typeof netPlayerNames==='function') ? netPlayerNames() : null;   // online: real names
-    const la = mode==='duel' ? ((nms?nms[0].slice(0,MAX_NAME):'P1')+' ') : 'LIVES ';   // MAX_NAME, not 10: a full-length name was losing its tail
-    const lb = mode==='duel' ? ((nms?nms[1].slice(0,MAX_NAME):'P2')+' ') : 'SCORE ';
+    // duelSideName already caps at MAX_NAME (not 10: a full-length name was losing its tail)
+    // and falls back to PLAYER n only where there is genuinely no name to print.
+    const la = mode==='duel' ? (duelSideName(0)+' ') : 'LIVES ';
+    const lb = mode==='duel' ? (duelSideName(1)+' ') : 'SCORE ';
     if(_hudCache.mode!==mode || _hudCache.la!==la || _hudCache.lb!==lb){
         _hudCache={mode,la,lb,a:-1,b:-1,c:-1,d:-1};
         const d = mode==='duel';
@@ -342,8 +343,16 @@ function _crashJolt(p, now){
     return i=>{
         if(i===0){
             const c = (e.boost?9:5)*(0.55+0.45*Math.exp(-age/180));   // stays squashed: it is a wreck
-            const back = (e.boost?4:2.5)*Math.exp(-age/180);
-            return [ -e.ax*back, -e.ay*back, e.ax?-c:c*0.8, e.ay?-c:c*0.8 ];
+            const b0 = e.boost?4:2.5, decay = Math.exp(-age/180);
+            // A HEAD-ON is the one crash whose impact cell holds NEITHER snake. Every other
+            // death leaves the head already against what killed it -- the bar, the body -- so
+            // the wreck reads right from the cell the head stands on. Here both heads stopped
+            // one cell short of the cell they both tried to enter, which drew them a whole
+            // clear block apart under a message saying they had collided. Lean the head half a
+            // cell into that shared cell so the two meet on its edge, and run the recoil
+            // FORWARD from that contact instead of backward from the cell behind it.
+            const push = e.into==='headon' ? CS/2 - b0*(1-decay) : -b0*decay;
+            return [ e.ax*push, e.ay*push, e.ax?-c:c*0.8, e.ay?-c:c*0.8 ];
         }
         const kick = amp*CS*Math.exp(-i/reach)*k(i)*(i%2?1:-1)*(1+0.35*rattle);
         const p2 = pileTo(i);

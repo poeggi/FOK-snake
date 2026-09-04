@@ -267,6 +267,13 @@ function mk(id, seed, role, extra, mine, theirs){ const c = runInGame(HOOKS(id) 
 
 // ---- torus geometry (shared by the autopilot) ----
 function torusDelta(a, b, n){ let d = b - a; if(d > n/2) d -= n; if(d < -n/2) d += n; return d; }
+// The pilot's ONLY memory, and the one thing about it that can cross a match boundary. A
+// driver that starts a run without clearing it inherits whichever corner the last run's
+// snakes were walking to, so the same call made twice in one process plays two different
+// games -- which is not a flaky test, it is a driver that is not reproducible. runMatch has
+// always cleared it; every other driver clears it through here.
+function resetPilot(){ _rover[0] = 0; _rover[1] = 0; }
+
 function torusDist(ax, ay, bx, by, cols, rows){ return Math.max(Math.abs(torusDelta(ax, bx, cols)), Math.abs(torusDelta(ay, by, rows))); }
 const eq = (u, v)=> u.x === v.x && u.y === v.y;
 const rev = (u, v)=> u.x === -v.x && u.y === -v.y;
@@ -464,7 +471,7 @@ function runMatch(opts){
     const secs = opts.secs || 20, W = opts.wire || {};
     const seed = (opts.seed >>> 0) || 0xD0E1;
     const dir = opts.director || autopilot;
-    _rover[0] = 0; _rover[1] = 0;   // fresh circuit each match, so scenarios do not inherit progress
+    resetPilot();                   // fresh circuit each match, so scenarios do not inherit progress
     // opts.ws = { A:[ids], B:[ids] }: each client's OWN worn windswept gear. A is the host (P0),
     // B the joiner (P1), and each is told only its own list plus the peer's -- exactly what a real
     // client has. Omitted, both snakes start bare and the steal rules never fire.
@@ -949,4 +956,5 @@ function runMatch(opts){
     };
 }
 
-module.exports = { runInGame, HOOKS, mk, anchor, runMatch, autopilot, collider, jouster, torusDelta, NET_BASE };
+module.exports = { runInGame, HOOKS, mk, anchor, runMatch, autopilot, resetPilot, collider, jouster,
+                   torusDelta, NET_BASE };

@@ -232,6 +232,197 @@ runTest('SMOKE-UI', `
         log('tournament screens ok: roster rows carry id + name and fill from a fixed top with the host on it, nameless players get a dimmed stand-in, START is the pre-selected row, the summary sits on the status band, BACK carries the cancel, and a tournament match ends without a rematch vote');
     }
 
+    // ---- who a table says you are, and where the podium says it ----------------------
+    // A RANKED TABLE IS THE SAME TABLE FOR EVERYONE READING IT. The PLAYER column names
+    // every row's player, yours included, and the margin says which row is yours. Putting
+    // YOU in the column instead left you the one reader who could not find yourself by the
+    // name you played under -- and the only one who could not read the board out to somebody
+    // sitting next to you.
+    {
+        const oCol=_ttCol, oCt=ct, oCtg=ctg, oPid=getPlayerId;
+        let cols=[], big=[];
+        const cap=()=>{ cols=[]; big=[];
+            _ttCol=(t,x,y,c,f)=>{ cols.push({t:String(t),x:x,y:y,f:f}); };
+            ct =(t,x,y,c,f)=>{ big.push({t:String(t),x:x,y:y,f:f}); };
+            ctg=(t,x,y,c,f)=>{ big.push({t:String(t),x:x,y:y,f:f}); }; };
+        const rel=()=>{ _ttCol=oCol; ct=oCt; ctg=oCtg; };
+        const at=(l,y)=>l.filter(o=>o.y===y);
+        getPlayerId=()=>'aaaa0001';
+        const ppl=[{id:'bbbb0002',name:'JO'},{id:'aaaa0001',name:'KAI'},{id:'cccc0003',name:'MO'}];
+        _tt={ tid:'t1', code:'PQKKSV', state:'running', host:'bbbb0002', max:8, stakes:true,
+              round:1, cursor:'', players:ppl, advancers:['bbbb0002','aaaa0001'],
+              standings:[{id:'bbbb0002',pts:4,diff:5,rank:1},
+                         {id:'aaaa0001',pts:2,diff:1,rank:2},
+                         {id:'cccc0003',pts:0,diff:-6,rank:3}],
+              brk:{ next:2, of:2, done:1, matches:3, hm:2, lvl:1, host:'bbbb0002',
+                    rows:[{id:'bbbb0002',name:'JO', rank:1,pts:4,diff:5,w:2,l:0,d:0,adv:true},
+                          {id:'aaaa0001',name:'KAI',rank:2,pts:2,diff:1,w:1,l:1,d:0,adv:true},
+                          {id:'cccc0003',name:'MO', rank:3,pts:0,diff:-6,w:0,l:2,d:0,adv:false}] } };
+        // Both tables, the same rule. The standings table reads names off the roster, the
+        // round board off the row the server sent -- two different lookups that used to
+        // disagree with each other about exactly one player.
+        [['STANDINGS',()=>drawTourneyBracket()], ['ROUND BOARD',()=>drawTourneyRound()]].forEach(tc=>{
+            cap(); tc[1](); rel();
+            const mine=cols.filter(o=>o.t==='YOU');
+            if(mine.length!==1) throw tc[0]+': want exactly one YOU marker, got '+mine.length;
+            const row=at(cols, mine[0].y).filter(o=>o.t!=='YOU');
+            if(!row.length) throw tc[0]+': the YOU marker sits on no row at all';
+            if(!row.some(o=>o.t==='KAI')) throw tc[0]+': my row does not carry my name: '+row.map(o=>o.t).join(',');
+            // LEFT OF THE LIST, not inside it: the marker has to clear the leftmost column the
+            // rows themselves use, or it is a fourth column and the table has to make room.
+            const left=Math.min.apply(null, row.map(o=>o.x));
+            if(!(mine[0].x<left)) throw tc[0]+': the YOU marker sits at x '+mine[0].x+', not left of the list ('+left+')';
+            // Everybody else keeps the name they played under, and nobody else is marked.
+            const others=cols.filter(o=>o.t==='JO'||o.t==='MO');
+            if(others.length!==2) throw tc[0]+': the other players lost their names: '+others.length;
+        });
+        log('standings + round board ok: YOU is a margin marker left of the list, every row keeps the name it played under');
+
+        // THE PODIUM is the ceremony screen settling, not a different screen: the same name
+        // band at the same three heights and the same verdict line at the same height, with
+        // ONE type size for all three places -- first place drawn bigger than the rest made
+        // the screen top-heavy and left second and third reading as a footnote to it.
+        _tt.state='done'; _tt.roles={ round:2, match:1, of:1, nid:'r2m1', hm:3, lvl:2,
+                                      players:['bbbb0002','aaaa0001'], you:'play', names:{} };
+        cap(); drawTourneyCeremony(); rel();
+        const cer=big.slice(), py=[116,146,176];
+        if(py.filter(y=>cer.some(o=>o.y===y)).length!==3)
+            throw 'the ceremony name band moved: '+cer.map(o=>o.y).join(',');
+        if(!cer.some(o=>o.y===228)) throw 'the ceremony verdict line moved out from under the podium';
+        _tt.podium=['bbbb0002','aaaa0001','cccc0003'];
+        cap(); drawTourneyPodium(); rel();
+        const pod=big.slice(), lbl=['1ST','2ND','3RD'];
+        py.forEach((y,i)=>{
+            const nm=at(pod,y).filter(o=>lbl.indexOf(o.t)<0);
+            if(nm.length!==1) throw 'podium place '+(i+1)+' should draw one name at the ceremony height '+y+', got '+nm.length;
+            if(nm[0].f!==FONT.TITLE) throw 'podium place '+(i+1)+' is drawn at size '+nm[0].f
+                                          +' -- all three places share one size ('+FONT.TITLE+')';
+            if(!at(pod,y).some(o=>o.t===lbl[i])) throw 'podium place '+(i+1)+' lost its '+lbl[i]+' label';
+        });
+        // Every player gets a verdict, not only the winner: coming third in a field of eight
+        // is a result, and a screen that speaks to one player says nothing to the rest.
+        const verdict=pod.filter(o=>o.y===228);
+        if(!verdict.length) throw 'the podium verdict is not on the ceremony verdict height (228)';
+        if(verdict[0].t!=='SECOND PLACE') throw 'a runner-up was told nothing: '+verdict[0].t;
+        if(!cols.some(o=>o.t==='YOU')) throw 'the podium does not mark which step is yours';
+        getPlayerId=()=>'bbbb0002'; cap(); drawTourneyPodium(); rel();
+        if(!big.some(o=>o.y===228&&o.t==='YOU WON IT')) throw 'the winner lost their line';
+        getPlayerId=()=>'zzzz9999'; cap(); drawTourneyPodium(); rel();
+        const out=big.filter(o=>o.y===228);
+        if(!out.length||!/ WON IT$/.test(out[0].t)||out[0].t==='YOU WON IT')
+            throw 'a player off the podium must still be told who won: '+(out[0]&&out[0].t);
+        if(cols.some(o=>o.t==='YOU')) throw 'a player off the podium was marked as being on it';
+        getPlayerId=oPid; _tt=null; _ttUi.sel=0; phase='menu';
+        log('podium ok: the ceremony name band and verdict heights reused, one type size for all three places, a line for every player and the YOU marker only on your own step');
+    }
+
+    // ---- P2 is a slot number, and a slot number is a FALLBACK -------------------------
+    // By the time a duel is running both names are known on both sides, so every place that
+    // printed a slot number asks for a name instead: the HUD, the winner banner and the
+    // heart-lost line all say the same word for the same person. PLAYER n survives only
+    // where it is true -- a local duel on one keyboard, where the second player has no
+    // account and so has no name.
+    {
+        const oNames=netPlayerNames, oCt=ct, oCtg=ctg;
+        let said=[];
+        const cap=()=>{ said=[]; ct=(t)=>{ said.push(String(t)); }; ctg=(t)=>{ said.push(String(t)); }; };
+        const rel=()=>{ ct=oCt; ctg=oCtg; };
+        netPlayerNames=()=>['KAI','JO'];
+        if(duelSideName(0)!=='KAI'||duelSideName(1)!=='JO') throw 'a named duel still shows slot numbers';
+        // Each of the three through its own draw path: a helper that is right and a caller
+        // that never asks it is exactly the bug this is here to catch.
+        simCommand({t:'startDuel', seed:0xd0e2});
+        inGame=true; _hudCache.mode=''; updateHUD();
+        if(_hudCache.la!=='KAI '||_hudCache.lb!=='JO ')
+            throw 'the duel HUD still labels its rows by slot: '+_hudCache.la+'/'+_hudCache.lb;
+        deathMsg='P2 LIFE LOST'; phaseAt=simNow-10000;
+        cap(); drawDeathFx(simNow); rel();
+        if(said.indexOf('JO LIFE LOST')<0) throw 'the heart-lost line still says P2: '+said.join(',');
+        phase='duelOver'; duelWinner=1; _tt=null;
+        cap(); drawDuelBoard(simNow); rel();
+        if(said.indexOf('JO WINS!')<0) throw 'the winner banner still says PLAYER 2: '+said.join(',');
+        // deathMsg is WIRE STATE -- it is hashed and it rides the rs snapshot -- so the sim may
+        // only ever write the slot number and the name goes in at draw time. A message the sim
+        // did not write passes through untouched.
+        if(_duelDeathMsg('LEVEL CLEARED')!=='LEVEL CLEARED') throw 'the death line rewrote a message that was not a slot';
+        // PLAYER n survives as the fallback it always should have been: a local duel on one
+        // keyboard, where the second player has no account and so has no name.
+        netPlayerNames=()=>['',''];
+        if(duelSideName(0)!=='PLAYER 1'||duelSideName(1)!=='PLAYER 2') throw 'a nameless side lost its fallback';
+        _hudCache.mode=''; updateHUD();
+        if(_hudCache.la!=='PLAYER 1 '||_hudCache.lb!=='PLAYER 2 ')
+            throw 'a nameless duel HUD lost its fallback: '+_hudCache.la+'/'+_hudCache.lb;
+        netPlayerNames=oNames; inGame=false; deathMsg='';
+        simCommand({t:'phase',phase:'menu'}); phase='menu';
+        log('duel names ok: the HUD rows, the winner banner and the heart-lost line all name the player through their own draw path, PLAYER n only where there is no name');
+    }
+
+    // ---- a head-on is the one crash whose impact cell holds NEITHER snake -------------
+    // Every other death leaves the head already against what killed it, so the wreck reads
+    // right from the cell the head stands on. In a head-on both heads stopped one cell short
+    // of the cell they both tried to enter, which drew them a whole clear block apart under
+    // a message saying they had collided.
+    {
+        const oSimple=_simpleGfx, oMotion=_reduceMotion;
+        _simpleGfx=()=>false; _reduceMotion=()=>false;
+        // Where drawSnakeG puts the middle of the head: the cell, plus the jolt's draw offset.
+        // The head also SQUASHES on impact (that is what j[2] is), so its edges are the wrong
+        // thing to measure -- a boost wreck flattens 9px and would read as a gap that is not
+        // there. Centres are what say whether the two are on the same cell edge.
+        const headMid=(p,cx,now)=>{
+            const j=_crashJolt(p,now), o=j?j(0):[0,0,0,0];
+            return cx*CS+1+o[0]+(CS-2)/2;
+        };
+        for(const boost of [false,true]){
+            _crashFx=[];
+            // Cells 5 and 7, both moving into 6: the shared cell neither of them reaches.
+            armCrash({p:0,hx:5,hy:5,x:6,y:5,into:'headon',boost:boost}, 1000);
+            armCrash({p:1,hx:7,hy:5,x:6,y:5,into:'headon',boost:boost}, 1000);
+            if(_crashFx.length!==2) throw 'the head-on wreck was not staged';
+            for(const age of [0,40,120,300]){
+                const d=headMid(1,7,1000+age)-headMid(0,5,1000+age);
+                // Their cells are two apart. Drawn touching, they are ONE apart; anything from
+                // one and a half up is the clear block of daylight the bug showed.
+                if(d>=CS*1.6) throw 'head-on at '+age+'ms ('+(boost?'boost':'normal')+'): the heads are '
+                                    +d.toFixed(1)+'px apart, more than a cell and a half, under a '
+                                    +'message saying they collided';
+                if(d<=CS*0.5) throw 'head-on at '+age+'ms ('+(boost?'boost':'normal')+'): the heads are '
+                                    +d.toFixed(1)+'px apart -- they are through each other, not against';
+            }
+        }
+        // ...and the lean is specific to a head-on: a snake that hit a BAR is already against
+        // it, so its wreck still recoils away from the impact rather than into it.
+        _crashFx=[]; armCrash({p:0,hx:5,hy:5,x:6,y:5,into:'bar',boost:false}, 1000);
+        const bj=_crashJolt(0,1000);
+        if(!bj||!(bj(0)[0]<0)) throw 'a bar crash must still recoil backwards, not lean forward';
+        _crashFx=[]; _simpleGfx=oSimple; _reduceMotion=oMotion;
+        log('head-on wreck ok: both heads lean into the cell they both tried to enter and meet on its edge, bar crashes still recoil');
+    }
+
+    // ---- the menu snake is the game's snake, dimmed -----------------------------------
+    // The SAME block as a real snake: CS-2 at a one-pixel inset. A smaller square on the same
+    // grid reads as a different thing that happens to move like one -- what makes it
+    // background is the alpha, not the size.
+    {
+        const oFill=ctx.fillRect, oRr=rr, oMotion=_reduceMotion, oMode=cfg.gfxMode;
+        let rects=[];
+        _reduceMotion=()=>false; cfg.gfxMode=1;
+        ctx.fillRect=function(x,y,w,h){ rects.push({x:x,y:y,w:w,h:h,a:ctx.globalAlpha}); };
+        rr=(x,y,w,h,r)=>{ rects.push({x:x,y:y,w:w,h:h,r:r,a:ctx.globalAlpha}); };
+        _mSnake={ dir:{x:1,y:0}, len:3, body:[{x:4,y:4},{x:3,y:4},{x:2,y:4}] };
+        _drawMenuSnake(1000);
+        ctx.fillRect=oFill; rr=oRr; _reduceMotion=oMotion; cfg.gfxMode=oMode;
+        if(rects.length!==3) throw 'the menu snake drew '+rects.length+' shapes for 3 segments';
+        const seg=rects.filter(o=>o.w===CS-2&&o.h===CS-2);
+        if(seg.length!==3) throw 'the menu snake must draw every segment at the in-game block size: '
+                                +rects.map(o=>o.w+'x'+o.h).join(' ');
+        if(seg.some(o=>o.x%CS!==1||o.y%CS!==1)) throw 'the menu snake blocks are off the in-game one-pixel inset';
+        // The dimming itself is not assertable here -- globalAlpha is canvas STATE and the
+        // harness context swallows state writes -- but it is also not what went wrong: the
+        // snake was always dim, it was drawn as a 0.72-cell square on a full-cell grid.
+        log('menu snake ok: full in-game block on the in-game one-pixel inset, the same shape the real snake draws');
+    }
+
     // Multi-page newspaper: render and flip pages without error.
     phase='news'; _newsAt=0; newsPage=0; drawNews(1000);
     press('ArrowRight'); if(newsPage!==1) throw 'news: LEFT/RIGHT did not flip pages';

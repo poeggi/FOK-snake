@@ -325,6 +325,18 @@ const UI_INPUT = {
     tourneyBracket: _ttUiInput('duelMenu'),
     tourneyRound: _ttUiInput('duelMenu'),
     tourneyPodium: _ttUiInput('duelMenu'),
+    tourneyQuit: {
+        nav: _navQC,
+        confirm(){
+            Snd.sfxPlay('select',cfg.music);
+            // NO is not "stay on this dialog": it is "carry on with the tournament", which
+            // means the screen the question was asked from.
+            if(quitConfirmSel===0) tourneyLeave(tourneyUi().to);
+            else phase = tourneyUi().from || 'tourneyLobby';
+        },
+        back(){ phase = tourneyUi().from || 'tourneyLobby'; },
+        other(key){ if(key==='y'||key==='Y'){ this.confirm(); return true; } return false; },
+    },
     tourneyCeremony: {
         // Nothing to choose here: the match is being set up and the next thing to happen
         // is the game itself. ESC steps back to the bracket without cancelling anything.

@@ -160,6 +160,140 @@ if(lane.step()){
               + 'ms after the primary it hangs off, and no ask is left parked anywhere');
 }
 
+// ---- E) a secondary whose world goes wrong, and the silence it keeps about it ---------
+// The one failure that is not a node dying: a watcher whose copy of the world is simply
+// WRONG -- a hole in the forwarded log, a hop that dropped, anything an inputs-only stream
+// cannot undo on its own. Left alone it stays wrong for the rest of the level, which is
+// exactly what a watcher reports: a board that is not the board, for minutes.
+//
+// A SPECTATOR MAY NOT FIX THIS BY ASKING. It subscribes and it receives, and that is the
+// whole of what it ever says to anyone -- the tier it sits in does not earn it a bigger
+// vocabulary. So the repair has to be something the wire was going to deliver anyway: the
+// feeder mints a full checkpoint every SPEC_CKPT_MS, it is relayed verbatim down every
+// tier, and a spectator -- which owns neither snake -- adopts every one of them whole.
+// Nobody notices, nobody decides, nobody speaks, and the world is right again within one
+// cadence. Note what the run below does NOT need: the drifted node's own hash detector
+// never fires (__badSince stays 0 throughout). It does not have to. Being repaired is not
+// something a passive receiver participates in.
+//
+// Corrupting a HOP-2 node is the point: a secondary is the furthest thing in the tree from
+// the state's author, and the node with nobody to ask even if asking were allowed.
+if(lane.step()){
+    let fix0 = null, at = 0;
+    // Struck the instant a checkpoint has just been adopted, so the wait measured below is
+    // the WHOLE cadence rather than whatever the phase happened to leave. Score is carried
+    // by the resync's player descriptor and covered by the duel hash but drives nothing in
+    // the sim, so what heals is the checkpoint and not the physics washing the damage out.
+    const CORRUPT = ';globalThis.__corrupt = ()=>{ if(!players) return false; players[0].score += 7; return true; };';
+    const r = runSpec({ secs:16, seed:0x77C3, wire:WIRE, hookS:CORRUPT,
+                        watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }],
+                        onSample:(now, c)=>{
+                            if(at || now < 6000) return;
+                            const o = c.S3;
+                            if(!o.c.__specOn()) return;
+                            const f = o.c.__rbDbg().fix | 0;
+                            if(fix0 == null){ fix0 = f; return; }
+                            if(f > fix0 && o.c.__corrupt()) at = now;
+                        } });
+    A(!r.exitReason, 'E: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    A(at > 0, 'E: the secondary was not watching at 6s -- nothing was corrupted and this proves nothing');
+    // No level boundary anywhere in this run, so "it came back when the level rebuilt" --
+    // the way a drifted watcher used to come back -- is excluded by construction.
+    A(r.levelUps === 0, 'E: ' + r.levelUps + ' level boundary in the run: a rebuild could have '
+                        + 'healed it and the checkpoint would get the credit');
+    alive('E', r, 'S1', 1); alive('E', r, 'S2', 1);
+    const s3 = r.spectators.S3;
+    A(!!s3 && s3.on, 'E: the secondary stopped watching instead of healing');
+    if(s3){
+        A(s3.divN > 0, 'E: the corruption never reached a settled tick -- this proves nothing');
+        A(s3.divClean != null, 'E: the secondary never re-converged: it watched a wrong board to the end');
+        // One cadence of wrong history is the budget: 2000ms is 120 ticks, and the last wrong
+        // tick may sit a wire crossing past that.
+        const span = (s3.divTo | 0) - (s3.divFrom | 0);
+        A(span < 160, 'E: ' + span + ' ticks of wrong history -- longer than the checkpoint cadence, '
+                      + 'so the repair is not arriving on the cadence it is supposed to');
+        A(s3.hops === 2, 'E: hops ' + s3.hops + ' -- it healed by falling back to the feeder, '
+                         + 'not by being served where it hangs');
+    }
+    // THE RULE ITSELF, and it holds for every watcher in the tree, drifted or not.
+    for(const n of ['S1', 'S2', 'S3']){
+        const s = r.spectators[n];
+        if(!s) continue;
+        const extra = s.upTypes.filter(t => t !== 'ssub');
+        A(extra.length === 0, 'E ' + n + ': said ' + extra.join('/') + ' to the node feeding it -- '
+                              + 'a spectator subscribes and listens, it does not ask');
+        A(s.duelOut === 0, 'E ' + n + ': sent ' + s.duelOut + ' duel packets toward the players');
+    }
+    A(bytes(r, 'A', 'S3') === 0, 'E: the feeder sent ' + bytes(r, 'A', 'S3')
+                                 + 'B to the secondary -- the repair went round the tier it belongs to');
+    rows.push('E secondary drift: corrupted at ' + at + 'ms, ' + (s3 ? (s3.divTo - s3.divFrom) : '?')
+              + ' ticks of wrong history inside one level, healed by a relayed checkpoint it never '
+              + 'asked for and never noticed (upstream vocabulary: '
+              + (s3 ? s3.upTypes.join('/') : '?') + '), ' + r.checks + ' checks');
+}
+
+// ---- F) the whole tree carried across a LEVEL BOUNDARY --------------------------------
+// Every other suite here lives inside one level, and a boundary is where a duel's tick base
+// moves: simTick restarts, the epoch advances, and every tick-stream packet authored on the
+// old base is gated off. A spectator crosses it a wire crossing late, so for a moment it is
+// on the previous epoch while the checkpoint stream is already on the next one. Two things
+// have to hold on the far side, and neither is visible from a run that never leaves level 1.
+//
+// FIRST, adopting a checkpoint has to leave a board that is byte-identical to the players',
+// not merely equivalent. The duel hash is JSON.stringify over the snapshot, so for 'bars' the
+// key ORDER and key PRESENCE are the value: a uniform rebuild hashes differently from the
+// identical board on every peer that never adopted one, and nothing heals it, because the
+// next repair rebuilds the same wrong shape. Level 1 has no bars at all, so a lossy decode
+// round-trips clean there and goes wrong the first time a real board is adopted. S1 and S2
+// cross without a single wrong tick, which is what says it.
+//
+// SECOND, the checkpoint stream has to still be ACCEPTED after the boundary -- it carries
+// the epoch of the tick base it was cut from, like every other tick packet, and an unstamped
+// one reads as epoch 0 and is gated off for the rest of the match. A clean crossing cannot
+// see that: nothing is being repaired, so nothing misses the repair. So S3 is corrupted a
+// second past the boundary, where the checkpoint is the ONLY thing that can heal it -- there
+// is no further level rebuild to take the credit -- and it has to come back on its own.
+if(lane.step()){
+    let epAt = 0, at = 0;
+    const CORRUPT = ';globalThis.__corrupt = ()=>{ if(!players) return false; players[0].score += 7; return true; };';
+    const r = runSpec({ secs:26, seed:0x77C0, wire:WIRE, hookS:CORRUPT,
+                        watchers:[{ at:1.2, from:'A' }, { at:1.6, from:'A' }, { at:3.2, from:'A' }],
+                        onSample:(now, c)=>{
+                            if(!epAt && c.A.c.__rbEpoch() > 0) epAt = now;
+                            if(at || !epAt || now < epAt + 1200) return;
+                            const o = c.S3;
+                            if(o.c.__specOn() && o.c.__corrupt()) at = now;
+                        } });
+    A(!r.exitReason, 'F: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    // Without a boundary this suite asserts nothing at all, so the boundary is an assertion --
+    // and so is it being the LAST one, or a rebuild could heal S3 and take the credit.
+    A(r.levelUps === 1 && epAt > 0, 'F: ' + r.levelUps + ' level boundary in the run (epoch moved at '
+                                    + epAt + 'ms) -- want exactly one, and after it nothing but the '
+                                    + 'checkpoint can heal a watcher');
+    A(at > epAt, 'F: nothing was corrupted after the boundary (' + at + 'ms) -- this proves nothing');
+    // The two that never went wrong: the whole point of the byte-identity half.
+    alive('F', r, 'S1', 1); alive('F', r, 'S2', 1);
+    const s3 = r.spectators.S3;
+    A(!!s3 && s3.on, 'F: the secondary stopped watching instead of healing');
+    if(s3){
+        A(s3.divN > 0, 'F: the corruption never reached a settled tick -- this proves nothing');
+        A(s3.divClean != null, 'F: the secondary never re-converged on the far side of the boundary: '
+                               + 'the checkpoint stream did not survive the tick base moving');
+        const span = (s3.divTo | 0) - (s3.divFrom | 0);
+        A(span < 160, 'F: ' + span + ' ticks of wrong history -- longer than the checkpoint cadence');
+        A(s3.hops === 2, 'F: hops ' + s3.hops + ' -- it healed by falling back to the feeder, '
+                         + 'not by being served where it hangs');
+        A(s3.dbg.boot === 1, 'F: the secondary re-booted ' + s3.dbg.boot
+                             + ' times -- a level boundary is a transition, not a new watch');
+        const extra = s3.upTypes.filter(t => t !== 'ssub');
+        A(extra.length === 0, 'F S3: said ' + extra.join('/') + ' to the node feeding it');
+    }
+    rows.push('F level boundary: the tick base moved at ' + epAt + 'ms, the two primaries crossed it '
+              + 'without one wrong tick, and the secondary -- struck at ' + at + 'ms, with no rebuild '
+              + 'left to heal it -- came back after ' + (s3 ? (s3.divTo - s3.divFrom) : '?')
+              + ' ticks on the checkpoint stream alone, ' + r.checks + ' checks');
+}
+
 console.log(rows.join('\n'));
 if(fails){ console.log('\nDUEL-SPEC-TREE FAIL: ' + fails + ' assertion(s)'); process.exit(1); }
 console.log('\nDUEL-SPEC-TREE PASSED');

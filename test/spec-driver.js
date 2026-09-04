@@ -9,7 +9,7 @@
 // What is REAL and what is faked:
 //   REAL -- the whole watch handshake (req/ok/no/feed-req), the grant window, the
 //           SPEC_MAX_DIRECT fan-out cap, the serve state machine (sctx + checkpoint +
-//           tail, ssub standby, sreq), the envelope sequence/generation dedup, the
+//           tail, ssub standby), the envelope sequence/generation dedup, the
 //           boot delay, the bias, the failover ladder, and the sim itself.
 //   FAKED -- the WebRTC half only: SDP and ICE are replaced by a two-step driver
 //           connect, and each spectator DataChannel is a queue with the same one-way
@@ -18,7 +18,7 @@
 //
 // Signals (watch / offer / answer) ride a driver bus with a configurable one-way delay,
 // standing in for the server's long-poll drain.
-const { runInGame, HOOKS, autopilot, NET_BASE } = require('./duel-driver');
+const { runInGame, HOOKS, autopilot, resetPilot, NET_BASE } = require('./duel-driver');
 
 // Hooks appended after duel-driver's: the signal bus, the fake spectator channels, and
 // the spectator-side surface a test reads.
@@ -56,6 +56,13 @@ const SPEC_HOOKS = `
   globalThis.__spOpen = (peer, kind)=>{ const l = _spFind(kind === 'out' ? _spOut : _spIn, peer); if(l && l.dc.onopen) l.dc.onopen(); };
   globalThis.__spFeed = (peer, kind, txt)=>{ const l = _spFind(kind === 'out' ? _spOut : _spIn, peer); if(l && l.dc.onmessage) l.dc.onmessage({ data:txt }); };
   globalThis.__spDrain = ()=> __spq.splice(0);
+  // Every message this node put on a link it is FED BY, by type. The passivity rule is a
+  // claim about this list and nothing else: a spectator subscribes and unsubscribes, and
+  // says nothing else to anybody for the whole match.
+  globalThis.__upTx = [];
+  { const _oSend = _spSend;
+    _spSend = (l, o)=>{ if(l && l.kind === 'in'){ try{ __upTx.push(String(o && o.t)); }catch(e){} } return _oSend(l, o); }; }
+  globalThis.__upTypes = ()=> Array.from(new Set(__upTx)).sort();
   // The link dies the way a closed channel dies: onclose fires, then it is dropped.
   globalThis.__spCut = (peer)=>{
     for(const arr of [_spIn, _spOut]){
@@ -125,6 +132,13 @@ const SPEC_HOOKS = `
   { const _oLI = netLocalInput;
     netLocalInput = function(kind, p, d, now){ if(netSpectating()) __authored++; return _oLI(kind, p, d, now); }; }
   globalThis.__authoredN = ()=> __authored;
+  // WHAT THE MATCH SAID. A tournament match is settled by its own sim and by nothing else:
+  // the winner index the duel declared (2 = draw), the two scores, the hearts still standing.
+  // Read off the shipping globals, so a harness cannot invent a result the players did not play.
+  globalThis.__winner = ()=> (typeof duelWinner !== 'undefined') ? duelWinner : -1;
+  globalThis.__score  = ()=> (typeof players !== 'undefined' && players) ? players.map(p => p.score | 0) : null;
+  globalThis.__lives  = ()=> (typeof players !== 'undefined' && players) ? players.map(p => p.lives | 0) : null;
+  globalThis.__len    = ()=> (typeof players !== 'undefined' && players) ? players.map(p => p.snake.length | 0) : null;
 })();`;
 
 // Both roles get the same hook set: a player is also a potential feeder, and the backup
@@ -142,6 +156,8 @@ const S_ID = ['cccccccc', 'dddddddd', 'eeeeeeee', 'abababab', 'cdcdcdcd'];
 //   opts.watchers    [{ at, from }]  -- one entry per watcher, in S_ID order; `from` is
 //                    a client NAME ('A' | 'S1' | ...): who to ask for a feed
 //   opts.kill        [{ at, who }]   -- cut every spectator link of that client
+//   opts.outage      [{ at, ms, who }] -- a SHORT blackout on one node ('*' = the whole wire)
+//   opts.settleTail  ms of CALM run after secs (default 0 = off)
 //   opts.director    input director (default duel-driver's autopilot)
 //   opts.onSample    (now, cl) diagnostic tap
 function runSpec(opts){
@@ -151,8 +167,31 @@ function runSpec(opts){
     const SW = opts.specWire || { base:W.base, jit:W.jit };
     const SIG = opts.sigMs == null ? 120 : opts.sigMs;
     const dir = opts.director || autopilot;
+    resetPilot();               // a run is reproducible on its own, not on what ran before it
     const watchers = opts.watchers || [];
     const kills = (opts.kill || []).map(k => ({ at:Math.round(k.at * 1000), who:k.who, done:false }));
+    // SHORT OUTAGES, the difference between this and opts.kill being that the node comes BACK.
+    // A dark node keeps running -- it ticks, authors, serves and sends -- but nothing it puts on
+    // a wire arrives and nothing arrives at it, which is duel-driver's own opts.outage model
+    // (runMatch: a WiFi drop where both clients stay awake) applied per node instead of to the
+    // whole link. The interesting part is never the outage: it is what the tree looks like on
+    // the far side of one, so every window is meant to be SHORT -- inside RB_PERSIST_KILL_MS,
+    // which is the silence that ends a match, and inside the spectator's own terminal deadline.
+    const outs = [].concat(opts.outage || []).map(o => ({
+        who:o.who || '*', at:Math.round(o.at * 1000), ms:o.ms | 0, hits:0 }));
+    let darkSet = null;
+    const dark = (n) => !!darkSet && (darkSet.has(n) || darkSet.has('*'));
+    // THE CALM TAIL. Everything a spectator repairs, it repairs on a cadence: the feeder
+    // pushes a checkpoint every SPEC_CKPT_MS and the node adopts it on the next settled
+    // tick, so a stretch of wrong history that OPENS near the end of a run cannot be shown
+    // to close inside it -- not because the repair failed but because the run stopped
+    // first. The tail is the answer: past `secs` the wire keeps carrying at the same
+    // latency but stops losing packets, stops going dark and opens no new level, and the
+    // divergence tracker keeps comparing. "Healed" then means what it says -- given a quiet
+    // line, the node came back to the players' history -- instead of meaning "the clock ran
+    // out clean". It is off by default: a suite that does not ask for a coda keeps the exact
+    // run it had before, down to the packet.
+    let calm = false;
 
     let rndS = (opts.rndSeed || 0x51ED) >>> 0;
     const rnd = () => (rndS = (rndS * 1103515245 + 12345) >>> 0) / 4294967296;
@@ -203,20 +242,22 @@ function runSpec(opts){
     const oneWay = (w) => Math.max(1, (w.base || 3) + (rnd() * 2 - 1) * (w.jit || 0));
 
     const emitDuel = (o, dirn) => {
+        const lost = dark(o.name);      // the outbox still drains: the device sent, the wire ate it
         for(const txt of o.c.__out.splice(0)){
             let t = '?'; try{ t = (JSON.parse(txt).t) || '?'; }catch(e){}
             if(t === 'pi') continue;
-            if(rnd() < (W.loss || 0)) continue;
+            if(lost || (!calm && rnd() < (W.loss || 0))) continue;
             duel[dirn].push([o.c.__now + oneWay(W), txt]);
         }
     };
-    const drainDuel = (q, C) => { for(let j = 0; j < q.length; j++){
+    const drainDuel = (q, C, name) => { if(dark(name)) return; for(let j = 0; j < q.length; j++){
         if(q[j][0] <= C.__now){ C.__recv(q[j][1]); q.splice(j--, 1); } } };
 
     const pumpSpec = (now) => {
         for(const n of names){
-            const o = cl[n];
+            const o = cl[n], lost = dark(n);
             for(const f of o.c.__spDrain()){
+                if(lost) continue;
                 const key = o.id + '>' + f.to;
                 // Reliable and ORDERED: a frame never overtakes the one before it.
                 const at = Math.max(now + oneWay(SW), (lastSpecAt[key] || 0) + 0.001);
@@ -226,12 +267,14 @@ function runSpec(opts){
                 pairB[pk] = (pairB[pk] | 0) + f.txt.length;
                 spec.push({ at, toId:f.to, fromId:o.id, kind:(f.kind === 'out' ? 'in' : 'out'), txt:f.txt });
             }
-            for(const s of o.c.__sigDrain()) sigs.push({ at:now + SIG, from:s.from, to:s.to, type:s.type, payload:s.payload });
+            for(const s of o.c.__sigDrain()){ if(lost) continue;
+                sigs.push({ at:now + SIG, from:s.from, to:s.to, type:s.type, payload:s.payload }); }
         }
         for(let i = 0; i < spec.length; i++){
             const f = spec[i];
             if(f.at > now) continue;
             const t = byId[f.toId];
+            if(t && dark(t.name)) continue;      // in flight when the lights went out: held, not lost
             if(t) t.c.__spFeed(f.fromId, f.kind, f.txt);
             spec.splice(i--, 1);
         }
@@ -239,6 +282,7 @@ function runSpec(opts){
             const g = sigs[i];
             if(g.at > now) continue;
             const t = byId[g.to];
+            if(t && dark(t.name)) continue;
             if(t) t.c.__onSig(g.from, g.type, g.payload);
             sigs.splice(i--, 1);
         }
@@ -266,14 +310,25 @@ function runSpec(opts){
     const SNAP = cl.A.c.__rbSnap();
     const LAG = opts.settleLag || cl.A.c.__rbDepth();
     let firstDiverge = null;
+    // The two PLAYERS get the same from/to/clean bookkeeping a spectator gets, and for the
+    // same reason. While the wire is dark both sides run on prediction, so a blackout leaves
+    // a wrong stretch of shared history behind it and "they never disagreed" was never the
+    // claim rollback makes. The claim is that they agreed AGAIN afterwards -- a last
+    // agreement past the last disagreement, which is the spectator predicate one tier up.
+    const pair = { divN:0, divFrom:null, divTo:null, divClean:null };
     const cmp = { checks:0 };
     const checkDiverge = () => {
         const st = Math.min(cl.A.c.__simTick(), cl.B.c.__simTick()) - LAG;
         const tk = st - (st % SNAP);
         if(tk < SNAP) return;
         const ha = cl.A.c.__ringHashAt(tk), hb = cl.B.c.__ringHashAt(tk);
-        if(ha != null && hb != null && ha !== hb && !firstDiverge)
-            firstDiverge = { who:'A/B', tick:tk, fields:diffFields(cl.A.c, cl.B.c, tk) };
+        if(ha != null && hb != null){
+            if(ha !== hb){
+                if(!firstDiverge) firstDiverge = { who:'A/B', tick:tk, fields:diffFields(cl.A.c, cl.B.c, tk) };
+                if(pair.divFrom == null) pair.divFrom = tk;
+                pair.divTo = tk; pair.divN++;
+            } else if(pair.divTo != null) pair.divClean = tk;
+        }
         if(ha == null) return;
         for(const n of names){
             const o = cl[n];
@@ -341,7 +396,13 @@ function runSpec(opts){
     // ---- run ----
     let exitReason = null, diedAt = 0, levelReached = 1, nextLive = 0;
     const trace = [], txSeries = [], pairB = {};
-    for(let now = 0; now <= secs * 1000; now++){
+    const TAIL = opts.settleTail | 0;
+    for(let now = 0; now <= secs * 1000 + TAIL; now++){
+        calm = now > secs * 1000;
+        darkSet = null;
+        if(!calm) for(const o of outs) if(now >= o.at && now < o.at + o.ms){
+            (darkSet || (darkSet = new Set())).add(o.who); o.hits++;
+        }
         for(const n of names) cl[n].c.__now = now;
         if(!started && now >= playersAt) startPlayers();
         for(const n of names) cl[n].c.__fire();
@@ -382,14 +443,14 @@ function runSpec(opts){
 
         for(const n of names){ const o = cl[n]; while(now >= o.next) fireOnce(o); }
         emitDuel(cl.A, 'AB'); emitDuel(cl.B, 'BA');
-        drainDuel(duel.AB, cl.B.c); drainDuel(duel.BA, cl.A.c);
+        drainDuel(duel.AB, cl.B.c, 'B'); drainDuel(duel.BA, cl.A.c, 'A');
         pumpSpec(now);
         if(now % 1000 === 0){
             const row = { at:now };
             for(const n of names) row[n] = cl[n].txB | 0;
             txSeries.push(row);
         }
-        maybeLevelUp();
+        if(!calm) maybeLevelUp();   // no new boundary in the coda: it is a settle, not more game
         checkDiverge();
         if(now % 50 === 0) sampleLag(now);
         const va = cl.A.c.__view(); if(va) levelReached = Math.max(levelReached, va.level);
@@ -403,6 +464,7 @@ function runSpec(opts){
         spectators[n] = {
             on: o.c.__specOn(), role: o.c.__specRole(), hops: o.c.__specHops(), gen: o.c.__specGen(),
             bias: o.c.__specBias(), dbg: o.c.__specDbg(), authored: o.c.__authoredN(),
+            upTypes: o.c.__upTypes(),
             cmp: o.cmp | 0, divFrom: o.divFrom == null ? null : o.divFrom, divTo: o.divTo == null ? null : o.divTo,
             divN: o.divN | 0, divClean: o.divClean == null ? null : o.divClean,
             inN: o.c.__inN(), outN: o.c.__outN(), subN: o.c.__subN(), askN: o.c.__askN(), txB: o.txB | 0,
@@ -421,8 +483,11 @@ function runSpec(opts){
                                               txB:cl[n].txB | 0,
                                               dbg:cl[n].c.__specDbg(), sig:cl[n].c.__sigDump() };
     return {
-        firstDiverge, exitReason, diedAt, levelUps, levelReached, checks:cmp.checks, txSeries, pairB,
+        firstDiverge, pairDiv:pair, exitReason, diedAt, levelUps, levelReached, checks:cmp.checks, txSeries, pairB,
         lagSpread,
+        // The match's own verdict, straight off the sim: -1 nobody yet, 0/1 a winner, 2 a draw.
+        winner: cl.A.c.__winner(), score: cl.A.c.__score(), lives: cl.A.c.__lives(), len: cl.A.c.__len(),
+        outages: outs.map(o => ({ who:o.who, at:o.at, ms:o.ms, hits:o.hits })), tail:TAIL,
         killed: kills.map(k => k.hit || null),
         spectators, players, cl, trace,
         rbA: cl.A.c.__rbDbg(), rbB: cl.B.c.__rbDbg(),

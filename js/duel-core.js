@@ -518,10 +518,9 @@ function _rbHashSettle(){
         if(netSpectating()){
             // A spectator disagreeing with its feeder is the spectator's problem, never the
             // match's: it holds by construction the STALE copy and is not a party to the
-            // players' lockstep. The only repair it may fire is asking its source to say the
-            // world again -- and the banner stays the neutral RE-SYNCING cover, because
-            // nothing is wrong with the duel these two are playing.
-            if(typeof netSpecResync === 'function') netSpecResync();
+            // players' lockstep. So the verdict is a DIAGNOSTIC here and nothing else -- no
+            // repair toward the players, and none toward the feed either. The next checkpoint
+            // is already on its way and will overwrite this world whether it was wrong or not.
             _netSigLog('! spec drift @' + q.tk + ' ' + where);
             continue;
         }
@@ -645,7 +644,18 @@ function _rbFullState(sn, tk){
 function _rbSpecSnapshot(){
     if(!_rbRing.length) return null;
     const le = _rbRing[_rbRing.length - 1];
-    return _rbFullState(le.snap, le.tk);
+    const rs = _rbFullState(le.snap, le.tk);
+    // The epoch is stamped HERE because this is the one 'rs' that never passes through
+    // _netSend, which is where every other tick-stream packet gets its ep: the checkpoint is
+    // wrapped into a spectator envelope and handed straight to the relay tree. Unstamped it
+    // arrives as epoch 0, so from the first boundary that moves the tick base -- a respawn,
+    // a level -- the receive gate drops every checkpoint as stale-epoch. That left a drifted
+    // watcher with no repair at all: it does not ask for one, and the only push that could
+    // reach it was the one being discarded, so it watched a wrong board until the next
+    // boundary happened to rebuild it. Same source as the stamper uses: the tick BASE's
+    // epoch, which is what the ticks in this snapshot are measured on.
+    if(rs) rs.ep = _rbEpoch | 0;
+    return rs;
 }
 // A loose windswept item off the wire, rebuilt in the sim's own key order. An unknown id or an
 // off-board cell drops the item rather than importing it: losing one cosmetic beats adopting
@@ -682,7 +692,21 @@ function _rbApplyResync(m){
     // the branch below.
     const snap = simSnapshot();
     snap.phase = m.ph; snap.level = m.lv|0; snap.gemsDone = m.gd|0; snap.gem = m.gem; snap.gemAt = m.ga; snap.deathMsg = m.dm; snap._barsV = (snap._barsV|0) + 1;
-    snap.bars = (m.bars || []).map(a => { const b = { x:a[0]|0, y:a[1]|0, fragile:!!(a[2]&1), paired:!!(a[2]&2) }; if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 }; if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; } return b; });
+    // Rebuilt in the SIM'S OWN KEY SHAPE, which is not a style question: 'bars' is hashed as
+    // JSON.stringify, so key ORDER and key PRESENCE are the value. _placeBars gives a plain bar
+    // {x,y,fragile} and a pair partner {x,y,paired,fragile} -- paired ahead of fragile, and no
+    // paired key at all on a bar that has no partner. A uniform {x,y,fragile,paired} rebuild
+    // hashes differently from the identical board on every peer that never adopted an rs, and
+    // nothing heals it: the next repair rebuilds the same wrong shape. Level 1 hid it by having
+    // no bars at all to round-trip.
+    snap.bars = (m.bars || []).map(a => {
+        const fr = !!(a[2] & 1);
+        const b = (a[2] & 2) ? { x:a[0]|0, y:a[1]|0, paired:true, fragile:fr }
+                             : { x:a[0]|0, y:a[1]|0, fragile:fr };
+        if(a[3] >= 0) b.pairEnd = { x:a[3]|0, y:a[4]|0 };
+        if(a.length > 5 && a[5] >= 0){ b.gd = a[5]|0; b.gdUntil = a[6]|0; }
+        return b;
+    });
     snap._gAt = m.gat|0;
     snap.gPer = m.gp; snap._gDue = m.gdue; snap.phaseAt = m.pha; snap.spawnAt = m.spa; snap.levelDoneWaiting = !!m.ldw;
     snap._rngState = m.rng; snap._speedRound = !!m.sr; snap.duelWinner = m.dw; snap._nmWasAdjacent = !!m.nma;

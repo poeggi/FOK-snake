@@ -60,7 +60,15 @@ const SPEC_DELAY_MS = 100;      // how far behind the live edge a spectator runs
 const SPEC_DC_OPTS = { negotiated:true, id:1, ordered:true };
 const SPEC_SILENCE_MS = 1500;      // a feed this quiet is dead: fail over to the standby
 const SPEC_FEED_SILENCE_MS = 2000; // the FEEDER is quiet: primaries pull the backup feeder
-const SPEC_CKPT_MS = 10000;        // checkpoint 'rs' cadence, so a late joiner needs a bounded tail
+// The checkpoint 'rs' cadence -- and the ONLY thing that ever repairs a spectator, which is
+// what sets the number. A spectator is passive: it subscribes, it receives, and it never
+// asks anyone for anything, so a world that has gone wrong (a hole in the log, a hop that
+// dropped, anything the input stream alone cannot undo) stays wrong until the next one of
+// these lands. That makes the cadence the worst-case time a watcher spends looking at a
+// board that is not the board. Measured against a feed that runs ~17KB/s per link, a ~700B
+// checkpoint at this rate costs ~2%: cheap enough that pushing it unconditionally to
+// everybody, forever, beats any scheme where the watcher has to notice and speak up.
+const SPEC_CKPT_MS = 2000;
 const SPEC_BUF_MAX = 900;          // envelopes held since the checkpoint (~45s of duel traffic)
 const SPEC_GRANT_MS = 30000;       // how long a granted watch request stays good
 // A watch that arrives BEFORE the match it names is the ORDINARY case, not an error: a
@@ -84,6 +92,7 @@ var _spHops = 1;        // how many forwarding hops from the feeder I sit
 var _spGen = 0;         // FEED generation: bumped when a backup feeder takes over
 var _spSeq = 0;         // my outbound envelope sequence, as a feeder
 var _spSeen = -1;       // highest envelope seq applied (dedup across a dual-connect)
+var _spLine = '';       // id of the node whose sequence line _spSeen counts (see _spOnFeedMsg)
 var _spCtx = null;      // the bootstrap context I hold (mine as feeder, or the one I was sent)
 var _spRs = null;       // newest checkpoint 'rs' envelope
 var _spBuf = [];        // envelopes since _spRs, for a late joiner
@@ -99,7 +108,6 @@ var _spSrc = '';        // peer id of the link currently feeding me
 var _spLostAt = 0;
 var _spOrphanG = -1;    // generation the server was last told we had run out of sources in      // when the feed first fell silent (the terminal deadline runs off this)
 var _spCkptAt = 0;
-var _spReqAt = 0;       // last fresh-state ask (throttle)
 var _spFeedAt = 0;      // wall time of the last envelope that reached me
 var _spDbg = { rx:0, tx:0, dup:0, over:0, fail:0, gen:0, boot:0 };
 
@@ -480,7 +488,6 @@ function _spOnServeMsg(l, txt){
     let d; try{ d = JSON.parse(txt); }catch(e){ return; }
     if(!d || typeof d !== 'object') return;
     if(d.t === 'ssub'){ const on = d.on !== 0; if(on) _spServeTail(l); l.sub = on; return; }
-    if(d.t === 'sreq'){ _spServeTail(l); return; }
 }
 // The checkpoint: a full 'rs' of our own sim, enveloped like any other packet, so a
 // late joiner needs only [sctx, this, the tail since] rather than the whole match.
@@ -498,8 +505,11 @@ function _spCkpt(force){
     const rs = _rbSpecSnapshot();
     if(!rs) return;
     _spCkptAt = now;
-    const env = _spOn ? { t:'sp', g:_spGen | 0, n:_spSeen | 0, p:0, m:rs }
-                      : _spWrap(rs, netMyIndex());
+    // A checkpoint also NAMES the line it belongs to. A relaying primary is minting into
+    // somebody else's numbering on purpose (see above), so it says whose; a player is
+    // minting its own and says so.
+    const env = _spOn ? { t:'sp', g:_spGen | 0, n:_spSeen | 0, o:_spLine, p:0, m:rs }
+                      : Object.assign(_spWrap(rs, netMyIndex()), { o:getPlayerId() });
     _spRs = env; _spBuf = [];
     for(const l of _spOut) if(l.sub) _spSend(l, env);
 }
@@ -519,13 +529,36 @@ function _spOnFeedMsg(l, txt){
     }
     if(d.t === 'sctx'){ _spOnCtx(l, d); return; }
     if(d.t !== 'sp') return;
+    l.live = true;
+    // ONLY THE LINK WE SUBSCRIBED TO FEEDS US. A warm standby was told to go silent, so
+    // anything still arriving on it is in flight from before that ssub -- and once our source
+    // has changed, it is in flight from a DIFFERENT sequence line, where its numbers mean
+    // nothing here. Counting one in pushes the high-water mark past everything the new source
+    // is about to send, and dedups the real feed away for the rest of the match.
+    if(l.sub !== true) return;
     _spDbg.rx++;
     _spFeedAt = _spNow();
-    l.live = true;
     // A bumped generation means a DIFFERENT feeder now owns the stream: its
     // sequence starts over, so the dedup line has to start over with it.
-    if((d.g | 0) > (_spGen | 0)){ _spGen = d.g | 0; _spSeen = -1; _spRs = null; _spBuf = []; _spDbg.gen++; }
+    if((d.g | 0) > (_spGen | 0)){ _spGen = d.g | 0; _spSeen = -1; _spLine = ''; _spRs = null; _spBuf = []; _spDbg.gen++; }
     else if((d.g | 0) < (_spGen | 0)) return;      // a straggler from the dead generation
+    // THE SEQUENCE LINE BELONGS TO WHOEVER MINTS IT, and only a checkpoint says who that is.
+    // A relay passes n through verbatim, so one feeder's numbering reaches the whole tree and
+    // a dual-connected node dedups the overlapping arm for free. But our SOURCE can change
+    // without the generation changing -- the tier above us dies and we go back to the players,
+    // and a player who is not the feeder mints its own line, from zero. Carried across, the old
+    // line's high-water mark then dedups that entire stream away: the feed arrives, every byte
+    // of it is discarded, and the watcher sits on the board the tree died on with no way back.
+    // So a checkpoint naming a different owner restarts the count -- and it is the only packet
+    // that safely can, because it is also the one that re-states the world we just lost.
+    if(d.m && d.m.t === 'rs' && typeof d.o === 'string' && d.o && d.o !== _spLine){
+        _spLine = d.o; _spSeen = -1; _spRs = null; _spBuf = [];
+    }
+    // Dedup is for the DUPLICATE ARM of a dual-connected feed, and that is ALL it has to be:
+    // the periodic checkpoint is minted at the feeder and relayed verbatim, so it carries a
+    // fresh number down the whole tree and reaches every tier as new. Nothing below is ever
+    // allowed to mint into this sequence except when serving a bootstrap tail, where the
+    // subscriber is at -1 and takes it regardless.
     if((d.n | 0) <= _spSeen){ _spDbg.dup++; return; }
     _spSeen = d.n | 0;
     // Keep serving what we consume (a primary is a spectator that also feeds).
@@ -544,7 +577,7 @@ function _spOnCtx(l, ctx){
     if(_spOn && (ctx.g | 0) > (_spGen | 0)){
         _spGen = ctx.g | 0;
         _spCtx = ctx;
-        _spSeen = -1;                            // the new generation restarts the sequence line
+        _spSeen = -1; _spLine = '';              // the new generation restarts the sequence line
         _spRs = null; _spBuf = [];               // and so does anything we hold for our own watchers
         _spSrc = l ? l.peer : _spSrc;
         _spFeedAt = _spNow(); _spLostAt = 0;
@@ -575,7 +608,7 @@ function _spOnCtx(l, ctx){
         if(l && l.sub !== true){ l.sub = false; _spSend(l, { t:'ssub', on:0 }); }
         return;
     }
-    if(l){ l.sub = true; _spSrc = l.peer; }     // this link is the ACTIVE feed: _spReq asks it
+    if(l){ l.sub = true; _spSrc = l.peer; }     // this link is the ACTIVE feed
     _spCtx = ctx;
     _spGen = ctx.g | 0;
     _spHops = Math.max(1, ctx.hops | 0);
@@ -628,18 +661,13 @@ function _spDeliver(env){
     if(m.t === 'bye'){ specStop('MATCH OVER'); return; }
     _netHandleParsed(m, env.p | 0);
 }
-// Ask the feeder for a fresh full state. The ONE repair a spectator is allowed:
-// it never sends a correction toward the players, because it is not a party to
-// their lockstep and its opinion of the world is by construction the stale one.
-function _spReq(){
-    const now = _spNow();
-    if(now - _spReqAt < 1000) return;
-    _spReqAt = now;
-    for(const l of _spIn) if(l.sub) _spSend(l, { t:'sreq' });
-}
-// duel-core's hook: our world disagreed with the feeder's. Never a repair toward
-// the players -- just ask the source to say it again.
-function netSpecResync(){ if(_spOn) _spReq(); }
+// A SPECTATOR NEVER ASKS FOR ANYTHING. Its entire upstream vocabulary is ssub on/off --
+// subscribe, and unsubscribe a warm standby. It has no repair of its own and needs none:
+// the feeder pushes a full checkpoint every SPEC_CKPT_MS to everyone regardless, and a
+// spectator owns neither snake, so it adopts every one of them whole. A world that has
+// gone wrong is therefore corrected by the next thing the wire was going to deliver
+// anyway, without the watcher noticing, deciding, or speaking. What it may do in the
+// meantime is exactly what a passive receiver may always do: show a stale frame.
 // Stop watching: tear every link down and hand the sim back to the menu.
 function specStop(msg){
     for(const l of _spIn) _spKill(l);
@@ -648,7 +676,7 @@ function specStop(msg){
     _spWant = []; _spAsk = []; _spQ = []; _spRs = null; _spBuf = [];
     if(_spBootT != null){ clearTimeout(_spBootT); _spBootT = null; }
     const was = _spOn;
-    _spOn = false; _spCtx = null; _spRole = ''; _spSeen = -1; _spFeedAt = 0; _spLostAt = 0; _spSrc = ''; _spOrphanG = -1;
+    _spOn = false; _spCtx = null; _spRole = ''; _spSeen = -1; _spLine = ''; _spFeedAt = 0; _spLostAt = 0; _spSrc = ''; _spOrphanG = -1;
     _spDisarm();
     netP2POnlySet(false);
     if(was) _netSessionEnd(msg || 'STOPPED WATCHING');
@@ -727,9 +755,10 @@ function _spTick(){
     _spWantPump(now);
     if(_spOn && _spCtx && _spFeedAt && now - _spFeedAt > SPEC_SILENCE_MS){
         if(!_spLostAt) _spLostAt = _spFeedAt;
-        // The feeder's heartbeat runs at 16 ticks, so silence this long is unambiguous:
-        // switch to the standby if we hold one, otherwise ask for a fresh state (which
-        // also proves whether the link is alive at all).
+        // The feeder's heartbeat runs at 16 ticks, so silence this long is unambiguous.
+        // A spectator's whole answer to it is which link it is subscribed to: promote the
+        // standby if we hold one, and otherwise wait -- the ladder below escalates to the
+        // server, which is the only party that can deal us a source we do not have.
         let cur = null, alt = null;
         for(const l of _spIn){ if(l.sub && !cur) cur = l; else if(!alt && l.dc && l.dc.readyState === 'open') alt = l; }
         if(alt){
@@ -742,13 +771,13 @@ function _spTick(){
             // pulls the backup feeder.
             _spAskBackup(now);
             _spFeedAt = now;
-        } else _spReq();
+        }
         // Halfway to the deadline with nothing recovered locally: escalate to the server
         // while there is still time for a re-deal to arrive and save the watch.
         if(now - _spLostAt > RB_PERSIST_KILL_MS / 2) _spOrphan();
-        // Nothing upstream has answered for as long as a duel gets before it is declared
+        // Nothing upstream has reached us for as long as a duel gets before it is declared
         // dead. A watch with no source left is over; say so rather than sit on a frozen
-        // board. The deadline runs off _spLostAt, so re-asking never postpones it.
+        // board. The deadline runs off _spLostAt, so a failover never postpones it.
         if(now - _spLostAt > RB_PERSIST_KILL_MS) specStop('CONNECTION LOST');
     } else if(_spOn) _spLostAt = 0;
     if(!_spOn && !_spOut.length && !_spWant.length && !_spAsk.length) _spDisarm();

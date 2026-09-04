@@ -32,8 +32,8 @@ case "${1:-}" in
     ""|--fast)              TIER=--fast ;;
     --full|--regression)    TIER=--full ;;
     --profile|--netprofile) TIER=--full ;;
-    --live|--tourney)       TIER=--fast ;;
-    *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile|--live|--tourney]"; exit 2 ;;
+    --live|--tourney|--tourney-sim) TIER=--fast ;;
+    *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile|--live|--tourney|--tourney-sim]"; exit 2 ;;
 esac
 
 node test/run-suites.js "$TIER" "${@:2}"
@@ -65,6 +65,18 @@ fi
 if [ "${1:-}" = "--tourney" ]; then
     echo "[checks] full tournament ladder, ten clients"
     node test/tourney-full.js
+fi
+
+# On-demand PLAYED TOURNAMENT (NOT part of the default run): bash test/checks.sh
+# --tourney-sim. The ladder above and tourney-e2e both FAKE every match -- a client is told
+# what the score was and the bracket moves on. This one plays all twelve matches of a
+# five-player tournament for real: two sims in lockstep with three spectators on the relay
+# tree, over a wire with latency, jitter, loss and a blackout walking around the tree. It is
+# the only run that answers whether a tournament survives a bad evening rather than only
+# good bookkeeping, and it takes a couple of minutes.
+if [ "${1:-}" = "--tourney-sim" ]; then
+    echo "[checks] played tournament: twelve real matches over a misbehaving wire"
+    node test/tourney-sim.js
 fi
 
 # On-demand LIVE server contract (NOT part of the default run, and never in CI):

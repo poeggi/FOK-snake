@@ -777,6 +777,7 @@ const CONTROLS = {
     tourneyRound:    ['esc','ok','dpad'],
     tourneyCeremony: ['esc','ok','dpad'],
     tourneyPodium:   ['esc','ok','dpad'],
+    tourneyQuit:     ['esc','ok','start','dpad'],
     // A duel's local player gets exactly the same controls as a classic player:
     // duel mirrors playing, duelPaused mirrors paused. The dpad was excluded back
     // when a duel was always LOCAL (two players, one keyboard -- beginDuel() still
@@ -848,6 +849,7 @@ const SCREENS = {
     tourneyRound:    { d:()=>drawTourneyRound(),    hud:false, freeze:true, anim:()=> true },
     tourneyCeremony: { d:()=>drawTourneyCeremony(), hud:false, freeze:true, anim:()=> true },
     tourneyPodium:   { d:()=>drawTourneyPodium(),   hud:false, freeze:true },
+    tourneyQuit:     { d:()=>drawTourneyQuit(),     hud:false, freeze:true },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },
     duelPaused:   { d:()=>drawDuelBoard(simNow), hud:true, freeze:true },
@@ -1232,7 +1234,6 @@ function _initWorker(){
         if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
         // The worker-hosted spectator's one outbound: ask the feed for a fresh state. Not a
         // wire packet -- nothing ever goes toward the two players -- so it has its own message.
-        if(m.t==='specReq'){ if(typeof netSpecResync==='function') netSpecResync(); return; }
         // An item handover the worker's duel-core attested and released. Only MAIN can post
         // it (the registry client owns cfg and the fetch), so it comes out as a message the
         // same way the wire packets do.

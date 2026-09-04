@@ -31,7 +31,10 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:0, msg:'', msgAt:0, stakes:false, busy:false, contAt:0 };
+var _ttUi = { sel:0, msg:'', msgAt:0, stakes:false, busy:false, contAt:0, from:'', to:'' };
+// The read-back of a tournament this device is still in but is not currently looking at --
+// what the REJOIN row is made of. Null until _ttProbe finds one.
+var _ttBack = null;
 var _ttPend = null;    // a roles sheet waiting for the previous match to leave the screen
 var _ttNid  = '';      // the node we are currently engaged with
 var _ttRep  = null;    // the pending result report {body, at, tries}
@@ -46,7 +49,11 @@ var _ttOffer = null;   // an offer that landed while the previous match still he
 var _ttOverAt = 0, _ttCerAt = 0, _ttTry = 0;
 var _ttStateAt = 0, _ttT = null;
 
-const _TT_PHASES = { tourneyLobby:1, tourneyBracket:1, tourneyRound:1, tourneyCeremony:1, tourneyPodium:1 };
+// tourneyQuit is one of them: the leave dialog is a tournament screen like any other, so
+// a tournament that ends underneath it takes it down with the rest rather than leaving a
+// question about a tournament nobody is in any more.
+const _TT_PHASES = { tourneyLobby:1, tourneyBracket:1, tourneyRound:1, tourneyCeremony:1,
+                     tourneyPodium:1, tourneyQuit:1 };
 
 // ---- small helpers -------------------------------------------------------------------
 function tourneyActive(){ return !!_tt; }
@@ -70,14 +77,31 @@ function _ttMsg(m, bad){
     _ttUi.msg = m || ''; _ttUi.msgAt = _msgNow(); _uiDirty = true;
     if(m) Snd.sfxPlay(bad ? 'fail' : 'select', cfg.music);
 }
+// A LINE about a match reads better with YOU in it -- "KAI vs YOU" -- so that is what
+// _ttName answers a person's own id with. A TABLE is the other case entirely: a row is a
+// person, and the column that says who everybody is has to say who YOU are too, or the
+// board you are reading is not the board the others are reading. Those rows take
+// _ttRealName and mark the row as yours in the margin instead.
 function _ttName(id){
     id = String(id || '');
     if(!id) return '';
     if(id === getPlayerId()) return 'YOU';
+    return _ttRealName(id);
+}
+function _ttRealName(id){
+    id = String(id || '');
+    if(!id) return '';
     if(_tt){
         for(const p of (_tt.players || [])) if(p && p.id === id) return String(p.name || '').toUpperCase() || fmtFriendId(id);
         const nm = _tt.roles && _tt.roles.names;
         if(nm && nm[id]) return String(nm[id]).toUpperCase();
+    }
+    // Our own name is not on any list we were handed until the server has sent one back:
+    // a create is answered before the roster it creates, and a row drawn in between must
+    // still be able to say whose it is.
+    if(id === getPlayerId() && typeof _netMyName === 'function'){
+        const mine = String(_netMyName() || '').toUpperCase();
+        if(mine) return mine;
     }
     return (typeof netFriendName === 'function' && netFriendName(id)) ? String(netFriendName(id)).toUpperCase() : fmtFriendId(id);
 }
@@ -99,9 +123,19 @@ function _ttDisarm(){ if(_ttT){ clearInterval(_ttT); _ttT = null; } }
 // Every response and every event is the same shape seen from a different distance, so one
 // merge takes all of them. Absent keys are left alone: a lobby event says nothing about a
 // bracket and must not erase one.
+// THE TOURNAMENT THIS DEVICE IS IN, remembered across a reload. A tournament is an hour of
+// other people's evening, and the picture of it lived only in memory: a refresh, a crash or
+// a phone that killed the tab left a player sitting in a bracket with no way back to it,
+// while the rest of the field waited out their walkovers. Only the id is kept -- everything
+// else is re-read from the server, which is the only thing that knows what has happened
+// since -- and it is dropped the moment the server says we are no longer in it.
+const TT_HELD = 'ttHeld';
+function _ttHold(tid){ try{ tid ? localStorage.setItem(TT_HELD, String(tid)) : localStorage.removeItem(TT_HELD); }catch(e){} }
+function _ttHeld(){ try{ return localStorage.getItem(TT_HELD) || ''; }catch(e){ return ''; } }
 function _ttAdopt(o){
     if(!o || !o.tid) return;
     const tid = String(o.tid);
+    _ttHold(tid);
     if(!_tt || _tt.tid !== tid)
         _tt = { tid, code:'', host:'', state:'open', stakes:false, max:TT_MAX, players:[],
                 round:0, cursor:null, schedule:[], bracket:[], standings:[], advancers:[],
@@ -159,6 +193,10 @@ async function _ttSync(force){
         return;
     }
     _ttAdopt(r.json);
+    // A tournament can end without us: the host walks out and every client is dropped. The
+    // event says so, but a client that missed it would otherwise poll a dead tournament for
+    // ever, so the read-back is allowed to deliver the same verdict.
+    if(_tt.state === 'abandoned'){ _ttDrop('TOURNAMENT ABANDONED'); return; }
     if(r.json.roles){
         const sheet = r.json.roles;
         if(!sheet.tid) sheet.tid = tid;
@@ -169,6 +207,10 @@ async function _ttSync(force){
     if(_tt.state === 'done' && _TT_PHASES[phase] && phase !== 'tourneyPodium') phase = 'tourneyPodium';
 }
 function _ttDrop(msg){
+    // Every route into here is terminal -- we left, it ended, it is gone, we are not in it
+    // any more -- so the way back is dropped with the picture. Stepping OUT of the screens
+    // is not one of these routes: that keeps both.
+    _ttHold('');
     _tt = null; _ttPend = null; _ttNid = ''; _ttRep = null; _ttWant = null;
     _ttPlayNid = ''; _ttOffer = null;
     _ttOverAt = 0; _ttCerAt = 0; _ttTry = 0; _ttRepDone = false;
@@ -514,10 +556,37 @@ function tourneyEnter(){
         const h = _netHello();   // picks up the tourneys list
         if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
     }
-    if(_tt) _ttSync(true);
+    if(_tt) _ttSync(true); else _ttProbe();
     _uiDirty = true;
 }
 function tourneyLobbyList(){ return (typeof _netTourneys !== 'undefined' && _netTourneys) ? _netTourneys : []; }
+// A tournament we are in but not in front of. The announce list cannot carry it -- that only
+// ever names OPEN lobbies on this network, and by the time you have dropped out of one it is
+// usually running -- so the way back is asked for directly, by the id this device kept.
+// Anything the server answers other than "you are in it and it is live" forgets the id: a
+// tournament you have been removed from must not keep offering you a door.
+async function _ttProbe(){
+    const tid = _ttHeld();
+    if(_tt || !tid || !netTourneyOk()){ if(_tt) _ttBack = null; return; }
+    const r = await _ttPost('state', { tid });
+    if(_tt) return;                                   // we joined something else meanwhile
+    if(!r.json){
+        if(r.status === 404 || r.status === 403) _ttHold('');
+        return;
+    }
+    const st = String(r.json.state || '');
+    if(st === 'done' || st === 'abandoned'){ _ttHold(''); _ttBack = null; }
+    else { r.json.tid = r.json.tid || tid; _ttBack = r.json; }
+    _uiDirty = true;
+}
+function tourneyRejoin(){
+    if(_tt || !_ttBack) return;
+    const back = _ttBack; _ttBack = null;
+    _ttAdopt(back);
+    _ttUi.sel = 0; _ttMsg('BACK IN');
+    Snd.sfxPlay('select', cfg.music);
+    _ttSync(true);
+}
 async function tourneyCreate(stakes){
     if(_tt || _ttUi.busy) return;
     if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
@@ -601,6 +670,21 @@ async function tourneyLeave(to){
     await _ttPost('leave', { tid });
 }
 
+// Leaving is only ever free for a guest in a lobby that has not started: nobody else has
+// spent anything on it yet. Every other exit takes something off other people -- the host's
+// takes the entire tournament, a player's mid-run hands away matches that were going to be
+// played -- and an exit that costs other people something is asked about first.
+function tourneyAsk(to){
+    if(!_tt) return;
+    if(_tt.host !== getPlayerId() && _tt.state === 'open'){ tourneyLeave(to); return; }
+    _ttUi.from = _TT_PHASES[phase] ? phase : 'tourneyLobby';
+    _ttUi.to = to || '';
+    quitConfirmSel = 1;                                // NO: the safe answer is the offered one
+    phase = 'tourneyQuit';
+    Snd.sfxPlay('nav', cfg.music);
+    _uiDirty = true;
+}
+
 // ---- the row model the lobby screen and its input share ------------------------------
 // One list, two readers: drawTourneyLobby paints it and UI_INPUT.tourneyLobby dispatches
 // it, so a row can never be drawn in one place and acted on in another.
@@ -608,6 +692,11 @@ function tourneyRows(){
     const rows = [];
     if(!_tt){
         const ok = netTourneyOk();
+        // The way back is the FIRST row when there is one: a player who dropped out of a
+        // running bracket is not here to start a second tournament, and their opponents are
+        // waiting on a walkover clock while they read the list.
+        if(_ttBack) rows.push({ t:'REJOIN TOURNAMENT', en:ok,
+                                note:String(_ttBack.code || ''), act:tourneyRejoin });
         rows.push({ t:'CREATE TOURNAMENT', en:ok, act:() => tourneyCreate(_ttUi.stakes) });
         // The label names what the toggle does, so this row takes no note: a note is drawn
         // at a fixed x and a row this long runs straight through that column.
@@ -644,7 +733,10 @@ function tourneyRows(){
             rows.push({ t:'CONTINUE', en:!left && !_ttUi.busy,
                         note:left ? (Math.ceil(left / 1000) + 'S') : '', act:tourneyContinue });
         }
-        rows.push({ t:'LEAVE TOURNAMENT', en:true, act:tourneyLeave });
+        // The host's exit is not a leave, it is an ending, and the row says the whole of it.
+        rows.push(_tt.host === getPlayerId()
+            ? { t:'END TOURNAMENT FOR ALL', en:true, act:() => tourneyAsk() }
+            : { t:'LEAVE TOURNAMENT', en:true, act:() => tourneyAsk() });
     }
     // BACK is the last row of every tournament screen, and on an OPEN lobby it is also the
     // only way off it -- so it says what leaving actually costs. A lobby you walk away from
@@ -653,7 +745,7 @@ function tourneyRows(){
     const open = !!_tt && _tt.state === 'open';
     rows.push(open
         ? { t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
-            en:true, act:() => tourneyLeave('duelMenu') }
+            en:true, act:() => tourneyAsk('duelMenu') }
         : { t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
     return rows;
 }

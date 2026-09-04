@@ -529,6 +529,19 @@ function netPlayerNames(){
     const peer = (_netSess.peerProfile && _netSess.peerProfile.name) || netFriendName(_netSess.peer) || fmtFriendId(_netSess.peer);
     return netHosting() ? [mine, peer] : [peer, mine];
 }
+// ONE side of a duel, named. P1/P2 is a slot number, and a slot number is what you write
+// when you do not know who is in the slot -- but by the time a duel is running, both names
+// are known on both sides. Every place that used to print a slot number asks here instead,
+// so the HUD, the winner banner and the heart-lost line all say the same word for the same
+// person. PLAYER 1 / PLAYER 2 survives only as the fallback it always should have been: a
+// local duel on one keyboard, where the second player has no account and so has no name.
+function duelSideName(i){
+    i = i ? 1 : 0;
+    const nms = (typeof netPlayerNames === 'function') ? netPlayerNames() : null;
+    let n = nms ? String(nms[i] || '') : (i === 0 ? String(_netMyName() || '') : '');
+    n = n.trim();
+    return n ? n.slice(0, MAX_NAME) : ('PLAYER ' + (i + 1));
+}
 // The two players' device categories in PLAYER order (P0 = host, P1 = joiner), for the
 // duel ready splash. Mine from _detectPlatform(); the peer's from its exchanged profile
 // (null if an older client sent none -- that side just shows no badge). null = offline.
