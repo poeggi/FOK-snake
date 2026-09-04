@@ -13,17 +13,18 @@
 // every input from the ahead side lands ticks late on the behind side -- a per-input rollback
 // storm with half-second silent gaps (the CONNECTION LOST jank; under field loss it decays to
 // OUT OF SYNC). That the control reliably storms is what proves the burst, not mere latency
-// slack, is doing the work. Its treatment arm is LB, which is also CONVERGE's second case: one
+// slack, is doing the work. Its treatment arm is LB, which is also the only CONVERGE case: one
 // run serves both claims, so the control is the only extra match this file pays for.
 const { runMatch } = require('./duel-driver');
 
 // A rematch fires mid-run (opts.rematch.at seconds). err0 is the initial relative clock offset the
-// server syncs leave; the burst must correct it across the restart. Each run plays 8s, restarts,
+// server syncs leave; the burst must correct it across the restart. The run plays 8s, restarts,
 // then plays the second match out -- the restart is the subject, so the run-up only has to be long
 // enough for a real multi-input, multi-level match to be under way when it fires.
-//   clean     : a moderate offset that flashed CONNECTION LOST in the field (drop>0 before the fix)
-//   loss+drift: a larger realistic offset + 3% loss (go retries must survive) + a drifting clock.
-//               Doubles as the treatment arm of the falsification pair below.
+//   loss+drift: a large realistic offset + 3% loss (go retries must survive) + a drifting clock.
+//               It is the ONLY converge case because it dominates a clean-wire one on every knob
+//               at once -- bigger err0, loss AND drift -- while the clean-wire burst-authored go
+//               is already driven by duel-boundary. Doubles as the treatment arm below.
 const LB = { name:'loss+drift e=150 ', secs:24, seed:0x77C0, p2pBoundary:true, wire:{ base:7, jit:3, loss:0.03 },
     phase:8, tjit:4, recv:true, clock:{ drift:1200, err0:150, samples:8 }, rematch:{ at:8 } };
 
@@ -32,11 +33,7 @@ const LB = { name:'loss+drift e=150 ', secs:24, seed:0x77C0, p2pBoundary:true, w
 // while a collapse of the effect still can.
 const LB_MARGIN = 80;
 
-const CONVERGE = [
-    { name:'clean err0=90    ', secs:24, seed:0x77C0, p2pBoundary:true, wire:{ base:6, jit:3, loss:0.02 },
-      phase:8, tjit:4, recv:true, clock:{ drift:600, err0:90, samples:8 }, rematch:{ at:8 } },
-    LB,
-];
+const CONVERGE = [LB];
 
 const steps = [];
 let failed = 0;

@@ -19,7 +19,11 @@ const log = s => { steps.push(s); };
 // Scenarios chosen to exercise each pinpointed failure independently:
 //   clean-boost : phase offset only, NO loss -> isolates the deferred-rollback boost drop (F1)
 //   lossy-boost : + packet loss              -> stresses the redundancy/loss window (F3)
-//   long-levels : longer run to levels 2-3   -> exercises the level-boundary epoch gap (F2)
+//   long-levels : the multi-boundary soak    -> exercises the level-boundary epoch gap (F2).
+//                 It has to cross TWO boundaries (L1->L2->L3), which this seed reaches at
+//                 ~28s, so the length sits just past that and expectLevel:3 holds it there:
+//                 running longer only buys more level-3 minutes, running shorter silently
+//                 drops the second boundary and the name stops being true.
 //   windswept   : jousting passes + loss     -> the near-miss steal, sim AND wardrobe write-back
 //   headroom    : CRUCIAL -- do not shorten, reseed, relax maxRb or fold into another case. It is
 //                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
@@ -41,7 +45,7 @@ const log = s => { steps.push(s); };
 const SCEN = [
     { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:12, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
     { name:'lossy-boost  5% loss      ', seed:0xBEEF, secs:20, wire:{ base:12, jit:6,  loss:0.05 }, phase:8, tjit:4, recv:true },
-    { name:'long-levels  to L2-3      ', seed:0x77C0, secs:40, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true },
+    { name:'long-levels  to L2-3      ', seed:0x77C0, secs:32, wire:{ base:7,  jit:3,  loss:0.02 }, phase:8, tjit:4, recv:true, expectLevel:3 },
     // Clocks start 28-32ms apart (err0 30 +/- anchor jitter): ~1.8 engine ticks of raw pts gap,
     // unplayable at 0rb if left standing. startBurst runs the production first-start burst over
     // the same delayed wire (host _netBurstThenStart -R/2; the joiner applies the host-computed
