@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v3.1.4';
+const APP_VERSION = 'v3.1.5';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -43,7 +43,24 @@ const DEATH_DUR = T(84), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge) and one or more pages, each a headline + body lines ('' = blank
 // gap line). Pages are flipped with LEFT/RIGHT; the newest goes first.
-const ANNOUNCEMENT = { id:'v2.7.1', pages:[
+const ANNOUNCEMENT = { id:'v3.1.0', pages:[
+    { headline:'TOURNAMENT NIGHT', lines:[
+        'NEW IN v3.1:',
+        'Up to 8 players, one trophy',
+        'Everyone on your network sees',
+        'your tournament - or they join',
+        'with the 6-letter code',
+        '',
+        'Two play, the rest all watch.',
+        'Last one standing takes it.' ] },
+    { headline:'PULL UP A CHAIR', lines:[
+        'NEW IN v3.1:',
+        'WATCH a friend who is already',
+        'in a duel - straight from the',
+        '1:1 lobby, a moment behind live',
+        '',
+        'Not a replay. The same game,',
+        'the same snakes, as it happens.' ] },
     { headline:'CRASH, BANG, WALLOP', lines:[
         'NEW IN v2.7:',
         'Prettier all round - gear knocked',

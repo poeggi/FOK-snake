@@ -659,5 +659,5 @@ function _spOrphan(){
     if(_spOrphanG === (_spGen | 0)) return;
     _spOrphanG = _spGen | 0;
     _netSigLog('~ SPEC ORPHAN');
-    if(_spTid && typeof tourneyOrphan === 'function') tourneyOrphan(_spTid, _spNid, _spGen | 0);
+    if(_spTid && typeof tourneyOrphan === 'function') tourneyOrphan(_spTid, _spNid);
 }

@@ -74,6 +74,17 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
   power pellets that turn the opponent's snake into food, PLAY AGAIN rematches,
   and a camera shake when the two heads brush past -- heavier, with a sonic
   boom, when both snakes are boosting through the pass
+- SPECTATING: watch a friend's online duel live. The watcher runs the very same
+  sim as the two players, fed a forwarded copy of their inputs and deliberately
+  held a little behind the live edge, so what it shows is the match itself and
+  not a re-telling of it
+- TOURNAMENT mode: create a tournament, everyone on the same network sees it
+  announced (or joins with the 6-character code), 2 to 8 players. The server
+  deals the schedule -- a sparse round-robin at 2 hearts, then knockouts, then
+  a normal 3-heart final -- and settles every result. Only two people ever play
+  at a time and everyone else spectates, over a two-tier relay tree that fails
+  over on its own when a forwarder puts their phone away. Item stakes are the
+  creator's choice at creation, off by default
 - Friend system: 32-bit player ID, friend-link QR code (SHOW MY ID) and an
   in-app camera QR scanner with a dependency-free decoder (ADD FRIEND)
 - Online matchmaking via FOK-server (invite friends with live online status and
@@ -102,8 +113,10 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 Online features speak to FOK-server (https://fok-server.poggensee.it, repo
 `poeggi/FOK-server`); the client-facing contract is that repo's docs/API.md --
 matchmaking, signaling, PTS time sync, latency reporting and global scores.
-This client requires an **API v3** server (PTS time sync + epoch-keyed starts);
-an older server will not matchmake or start duels. Single-player is unaffected.
+This client requires an **API v4** server; an older one will not matchmake or
+start duels. Tournaments and spectating additionally need **4.1** -- against a
+4.0 server the menu entry stays greyed out and everything else works as before.
+Single-player is unaffected either way.
 The engine runs on a deterministic fixed-timestep 60 Hz tick clock, which is
 what makes prediction netcode and replay-validated scores possible.
 (docs/multiplayer-server-prompt.md is the historical design brief.)

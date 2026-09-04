@@ -14,7 +14,7 @@
 // THE ONE RULE THE SERVER STATES OUTRIGHT: a client must not act on a `tourney` signal it
 // did not expect to the extent of playing a match it cannot see in `state`. When anything
 // looks off we call state() and render THAT, rather than believing a stray event.
-const TT_MAX        = 10;      // hard player cap (mirrors tournament_max_players)
+const TT_MAX        = 8;       // hard player cap (mirrors tournament_max_players)
 const TT_TICK_MS    = 1000;    // housekeeping cadence while a tournament is held
 const TT_REPORT_MS  = 2500;    // result-report retry spacing (the POST is idempotent)
 const TT_REPORT_MAX = 24;      // ~1 minute of retries, well inside the 3-min walkover ladder
@@ -45,8 +45,8 @@ function tourneyView(){ return _tt; }
 function tourneyUi(){ return _ttUi; }
 function tourneyMax(){ return _tt && _tt.max ? (_tt.max|0) : TT_MAX; }
 // Round 1 is SPARSE above four players: every pair up to 4, then the two circulant
-// offsets, which is 2N matches. The lobby quotes this so nobody starts a ten-player
-// tournament expecting 45 games.
+// offsets, which is 2N matches. The lobby quotes this so nobody starts an eight-player
+// tournament expecting 28 games.
 function _ttMatches(n){ n = n|0; return n < 2 ? 0 : (n <= 4 ? n * (n - 1) / 2 : 2 * n); }
 // The gate on the whole feature: tournaments need a 4.1 server. An older one answers 404
 // to tournament.php and never sends a roles sheet, so the menu row stays grey.

@@ -1,7 +1,8 @@
 # Tournament Mode - client implementation plan
 
-The FOK-server side of this feature is specified separately in
-FOK-server/docs/TOURNAMENT-SPEC.md (API 4.0 -> 4.1). This document is the
+The FOK-server side of this feature was specified separately while it was
+being built; now that it ships, the live contract is that repo's docs/API.md
+(API 4.1: the Spectating and Tournament mode sections). This document is the
 FOK-snake half: what gets built, in which order, and how each phase is
 verified. Companion invariant: the server orchestrates and settles, but never
 carries a byte of game traffic.
@@ -10,13 +11,13 @@ carries a byte of game traffic.
 
 A local client creates a tournament; it is announced to clients behind the
 same public IP (server-side filter, no LAN protocol needed) and joinable by
-code from anywhere. 2..10 players join, the creator starts.
+code from anywhere. 2..8 players join, the creator starts.
 
 - Round 1 (SPARSE, 2 hearts): everyone plays at most 4 matches. With
   N <= 5 players that is a full round-robin (N-1 matches each); with
   N >= 6 each player meets the neighbors at offsets 1 and 2 on the seeded
-  circle - exactly 4 matches each, 2N total (10 players = 20 matches, not
-  the 45 of a dense round-robin).
+  circle - exactly 4 matches each, 2N total (8 players = 16 matches, not
+  the 28 of a dense round-robin).
 - Stats interstitial: standings by points; the best 50% advance.
 - Knockouts (2 hearts): seeded single-elimination bracket, byes for top
   seeds when the advancer count is not a power of two.
@@ -107,6 +108,10 @@ action by a second and a half.
 Every phase is independently shippable and green-gated; each wire-surface
 phase is a MINOR bump via annotated tag (hook-managed versions - never
 hand-edit sw.js / js/assets.js).
+
+The whole feature SHIPPED as snake-v3.1.0, built against server API 4.1.
+Everything below this line is the plan as it was written, kept because it
+records why each piece is shaped the way it is.
 
 ## Phase A - heartsMax + stakes as negotiated match parameters (MINOR)
 
