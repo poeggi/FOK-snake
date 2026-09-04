@@ -729,7 +729,15 @@ let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // outstanding at all times and the link is never left idle.
 async function _netPollOnce(){
     if(_netPollBusy || !_netOk() || !_netPollDue()) return;
-    const held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId';   // long-poll during a reconnect so the re-handshake signals arrive fast
+    // The tournament screens are matchmaking screens like the rest, and hold like them:
+    // between matches EVERY signal that moves the evening on -- a lobby join, the next
+    // roles sheet, the offer for a match this client is about to answer -- arrives here,
+    // and a 1s short-poll put a second on each leg of a handshake the 1:1 path does in
+    // ~150ms. Not the podium: that tournament is over and nothing further is coming. Not
+    // during a match either -- _netSess.game short-circuits above, so the eight people
+    // watching hold nothing while they watch.
+    const held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId'
+               || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;
