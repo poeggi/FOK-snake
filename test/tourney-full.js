@@ -175,6 +175,11 @@ async function passBreak(mode){
         const out = b0.rows.filter(r => !r.adv && !r.gone)[0];
         const li = idx(out.id);
         await C[li].pick('LEAVE TOURNAMENT');
+        // The row opens the QUESTION, it does not answer it: walking out of a tournament
+        // mid-run costs the matches you were still due, so it is asked about first.
+        A(C[li].phase() === 'tourneyQuit',
+          'break ' + done + ': ' + NAMES[li] + ' left without being asked (' + C[li].phase() + ')');
+        await C[li].key('confirm', 0);              // 0 is YES
         await settleAsync();
         A(C[li].tt() === null, 'break ' + done + ': ' + NAMES[li] + ' left but still holds a tournament');
         A(srv.T.players.length === N - 1, 'break ' + done + ': the roster did not shrink on the leave');

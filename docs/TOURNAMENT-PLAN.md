@@ -275,7 +275,7 @@ All in the one shared sim/netcode - no second code path.
 | A player backgrounds | Existing suspend/catch-up machinery; total silence -> result timeout -> walkover |
 | Late spectator | sctx + checkpoint rs + envelope tail from a primary |
 | Result contradiction | Bracket node frozen + admin alert; admin clears |
-| Creator leaves mid-run | Forfeits their matches; the tournament continues (the creator owns the lobby, not the bracket) |
+| Creator leaves mid-run | Ends it for everyone: state `abandoned`, cursor cleared, a `lobby` event carrying that state to every participant, and the stats trace recorded because matches were played. A guest leaving mid-run still forfeits. Same `leave` request either way -- the server tells the two apart by the sender |
 
 ## Verification
 

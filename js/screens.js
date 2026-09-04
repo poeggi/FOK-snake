@@ -1657,7 +1657,10 @@ function drawTourneyLobby(){
         // player who never set a name used to be an entirely blank line in the roster.
         menuItem(fmtFriendId(String((p && p.id) || '')), y, false);
         _drawRowName(nm || 'NO NAME', y, !!p && p.id === getPlayerId(), nm ? null : '#555');
-        if(p && p.id === t.host) ct('HOST', CW/2 + 180, y, '#ffd700', FONT.HINT);
+        // The row's own size: HOST says which of these people this one is, the same way
+        // the name does, and set smaller it read as a footnote to a name rather than
+        // part of the line.
+        if(p && p.id === t.host) ct('HOST', CW/2 + 180, y, '#ffd700', FONT.MENU);
     });
     // What the lobby AMOUNTS TO, on the line the whole game keeps for exactly that: SHOP puts
     // its balance here, ACHIEVEMENTS its unlocked count. It reads as a footer to the screen
@@ -1811,20 +1814,23 @@ function drawTourneyRound(){
     // they are still in it and what they are walking into.
     ctg(_ttStage(b.stage, b.next), CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
     const mt = b.matches | 0, hm = _duelHearts(b.hm);
+    // What is about to be PLAYED, and only that. How many got through is the table right
+    // below it -- the cut is ruled across it and everything above the rule is lit -- and a
+    // legend explaining four column headings was a sentence spent on what the columns say.
     ct('LEVEL ' + (b.lvl | 0) + '  -  ' + mt + (mt === 1 ? ' MATCH' : ' MATCHES')
-       + '  -  ' + hm + (hm === 1 ? ' HEART' : ' HEARTS') + '  -  ' + (b.of | 0) + ' THROUGH',
-       CW/2, 48, '#ffd700', FONT.HINT);
-    ct('W-L-D IS ROUND ' + (b.done | 0) + ' ONLY  -  PTS AND DIFF ARE ROUND 1', CW/2, 64, '#4a7a4a', FONT.HINT);
-    // Hint size, not menu size: five columns and a name do not fit across the canvas at the
-    // size the four-column standings table uses.
-    _ttCol('#',      CW/2 - 215, 80, '#666', FONT.HINT);
-    _ttCol('PLAYER', CW/2 - 195, 80, '#666', FONT.HINT);
-    _ttCol('W-L-D',  CW/2 + 20,  80, '#666', FONT.HINT, 'right');
-    _ttCol('PTS',    CW/2 + 95,  80, '#666', FONT.HINT, 'right');
-    _ttCol('DIFF',   CW/2 + 170, 80, '#666', FONT.HINT, 'right');
+       + '  -  ' + hm + (hm === 1 ? ' HEART' : ' HEARTS'), CW/2, 48, '#ffd700', FONT.HINT);
+    // The standings table, in the standings screen's columns and at its size: between rounds
+    // it is the same board it is during one, and reading it should not be a different job.
+    // W-L-D is what kept it a fifth column too many to fit at that size, and it says in three
+    // numbers what the points beside it say in one.
+    _ttCol('#',      CW/2 - 210, 68, '#666', FONT.HINT);
+    _ttCol('PLAYER', CW/2 - 180, 68, '#666', FONT.HINT);
+    _ttCol('PTS',    CW/2 + 110, 68, '#666', FONT.HINT, 'right');
+    _ttCol('DIFF',   CW/2 + 200, 68, '#666', FONT.HINT, 'right');
     const rows = (b.rows || []).slice(0, tourneyMax());
     rows.forEach((r, i) => {
-        const y = 96 + i * 19, me = String(r.id) === getPlayerId();
+        // A pitch that still clears the buttons with a full field of ten on the board.
+        const y = 84 + i * 19, me = String(r.id) === getPlayerId();
         // Four readings in the order they matter: this player forfeited, this is me, this
         // player is through, this player is not.
         const col = r.gone ? '#555' : me ? '#7fff7f' : r.adv ? '#ffd700' : '#888';
@@ -1832,19 +1838,20 @@ function drawTourneyRound(){
         // put it. Sitting it between the last `adv` row and the first that is not is what
         // stops it from ever disagreeing with the colours above and below it.
         if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 216, y - 10, 432, 1); }
-        if(me) _ttMine(CW/2 - 223, y);
-        _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 215, y, col, FONT.HINT);
-        _ttCol(_ttRowName(r).slice(0, 14),              CW/2 - 195, y, col, FONT.HINT);
-        _ttCol((r.w | 0) + '-' + (r.l | 0) + '-' + (r.d | 0), CW/2 + 20, y, col, FONT.HINT, 'right');
-        _ttCol(String(r.pts != null ? r.pts : 0),       CW/2 + 95,  y, col, FONT.HINT, 'right');
-        _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 170, y, col, FONT.HINT, 'right');
-        // How far a player got is the only consolation the table has to offer, so an
-        // eliminated row says it rather than simply going quiet.
-        if(r.gone)      _ttCol('GONE', CW/2 + 185, y, '#555', FONT.HINT);
-        else if(!r.adv) _ttCol('OUT R' + (r.until | 0), CW/2 + 185, y, '#666', FONT.HINT);
+        if(me) _ttMine(CW/2 - 218, y);
+        _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 210, y, col, FONT.MENU);
+        _ttCol(_ttRowName(r).slice(0, 15),              CW/2 - 180, y, col, FONT.MENU);
+        _ttCol(String(r.pts != null ? r.pts : 0),       CW/2 + 110, y, col, FONT.MENU, 'right');
+        _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 200, y, col, FONT.MENU, 'right');
+        // The one thing the rule cannot say: this player is not out, they WALKED OUT. It is
+        // an annotation on a row rather than a column of its own, so it sits in the margin
+        // opposite YOU and at the margin's size. Which round somebody went out in is not
+        // annotation, it is a fifth and sixth column of consolation, and the ladder is
+        // already in that order.
+        if(r.gone) _ttCol('GONE', CW/2 + 215, y, '#555', FONT.HINT);
     });
     if(!rows.length) ct('NO STANDINGS' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
-    _ttDrawRows(268, 26);
+    _ttDrawRows(274, 26);
     const ui = tourneyUi();
     if(ui.msg) drawStatus(ui.msg);
     // Only the host has a button. Everyone else is told whose press they are waiting on --
