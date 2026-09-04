@@ -22,12 +22,16 @@ const HOOKS = (myId) => `
   globalThis.fetch = ()=>({ then:()=>({ catch:()=>{} }) });
   // Minimal RTCPeerConnection so the P2P code paths are reachable headlessly.
   // (Only presence + the SDP shuffle matter here; no real ICE is performed.)
+  // Every pc gets its OWN sdp: a real one mints fresh ICE credentials, and two attempts
+  // that read alike would hide the difference between a re-sent offer and a new one.
+  var __pcN = 0;
   globalThis.RTCPeerConnection = function(){
-    this.localDescription = { type:'offer', sdp:'stub' };
+    const sdp = 'stub-' + (++__pcN);
+    this.localDescription = { type:'offer', sdp:sdp };
     this.connectionState = 'new';
     this.createDataChannel = ()=>({ readyState:'connecting', send(){}, close(){} });
-    this.createOffer  = async ()=>({ type:'offer',  sdp:'stub' });
-    this.createAnswer = async ()=>({ type:'answer', sdp:'stub' });
+    this.createOffer  = async ()=>({ type:'offer',  sdp:sdp });
+    this.createAnswer = async ()=>({ type:'answer', sdp:sdp });
     this.setLocalDescription  = async ()=>{};
     this.setRemoteDescription = async ()=>{};
     this._ice = [];
@@ -393,6 +397,45 @@ try {
     const t = pump(B, A);
     if(!t.includes('answer')) throw new Error('B must re-answer a duplicate offer, got ' + t);
     if(A.__state().hs.offerTo !== null) throw new Error('the re-answer must end the retry');
+  });
+
+  // ------------------------------------------------------------------- re-offer
+  // Told apart by the OFFER, not by the peer. A re-sent offer (our answer was lost) and a
+  // brand-new one from a host that tore its own attempt down and rebuilt (a tournament
+  // ceremony re-offering, a reconnect) arrive as the same signal type from the same id --
+  // and answering the second off the pc built for the first can never connect, because the
+  // credentials in that answer belong to a pc neither side still has. It looks exactly like
+  // a peer who will not come: the ladder re-offers, gets the dead answer back every time,
+  // and the match hangs until it is given up on.
+  await acheck('re-offer: a NEW offer is answered off a fresh pc, a re-sent one is not', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(false); B.__setRelay(false);
+    const flush = () => new Promise(r => setTimeout(r, 0));
+    A.__qmOffer(B_ID); await flush();
+    const off1 = A.__out.find(s => s.type === 'offer');
+    if(!off1) throw new Error('A never offered');
+    B.__deliver(off1); await flush();
+    const first = B.__out.filter(s => s.type === 'answer').pop();
+    if(!first) throw new Error('B never answered the offer');
+    const sdp1 = JSON.parse(first.payload).sdp.sdp;
+    // The SAME offer again: our answer was lost, so re-answer off the pc already built.
+    B.__out.splice(0);
+    B.__deliver(off1); await flush();
+    const dup = B.__out.filter(s => s.type === 'answer').pop();
+    if(!dup) throw new Error('B must re-answer a duplicate offer');
+    if(JSON.parse(dup.payload).sdp.sdp !== sdp1) throw new Error('a duplicate offer rebuilt B\'s pc');
+    // A gives up on that attempt and offers again off a new pc.
+    A.__out.splice(0); B.__out.splice(0);
+    A.__qmOffer(B_ID); await flush();
+    const off2 = A.__out.find(s => s.type === 'offer');
+    if(!off2) throw new Error('A never re-offered');
+    if(JSON.parse(off2.payload).sdp.sdp === JSON.parse(off1.payload).sdp.sdp)
+      throw new Error('the harness minted one sdp for two pcs: the case cannot be tested');
+    B.__deliver(off2); await flush();
+    const ans2 = B.__out.filter(s => s.type === 'answer').pop();
+    if(!ans2) throw new Error('B never answered the re-offer');
+    if(JSON.parse(ans2.payload).sdp.sdp === sdp1)
+      throw new Error('B answered a new offer with the answer from its dead pc');
   });
 
   // ---------------------------------------------------------------- navigation

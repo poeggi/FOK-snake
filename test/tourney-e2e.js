@@ -20,7 +20,7 @@
 //
 // Run: node test/tourney-e2e.js
 const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
-        TT_OVER_MS, TT_STATE_MS } = require('./tourney-world');
+        TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS, TT_CONNECT_TRIES } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
 const NAMES = ['KAI', 'JO', 'ADA', 'LEO', 'MIA', 'ZED'];
@@ -603,6 +603,100 @@ async function passBreak(opts){
       '15: an unknown token did not fall back to a plain round number');
     rows.push('15 stage tokens: the four named stages read as themselves, and anything else -- '
               + 'including a token a newer server invents -- reads as a plain round number');
+
+    // ---- 16. a result names the match that was PLAYED --------------------------------
+    // The server deals the next node the instant a result settles, so from then until the
+    // finished match leaves the screen the client holds TWO nodes: the one on the board and
+    // the one just dealt. Reporting against the second is reporting on a match that has not
+    // been played -- and walking off the over screen did exactly that, forfeiting the next
+    // node before its ceremony had even connected.
+    const rp = C[4];
+    rp.clear();
+    const rtid = rp.tt().tid;
+    const sheet = (nid, you) => ({ event:'roles', tid:rtid, nid, round:9, stage:'ko', lvl:1, hm:2,
+                                   stakes:false, players:[IDS[0], IDS[4]], feeder:IDS[0],
+                                   primaries:[], secondaries:[], names:{}, you });
+    rp.inGame(false);
+    rp.sigTo(sheet('played', 'play'));
+    rp.tick();                                   // the sheet engages: this node owns the board
+    A(rp.playNid() === 'played', '16: the engaged node did not take the board, got "' + rp.playNid() + '"');
+    rp.inGame(true);
+    rp.sigTo(sheet('dealt', 'play'));            // the NEXT node, dealt while we are still playing
+    A(rp.playNid() === 'played',
+      '16: a sheet for the next node moved the board under the live match, to "' + rp.playNid() + '"');
+    rp.walkOut('peer', IDS[0], [2, 5]);          // ESC on the over screen
+    const res = rp.rec().posts.filter(p => p.action === 'result');
+    A(res.length === 1 && res[0].nid === 'played' && res[0].outcome === 'loss',
+      '16: walking out reported ' + JSON.stringify(res.map(p => p.nid + '/' + p.outcome)));
+    rp.inGame(false); rp.tick();                 // the board clears, the dealt node engages
+    A(rp.playNid() === 'dealt', '16: the node dealt during the match never took the board');
+    rp.inGame(false); rp.clear();
+    rows.push('16 report binding: a result names the node whose match was on the board, never the '
+              + 'one dealt while it was still up -- walking out cannot forfeit the next match');
+
+    // ---- 17. an offer that arrives mid-over-screen is kept, not dropped ---------------
+    // THE HANG. The feeder offers the instant it engages; its peer may still be looking at
+    // the previous match's over screen, where net-session refuses every offer because a live
+    // game owns the session. Signals are one-shot, so that offer is the only one there will
+    // be for the next 20 seconds -- and the answerer, which never offers, sat on CONNECTING
+    // for a match whose invitation had already been delivered and thrown away.
+    const pk = C[3];
+    pk.clear();
+    pk.inGame(true);                             // the last match is still on the board
+    pk.sigTo({ event:'roles', tid:pk.tt().tid, nid:'park1', round:9, stage:'ko', lvl:1, hm:2,
+               stakes:false, players:[IDS[0], IDS[3]], feeder:IDS[0], primaries:[],
+               secondaries:[], names:{}, you:'play' });   // players[0] feeds: we answer
+    pk.sigRaw('offer', IDS[0], { sdp:{ type:'offer', sdp:'v=0 park' }, seed:77 });
+    A(pk.rec().answers.length === 0 && pk.rec().offers.length === 0,
+      '17: the offer was acted on while a match still held the board');
+    pk.inGame(false);
+    pk.tick();                                   // the board clears: the sheet engages
+    const ans = pk.rec().answers;
+    A(ans.length === 1 && ans[0].peer === IDS[0] && ans[0].seed === 77,
+      '17: the parked offer was never answered, got ' + JSON.stringify(ans));
+    A(pk.rec().offers.length === 0, '17: the answerer offered as well -- both sides would offer');
+    pk.clear();
+    rows.push('17 parked offer: an offer that lands while the previous match is still on the '
+              + 'board is answered the moment it clears, instead of being lost for good');
+
+    // ---- 18. ESC to the bracket does not disarm the recovery -------------------------
+    // The ceremony says ESC:bracket and means it: looking at the bracket cancels nothing. The
+    // re-offer ladder and the walkover it ends in used to run only while the ceremony itself
+    // was the screen in front of the player, so that one keypress silently removed both --
+    // and the node hung for the whole tournament, not just for the player who pressed it.
+    const es = C[2];
+    es.clear(); es.inGame(false);
+    es.sigTo({ event:'roles', tid:es.tt().tid, nid:'esc1', round:9, stage:'ko', lvl:1, hm:2,
+               stakes:false, players:[IDS[2], IDS[0]], feeder:IDS[2], primaries:[],
+               secondaries:[], names:{}, you:'play' });   // we feed, so we offer
+    es.tick();
+    A(es.phase() === 'tourneyCeremony' && es.rec().offers.length === 1,
+      '18: the ceremony did not open with an offer');
+    es.setPhase('tourneyBracket');                        // ESC:bracket
+    for(let t = 1; t < TT_CONNECT_TRIES; t++){
+        clock(TT_CONNECT_MS + 1000); es.tick(); es.tick();
+        A(es.rec().offers.length === t + 1,
+          '18: re-offer ' + t + ' never happened away from the ceremony (' + es.rec().offers.length + ' offers)');
+    }
+    clock(TT_CONNECT_MS + 1000); es.tick();
+    A(es.msg() === 'MATCH DID NOT CONNECT',
+      '18: the ladder never gave the node back to the server, msg "' + es.msg() + '"');
+    A(es.playNid() === '', '18: a match that never connected still holds the board');
+    // ...and a ceremony that DID become a match leaves nothing behind for the ladder to trip
+    // over: the quiet after a match that played is not a match that failed to connect.
+    es.clrMsg(); es.clear();
+    es.sigTo({ event:'roles', tid:es.tt().tid, nid:'esc2', round:9, stage:'ko', lvl:1, hm:2,
+               stakes:false, players:[IDS[2], IDS[0]], feeder:IDS[2], primaries:[],
+               secondaries:[], names:{}, you:'play' });
+    es.tick();
+    es.inGame(true); es.tick();                           // the match goes live
+    es.inGame(false); es.setPhase('tourneyBracket');      // ...and ends, back to the bracket
+    clock(TT_CONNECT_MS * 2); es.tick(); es.tick();
+    A(es.rec().offers.length === 1 && es.msg() === '',
+      '18: the ladder fired again after a match that had already played, msg "' + es.msg() + '"');
+    es.clear();
+    rows.push('18 ESC:bracket: leaving the ceremony to look at the bracket keeps both the '
+              + 're-offer ladder and the walkover that ends it, and a match that played arms neither');
 
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }

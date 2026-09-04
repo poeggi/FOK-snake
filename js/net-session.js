@@ -219,6 +219,10 @@ function _netOnSignal(sig){
                     if(_netSess && _netSess.peer === from && _netSess.game) _netRtcReanswer(from, od);
                     break;
                 }
+                // An offer for the next tournament match can land while the last one is
+                // still on our board. _netRtcAnswer refuses it there (a live game owns the
+                // session) and it would never be sent again, so the tournament keeps it.
+                if(inGame && typeof tourneyParkOffer === 'function' && tourneyParkOffer(from, od)) break;
                 // Relay when EITHER side wants it -- the same rule the invite path applies
                 // (_netInviteAnswer). Quick match has no invite to carry the bit, so an
                 // offerer without the setting sends a normal sdp offer; routing on that

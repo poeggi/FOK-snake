@@ -24,6 +24,8 @@ const MAX_DIRECT   = 2;        // SPEC_MAX_DIRECT
 const MAX_LEVEL    = 10;       // MAX_LEVELS: the ladder cannot go deeper than the game does
 // Client-side timings the run has to step over.
 const TT_OVER_MS   = 4000;     // tourney.js: how long a settled match holds the screen
+const TT_CONNECT_MS    = 20000;   // tourney.js: a ceremony that has not connected by now re-offers
+const TT_CONNECT_TRIES = 4;       // tourney.js: re-offers before the node goes back to the server
 const TT_STATE_MS  = 5000;     // tourney.js: the floor between unforced state() read-backs
 
 // ============================================================================
@@ -384,17 +386,19 @@ function mkServer(opts){
 // ============================================================================
 function driverSrc(id){
     return '\n;(function(){\n'
-        + '  var REC = globalThis.__REC = { offers:[], watches:[], sigs:[], exits:0 };\n'
+        + '  var REC = globalThis.__REC = { offers:[], answers:[], watches:[], sigs:[], posts:[], exits:0 };\n'
         + '  var clock = 100000;\n'
         + '  performance.now = function(){ return clock; };\n'
         + '  cfg.offline = false; cfg.music = 0; cfg.sfx = 0;\n'
         + '  getPlayerId = function(){ return "' + id + '"; };\n'
         + '  globalThis.fetch = function(url, opt){\n'
-        + '      var r = globalThis.__srv(String(url), JSON.parse(opt.body));\n'
+        + '      var b = JSON.parse(opt.body); REC.posts.push(b);\n'
+        + '      var r = globalThis.__srv(String(url), b);\n'
         + '      return Promise.resolve({ status:r.status, json:function(){ return Promise.resolve(r.json); } });\n'
         + '  };\n'
         // The four seams a headless client cannot run for real.
         + '  _netRtcOffer = function(peer){ REC.offers.push(String(peer)); };\n'
+        + '  _netRtcAnswer = function(peer, d){ if(inGame) return; REC.answers.push({ peer:String(peer), seed:(d && d.seed) | 0 }); };\n'
         + '  _netSignal = function(to, type, payload){ REC.sigs.push({ to:String(to), type:String(type), payload:String(payload) }); };\n'
         + '  _netTimeSync = function(){};\n'
         + '  _duelExit = function(){ inGame = false; _netSess = null; REC.exits++; phase = (typeof tourneyExitPhase === "function" && tourneyExitPhase()) || "duel11"; };\n'
@@ -412,7 +416,7 @@ function driverSrc(id){
         + '    clrMsg: function(){ _ttUi.msg = ""; },\n'
         + '    tt: function(){ return _tt ? JSON.parse(JSON.stringify(_tt)) : null; },\n'
         + '    rec: function(){ return JSON.parse(JSON.stringify(REC)); },\n'
-        + '    clear: function(){ REC.offers = []; REC.watches = []; REC.sigs = []; REC.exits = 0; },\n'
+        + '    clear: function(){ REC.offers = []; REC.answers = []; REC.watches = []; REC.sigs = []; REC.posts = []; REC.exits = 0; },\n'
         + '    enter: function(){ return tourneyEnter(); },\n'
         + '    create: function(s){ return tourneyCreate(s); },\n'
         + '    join: function(c){ return tourneyJoin(c); },\n'
@@ -458,6 +462,9 @@ function driverSrc(id){
         + '    spOrphan: function(){ _spOrphan(); },\n'
         + '    spGranted: function(pid){ return !!_spGrant[pid]; },\n'
         + '    sigTo: function(d){ _netOnSignal({ type:"tourney", from:"", payload:JSON.stringify(d) }); },\n'
+        // A signal from another PLAYER rather than from the server: the duel handshake types.
+        + '    sigRaw: function(type, from, d){ _netOnSignal({ type:type, from:from, payload:JSON.stringify(d) }); },\n'
+        + '    playNid: function(){ return _ttPlayNid; },\n'
         + '  };\n'
         + '})();\n';
 }
@@ -501,4 +508,4 @@ function mkWorld(ids, names, opts){
 
 module.exports = { mkServer, driverSrc, mkWorld,
                    RESULT_MS, BREAK_MS, BREAK_TTL_MS, MAX_DIRECT, MAX_LEVEL,
-                   TT_OVER_MS, TT_STATE_MS };
+                   TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS, TT_CONNECT_TRIES };

@@ -174,6 +174,7 @@ function netP2POnly(){ return _netP2POnly || !!(_netSess && _netSess.p2pOnly); }
 function _netMkSess(peer, role){
     const s = { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
+             offKey:'',   // the offer sdp this session answers: a DIFFERENT one is a new attempt, not a re-send
              // DEPRECATED(relay): session slots owned by net-relay.js -- drop with it.
              relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
              relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
@@ -264,14 +265,19 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
         return;
     }
     if(!_netRtcAvail() || inGame){ _netSigLog('< offer SKIP'); return; }
-    if(_netSess && _netSess.peer === peer){
-        // Duplicate offer: the host re-sent because our answer was lost. Answer
-        // again; tearing the forming session down here would break the connect.
+    // The SAME offer again means our answer was lost and the host re-sent: answer off the
+    // pc we already built, because tearing a forming session down would break the connect.
+    // A DIFFERENT one from the same peer is a fresh attempt -- the host tore its own side
+    // down first -- and re-sending the old answer to it can never connect: the credentials
+    // in it belong to a pc that no longer exists on either side.
+    const okey = String((d && d.sdp && d.sdp.sdp) || '');
+    if(_netSess && _netSess.peer === peer && _netSess.offKey === okey){
         _netSignal(peer, 'answer', JSON.stringify({ sdp: _netSess.pc && _netSess.pc.localDescription, profile:_netProfile(), v:_swVersion, rc:(d && d.rc)|0 }));
         return;
     }
     if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
     const pc = _netRtcInit(peer, 'peer');
+    _netSess.offKey = okey;
     _netSess.peerProfile = _netClampProfile(d.profile);
     _netNameSeen(peer, _netSess.peerProfile.name);
     _netSess.seed = (d.seed>>>0) || 1;

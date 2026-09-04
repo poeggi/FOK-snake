@@ -37,6 +37,12 @@ var _ttNid  = '';      // the node we are currently engaged with
 var _ttRep  = null;    // the pending result report {body, at, tries}
 var _ttRepBusy = false, _ttRepDone = false;
 var _ttWant = null;    // the match parameters an inbound answer must be dressed with
+// The node whose match is ON THE BOARD, which is NOT _ttNid: the server deals the next node
+// the moment a result settles, so from then until the finished match leaves the screen the
+// two name different matches. Everything about the match being played -- what a result is
+// reported against, whether walking out still owes one -- hangs off this one.
+var _ttPlayNid = '';
+var _ttOffer = null;   // an offer that landed while the previous match still held the board
 var _ttOverAt = 0, _ttCerAt = 0, _ttTry = 0;
 var _ttStateAt = 0, _ttT = null;
 
@@ -164,6 +170,7 @@ async function _ttSync(force){
 }
 function _ttDrop(msg){
     _tt = null; _ttPend = null; _ttNid = ''; _ttRep = null; _ttWant = null;
+    _ttPlayNid = ''; _ttOffer = null;
     _ttOverAt = 0; _ttCerAt = 0; _ttTry = 0; _ttRepDone = false;
     if(typeof specNode === 'function') specNode('', '');
     if(typeof specGrant === 'function') specGrant([]);
@@ -220,7 +227,7 @@ function _ttOnSignal(d){
             break;
         case 'over':
             _tt.state = 'done'; _tt.podium = d.podium || [];
-            _ttNid = ''; _ttPend = null;
+            _ttNid = ''; _ttPend = null; _ttOffer = null;
             if(!inGame) phase = 'tourneyPodium';
             _uiDirty = true;
             break;
@@ -249,7 +256,10 @@ function _ttRoles(d){
     if(typeof specNode === 'function') specNode(_tt.tid, nid);
     _uiDirty = true;
     if(_ttNid === nid) return;   // the same node again (a state re-read, a repeat delivery)
-    _ttNid = nid; _ttRepDone = false; _ttTry = 0; _tt.frozen = '';
+    // _ttRepDone deliberately stays as it is: it belongs to the match on the BOARD, and this
+    // sheet is for the next one. Clearing it here hands a player still on the over screen a
+    // fresh debt, which leaving that match then pays with a forfeit of the node just dealt.
+    _ttNid = nid; _ttTry = 0; _tt.frozen = ''; _ttOffer = null;
     _ttPend = d;                 // engaged by _ttTick, once the previous match is off the board
     if(_tt.you !== 'idle' && !inGame){ phase = 'tourneyCeremony'; _ttCerAt = _msgNow(); }
     _ttArm();
@@ -273,6 +283,7 @@ function _ttPatch(d){
 // while a game is on: the previous match has to be off the board first.
 function _ttEngage(d){
     const me = getPlayerId(), you = String(d.you || 'idle');
+    _ttPlayNid = '';
     if(you === 'play'){
         const ps = (d.players || []).map(String);
         const peer = ps[0] === me ? ps[1] : ps[0];
@@ -281,6 +292,7 @@ function _ttEngage(d){
         // at the game's last level. The sheet says which, and _duelLvl refuses anything that
         // is not a level this build has.
         _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes, lvl:_duelLvl(d.lvl) };
+        _ttPlayNid = String(d.nid || ''); _ttRepDone = false;   // this node's match owns the board now
         netP2POnlySet(true);   // a tournament match is direct or nothing
         // _netMkSess is not the only moment a session can need dressing. Engagement is
         // deferred (the previous match has to be off the board first), and the feeder offers
@@ -292,7 +304,14 @@ function _ttEngage(d){
         // players[0] is the feeder and the feeder is always the offerer, so the two sides
         // never both offer. This is the quick-match path verbatim -- an offer needs no
         // friendship, which is exactly why strangers can be drawn against each other.
-        if(String(d.feeder) === me) _netRtcOffer(peer);
+        if(String(d.feeder) === me){ _netRtcOffer(peer); return; }
+        // The offer may already have been made, and refused, while the previous match was
+        // still on our board -- see tourneyParkOffer. Signals are one-shot, so this is the
+        // only copy of it there will ever be until the feeder's ladder offers again.
+        if(_ttOffer && _ttOffer.peer === peer && typeof _netRtcAnswer === 'function'){
+            const o = _ttOffer; _ttOffer = null;
+            _netRtcAnswer(peer, o.od);
+        }
         return;
     }
     if(you === 'spectate'){
@@ -305,8 +324,21 @@ function _ttEngage(d){
         for(const p of src.slice(0, SPEC_MAX_DIRECT)) specWatch(p, _tt.tid, d.nid);
     }
 }
+// net-session hands us an offer it is about to refuse because a game is still on. A
+// tournament deals the next match the instant the last result settles, and the feeder offers
+// the instant IT engages -- while the peer it is offering to may still be looking at the over
+// screen of the match before. Refusing that offer loses it for good (signals are one-shot)
+// and the answerer then sits out the whole ceremony waiting for one that was already
+// delivered. Keep it instead; _ttEngage answers it as soon as the board is clear.
+function tourneyParkOffer(from, od){
+    const d = _ttPend || (_tt && _tt.roles);
+    if(!_tt || !d || String(d.you || 'idle') !== 'play') return false;
+    if((d.players || []).map(String).indexOf(String(from)) < 0) return false;
+    _ttOffer = { peer:String(from), od };
+    return true;
+}
 function _ttFail(msg){
-    _ttPend = null; _ttCerAt = 0; _ttWant = null;
+    _ttPend = null; _ttCerAt = 0; _ttWant = null; _ttPlayNid = ''; _ttOffer = null;
     netP2POnlySet(false);
     if(_TT_PHASES[phase]) phase = _tt ? tourneyExitPhase() : 'tourneyLobby';
     _ttMsg(msg, true);
@@ -358,23 +390,25 @@ async function _ttFlushRep(){
 function tourneyMatchOver(){
     if(!_tt || !_ttNid) return;
     if(!_ttOverAt) _ttOverAt = _msgNow();
-    if(_tt.you !== 'play' || _ttRepDone) return;
+    // _ttPlayNid, not _tt.you: the sheet for the next node may already have landed, and its
+    // role says nothing about the match that just ended on our board.
+    if(!_ttPlayNid || _ttRepDone) return;
     _ttRepDone = true;
     const my = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
     const ps = (typeof players !== 'undefined' && players) ? players : null;
     const sc = ps ? [ps[my].score | 0, ps[1 - my].score | 0] : [0, 0];
     const w  = (typeof duelWinner !== 'undefined') ? duelWinner : -1;
-    _ttReport(_ttNid, w === 2 ? 'draw' : (w === my ? 'win' : 'loss'), sc);
+    _ttReport(_ttPlayNid, w === 2 ? 'draw' : (w === my ? 'win' : 'loss'), sc);
 }
 // Called when a player walks out of a tournament match before it ended. Leaving is losing,
 // and a reported loss settles at once -- far kinder to the eight people waiting than the
 // three-minute walkover ladder. Nobody lies to lose.
 function tourneyMatchLeft(){
-    if(!_tt || !inGame || _tt.you !== 'play' || _ttRepDone || !_ttNid) return;
+    if(!_tt || !inGame || !_ttPlayNid || _ttRepDone) return;
     _ttRepDone = true;
     const my = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
     const ps = (typeof players !== 'undefined' && players) ? players : null;
-    _ttReport(_ttNid, 'loss', ps ? [ps[my].score | 0, ps[1 - my].score | 0] : [0, 0]);
+    _ttReport(_ttPlayNid, 'loss', ps ? [ps[my].score | 0, ps[1 - my].score | 0] : [0, 0]);
 }
 // net-spec.js calls these: a primary about to be backgrounded stands down, and a secondary
 // that lost every source asks for a new one. Both are role re-deals for the CURRENT node
@@ -390,7 +424,7 @@ function tourneyOrphan(tid, nid){
 
 // ---- housekeeping --------------------------------------------------------------------
 function _ttClearMatch(){
-    _ttOverAt = 0; _ttWant = null;
+    _ttOverAt = 0; _ttWant = null; _ttPlayNid = '';
     netP2POnlySet(false);
     if(typeof netSpectating === 'function' && netSpectating() && typeof specStop === 'function') specStop('');
     if(typeof _duelExit === 'function') _duelExit();   // lands on tourneyExitPhase()
@@ -407,6 +441,10 @@ function _ttTick(){
     // outlived the match it was made for. The next match inherited it and was torn down as a
     // finished one seconds after it began: a live game killed and forfeited mid-play.
     if(!inGame && _ttOverAt) _ttOverAt = 0;
+    // The ceremony's job ended the moment the match went live. Leaving the stamp up would
+    // let the connect ladder below read the quiet after a match that PLAYED as a match that
+    // never connected, and forfeit a node nobody was waiting on.
+    if(inGame && _ttCerAt){ _ttCerAt = 0; _ttTry = 0; }
     // A finished match must be OFF the board before the next one can be set up. The banner
     // still gets its moment -- unless the next sheet is already waiting, in which case the
     // tournament is what the player wants to be looking at.
@@ -434,7 +472,12 @@ function _ttTick(){
     // A ceremony that never became a match: the offer was lost, or the peer is slow to
     // arrive. Re-offer a few times before handing it back to the server's walkover ladder,
     // which is the only thing entitled to decide that somebody did not show up.
-    if(phase === 'tourneyCeremony' && !inGame && !_ttPend && _ttCerAt && now - _ttCerAt > TT_CONNECT_MS){
+    // Deliberately NOT gated on the ceremony being the screen in front of us: ESC steps back
+    // to the bracket without cancelling the match, so the recovery has to keep running there
+    // as well -- otherwise one keypress silently takes away both the re-offer and the
+    // walkover, and the node hangs for everybody in the tournament, not just for the player
+    // who pressed it.
+    if(!inGame && !_ttPend && _ttCerAt && now - _ttCerAt > TT_CONNECT_MS){
         if(++_ttTry >= TT_CONNECT_TRIES) _ttFail('MATCH DID NOT CONNECT');
         else { _ttCerAt = now; _ttPend = _tt.roles; }
     }
