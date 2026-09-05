@@ -38,7 +38,12 @@ const ITEM_RETRY_MIN = 1500;    // the FIRST retry after a failed drain; it doub
 const ITEM_RETRY_MAX = 600000;  // ceiling: a long offline stretch costs one attempt every 10 min
 const ITEM_HELD_WAIT = 65000;   // re-send a parked gain claim just past claim_grace_ms (60s default)
 const ITEM_CLAIM_TRIES = 6;     // held re-sends before a gain claim is given up on
-const ITEM_CLAIM_MAX_AGE = 6600000;   // 110 min: inside the server's match_open_max_ms (2h default), past which a claim can only alert an operator
+// A match accepts claims for as long as its duel still reports in, plus about two
+// minutes after it goes quiet. The window runs from the DUEL, not from the transfer,
+// so a claim authored in the first level of a long duel is still good at the end of
+// it -- 10 min is that grace with room for the rest of a duel on top. Older than
+// this the server can only refuse, so the entry is dropped rather than delivered.
+const ITEM_CLAIM_MAX_AGE = 600000;
 let _itemBusy = false;          // single-flight: one drain at a time, never two racing the same queue
 let _itemRetryAt = 0, _itemRetryMs = ITEM_RETRY_MIN, _itemTimer = 0;
 let _itemSynced = false;        // reconciled against the server list once this session
@@ -208,9 +213,10 @@ async function itemFlush(){
         const held = {};
         for(let i = 0; i < cq.length; ){
             const c = cq[i], now = Date.now();
-            // The match row a claim is verified against ages out (match_open_max_ms,
-            // 2h by default). Past that a delivery can only raise an operator alert,
-            // so an ancient backlog entry is dropped instead of posted.
+            // The match a claim is verified against closes shortly after its duel stops
+            // reporting in (see ITEM_CLAIM_MAX_AGE), and a claim that arrives after that
+            // is the ordinary end of a match, not an anomaly: the server refuses it and
+            // says nothing. An ancient backlog entry is dropped instead of posted.
             if(now - (c.at || 0) > ITEM_CLAIM_MAX_AGE){ cq.splice(i, 1); saveCfg(); continue; }
             if(held[c.uid] || (c.next && now < c.next)){
                 held[c.uid] = 1;

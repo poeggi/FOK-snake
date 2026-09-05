@@ -255,9 +255,9 @@ try {
         const c = S.__cfg();
         S.itemClaim({ mid: MID, uid: UID, item: 'crown', from: S.__me, to: S.__peer,
                       tick: 128, seq: 0, digest: 'dg', myTag: 'a'.repeat(16), peerTag: '' });
-        c.claimQ[0].at = Date.now() - 8 * 3600 * 1000;   // long past match_open_max_ms
+        c.claimQ[0].at = Date.now() - 8 * 3600 * 1000;   // long past the match window
         await S.__flush();
-        eq(c.claimQ.length, 0, 'it can only raise an operator alert now');
+        eq(c.claimQ.length, 0, 'the server could only refuse it now');
         eq(S.__take().filter(p => p.action === 'claim').length, 0, 'so it is never posted');
     });
 
