@@ -30,16 +30,24 @@ const log = s => { steps.push(s); };
 //                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
 //                 zero: there is no "a few rollbacks are fine" reading of it to erode.
 //                 The clocks START 60ms apart (err0 60 -- past the whole authoring lead) on a
-//                 62ms-RTT channel; the REAL first-start burst sync must first bring the relative
+//                 28ms-RTT channel; the REAL first-start burst sync must first bring the relative
 //                 pts to nearly 0 (asserted via startSync), and only then does play open. From
-//                 there the wire alone spends 96% of the SIM_LEAD-tick budget (31+1 = 32ms of
-//                 33.3ms), so the lane holds 0 rollbacks ONLY if the burst residual stays inside
-//                 the remaining margin AND the author headroom does its job -- it PROVES both
-//                 ends of the chain at once: the burst earns the sub-tick condition, and every
-//                 input then lands within its authoring lead, delivered on time (or via the
-//                 one-tick-late shortcut) and NEVER rolls back (maxRb:0). Both numbers are tied to
-//                 SIM_LEAD: widen or narrow the lead and the wire and err0 must be re-scaled with
-//                 it, or the lane stops being a guard and starts passing vacuously. The match levels through
+//                 there the wire alone spends 90% of the budget the design GUARANTEES -- which is
+//                 ONE TICK_MS, not SIM_LEAD of them (see THE AUTHORING CLOCK in js/sim.js): a
+//                 record born just before the next tick fires is only (SIM_LEAD-1) whole ticks
+//                 from its target, so 14+1 = 15ms of 16.67ms. opts.authorPhase is what puts
+//                 authoring at that instant. WITHOUT it the driver stamps every record at the
+//                 tick boundary, the budget silently doubles to 33.3ms, and this lane stays green
+//                 out past a 32ms wire while guarding nothing -- which is exactly what it did
+//                 while the wire read base:31. Measured cliff at worst-case authoring: 15ms
+//                 rollback-free, 17ms rolling back in the hundreds. So the lane holds 0 rollbacks
+//                 ONLY if the burst residual stays inside the remaining margin AND the author
+//                 headroom does its job -- it PROVES both ends of the chain at once: the burst
+//                 earns the sub-tick condition, and every input then lands within its authoring
+//                 lead, delivered on time (or via the one-tick-late shortcut) and NEVER rolls
+//                 back (maxRb:0). The wire is tied to SIM_LEAD as (SIM_LEAD-1) ticks: change the
+//                 lead and the wire and err0 must be re-scaled with it, or the lane stops being a
+//                 guard and starts passing vacuously. The match levels through
 //                 the REAL L1->L2 req->go boundary (re-burst on the wire) into a speed round both
 //                 clients must see (expectLevel/expectSpeed), under heavy movement and multi-touch
 //                 gestures from BOTH ends. The noburst twin lane proves the burst is load-bearing:
@@ -57,14 +65,15 @@ const SCEN = [
     // tick, exactly as a real 2.6 match syncs on its first go. The lane asserts the sync itself:
     // |gap0| > 25 (the start condition is real) and |gap1| <= 3 (relative pts brought to nearly
     // 0). Play then runs with tick schedules ALIGNED (phase0/tjit0) on a wire that alone uses
-    // 96% of the one-tick budget: 14-16ms transit (base15 +/- jit1) against the 16.67ms tick.
-    // jit:1 is the provable maximum -- at jit:2 the worst packet takes 17ms, over budget by
-    // physics, and a rollback would be CORRECT. It is the SUM of net + residual pts + any
-    // schedule skew that must stay under a tick, so the burst residual eats the remaining margin
-    // directly: a sub-millisecond residual regression flips this lane red. That is the point --
-    // the sub-tick margin the engine owes either side is only available if PTS alignment works,
-    // so this lane tests both at once. With skew zeroed this is a KNOWN-0rb condition and
-    // maxRb:0 is exact; any rb here is a real headroom (or burst) leak to debug.
+    // 90% of the one-tick budget: 13-15ms transit (base14 +/- jit1) against the 16.67ms tick.
+    // The tick is the ceiling by physics -- at a 17ms worst packet the record is over budget and
+    // a rollback would be CORRECT (measured there: rb in the hundreds). It is the SUM of net +
+    // residual pts + any schedule skew that must stay under a tick, so the burst residual eats
+    // the remaining margin directly: a ~1.5ms residual regression flips this lane red. That
+    // is the point -- the sub-tick margin the engine owes either side is only available if
+    // PTS alignment works, so this lane tests both at once. With skew zeroed this is a
+    // KNOWN-0rb condition and maxRb:0 is exact; any rb here is a real headroom (or burst)
+    // leak to debug.
     //
     // p2pBoundary is ACTIVE coverage: the pilots level through the REAL L1->L2 req->go boundary
     // (epoch bump, simTick->0, re-burst on the wire), and L2 for this seed is a SPEED round --
@@ -93,13 +102,13 @@ const SCEN = [
     // tick's flush -- the cap-deferred path stays on the wire and inside the authoring lead).
     // Decoys are provably-inert reverses of the dirQueue TAIL -- see duel-driver.
     // CRUCIAL (see header): the 0-rollback headroom guard. Keep it long and keep maxRb at 0.
-    { name:'headroom     burst 0rb   ', seed:0x7002, secs:30, wire:{ base:31, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, doubleEvery:2, maxRb:0, expectSync:{ minGap0:50, maxGap1:3 }, expectLevel:2, expectSpeed:true },
+    { name:'headroom     burst 0rb   ', seed:0x7002, secs:30, wire:{ base:14, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, authorPhase:0.05, doubleEvery:2, maxRb:0, expectSync:{ minGap0:50, maxGap1:3 }, expectLevel:2, expectSpeed:true },
     // Falsification twin: identical start gap and wire, burst APPLY disabled (noBurst) -> the raw
     // 30ms (~1.8 tick) offset stands, the ahead peer runs a persistent tick lead, the other side's
     // inputs land late there, rollbacks MUST appear (minRb) while the pair still HEALS by rollback
     // (all health gates stay on). RED without the burst, GREEN with -- proves the lane above is
     // load-bearing, not vacuously 0.
-    { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:31, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, doubleEvery:2, minRb:1, expectSync:{ minGap1:50 } },
+    { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:14, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, authorPhase:0.05, doubleEvery:2, minRb:1, expectSync:{ minGap1:50 } },
     // WINDSWEPT steal over the wire. The autopilot deliberately keeps two cells of clearance, so
     // under it the near-miss rules are dead code -- this lane flies the `jouster` director instead:
     // adjacent opposing lanes, one cell apart, boosting down the lane and braking into the turns,

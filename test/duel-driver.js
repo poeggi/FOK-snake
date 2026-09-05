@@ -445,7 +445,11 @@ function applyDirective(C, out){
 //   opts.clock : { drift, err0, samples } | null            -- independent device clocks
 //   opts.clockLeadsFire : with a fixed offset (bursts off), err0 also leads B's fire schedule (bPhase)
 //   opts.director : (view)=>directive  (defaults to autopilot)
-//   opts.postAuthor : worst-case input phase. The default authors each steer BEFORE __tick1 --
+//   opts.postAuthor : worst-case input ORDER. This is only half of the worst case -- it fixes
+//                     WHICH SIDE of the tick the steer is authored on, never WHERE IN THE
+//                     INTERVAL, because __now is set once per fire and does not advance inside
+//                     it. Pair it with opts.authorPhase for the other half.
+//                     The default authors each steer BEFORE __tick1 --
 //                     the BEST case: the same boundary's netTickPre flush ships the record with
 //                     zero deferral. Worse, the autopilot's view only changes at game-step
 //                     boundaries, so every intent is born right after a step, at MAXIMUM _gDue --
@@ -463,6 +467,17 @@ function applyDirective(C, out){
 //                     of the lead's ticks; with the wire sized to eat nearly all of the rest (see
 //                     duel-desync headroom) that is late by the transit time, a guaranteed
 //                     rollback -- while a send at authoring keeps the whole lead minus transit.
+//   opts.authorPhase: ms before the NEXT tick at which a postAuthor steer is authored, i.e. the
+//                     sub-tick instant a real touch lands on. Without it every record is stamped
+//                     at __now = the tick boundary (a = 0), which is the most GENEROUS phase
+//                     there is: the target tick simTick+SIM_LEAD is then a full SIM_LEAD ticks
+//                     away and the wire gets 33.3ms. The design guarantees only ONE TICK_MS (see
+//                     THE AUTHORING CLOCK in js/sim.js): an input born just before the next tick
+//                     fires is (SIM_LEAD-1) whole ticks from its target. So a lane that asserts a
+//                     rollback bound MUST set this -- a small epsilon puts authoring at the last
+//                     instant of the interval and the budget at its guaranteed floor. Measured
+//                     with it: 15ms one-way is rollback-free, 17ms is not. Without it the same
+//                     lane stays green out past 32ms and guards nothing.
 //   opts.doubleEvery: with postAuthor, every Nth intent is a MULTI gesture, alternating between
 //                     two forms (per-side S.multi parity). DOUBLE at __gdue()==__LEAD: the held steer
 //                     plus one decoy in the last interval -- both records must ship at
@@ -617,6 +632,12 @@ function runMatch(opts){
         S.c.__tick1();
         if(CATCHUP) S.c.__tickCatchup();
         if(opts.flushFx) S.c.__flushFx();   // run the browser's presentation half too (see __flushFx)
+        // The sub-tick instant the steer is authored at (see opts.authorPhase). __now drives the
+        // client's clock AND the wire stamp in emit(), so moving it here is what turns the a = 0
+        // best case into the guaranteed worst case.
+        if(opts.postAuthor && S.pend && opts.authorPhase != null){
+            S.c.__now = (0 | S.next) + TICK - opts.authorPhase;
+        }
         if(opts.postAuthor && S.pend){
             // The held steer targets the same game-step boundary (simTick + _gDue) no matter which
             // interval of the window authors it -- so holding costs the pilot nothing and lets the

@@ -1096,6 +1096,16 @@ function _dirEnqueue(q, cur, d){
 // the peer before ITS sim reaches the tick, which is why a duel input is rollback-free in the
 // common case. Offline there is nobody to send to and the gap stays regardless: the gap IS
 // the mechanic, so a turn and a boost cost exactly the same two ticks in every mode.
+//
+// THE BUDGET THIS BUYS THE WIRE IS ONE TICK_MS, NOT SIM_LEAD OF THEM. An input is authored
+// somewhere INSIDE the interval that follows the last completed tick, so its target sits
+// (SIM_LEAD * TICK_MS - a) away for an authoring offset a in [0, TICK_MS): a full 33.3ms for a
+// record born the instant a tick ended, but only a hair over 16.67ms for one born just before
+// the next tick fires. A guarantee is the WORST case, so ONE whole TICK_MS is what the design
+// owes the wire, and it is the only number a netcode test may be measured against. A rig that
+// authors at the tick boundary (a = 0) measures the BEST case and passes at twice the real
+// budget -- it must author at the last instant of the interval instead. Measured at worst-case
+// authoring: rollback-free at 15ms one-way, rolling back at 17ms. That pair is the baseline.
 const SIM_LEAD = 2;
 function simInputTick(kind){
     // A turn is step-granular -- it cannot take effect before the next accrual boundary -- so
