@@ -62,6 +62,72 @@ try {
     bench('name entry (friend + scan panel)', ()=>drawNameEntry(simNow));
     entryMode='score';
 
+    // ---- tournament screens ----
+    // Every one of these is a BOARD, and a board costs what is ON it: a room at the player
+    // cap, a standings table with the cut ruled across it, a bracket carrying every node
+    // state, a QR card. The fixture is a FULL tournament for exactly that reason -- profiled
+    // against two players these screens would measure nothing that happens in the room they
+    // are actually read in, which is the one with ten people in it.
+    const _tid = i => ('0000000' + i).slice(-8);
+    const _tps = [];
+    for(let i=0;i<10;i++) _tps.push({ id:_tid(i), name:'clnt-CI-' + _tid(i).slice(-4) });
+    const _oPid = getPlayerId, _oOk = netTourneyOk;
+    // Two overrides, both there to buy the EXPENSIVE path: a board draws the [YOU] marker
+    // only for the player standing on it, and every row on a screen the server has not
+    // blessed is drawn dark, which is the cheap one.
+    getPlayerId = () => _tid(0);
+    netTourneyOk = () => true;
+    // A status line is up on every one of these screens at some point, and it is the same
+    // line on all of them, so it stays up for the whole run instead of moving the cost
+    // between screens depending on which branch each one happened to take.
+    _ttUi.sel = 0; _ttUi.msg = 'WAITING FOR THE SERVER'; _ttUi.from = ''; _ttUi.contAt = 0;
+    _tt = null; _netTourneys = [];
+    for(let i=0;i<6;i++) _netTourneys.push({ tid:'t'+i, code:'ABC'+i+'XY', players:i+2, max:10,
+                                             host:_tid(i), host_name:'clnt-CI-000'+i });
+    phase='tourneyLobby'; bench('tourney lobby (browse, 6 rooms)', ()=>drawTourneyLobby());
+    _tt = { tid:'t1', code:'K7MZ4Q', state:'open', host:_tid(0), max:10, stakes:true, round:0,
+            players:_tps.slice() };
+    bench('tourney lobby (10-player roster)', ()=>drawTourneyLobby());
+    // The QR is built once and cached against its own text, so the warm redraw is what a
+    // frame of this screen actually costs -- the cold build is already profiled above.
+    phase='tourneyCode'; bench('tourney join code (QR cached)', ()=>drawTourneyCode());
+    _tt.state='running'; _tt.round=1; _tt.cursor='r1m3';
+    _tt.standings = _tps.map((p,i)=>({ id:p.id, rank:i+1, pts:20-i*2, diff:9-i }));
+    _tt.advancers = _tps.slice(0,5).map(p=>p.id);
+    _tt.schedule = [{ nid:'r1m3', players:[_tid(2),_tid(3)], state:'live' }];
+    phase='tourneyBracket'; bench('tourney standings (10 rows)', ()=>drawTourneyBracket());
+    // Every state a node can be in, on one board: the colours and the right-hand column
+    // branch per node, and a bracket of nine identical pending rows would exercise one of
+    // the six branches nine times.
+    _tt.round=2; _tt.cursor='r2m1';
+    _tt.bracket = ['live','settled','confirmed','pending','frozen','void','bye','draw','settled']
+        .map((st,i)=>{
+            const nd = { nid:'r2m'+(i+1), lvl:2+(i%3), state:(st==='bye'||st==='draw') ? 'settled' : st,
+                         players:[_tid(i), _tid((i+1)%10)] };
+            if(st==='bye') nd.players=[_tid(i), ''];
+            if(st==='draw') nd.draw=true;
+            if(st==='settled'||st==='confirmed') nd.winner=_tid(i);
+            return nd;
+        });
+    bench('tourney bracket (9 nodes)', ()=>drawTourneyBracket());
+    _tt.brk = { stage:'semi', next:3, matches:2, hm:2, lvl:4, host:_tid(0),
+                rows:_tps.map((p,i)=>({ id:p.id, name:p.name, rank:i+1, pts:20-i*2, diff:9-i,
+                                        adv:i<5, gone:i===9 })) };
+    phase='tourneyRound'; bench('tourney round break (10 rows)', ()=>drawTourneyRound());
+    _tt.brk = null;
+    _tt.roles = { round:3, match:2, of:2, nid:'r3m2', hm:2, lvl:4, stage:'semi', stakes:true,
+                  players:[_tid(0), _tid(1)], you:'play', names:{} };
+    phase='tourneyCeremony'; bench('tourney ceremony (playing)', ()=>drawTourneyCeremony());
+    _tt.roles.you='spectate'; bench('tourney ceremony (spectating)', ()=>drawTourneyCeremony());
+    _tt.state='done'; _tt.podium=[_tid(1), _tid(0), _tid(2)];
+    phase='tourneyPodium'; bench('tourney podium', ()=>drawTourneyPodium());
+    // The dialog costs what the board BEHIND it costs: that board is drawn in full and then
+    // glassed over, so it is profiled over the most expensive backdrop it can be raised on.
+    _tt.state='running'; _ttUi.from='tourneyBracket'; quitConfirmSel=1;
+    phase='tourneyQuit'; bench('tourney quit (bracket behind)', ()=>drawTourneyQuit());
+    getPlayerId=_oPid; netTourneyOk=_oOk;
+    _tt=null; _netTourneys=[]; _ttUi.msg=''; _ttUi.from=''; _ttUi.sel=-1;
+
     // ---- classic gameplay (sim + board) ----
     simTick=0; simNow=0; startGame();
     for(let i=0;i<400;i++) update();
@@ -100,7 +166,9 @@ try {
     const covered=new Set(['splash','menu','news','settings','scores','achievements','shop',
       'credits','duelMenu','duel11','lobby','friends','friendId','invite','quitConfirm','resetConfirm','nameEntry',
       'playing','paused','dying','levelReady','levelDone',
-      'duel','duelReady','duelPaused','duelOver']);
+      'duel','duelReady','duelPaused','duelOver',
+      'tourneyCode','tourneyLobby','tourneyBracket','tourneyRound','tourneyCeremony',
+      'tourneyPodium','tourneyQuit']);
     for(const ph of Object.keys(SCREENS))
       if(!covered.has(ph)) R.warns.push('NOT PROFILED (new screen?): '+ph);
   } catch(e) { R.err = String(e && e.stack || e); }
