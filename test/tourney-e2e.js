@@ -23,7 +23,9 @@ const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
         TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS, TT_CONNECT_TRIES } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
-const NAMES = ['KAI', 'JO', 'ADA', 'LEO', 'MIA', 'ZED'];
+// The clnt-CI-<id tail> shape the live probes use: one naming convention for every
+// client this project invents, and a name in the log traces back to the id that wore it.
+const NAMES = IDS.map(id => 'clnt-CI-' + id.slice(-4));
 const N = IDS.length;
 
 const rows = [];

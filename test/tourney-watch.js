@@ -20,7 +20,9 @@
 const { mkWorld, TT_CONNECT_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003'];
-const NAMES = ['KAI', 'JO', 'ADA'];
+// The clnt-CI-<id tail> shape the live probes use: one naming convention for every
+// client this project invents, and a name in the log traces back to the id that wore it.
+const NAMES = IDS.map(id => 'clnt-CI-' + id.slice(-4));
 
 const rows = [];
 let fails = 0;

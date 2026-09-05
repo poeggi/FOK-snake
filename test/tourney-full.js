@@ -19,7 +19,9 @@ const { mkWorld, MAX_LEVEL, BREAK_MS, BREAK_TTL_MS,
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005',
                'aaaa0006', 'aaaa0007', 'aaaa0008', 'aaaa0009', 'aaaa0010'];
-const NAMES = ['KAI', 'JO', 'ADA', 'LEO', 'MIA', 'ZED', 'NOA', 'TIM', 'EVA', 'RAY'];
+// The clnt-CI-<id tail> shape the live probes use: one naming convention for every
+// client this project invents, and a name in the log traces back to the id that wore it.
+const NAMES = IDS.map(id => 'clnt-CI-' + id.slice(-4));
 const N = IDS.length;              // the player cap: tournament_max_players
 const CUT = 8;                     // how many survive the round-robin, so the tree is 8-4-2
 

@@ -33,7 +33,9 @@ const { mkWorld, MAX_DIRECT, BREAK_MS, TT_OVER_MS, TT_STATE_MS } = require('./to
 const { runSpec } = require('./spec-driver');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005'];
-const NAMES = ['KAI', 'JO', 'ADA', 'LEO', 'MIA'];
+// The clnt-CI-<id tail> shape the live probes use: one naming convention for every
+// client this project invents, and a name in the log traces back to the id that wore it.
+const NAMES = IDS.map(id => 'clnt-CI-' + id.slice(-4));
 const N = IDS.length;              // five: 2N round-robin matches, then a 3-strong knockout
 const TAIL = 2500;                 // ms of CALM wire after each match, so "healed" is provable
 const SEED0 = 0x7A1E, SEEDSTEP = 0x9E37;

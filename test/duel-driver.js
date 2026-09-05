@@ -83,7 +83,7 @@ const HOOKS = (id) => `
     _netSess.seed = seed>>>0; _netSess.game = true; _netSess.pc = null;
     const _wmap = (a)=>{ const o={}; for(const id of (a||[])) o[id]=true; return o; };
     cfg.wornItems = _wmap(mine);
-    _netSess.peerProfile = { name:'PEER', color:0, shopItems:_wmap(theirs), platform:'pc' };
+    _netSess.peerProfile = { name:'clnt-CI-PEER', color:0, shopItems:_wmap(theirs), platform:'pc' };
     _netSess.dc = { readyState:'open', bufferedAmount:0, send(j){ __out.push(j); }, close(){} };
     _netMarkRecv(_netSess);
     _netLiveStart();
