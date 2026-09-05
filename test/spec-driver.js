@@ -95,7 +95,8 @@ const SPEC_HOOKS = `
   // The duel driver names its peer 'ffffffff' -- enough for two clients that only ever
   // talk to each other, but the bootstrap context carries the PLAYERS' real ids (a primary
   // needs them to reach the backup feeder), so each player is given its true opponent.
-  globalThis.__setPeer = (id)=>{ if(_netSess) _netSess.peer = String(id); };
+  globalThis.__setPeer = (id)=>{ if(!_netSess) return; _netSess.peer = String(id);
+    if(_netSess.peerProfile) _netSess.peerProfile.name = _ciName(id); };
 
   // ---- spectator surface ------------------------------------------------
   // A watcher never calls __p2pStart: it has a shared clock and nothing else until a

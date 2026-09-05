@@ -23,8 +23,9 @@ const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
         TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS, TT_CONNECT_TRIES } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
-// The clnt-CI-<id tail> shape the live probes use: one naming convention for every
-// client this project invents, and a name in the log traces back to the id that wore it.
+// clnt-CI-<the four hex that tell these ids apart>: the shape the live probes register
+// under, so a name in the log traces back to the id that wore it. Here that is the tail
+// (the live ids differ in their head instead).
 const NAMES = IDS.map(id => 'clnt-CI-' + id.slice(-4));
 const N = IDS.length;
 
@@ -151,6 +152,29 @@ async function node(plan){
         A(C[i].phase() === 'tourneyCeremony', '2 ' + nid + ': ' + NAMES[i] + ' sat on ' + C[i].phase() + ' instead of the ceremony');
         C[i].draw();
     }
+
+    // -- a spectator who steps off the ceremony to read the board can step back onto it --
+    // ESC off the ceremony is the only way onto the board mid-node, and without a way back
+    // reading the standings while the match is being set up is a one-way trip that ends at
+    // LEAVE TOURNAMENT. The way back is the row the board OPENS on, because it is the press
+    // the person who just pressed ESC is going to make next.
+    let is_ = -1;
+    for(let i = 0; i < N; i++) if(i !== ia && i !== ib){ is_ = i; break; }
+    C[is_].setPhase('tourneyBracket');
+    const rb = C[is_].rows();
+    A(rb[0].t === 'WATCH THE MATCH' && rb[0].en, '2 ' + nid + ': the board offers '
+      + rb.map(x => x.t).join('/') + ' -- no way back to the match being watched');
+    A(C[is_].sel() === 0, '2 ' + nid + ': the way back to the match is not the pre-selected row');
+    C[is_].draw();
+    C[is_].pick('WATCH THE MATCH');
+    A(C[is_].phase() === 'tourneyCeremony', '2 ' + nid + ': the way back landed on ' + C[is_].phase());
+    // A player gets the row for their OWN match, in their own words. They cannot reach the
+    // board from the ceremony at all (it refuses their ESC), but every other route onto it
+    // -- a break, a forfeit -- leaves the same node dealt and the same way back owed.
+    C[ia].setPhase('tourneyBracket');
+    A(C[ia].rows()[0].t === 'GO TO YOUR MATCH',
+      '2 ' + nid + ': the board a player sees opens on ' + C[ia].rows()[0].t);
+    C[ia].setPhase('tourneyCeremony');
 
     // -- the feeder offers, and only the feeder --
     const sheetR = C[ia].tt().roles;

@@ -829,6 +829,16 @@ function tourneyRows(){
         // pressing it and nobody still playing behind it.
         rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
     } else {
+        // A board opened from a ceremony has to lead back to it. ESC off the ceremony is how
+        // a spectator gets here -- reading the standings while the match they are watching is
+        // being set up -- and without this row the only way off the board again is the one
+        // that leaves the tournament. It is the FIRST row and so the pre-selected one: it is
+        // the only row here that costs nobody anything, and it is the press the person who
+        // just pressed ESC is going to make next. It exists only while there IS a ceremony
+        // behind it: a sheet naming this device, not yet taken over by the match itself.
+        if(!inGame && _ttCerAt && _tt.roles && String(_tt.roles.you || 'idle') !== 'idle')
+            rows.push({ t:_tt.roles.you === 'spectate' ? 'WATCH THE MATCH' : 'GO TO YOUR MATCH',
+                        en:true, act:() => { _ttGo('tourneyCeremony'); Snd.sfxPlay('nav', cfg.music); } });
         // The one row a whole field is waiting on. It belongs to the host and only while a
         // break is open, and it stays dark until the server will accept it: an early press
         // is refused, and a button that refuses looks like a broken one.

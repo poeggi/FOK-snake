@@ -76,6 +76,11 @@ const HOOKS = (id) => `
   // and the duel lists are then derived by the REAL _duelWsLists. That is the property under
   // test: no windswept list ever crosses the wire, so each client must compute the identical
   // [P0,P1] pair from the two profiles or the very first steal roll desyncs the match.
+
+  // Every invented client is named clnt-CI-<the four hex that tell the ids of its set
+  // apart>, the shape the live probes register under (test/peer-net.sh, test/items-live.js),
+  // so a name in a log or on a production row traces back to the id that wore it.
+  globalThis._ciName = (id)=> 'clnt-CI-' + String(id || '').slice(0, 4);
   globalThis.__p2pStart = (seed, role, mine, theirs)=>{
     _netSync = { ofs:0, rtt:1, at:Date.now() };
     simTick = role==='host' ? 45000 : 3000; simNow = simTick*TICK_MS; inGame = true;
@@ -83,7 +88,7 @@ const HOOKS = (id) => `
     _netSess.seed = seed>>>0; _netSess.game = true; _netSess.pc = null;
     const _wmap = (a)=>{ const o={}; for(const id of (a||[])) o[id]=true; return o; };
     cfg.wornItems = _wmap(mine);
-    _netSess.peerProfile = { name:'clnt-CI-PEER', color:0, shopItems:_wmap(theirs), platform:'pc' };
+    _netSess.peerProfile = { name:_ciName(_netSess.peer), color:0, shopItems:_wmap(theirs), platform:'pc' };
     _netSess.dc = { readyState:'open', bufferedAmount:0, send(j){ __out.push(j); }, close(){} };
     _netMarkRecv(_netSess);
     _netLiveStart();
