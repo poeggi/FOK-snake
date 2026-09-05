@@ -21,19 +21,27 @@ const WASD={w:{x:0,y:-1},s:{x:0,y:1},a:{x:-1,y:0},d:{x:1,y:0}};   // duel P2 con
 // keyboard's (phase==='playing'||phase==='duel') gates. NOT a menu: a swipe must
 // steer immediately instead of deferring to touchend, and a tap must not press A.
 function _inPlay(){ return phase==='playing'||phase==='duel'; }
-// OUR snake's boost state. The classic globals (boosting/boostDir) belong to the
-// SINGLE-PLAYER snake and a duel never writes them -- it lives in players[]. Reading
-// them in a duel meant `boosting` was permanently false, so the swipe path's "am I
-// already boosting this way?" test could never pass and every swipe move called
-// gameBoostEnd: boost engaged, then died on the next finger movement. The dpad path
-// never read them, which is exactly why it worked and this did not.
-// In a duel our snake is P0 locally, or our own index online -- never the opponent's.
-function _myBoost(){
-    if(!players) return { dir: boostDir, on: boosting };
-    const i = (typeof netGameActive === 'function' && netGameActive()) ? netMyIndex() : 0;
-    const P = players[i] || players[0];
-    return { dir: P.boostDir, on: P.boosting };
+// THE input-side answer to "which snake is mine", and the only one. The classic globals
+// (dir/boostDir/boosting/snake) belong to the SINGLE-PLAYER snake and a duel never writes
+// them -- it lives in players[] -- so every gesture-side READ has to resolve an index, and
+// every place that resolved one by hand was a place the two modes could drift apart: the
+// boost test read `boosting` in a duel (permanently false, so boost died on the next finger
+// movement) and the anti-spiral guard read `dir` (so the guard never armed in a duel at all).
+// The mapping already exists in _armIndex -- it is what every steer and arm is authored
+// through -- so the reads go through it too and the gesture layer cannot disagree with the
+// sim about whose snake it is steering. Classic mode returns the globals, because there they
+// ARE our snake; spectating returns an empty snake, because there none is.
+function _mySnake(){
+    if(typeof players === 'undefined' || !players)
+        return { dir:     (typeof dir      !== 'undefined') ? dir      : null,
+                 boostDir:(typeof boostDir !== 'undefined') ? boostDir : null,
+                 boosting:(typeof boosting !== 'undefined') ? !!boosting : false,
+                 snake:   (typeof snake    !== 'undefined') ? snake    : null };
+    const i = _armIndex(0);
+    return (i >= 0 && players[i]) || { dir:null, boostDir:null, boosting:false, snake:null };
 }
+function _myBoost(){ const P = _mySnake(); return { dir: P.boostDir, on: !!P.boosting }; }
+function _myDir(){ return _mySnake().dir; }
 let _kbBoostDir=null;   // last keydown boost dir (arrows / P0), tracked locally so keyup doesn't race the worker mirror
 let _kbBoostW=null;     // same for WASD / duel P2
 let _splashKeyHeld = false;   // splash key-repeat guard (pure input debounce)
@@ -811,15 +819,13 @@ function _touchSensF(){ return _TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touc
 // its heading, but swipe past the guard and the turn still commits. A turn the other way or a
 // pause resets the run, so a spiral you actually mean is still yours to make. Gesture-only: it
 // reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
-// pause has cleared it, the snake's own heading (dir) seeds the first turn -- single player only,
-// since a duel's heading is players[i].dir, not this global.
+// pause has cleared it, our own snake's heading seeds the first turn -- _myDir(), so the guard
+// arms off the same heading in single player, local 1:1 and online 1:1 alike.
 let _turnSense=0, _turnRun=0;
 function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;
     if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
-    const prev=_swipeLastDir?GDIRS[_swipeLastDir]
-        :(typeof players!=='undefined'&&players)?null
-        :(typeof dir!=='undefined'?dir:null);
+    const prev=_swipeLastDir?GDIRS[_swipeLastDir]:_myDir();
     const kd=GDIRS[key];
     const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
     if(sense===0) return false;
@@ -827,18 +833,10 @@ function _spiralHold(key, dist, sf){
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
     return false;
 }
-// DEBUG LEVEL 3 turn trace: our snake's head cell (single-player global, or our own duel
-// index), and a small ring of fading markers dropped where each touch turn commits -- and
-// where the anti-spiral guard holds one -- so a spiral can be replayed by eye on the board.
-// Pure render aid, guarded off below level 3; it never feeds the sim.
-function _myHeadCell(){
-    if(typeof players!=='undefined' && players){
-        const i=(typeof netGameActive==='function'&&netGameActive())?netMyIndex():0;
-        const P=players[i]||players[0];
-        return (P&&P.snake&&P.snake[0])||null;
-    }
-    return (typeof snake!=='undefined'&&snake&&snake[0])||null;
-}
+// DEBUG LEVEL 3 turn trace: our snake's head cell, and a small ring of fading markers dropped
+// where each touch turn commits -- and where the anti-spiral guard holds one -- so a spiral can
+// be replayed by eye on the board. Pure render aid, guarded off below level 3; never feeds the sim.
+function _myHeadCell(){ const s=_mySnake().snake; return (s&&s[0])||null; }
 const _dbgTurns=[];
 function _dbgTurnLog(cell, key, dist, run, held, thresh){
     if((cfg.debug|0)<3 || !cell) return;
