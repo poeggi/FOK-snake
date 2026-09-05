@@ -958,6 +958,13 @@ function _moveBarsGhost(){
 function update() {
     simTick++;
     simNow = simTick * TICK_MS;
+    // This tick's inputs, before anything simulates them. They were authored for exactly this
+    // tick by simInputTick and have been waiting since. Online the same records wait in the
+    // rollback log and netTickPre feeds them at the same point in the tick order.
+    if(_simQ.size){
+        const q = _simQ.get(simTick);
+        if(q){ _simQ.delete(simTick); for(const c of q) _simExec(c); }
+    }
     const now = simNow;
     if(phase==='playing'){
         // boosting is COMMAND-DRIVEN: the arming stage (simArmTick, device-local)
@@ -1073,7 +1080,51 @@ function _dirEnqueue(q, cur, d){
 // Web Worker (sim-worker.js onmessage) and the headless path (game.js _wsend when there is
 // no Worker -- tests + any browser without Worker support). Pure sim effects only; the
 // worker wraps pause/resume/start with its own tick-loop + post handling.
+// ---- THE AUTHORING CLOCK ------------------------------------------------------
+// Every local input and every locally-created event names the tick it must execute on, and
+// this is the only place that number is decided -- classic, local 1:1 and online 1:1 alike.
+// simTick is the LAST COMPLETED tick, so simTick+1 is the tick already about to run: it can
+// be a millisecond away and offers no slack at all. simTick+2 is the first tick with a whole
+// TICK_MS in front of it. That gap is what the wire spends carrying the identical record to
+// the peer before ITS sim reaches the tick, which is why a duel input is rollback-free in the
+// common case. Offline there is nobody to send to and the gap stays regardless: the gap IS
+// the mechanic, so a turn and a boost cost exactly the same two ticks in every mode.
+const SIM_LEAD = 2;
+function simInputTick(kind){
+    // A turn is step-granular -- it cannot take effect before the next accrual boundary -- so
+    // it is authored AT that boundary, and never nearer than the lead. Everything else
+    // executes on the exact tick it names.
+    return simTick + ((kind === 'dir' && _gDue > SIM_LEAD) ? _gDue : SIM_LEAD);
+}
+// Records waiting for their tick. Online the equivalent store is the rollback log, which must
+// additionally keep them for re-simulation -- that is the transport's business, not the
+// mechanic's; the tick they name and the point at which they execute are the same in both.
+const _simQ = new Map();
+function simSchedule(tk, cmd){
+    let a = _simQ.get(tk);
+    if(!a){ a = []; _simQ.set(tk, a); }
+    a.push(cmd);
+}
+// The sim's ONE message entry. An input names a future tick and waits for it; a control
+// command rebuilds or steers the world and takes effect at once. Routing it here rather than
+// at each home is what keeps the rule from being re-decided per transport: the worker, the
+// in-process home and the headless harness all arrive through this function.
+const _SIM_INPUT = { dir:1, boost:1, boostend:1 };
 function simCommand(m){
+    if(_SIM_INPUT[m.t]){ simSchedule(simInputTick(m.t), m); return; }
+    _simExec(m);
+}
+// Execute a command NOW. Called by the tick drain below, and by the duel core when it feeds a
+// logged record at its authored tick (netTickPre) or replays the log through a rollback.
+// 'arm' stays immediate on purpose: arming is device-local state for the arming stage, not an
+// input to the world -- the stage's real transitions are what get authored, through simArmIssue.
+function _simExec(m){
+    // A world rebuild voids whatever is still scheduled: those records name ticks on a
+    // timeline that no longer exists (start/respawn/level all reset simTick to 0).
+    if(m.t === 'start' || m.t === 'startDuel' || m.t === 'startDuelLevel' || m.t === 'startDuelRespawn' || m.t === 'phase'){
+        _simQ.clear();
+        _armPend = [];   // an in-flight arming transition named a tick in the timeline just voided
+    }
     switch(m.t){
         case 'start': startGame(m.seed, m.bestScore); break;
         // m.net marks an ONLINE duel: deaths then hold for the negotiated respawn boundary
@@ -1164,6 +1215,22 @@ function simApply(s){
 // swipe) skips the wait. Ticked once per LIVE engine tick by each sim home; never
 // during a rollback re-sim (arming is real input authorship, not replayable state).
 let _armSlots = [];   // per LOCAL player index: {dir, since, go} | {off:true} | empty
+// The stage is edge-triggered against the sim's boosting flag, but a transition it issues does
+// not execute on the tick it is issued: simInputTick names a tick SIM_LEAD ahead, so the flag
+// keeps reading the OLD value for the whole lead. Per LOCAL player, the transition still in
+// flight -- {tk: the tick it executes on, on: what boosting becomes}. Without it the stage
+// re-decides the same engage on every tick of the lead and authors one record per tick, and a
+// release landing inside the lead reads boosting as still false and lets the engage stand.
+let _armPend = [];
+function _armBoosting(p, P){
+    const q = _armPend[p];
+    if(q){ if(simTick < q.tk) return q.on; _armPend[p] = null; }
+    return P.boosting;
+}
+function _armIssue(p, kind, d){
+    _armPend[p] = { tk: simTick + SIM_LEAD, on: kind === 'bs' };
+    simArmIssue(p, kind, d);
+}
 function simArm(p, d, instant){
     _armSlots[p] = d ? { dir:{ x:d.x, y:d.y }, since:simTick, go:!!instant } : { off:true };
 }
@@ -1182,14 +1249,17 @@ function simArmTick(){
         const a = _armSlots[p]; if(!a) continue;
         const P = players ? players[p] : (p === 0 ? { dir, dirQueue, boosting, alive:true } : null);
         if(!P) { _armSlots[p] = null; continue; }
-        if(a.off){ if(P.boosting) simArmIssue(p, 'be'); _armSlots[p] = null; continue; }
+        // Boosting as of the last decision this stage made -- the live flag once nothing is in
+        // flight. Every branch below judges against it, so the lead is never re-decided.
+        const bo = _armBoosting(p, P);
+        if(a.off){ if(bo) _armIssue(p, 'be'); _armSlots[p] = null; continue; }
         if(P.alive === false) continue;
         const aligned = a.dir.x === P.dir.x && a.dir.y === P.dir.y && P.dirQueue.length === 0;
         if(!aligned){
             a.since = simTick;                        // re-aim: the wait starts over
-            if(P.boosting) simArmIssue(p, 'be');      // real end: the boost died with the turn
-        } else if(!P.boosting && cfg.turbo !== false && (a.go || simTick - a.since >= BOOST_GRACE_TICKS)){
-            simArmIssue(p, 'bs', a.dir);              // real engage, authored NOW
+            if(bo) _armIssue(p, 'be');                // real end: the boost died with the turn
+        } else if(!bo && cfg.turbo !== false && (a.go || simTick - a.since >= BOOST_GRACE_TICKS)){
+            _armIssue(p, 'bs', a.dir);                // real engage, authored for its tick
         }
     }
 }

@@ -245,10 +245,11 @@ const HOOKS = (id) => `
       const at = _rbLog.get(toTick);
       globalThis.__rbTrace.push({ to:toTick, sim:simTick, late:(simTick - toTick),
         lvl:level, ph:phase, ep:(_netSess ? _netSess.epoch : -1), gAt:_gAt, base:_rbBase, now:__now,
-        cmds:(at ? at.map(c=> c.t + (c.p!=null ? '/p'+c.p : '') + (c._live ? '*' : '')) : []) });
+        cmds:(at ? at.map(c=> c.t + (c.p!=null ? '/p'+c.p : '')) : []) });
       return _oRB(toTick); } }
   globalThis.__rbTraceDump = ()=> globalThis.__rbTrace.slice();
   globalThis.__TICK    = TICK_MS;
+  globalThis.__LEAD    = SIM_LEAD;   // the authoring lead in ticks (js/sim.js simInputTick), the hold point in fireOnce
 })();`;
 
 const NET_BASE = 1784500000000;
@@ -452,18 +453,23 @@ function applyDirective(C, out){
 //                     deferred-flush latency defect stays invisible here. postAuthor closes both
 //                     holes: steers are authored AFTER the tick runs (a real touch lands
 //                     mid-interval, after the boundary's flush already left) and each one is HELD
-//                     to the last interval before its target boundary (__gdue()==1; the target,
-//                     simTick + _gDue, is the same from anywhere in the window, so the pilot is
-//                     not degraded). A send deferred to the next tick's flush then has exactly
-//                     ZERO wire budget -- late by the transit time, a guaranteed rollback --
-//                     while a send at authoring keeps a full tick minus transit.
+//                     to the LAST interval that still names the coming boundary. That interval is
+//                     __gdue()==__LEAD: a turn is authored at simTick + _gDue but never nearer
+//                     than the lead (js/sim.js simInputTick), so from anywhere earlier in the
+//                     window the target is the same boundary and holding costs the pilot nothing,
+//                     while one interval later the floor pushes it past the boundary onto the next
+//                     one -- which degrades the pilot rather than the netcode, and is not what
+//                     this lane measures. A send deferred to the next tick's flush then loses one
+//                     of the lead's ticks; with the wire sized to eat nearly all of the rest (see
+//                     duel-desync headroom) that is late by the transit time, a guaranteed
+//                     rollback -- while a send at authoring keeps the whole lead minus transit.
 //   opts.doubleEvery: with postAuthor, every Nth intent is a MULTI gesture, alternating between
-//                     two forms (per-side S.multi parity). DOUBLE at __gdue()==1: the held steer
+//                     two forms (per-side S.multi parity). DOUBLE at __gdue()==__LEAD: the held steer
 //                     plus one decoy in the last interval -- both records must ship at
 //                     authoring (the two-flush cap), because a capped-deferred second record
 //                     would leave at the boundary itself with zero wire budget, a guaranteed
 //                     rollback; maxRb:0 thus proves the cap is at least two. TRIPLE at birth
-//                     (__gdue()>=2): decoy + steer + decoy in one interval; the third record
+//                     (__gdue()>__LEAD): decoy + steer + decoy in one interval; the third record
 //                     exceeds the cap and coalesces into the NEXT tick's flush with a boundary
 //                     of budget left, keeping the cap-deferred path on the wire and in time.
 //                     Decoys are reverses of the dirQueue TAIL (via __dirTail), NOT of the live
@@ -616,10 +622,12 @@ function runMatch(opts){
             // interval of the window authors it -- so holding costs the pilot nothing and lets the
             // authoring phase be chosen adversarially. Two placements, both post-tick (the
             // boundary's own flush is already gone, like a real mid-interval touch):
-            //   worst case (singles): the LAST interval before the target boundary (__gdue()==1).
-            //     A send deferred to the next tick's flush leaves at that boundary itself -- zero
-            //     wire budget, late by transit, a guaranteed rollback. Send-at-authoring keeps a
-            //     full tick minus transit.
+            //   worst case (singles): the LAST interval that still names the coming boundary
+            //     (__gdue()==__LEAD -- one later and the authoring floor moves the target to the
+            //     NEXT boundary, degrading the pilot instead of the netcode). A send deferred to
+            //     the next tick's flush burns one of the lead's ticks; the wire is sized to eat
+            //     nearly all of the rest, so that is late by transit, a guaranteed rollback.
+            //     Send-at-authoring keeps the whole lead minus transit.
             //   every doubleEvery-th intent is a MULTI gesture -- DOUBLE vs TRIPLE alternating
             //     on S.multi parity (see opts.doubleEvery in the header doc).
             // DECOYS must be provably inert. The sim judges every dir record against the dirQueue
@@ -636,9 +644,9 @@ function runMatch(opts){
             // intent itself iff the sim will append it); both are rejected on BOTH clients,
             // gameplay untouched. The wire stress is unchanged: distinct same-tick dir records
             // still exercise the leading-edge flush pair and the cap-deferred third record.
-            const gd = S.c.__gdue();
+            const gd = S.c.__gdue(), LEAD = S.c.__LEAD;
             const multi = opts.doubleEvery && (S.gest + 1) % opts.doubleEvery === 0;
-            const hv = S.fresh && multi && (S.multi & 1) && gd >= 2 ? S.c.__view() : null;
+            const hv = S.fresh && multi && (S.multi & 1) && gd > LEAD ? S.c.__view() : null;
             const postTail = (t, p)=>   // tail after the intent p is judged: appended unless dup/reverse
                 (!(p.x === t.x && p.y === t.y) && !(p.x === -t.x && p.y === -t.y)) ? p : t;
             const t0 = hv ? S.c.__dirTail() || { x:hv.dx, y:hv.dy, n:0 } : null;
@@ -650,7 +658,7 @@ function runMatch(opts){
                 const t2 = postTail(t0, S.pend);
                 S.c.__steer({ x:-t2.x, y:-t2.y });       // decoyB: reverse of the predicted post-intent tail
                 S.pend = null;
-            } else if(gd === 1){
+            } else if(gd === LEAD){
                 S.gest++;
                 const t = multi ? S.c.__dirTail() : null;
                 S.c.__steer(S.pend);

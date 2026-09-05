@@ -42,7 +42,12 @@ const GOLDEN = 'bb02d65e:216';
 // the landing tick. It used to sit there stranded -- a body cell is one a head only reaches
 // by dying -- for as long as the tail took to clear it: 18 such ticks in this lane, 0 now,
 // and removing the new branch alone gives b9878561 back byte for byte)
-const GOLDEN_DUEL = '20ea507b:31451';
+// -> 8502daef:29923 (THE AUTHORING CLOCK: every input names the tick it executes on, SIM_LEAD
+// ticks out, in every mode alike -- js/sim.js simInputTick. A turn is authored AT its accrual
+// boundary, so one issued within the lead of that boundary now takes the NEXT step instead: the
+// pilots steer on marginally staler state and the lane resolves differently. The CLASSIC golden
+// above does not move, which is the proof that a turn is step-granular either way)
+const GOLDEN_DUEL = '8502daef:29923';
 
 const driver = `
 ;(function(){

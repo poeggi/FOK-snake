@@ -982,12 +982,12 @@ function netTickPre(){
         _rbHashSettle(); _rbStateSettle(); _wsDrain();
     }
     _rbEnsureSnap(t);
-    // Our own input was applied the moment it happened (netLocalInput), at exactly this
-    // point in the tick order -- so skip it here or it lands twice. A ROLLBACK re-sim
-    // goes through _rbRollback, which applies the log in full: _live is only about this
-    // live pass.
+    // This tick's records, ours and the peer's alike -- one store, one apply point, the same
+    // position in the tick order as the offline drain at the top of update(). Nothing is
+    // applied on the spot when it is authored: an input executes on the tick it names and
+    // only there, which is what lets a rollback re-simulation reproduce the tick exactly.
     const cmds = _rbLog.get(t);
-    if(cmds) for(const c of cmds){ if(!c._live) simCommand(c); }
+    if(cmds) for(const c of cmds) _simExec(c);
     // NO re-anchor here. The tick is floor((netPts() - startPts) / TICK_MS), so moving
     // the anchor while startPts stays put SHIFTS THE WHOLE TIMELINE: the target jumps by
     // however far the clock moved, and if it jumps backwards simTick is suddenly ahead
@@ -1132,7 +1132,7 @@ function _rbRollback(toTick){
         if(t % RB_SNAP_EVERY === 0 || (t & 63) === 0)   // same grid as _rbEnsureSnap, pinned hash ticks included
             _rbRing.push({ tk:t, snap:_rbCloneSnap(_rbDuelSnap()) });
         const cmds = _rbLog.get(t);
-        if(cmds) for(const c of cmds) simCommand(c);
+        if(cmds) for(const c of cmds) _simExec(c);
         update();
         if(simEvents.length) drainSimEvents();   // ...and the re-run queues the RIGHT ones
     }
@@ -1245,7 +1245,7 @@ function _netPeerInput(m, srcIdx){
         // -- record the earliest such past tick and let netTickPre do ONE rollback+replay covering
         // every late input from this drain (batching caps it at one re-sim per tick).
         if(tk === simTick && (cmd.t === 'dir' ? !_rbPeerSteppedSince(oP, tk) : tk > _gAt)){
-            simCommand(cmd); _rbDbg.live++;   // SHORTCUT here: spend the peer's headroom -- inject live right before sim, no rollback
+            _simExec(cmd); _rbDbg.live++;   // SHORTCUT here: spend the peer's headroom -- inject live right before sim, no rollback
         } else if(tk <= simTick){ if(tk < earliest) earliest = tk; }
         else _rbDbg.live++;
     }
@@ -1254,16 +1254,17 @@ function _netPeerInput(m, srcIdx){
     // tick reaches the identical state as N separate rollbacks would, at a fraction of the cost.
     if(earliest < _rbRewindTo) _rbRewindTo = earliest;
 }
-// Local input during an online duel. It is applied IMMEDIATELY -- exactly like
-// single player -- and also logged for the tick it belongs to, so a rollback
-// re-simulation reproduces it.
+// Local input during an online duel: logged for the tick it names (simInputTick) and sent at
+// once, then applied from that log when the sim reaches the tick -- the same store, the same
+// tick and the same moment on both sides, which is what makes a rollback re-simulation
+// reproduce it exactly.
 //
-// Logging it WITHOUT applying it was wrong: it made online input wait for netTickPre
-// to run, which quietly coupled the controls to the tick loop. The moment that loop
-// is not ticking (at a match start the clock-driven target is not ahead of us yet)
-// the input just sat in the log, unapplied -- dead controls and dead boost for the
-// first seconds of a duel, on every device. Single player never had that because it
-// applies on the spot. The sim is the same, so the input path must be the same.
+// The tick loop must therefore actually be ticking. It once was not: at a match start the
+// clock-driven target is not yet ahead of us, and a logged input just sat there unapplied --
+// dead controls for the first seconds of a duel. That is a property of the LOOP, not of the
+// authoring rule, and the resume/catch-up path owns it now. Do not "fix" it by applying local
+// input on the spot: that reintroduces the one-tick boosting-flag split the settled-history
+// hash reads as a desync, and it forks this mode away from every other one.
 // Returns true when the online path consumed it; p!==0 is swallowed (no local P2).
 function netLocalInput(kind, p, d, now){
     if(!netGameActive()) return false;
@@ -1282,20 +1283,23 @@ function netLocalInput(kind, p, d, now){
     }
     const myP = netMyIndex();
     // HEADROOM (mandatory, non-negotiable -- half of a pair with the shortcut in _netPeerInput).
-    // Every local input is authored at least ONE tick in the FUTURE, never at simTick or earlier,
-    // and sent at once. That lead IS the network transmit headroom: the window for the peer to
-    // receive it and apply it on its own timeline BEFORE its sim reaches the authored tick, so the
-    // common case costs no rollback. Author at the current tick and the wire gets zero time -> a
-    // rollback on every single input. The two authoring sites below each spend exactly this rule;
-    // the peer SPENDS the headroom via the one-tick-late shortcut in _netPeerInput.
-    let tk = simTick + 1;   // HEADROOM here: boost/boostend authored +1 -- tightest lead that still leaves one full tick of wire slack
+    // The lead is NOT decided here: simInputTick (sim.js) decides it for every mode at once, and
+    // online merely spends what it grants. simTick is the last COMPLETED tick, so an input
+    // authored at simTick+1 would name the tick already about to run and hand the wire whatever
+    // is left of it -- frequently nothing, and then every single input costs the peer a rollback.
+    // simInputTick's simTick+2 is the first tick with a whole TICK_MS in front of it, and that is
+    // the window for the peer to receive the record and apply it on its own timeline BEFORE its
+    // sim reaches the tick. The peer SPENDS that headroom via the one-tick-late shortcut in
+    // _netPeerInput. Send at once, always: a lead deferred to the next flush is a lead unspent.
+    let tk = simInputTick(kind);   // HEADROOM here
     if(kind === 'dir'){
         // HEADROOM here (mandatory): a turn is step-granular -- no effect before the next game-tick
-        // boundary -- so it is authored at that boundary (simTick + _gDue, always >= simTick+1) and
-        // applied from the shared log, local and peer alike. That >= one-tick lead is the wire slack.
+        // boundary -- so simInputTick authors it at that boundary, floored at the lead, and it is
+        // applied from the shared log, local and peer alike. The same call decides the same tick
+        // for a classic turn, which is why a turn feels identical in every mode.
         const P = players && players[myP];
         if(!P) return true;
-        const S = (phase === 'duel' && _gDue > 0) ? simTick + _gDue : simTick + 1;   // <- authored one step boundary ahead
+        const S = simInputTick('dir');
         // Intent-change gate (source-agnostic: keyboard, dpad and free-touch swipe all funnel here).
         // A turn onto the heading the snake already holds -- or its exact REVERSE -- is dropped by
         // the sim on BOTH clients, so authoring a wire record for it is pure waste: one peer
@@ -1349,8 +1353,8 @@ function netLocalInput(kind, p, d, now){
     // the flip in the owner's ring snapshot one tick BEFORE the peer's log-driven apply lands
     // it in theirs: a standing one-tick boosting-flag split that the settled-history hash
     // reads as a real desync (-> resync snap -> the visible self/gem jumps). Logging it the
-    // same way both sides replay it removes the split, and there is no _live record left for a
-    // deferred rollback to drop.
+    // same way both sides replay it removes the split, and there is no live-applied record
+    // left for a deferred rollback to drop.
     _rbAdd(tk, cmd);
     _rbSentAdd(kind === 'bs' ? { q:++_rbSeq, tk:_rbToWire(tk), k:'bs', d:{x:d.x, y:d.y}, n: now?1:0 }
                              : { q:++_rbSeq, tk:_rbToWire(tk), k:'be' });   // be carries no dir/now: the receiver reads neither

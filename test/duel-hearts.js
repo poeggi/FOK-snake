@@ -33,8 +33,12 @@ const { runTest } = require('./harness');
 
 // Recorded from the first green run; update ONLY intentionally (a deliberate rule change to
 // the 2-heart lane), never to paper over a refactor. Its companion GOLDEN_DUEL in
-// sim-determinism.js covers the default 3-heart lane and must NOT move when this one does.
-const GOLDEN_DUEL_H2 = '78e8513a:7575';
+// sim-determinism.js covers the default 3-heart lane and must NOT move when this one does --
+// the ONE exception being a rule that is not about hearts at all and so moves every duel lane
+// at once, which is what took 78e8513a:7575 to 2c8afb23:12776: the authoring clock (js/sim.js
+// simInputTick) gave every input a tick to name, the pilots steer on marginally staler state,
+// and a 2-heart match takes longer to settle -- hence the per-match tick budget below.
+const GOLDEN_DUEL_H2 = '2c8afb23:12776';
 
 // ---- static guard: the match parameters ride EVERY go -------------------------------
 // The go is the one timeline opener, authored in two places (the match/rematch start and the
@@ -402,7 +406,7 @@ const driver = `
         simCommand({ t:'startDuel', seed:(0x2EA47 ^ Math.imul(m+1, 0x9E3779B1))>>>0, hearts:2,
                      ws:[['shades','cylinder'],['crown','eyepatch']] });
         let ram=-1;
-        for(let i=0; i<4000 && duelWinner<0; i++){
+        for(let i=0; i<16000 && duelWinner<0; i++){
           if(ram<0 && i>=120) ram=i;
           const ramming = i<ram+30;
           for(let p=0; p<2; p++){

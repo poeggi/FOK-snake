@@ -29,19 +29,22 @@ const log = s => { steps.push(s); };
 //   headroom    : CRUCIAL -- do not shorten, reseed, relax maxRb or fold into another case. It is
 //                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
 //                 zero: there is no "a few rollbacks are fine" reading of it to erode.
-//                 The clocks START 30ms apart (err0 30 -- nearly two engine ticks of pts gap) on a
-//                 30ms-RTT channel; the REAL first-start burst sync must first bring the relative
+//                 The clocks START 60ms apart (err0 60 -- past the whole authoring lead) on a
+//                 62ms-RTT channel; the REAL first-start burst sync must first bring the relative
 //                 pts to nearly 0 (asserted via startSync), and only then does play open. From
-//                 there the wire alone spends 96% of the one-tick budget (15+1 = 16ms of 16.67ms),
-//                 so the lane holds 0 rollbacks ONLY if the burst residual stays inside the
-//                 remaining margin AND the one-tick author headroom does its job -- it PROVES both
+//                 there the wire alone spends 96% of the SIM_LEAD-tick budget (31+1 = 32ms of
+//                 33.3ms), so the lane holds 0 rollbacks ONLY if the burst residual stays inside
+//                 the remaining margin AND the author headroom does its job -- it PROVES both
 //                 ends of the chain at once: the burst earns the sub-tick condition, and every
 //                 input then lands within its authoring lead, delivered on time (or via the
-//                 one-tick-late shortcut) and NEVER rolls back (maxRb:0). The match levels through
+//                 one-tick-late shortcut) and NEVER rolls back (maxRb:0). Both numbers are tied to
+//                 SIM_LEAD: widen or narrow the lead and the wire and err0 must be re-scaled with
+//                 it, or the lane stops being a guard and starts passing vacuously. The match levels through
 //                 the REAL L1->L2 req->go boundary (re-burst on the wire) into a speed round both
 //                 clients must see (expectLevel/expectSpeed), under heavy movement and multi-touch
 //                 gestures from BOTH ends. The noburst twin lane proves the burst is load-bearing:
-//                 apply disabled, same start gap -> rollbacks appear. (Correction survival across
+//                 apply disabled, same start gap -> the raw 60ms gap outlasts the lead and
+//                 rollbacks appear. (Correction survival across
 //                 boundaries at LARGER err0 is duel-boundary/duel-rematch territory.)
 const SCEN = [
     { name:'clean-boost  phase8 jit  ', seed:0xD0E1, secs:12, wire:{ base:5,  jit:2,  loss:0    }, phase:8, tjit:4, recv:true },
@@ -74,12 +77,14 @@ const SCEN = [
     //
     // postAuthor: worst-case input phase. Steers are authored AFTER their tick ran (a real touch
     // lands mid-interval, after the boundary's flush already left) and each is HELD to the last
-    // interval before its target step boundary (_gDue==1; the target is the same from anywhere in
-    // the window, so the pilot loses nothing). A flush deferred to the next tick then has exactly
-    // ZERO wire budget: it arrives transit-late, a guaranteed rollback. Only the send-at-authoring
-    // contract (netLocalInput's leading-edge flush; netTickPost for boost) keeps a
-    // full-tick-minus-transit budget and holds rb at 0. A deferred-only flush fails this scenario
-    // with rb in the hundreds. The default authoring path is DOUBLY best-case -- pre-tick (the
+    // interval that still names the coming step boundary (_gDue==SIM_LEAD; from anywhere earlier
+    // in the window the target is that same boundary, so the pilot loses nothing -- one interval
+    // later the authoring floor moves it to the NEXT boundary, which would degrade the pilot and
+    // measure nothing about the netcode). A flush deferred to the next tick then burns one of the
+    // lead's ticks, and the wire below is sized to eat nearly all of what is left: it arrives
+    // transit-late, a guaranteed rollback. Only the send-at-authoring contract (netLocalInput's
+    // leading-edge flush; netTickPost for boost) keeps a whole-lead-minus-transit budget and holds
+    // rb at 0. A deferred-only flush fails this scenario with rb in the hundreds. The default authoring path is DOUBLY best-case -- pre-tick (the
     // same boundary's flush ships the record, zero deferral) and at maximum _gDue (autopilot
     // intents are born right after a game step) -- which is how that defect stayed green here.
     // doubleEvery: every 2nd intent is a MULTI gesture (fast fingers), alternating between a
@@ -88,13 +93,13 @@ const SCEN = [
     // tick's flush -- the cap-deferred path stays on the wire and inside the authoring lead).
     // Decoys are provably-inert reverses of the dirQueue TAIL -- see duel-driver.
     // CRUCIAL (see header): the 0-rollback headroom guard. Keep it long and keep maxRb at 0.
-    { name:'headroom     burst 0rb   ', seed:0x7002, secs:30, wire:{ base:15, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:30, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, doubleEvery:2, maxRb:0, expectSync:{ minGap0:25, maxGap1:3 }, expectLevel:2, expectSpeed:true },
+    { name:'headroom     burst 0rb   ', seed:0x7002, secs:30, wire:{ base:31, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, doubleEvery:2, maxRb:0, expectSync:{ minGap0:50, maxGap1:3 }, expectLevel:2, expectSpeed:true },
     // Falsification twin: identical start gap and wire, burst APPLY disabled (noBurst) -> the raw
     // 30ms (~1.8 tick) offset stands, the ahead peer runs a persistent tick lead, the other side's
     // inputs land late there, rollbacks MUST appear (minRb) while the pair still HEALS by rollback
     // (all health gates stay on). RED without the burst, GREEN with -- proves the lane above is
     // load-bearing, not vacuously 0.
-    { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:15, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:30, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, doubleEvery:2, minRb:1, expectSync:{ minGap1:25 } },
+    { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:31, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, doubleEvery:2, minRb:1, expectSync:{ minGap1:50 } },
     // WINDSWEPT steal over the wire. The autopilot deliberately keeps two cells of clearance, so
     // under it the near-miss rules are dead code -- this lane flies the `jouster` director instead:
     // adjacent opposing lanes, one cell apart, boosting down the lane and braking into the turns,

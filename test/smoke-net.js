@@ -42,6 +42,9 @@ runTest('SMOKE-NET', `
     gameBoostStart(0, GDIRS.ArrowUp, true);
     for(let i=0;i<200 && _netInputs.length<2;i++) update();
     if(_netInputs.length!==2||_netInputs[1][1]!==4) throw 'engage not logged: '+JSON.stringify(_netInputs);
+    // A record is LOGGED when the stage issues it and EXECUTES on the tick it names, SIM_LEAD
+    // ticks out (js/sim.js simInputTick) -- in every mode, single player included.
+    for(let i=0;i<SIM_LEAD;i++) update();
     if(!boosting) throw 'instant boost did not engage';
     gameBoostEnd(0);
     for(let i=0;i<8 && _netInputs.length<3;i++) update();

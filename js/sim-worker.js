@@ -308,6 +308,6 @@ onmessage = (e) => {
         case 'startDuel':
         case 'phase':
         case 'advance':  simCommand(m); _post(); break;   // one-shot state changes: post immediately
-        default:         simCommand(m);                    // dir / boost / boostend: applied on the next tick's post
+        default:         simCommand(m);                    // dir / boost / boostend / arm: simCommand schedules an input for the tick it names
     }
 };

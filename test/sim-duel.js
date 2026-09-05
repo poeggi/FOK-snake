@@ -85,14 +85,21 @@ const driver = `
     // perpendicular replaces it, same/reverse just cancels it. One rule, classic == duel.
     const DIRS={U:{x:0,y:-1},D:{x:0,y:1},L:{x:-1,y:0},R:{x:1,y:0}};
     const qs=(dq)=>dq.map(v=>v.x===1?'R':v.x===-1?'L':v.y===1?'D':'U').join('');
+    // simCommand AUTHORS: it schedules the input for the tick simInputTick names, and the whole
+    // seq -- fed at one simTick -- lands in that one tick's bucket, judged in order exactly as it
+    // will be at the boundary. This case is about the judging, so drain that bucket in place: a
+    // real update() would reach the same boundary but also STEP, popping the queue we measure.
+    const drain=()=>{ for(const [,cmds] of _simQ) for(const c of cmds) _simExec(c); _simQ.clear(); };
     const run=(mode, seq)=>{   // heading up, empty queue; feed seq, return the queue as a string
       if(mode==='duel'){
         startDuel(777); const P=players[0]; P.dir={x:0,y:-1}; P.dirQueue.length=0;
         for(const k of seq) simCommand({t:'dir', p:0, dir:{x:DIRS[k].x,y:DIRS[k].y}});
+        drain();
         return qs(players[0].dirQueue);
       }
       startGame(777,0); dir={x:0,y:-1}; dirQueue.length=0;
       for(const k of seq) simCommand({t:'dir', dir:{x:DIRS[k].x,y:DIRS[k].y}});
+      drain();
       return qs(dirQueue);
     };
     const CASES=[
