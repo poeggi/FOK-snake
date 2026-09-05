@@ -21,8 +21,8 @@
 #
 # NOT part of test/checks.sh's default tier: it needs the network and a live
 # deployment, so it can neither gate a commit nor run in CI. Invoke it directly,
-# or via 'bash test/checks.sh --live'. It registers two throwaway player ids
-# per family, which age out under the server's normal player TTL.
+# or via 'bash test/checks.sh --live'. It registers two player ids per family,
+# which age out under the server's normal player TTL.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -56,7 +56,15 @@ ordered() { # ordered <name> <first> <second> <actual>
 IPOPT=""
 req() { curl -s -m 15 $IPOPT "$@"; }
 post() { req -X POST -H 'Content-Type: application/json' -d "$2" "$BASE$1"; }
-newid() { od -An -N4 -tx1 /dev/urandom | tr -d ' \n'; }
+# WHO THIS PROBE RUNS AS. The ids are the project's fixed live-test set (the same
+# four FOK-server's test/live-protocol.sh uses), one pair per family, and every
+# hello names itself after the id it belongs to. Both halves matter on a box that
+# is also serving real players: fixed means a run reuses last run's rows instead
+# of leaving a fresh pair behind, and the name is what tells somebody reading the
+# player list that the row is a test client and not a person.
+ID_A6=11117e57; ID_B6=22227e57
+ID_A4=33337e57; ID_B4=44447e57
+ciname() { echo "clnt-CI-${1:0:4}"; }
 # Field out of the peer-net payload, which arrives as JSON escaped inside the
 # signal envelope: "payload":"{\"ip\":\"...\"}".
 field() { echo "$2" | grep -oE "\\\\\"$1\\\\\":\\\\\"[^\\]+" | head -1 | sed 's/.*:\\"//'; }
@@ -64,8 +72,13 @@ field() { echo "$2" | grep -oE "\\\\\"$1\\\\\":\\\\\"[^\\]+" | head -1 | sed 's/
 # Registers both players, has B accept A (the signal that triggers the hint),
 # then drains A's mailbox and echoes it. The bye clears the pairing again.
 pair() { # pair <id-a> <id-b>
-    post /api/hello.php "{\"id\":\"$1\"}" > /dev/null
-    post /api/hello.php "{\"id\":\"$2\"}" > /dev/null
+    post /api/hello.php "{\"id\":\"$1\",\"name\":\"$(ciname "$1")\"}" > /dev/null
+    post /api/hello.php "{\"id\":\"$2\",\"name\":\"$(ciname "$2")\"}" > /dev/null
+    # Reused ids come with the previous run's undrained bye still sitting in the
+    # mailbox this run is about to read, so drain both before the accept: what the
+    # assertions below see is then this run's traffic and nothing else.
+    req "$BASE/api/poll.php?id=$1" > /dev/null
+    req "$BASE/api/poll.php?id=$2" > /dev/null
     post /api/signal.php "{\"id\":\"$2\",\"to\":\"$1\",\"type\":\"accept\",\"payload\":\"x\"}" > /dev/null
     req "$BASE/api/poll.php?id=$1"
 }
@@ -77,7 +90,7 @@ IPOPT="--ipv6"
 if ! req -o /dev/null "$BASE/api/t.txt"; then
     echo "SKIP no IPv6 route from this machine -- the v6 half of this test cannot run here"
 else
-    A=$(newid); B=$(newid)
+    A="$ID_A6"; B="$ID_B6"
     MB_A=$(pair "$A" "$B")
     MB_B=$(req "$BASE/api/poll.php?id=$B")
     post /api/signal.php "{\"id\":\"$B\",\"to\":\"$A\",\"type\":\"bye\",\"payload\":\"\"}" > /dev/null
@@ -109,7 +122,7 @@ fi
 # ---- IPv4: the same endpoint, a different transport ----
 # Not a duplicate of the above: it is what makes the IPv6 result mean something.
 IPOPT="--ipv4"
-A4=$(newid); B4=$(newid)
+A4="$ID_A4"; B4="$ID_B4"
 MB_A4=$(pair "$A4" "$B4")
 post /api/signal.php "{\"id\":\"$B4\",\"to\":\"$A4\",\"type\":\"bye\",\"payload\":\"\"}" > /dev/null
 expect "over IPv4, A is told the peer's family is 4" '\"family\":4' "$MB_A4"

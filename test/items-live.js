@@ -19,6 +19,11 @@ const crypto = require('crypto');
 const BASE = process.argv[2] || 'https://fok-server.poggensee.it';
 const A = '11117e57';                 // the loser / minter side
 const B = '22227e57';                 // the taker side
+// WHAT THESE TWO ARE CALLED where somebody might have to look at them. Nothing in
+// the item contract reads a display name, but the ids leave rows on a production
+// box, and hello is the only place a name is recorded. clnt-CI-<first four of the
+// id> so the name points straight back at the row it belongs to.
+const ciName = id => 'clnt-CI-' + id.slice(0, 4);
 const SEP = '|';
 
 let pass = 0, fail = 0;
@@ -55,7 +60,8 @@ const UID_RE = /^[0-9a-f]{32}$/;
 const ITEMS = '/api/items.php';
 
 async function main() {
-    console.log('[items-live] ' + BASE);
+    console.log('[items-live] ' + BASE + '   as ' + ciName(A) + ' + ' + ciName(B));
+    for (const id of [A, B]) await post('/api/hello.php', { id, name: ciName(id) });
 
     // ---- shape: the wire refuses what it should ---------------------------
     let r = await fetch(BASE + ITEMS).then(x => ({ status: x.status }), () => ({ status: 0 }));
