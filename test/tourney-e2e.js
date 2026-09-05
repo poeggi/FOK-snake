@@ -97,11 +97,17 @@ async function lobby(){
     await pump(1);
     A(C[0].tt().players.length === N, '1: the roster grew back on the read-back but did not');
 
-    // A guest is offered no START row, ever -- but the code is not the host's to keep: the
-    // person standing next to a newcomer is the one who ends up showing it to them.
+    // A guest sees the host's START row too, dark, saying whose press the room is waiting
+    // on: ONE lobby screen instead of two, with every other row in the same place on both.
+    // It is also the one row on the screen that is not theirs to press, so a guest's lobby
+    // opens with nothing selected rather than under the cursor of a row that only fails.
+    // The code itself is not the host's to keep: the person standing next to a newcomer is
+    // the one who ends up showing it to them.
     const rg = C[3].rows();
-    A(!rg.some(x => x.t.indexOf('START') === 0), '1: a guest is offered START');
-    A(rg[0].t === 'SHOW JOIN CODE' && rg[0].en, '1: a guest cannot pass the code on (' + rg[0].t + ')');
+    A(rg[0].t === 'START TOURNAMENT' && !rg[0].en && rg[0].note === 'HOST ONLY' && rg[0].nosel,
+      '1: a guest\'s START row read as ' + JSON.stringify(rg[0]));
+    A(C[3].sel() === -1, '1: a guest\'s lobby opened armed on row ' + C[3].sel());
+    A(rg[1].t === 'SHOW JOIN CODE' && rg[1].en, '1: a guest cannot pass the code on (' + rg[1].t + ')');
     A(rg[rg.length - 1].t === 'BACK - LEAVE TOURNAMENT',
       '1: a guest is offered ' + rg[rg.length - 1].t + ' rather than one row that backs out and leaves');
     A(C[0].rows()[0].en, '1: START is greyed with a full room');
@@ -631,7 +637,7 @@ async function passBreak(opts){
     // client is reading, and a client that renders an unknown token as nothing leaves a
     // headline blank on the one screen that exists to say what is about to be played.
     const S = (tok, r) => C[1].stage(tok, r);
-    A(S('group', 1) === 'GROUP STAGE' && S('quarter', 2) === 'QUARTER FINALS'
+    A(S('group', 1) === 'GROUP STAGE' && S('quarter', 2) === 'QUARTERS'
       && S('semi', 3) === 'SEMI FINALS' && S('final', 4) === 'THE FINAL',
       '15: a named stage read as ' + [S('group', 1), S('quarter', 2), S('semi', 3), S('final', 4)].join('/'));
     A(S('ko', 3) === 'ROUND 3', '15: a round of 16 read as "' + S('ko', 3) + '"');
@@ -695,11 +701,13 @@ async function passBreak(opts){
     rows.push('17 parked offer: an offer that lands while the previous match is still on the '
               + 'board is answered the moment it clears, instead of being lost for good');
 
-    // ---- 18. ESC to the bracket does not disarm the recovery -------------------------
-    // The ceremony says ESC:bracket and means it: looking at the bracket cancels nothing. The
-    // re-offer ladder and the walkover it ends in used to run only while the ceremony itself
-    // was the screen in front of the player, so that one keypress silently removed both --
-    // and the node hung for the whole tournament, not just for the player who pressed it.
+    // ---- 18. THE RECOVERY LADDER IS NOT A PROPERTY OF THE SCREEN ---------------------
+    // The re-offer ladder and the walkover it ends in used to run only while the ceremony
+    // itself was the screen in front of the player, so anything that took that screen away
+    // silently removed both -- and the node hung for the whole tournament, not just for the
+    // client that moved. A spectator pressing ESC to read the board, a player opening the
+    // leave dialog, a reload landing back on the bracket: the match is being set up either
+    // way, and the client that owes the offer owes it from wherever it is standing.
     const es = C[2];
     es.clear(); es.inGame(false);
     es.sigTo({ event:'roles', tid:es.tt().tid, nid:'esc1', round:9, stage:'ko', lvl:1, hm:2,
@@ -708,7 +716,7 @@ async function passBreak(opts){
     es.tick();
     A(es.phase() === 'tourneyCeremony' && es.rec().offers.length === 1,
       '18: the ceremony did not open with an offer');
-    es.setPhase('tourneyBracket');                        // ESC:bracket
+    es.setPhase('tourneyBracket');                        // the ceremony stops being the screen
     for(let t = 1; t < TT_CONNECT_TRIES; t++){
         clock(TT_CONNECT_MS + 1000); es.tick(); es.tick();
         A(es.rec().offers.length === t + 1,
@@ -731,7 +739,7 @@ async function passBreak(opts){
     A(es.rec().offers.length === 1 && es.msg() === '',
       '18: the ladder fired again after a match that had already played, msg "' + es.msg() + '"');
     es.clear();
-    rows.push('18 ESC:bracket: leaving the ceremony to look at the bracket keeps both the '
+    rows.push('18 the recovery ladder is not a property of the screen: leaving the ceremony keeps both the '
               + 're-offer ladder and the walkover that ends it, and a match that played arms neither');
 
     // ---- 19. a watcher's ladder never ends ------------------------------------------

@@ -429,7 +429,10 @@ function driverSrc(id){
         + '    brk: function(){ var b = tourneyBreak(); return b ? JSON.parse(JSON.stringify(b)) : null; },\n'
         + '    cont: function(){ return tourneyContinue(); },\n'
         + '    stage: function(tok, r){ return _ttStage(tok, r); },\n'
-        + '    rows: function(){ return tourneyRows().map(function(r){ return { t:r.t, en:r.en !== false, note:r.note || "" }; }); },\n'
+        + '    rows: function(){ return tourneyRows().map(function(r){ return { t:r.t, en:r.en !== false, note:r.note || "", nosel:!!r.nosel }; }); },\n'
+        // WHICH ROW THE SCREEN OPENS ON, which is a rule about rows and not about drawing:
+        // -1 is unarmed, and a list whose first row is not this player's to press opens there.
+        + '    sel: function(){ return tourneySel(); },\n'
         + '    pick: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return rs[i].act(); } throw "no row " + t; },\n'
         + '    has: function(t){ return tourneyRows().some(function(r){ return r.t.indexOf(t) === 0; }); },\n'
         + '    draw: function(){ var s = SCREENS[phase]; if(!s || !s.d) throw "no screen for " + phase; s.d(); return true; },\n'

@@ -93,11 +93,30 @@ function tourneySel(rows){
 // in itself -- one row per participant, already ordered and already cut -- so it is handed
 // to the screen as it arrived rather than folded into the standings it partly repeats.
 function tourneyBreak(){ return (_tt && _tt.brk) || null; }
+// AM I THE ONE ABOUT TO PLAY? True only between the roles sheet naming me and the duel
+// taking the screen. It is the one moment in a tournament where a player has nowhere to be
+// but here: the board is for people with time to read it, and a player who wandered onto it
+// while their opponent is waiting on a connection is a player who is late for their match.
+function tourneyUp(){ return !!(_tt && _tt.roles && String(_tt.roles.you || '') === 'play'); }
 function tourneyMax(){ return _tt && _tt.max ? (_tt.max|0) : TT_MAX; }
 // Round 1 is SPARSE above four players: every pair up to 4, then the two circulant
 // offsets, which is 2N matches. The lobby quotes this so nobody starts an eight-player
 // tournament expecting 28 games.
 function _ttMatches(n){ n = n|0; return n < 2 ? 0 : (n <= 4 ? n * (n - 1) / 2 : 2 * n); }
+// How many rounds this tournament HAS, so a board can say where in it you are rather than
+// only which round is up. Round 1 is the group stage; the knockout halves the field every
+// round after it. Same standing as _ttMatches: the client works out what the field SHAPE
+// implies purely to say it out loud, and decides nothing by it -- and a bracket the server
+// has already dealt overrides the arithmetic outright, because its own nodes are the truth
+// about how deep this tournament actually goes.
+function _ttRounds(t){
+    let deep = 0;
+    for(const nd of [].concat((t && t.bracket) || [], (t && t.schedule) || []))
+        if(nd && (nd.round | 0) > deep) deep = nd.round | 0;
+    let a = Math.ceil(((t && t.players) || []).length / 2), est = 1;
+    while(a > 1){ a = Math.ceil(a / 2); est++; }
+    return Math.max(deep, est, t ? (t.round | 0) : 0);
+}
 // The gate on the whole feature: tournaments need a 4.1 server. An older one answers 404
 // to tournament.php and never sends a roles sheet, so the menu row stays grey.
 function netTourneyOk(){
@@ -778,17 +797,27 @@ function tourneyRows(){
         // scanStart() rides the keypress/tap: a camera permission prompt is only allowed to
         // appear inside a user gesture, exactly as ADD FRIEND opens its own.
         rows.push({ t:'JOIN BY CODE', en:ok, act:() => { _entryOpen('tcode'); scanStart(); } });
+        // A lobby is a ROOM SOMEBODY IS IN, not a command: it carries the same three things a
+        // roster row does -- who, which id, how many -- in the same three columns, so the list
+        // of rooms below reads as a different KIND of thing from the actions above it. The
+        // name is the column that does that work, which is why it is a field of its own rather
+        // than more text in the label.
         for(const l of tourneyLobbyList().slice(0, 6)){
             const n = l.players | 0, mx = l.max | 0;
-            rows.push({ t:String(l.code || '') + '  ' + String(l.host_name || '?').toUpperCase(),
+            rows.push({ t:String(l.code || ''), name:String(l.host_name || '?').toUpperCase(),
                         note:n + '/' + mx, en:ok && n < mx, act:() => tourneyJoin(l.tid || l.code) });
         }
     } else if(_tt.state === 'open'){
         const host = _tt.host === getPlayerId(), n = (_tt.players || []).length;
-        // START is the top row and therefore the pre-selected one (sel is 0 on entry): it is
-        // the thing the host is waiting to do, and the one press that should never need a
-        // journey down a list. Showing the code is what you do WHILE waiting for it.
-        if(host) rows.push({ t:'START TOURNAMENT', en:n >= 2, note:n < 2 ? '(NEED 2)' : '', act:tourneyStart });
+        // START is the top row and therefore the pre-selected one for the HOST (sel is 0 on
+        // entry): it is the thing they are waiting to do, and the one press that should never
+        // need a journey down a list. Showing the code is what you do WHILE waiting for it.
+        // A guest sees the same row, dark, saying whose press the room is waiting on -- one
+        // lobby screen instead of two, with SHOW JOIN CODE in the one place on both. `nosel`
+        // is what keeps a guest's lobby from opening under the cursor: the row it would open
+        // on is the one row on the screen that is not theirs to press.
+        rows.push({ t:'START TOURNAMENT', en:host && n >= 2, nosel:!host,
+                    note:host ? (n < 2 ? '(NEED 2)' : '') : 'HOST ONLY', act:tourneyStart });
         // Anyone in the room can hand the code on, not just the host: the person standing
         // next to the newcomer is the one who ends up showing it to them.
         rows.push({ t:'SHOW JOIN CODE', en:true,

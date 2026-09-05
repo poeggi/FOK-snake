@@ -1596,6 +1596,55 @@ function drawResetConfirm() {
 // the next match, and the podium. None of them computes anything about the tournament --
 // every number on them came off the wire (see tourney.js).
 // ================================================================
+// ONE grid for every tournament list. The YOU marker sits the same distance from the left
+// edge on all of them, so a player finds their own row in the same place whichever board is
+// up; the content column starts far enough right to leave it alone, and carries the rank on
+// a ranked table or the name on a plain list. TT_X_NAME is the name beside a rank.
+const TT_X_YOU = 24, TT_X_COL = CW/2 - 182, TT_X_NAME = CW/2 - 152;
+// One pitch for both ranked tables, and the half-row the cut is given between them. A rule
+// squeezed into the ordinary gap touches the type above and below it, and a divider that
+// touches what it divides reads as an underline on one of them instead of as a line between.
+const TT_ROW_H = 19, TT_CUT_GAP = 10;
+// One line in two voices: the LABEL grey, the fact gold. A header that sets the word telling
+// you WHAT you are looking at as loudly as the thing itself has to be read twice -- once to
+// find the fact in it, once to read it. Monospace, so the run is centered by counting
+// characters, and every segment lands on the grid the columns already use.
+function _ttRun(segs, y, size){
+    let n = 0;
+    for(const g of segs) n += String(g[0]).length;
+    let x = CW/2 - n * size / 2;
+    for(const g of segs){ _ttCol(g[0], x, y, g[1], size); x += String(g[0]).length * size; }
+}
+// WHERE THE CUT FALLS, on both boards that draw a ranked table, because it says the same
+// thing on each: everybody above this line is still in the tournament. Drawn in the game's
+// OWN pixel -- a 2px dash on the 2px grid every other block on these screens is painted on.
+// A 1px hairline is the one stroke width nothing else in the game uses, and beside type whose
+// strokes are 2px wide it read as a ruled sheet of paper laid over an 8-bit board.
+function _ttCut(y){
+    ctx.fillStyle = '#4a7a4a';
+    const ry = Math.round((y - (TT_ROW_H + TT_CUT_GAP) / 2) / 2) * 2;
+    for(let x = CW/2 - 188; x + 6 <= CW/2 + 224; x += 12) ctx.fillRect(x, ry, 6, 2);
+}
+// What the board between matches is CALLED, from the one place that decides it. Round 1 is a
+// table of everybody and round 2 onward is a tree of survivors, and they are different enough
+// to want different names. The screens that only point AT that board take the name from here
+// too: a key hint naming it something the board never calls itself sends a player looking for
+// a screen that does not exist.
+// WHERE IN THE TOURNAMENT YOU ARE, in the one corner every tournament board keeps it in and
+// at the size of the headline it belongs to. A fact that moves from screen to screen is a
+// fact a player has to hunt for; parked in the top right of every board that has a round, it
+// stops being read and starts being simply known.
+function _ttWhere(round, t){
+    _ttCol('ROUND ' + (round | 0) + '/' + _ttRounds(t), CW - 16, 24, '#888', FONT.TITLE, 'right');
+}
+// The headline band an info board wears: WHAT this board is, centred where every screen in
+// the game puts its title, and where in the tournament it is, in the corner. The stage names
+// are written to fit beside the marker -- see _ttStage.
+function _ttHead(title, round, t){
+    ctg(title, CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    _ttWhere(round, t);
+}
+function _ttBoard(t){ return (t ? (t.round | 0) : 0) >= 2 ? 'KNOCKOUT' : 'STANDINGS'; }
 // Column text: the shared ct() is centered-only, and a table needs edges.
 function _ttCol(t, x, y, col, size, align){
     ctx.font = `${size||FONT.HINT}px "Press Start 2P"`; ctx.textBaseline = 'middle';
@@ -1612,6 +1661,10 @@ function _ttDrawRows(startY, rowH){
         const last = i === rows.length - 1, y = last ? BACK_Y : startY + i * rowH;
         if(r.en === false) ct(sel === i ? ('> ' + r.t + ' <') : r.t, CW/2, y, sel === i ? '#777' : '#555', FONT.MENU);
         else menuItem(r.t, y, sel === i);
+        // A row that names a PERSON is drawn as one: the name goes in the list column every
+        // tournament roster uses, at the size of the row it belongs to. That column is the
+        // whole difference between a room somebody is running and the actions above it.
+        if(r.name) _ttCol(_ttClip(r.name, 7), TT_X_COL, y, r.en === false ? '#555' : '#888', FONT.MENU);
         if(r.note && !last) ct(r.note, CW/2 + 176, y, sel === i ? '#ffd700' : '#666', FONT.HINT);
     });
 }
@@ -1645,7 +1698,8 @@ function drawTourneyLobby(){
     const n = ps.length, host = t.host === getPlayerId();
     _ttDrawRows(56, MENU_ROW);
     // The roster is a FRIENDS list in all but name -- people, by name and id, each with a note
-    // about them -- so it is drawn as one: name column, id centered, note on the right.
+    // about them -- so it is drawn as one, on the same grid the rows above it use: the marker
+    // in the margin, the name in the list column, the id and the note to the right of it.
     // It FILLS FROM THE TOP at a fixed pitch: the row a person is on is theirs for as long as
     // they are in the room, and a newcomer lands underneath everybody instead of pushing the
     // whole list -- and the host with it -- up the screen. The pitch is the one that lets a
@@ -1653,10 +1707,12 @@ function drawTourneyLobby(){
     const TT_TOP = 110, TT_ROW = 22;
     ps.forEach((p, i) => {
         const y = TT_TOP + i * TT_ROW, nm = String((p && p.name) || '').toUpperCase();
+        const you = !!p && p.id === getPlayerId();
+        if(you) _ttYou(y);
         // The ID is what every row is guaranteed to have, so it is what every row shows: a
         // player who never set a name used to be an entirely blank line in the roster.
-        menuItem(fmtFriendId(String((p && p.id) || '')), y, false);
-        _drawRowName(nm || 'NO NAME', y, !!p && p.id === getPlayerId(), nm ? null : '#555');
+        _ttCol(_ttClip(nm || 'NO NAME', 10), TT_X_COL, y, nm ? (you ? '#7fff7f' : '#888') : '#555', FONT.MENU);
+        _ttCol(fmtFriendId(String((p && p.id) || '')), CW/2 + 126, y, '#cccccc', FONT.MENU, 'right');
         // The row's own size: HOST says which of these people this one is, the same way
         // the name does, and set smaller it read as a footnote to a name rather than
         // part of the line.
@@ -1707,51 +1763,92 @@ function drawTourneyBracket(){
     if(!t){ drawTourneyLobby(); return; }
     drawGrid(); drawOvBg(0.92);
     const ko = (t.round | 0) >= 2;
-    ctg(ko ? 'KNOCKOUT' : 'STANDINGS', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    _ttHead(_ttBoard(t), t.round | 0, t);
     const cur = t.cursor ? String(t.cursor) : '';
-    ct(cur ? ('NOW PLAYING: ' + _ttMatchLine(t, cur)) : ('ROUND ' + (t.round | 0) + _ttDots()),
-       CW/2, 46, '#ffd700', FONT.HINT);
+    // The subtitle is now free to say only what is happening RIGHT NOW, in two voices: the
+    // label grey, the fact gold. Where in the tournament this is has moved to the corner it
+    // keeps on every board.
+    if(cur) _ttRun([['NOW PLAYING: ', '#888'], [_ttMatchLine(t, cur), '#ffd700']], 46, FONT.HINT);
+    else ct('WAITING FOR THE NEXT MATCH' + _ttDots(), CW/2, 46, '#888', FONT.HINT);
     if(t.frozen) ct('A MATCH IS FROZEN - THE TWO REPORTS DISAGREED', CW/2, 60, '#ff5555', FONT.HINT);
     if(!ko){
         const rows = t.standings || [], adv = (t.advancers || []).map(String);
-        _ttCol('#',      CW/2 - 194, 78, '#666', FONT.HINT);
-        _ttCol('PLAYER', CW/2 - 164, 78, '#666', FONT.HINT);
+        _ttCol('#',      TT_X_COL,  78, '#666', FONT.HINT);
+        _ttCol('PLAYER', TT_X_NAME, 78, '#666', FONT.HINT);
         _ttCol('PTS',    CW/2 + 126, 78, '#666', FONT.HINT, 'right');
         _ttCol('DIFF',   CW/2 + 216, 78, '#666', FONT.HINT, 'right');
-        rows.slice(0, tourneyMax()).forEach((r, i) => {
-            const y = 96 + i * 20, me = String(r.id) === getPlayerId();
-            // The advancing half is what everyone is actually reading the table for.
-            const up = adv.length ? adv.indexOf(String(r.id)) >= 0 : (i < Math.max(2, Math.ceil(rows.length / 2)));
+        // The advancing half is what everyone is actually reading the table for.
+        const list = rows.slice(0, tourneyMax());
+        const isUp = (r, i) => adv.length ? adv.indexOf(String(r.id)) >= 0
+                                          : (i < Math.max(2, Math.ceil(rows.length / 2)));
+        // Where the table stops being the half that goes through. The colours say it per row;
+        // the rule says it to somebody reading the board from across a table, and it is the
+        // same rule the round board draws because it is the same statement.
+        const cut = list.findIndex((r, i) => i && !isUp(r, i) && isUp(list[i - 1], i - 1));
+        list.forEach((r, i) => {
+            const y = 96 + i * TT_ROW_H + (cut > 0 && i >= cut ? TT_CUT_GAP : 0);
+            const me = String(r.id) === getPlayerId(), up = isUp(r, i);
             const col = me ? '#7fff7f' : up ? '#ffd700' : '#888';
-            if(me) _ttMine(CW/2 - 226, y);
-            _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 194, y, col, FONT.MENU);
-            _ttCol(_ttRealName(r.id).slice(0, 15),          CW/2 - 164, y, col, FONT.MENU);
+            if(i === cut) _ttCut(y);
+            if(me) _ttYou(y);
+            _ttCol(String(r.rank != null ? r.rank : i + 1), TT_X_COL,  y, col, FONT.MENU);
+            _ttCol(_ttClip(_ttRealName(r.id), 15),          TT_X_NAME, y, col, FONT.MENU);
             _ttCol(String(r.pts),                           CW/2 + 126, y, col, FONT.MENU, 'right');
             _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 216, y, col, FONT.MENU, 'right');
         });
         if(!rows.length) ct('NO MATCHES SETTLED YET' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     } else {
-        // The bracket keeps the smaller size the standings just left behind: a node draws a
-        // whole composed line (two names, then the result), which at menu size runs off the
-        // canvas, where the standings draw one short column each.
-        (t.bracket || []).slice(0, 13).forEach((nd, i) => {
-            const y = 82 + i * 15, live = String(nd.nid) === cur, st = String(nd.state || 'pending');
+        // The bracket is a LIST OF MATCHES and reads at the size every other list on these
+        // screens is set at. It only ever fitted at hint size because a node was drawn as one
+        // composed sentence -- two names, then the result in words -- so the one screen read
+        // at a glance ended up in the smallest type on the game. Drawn as columns it fits at
+        // row size, because the verdict moves into the COLOUR of the pairing and costs no
+        // width at all: the winner keeps the row's colour and the loser goes dark.
+        (t.bracket || []).slice(0, 9).forEach((nd, i) => {
+            const y = 84 + i * 22, live = String(nd.nid) === cur, st = String(nd.state || 'pending');
             // Six node states, three readings: one is being played, one produced a result,
             // and one closed without producing anything. A void or frozen node used to draw
             // exactly like a match still waiting its turn, which is the one thing it is not.
             const col = live ? '#ffd700' : (st === 'settled' || st === 'confirmed') ? '#7fff7f'
                       : st === 'frozen' ? '#ff5555' : st === 'void' ? '#666' : '#888';
-            _ttCol(String(nd.nid || '').toUpperCase(), CW/2 - 210, y, col, FONT.HINT);
-            _ttCol(_ttMatchLine(t, nd.nid, nd),        CW/2 - 140, y, col, FONT.HINT);
+            _ttCol(_ttClip(String(nd.nid || '').toUpperCase(), 5), TT_X_COL, y, col, FONT.MENU);
+            _ttNode(nd, TT_X_NAME + 56, y, col);
             // Each stage is one level deeper than the one before it, so the bracket can say
-            // what a match will be played on before anybody plays it.
-            if(nd.lvl) _ttCol('L' + (nd.lvl | 0), CW/2 + 205, y, col, FONT.HINT, 'right');
+            // what a match will be played on before anybody plays it -- and the same column
+            // says how a node CLOSED when it closed without being played.
+            _ttCol(_ttNodeTag(nd), CW/2 + 216, y, col, FONT.MENU, 'right');
         });
         if(!(t.bracket || []).length) ct('THE BRACKET IS BEING DEALT' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     }
     _ttDrawRows(296, 26);
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// A name in a column, cut to the column. One rule for every tournament list, so a name that
+// does not fit is cut the same way wherever it is read.
+function _ttClip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 2) + '..' : s; }
+// One node's pairing, drawn so the RESULT costs no width: both names in the node's colour
+// while it is undecided, the winner keeping it and the loser going dark once it is not. A
+// node with one side missing is a BYE, and one that closed with nobody left to play it says
+// that instead of naming a pairing that never existed.
+function _ttNode(nd, x, y, col){
+    const st = String(nd.state || ''), ps = nd.players || [];
+    if(st === 'void'){ _ttCol('NOBODY LEFT', x, y, col, FONT.MENU); return; }
+    const a = _ttClip(_ttName(ps[0]), 6), b = _ttClip(_ttName(ps[1]), 6);
+    if(!a || !b){ _ttCol((a || b || '?') + '  BYE', x, y, col, FONT.MENU); return; }
+    const w = nd.draw ? '' : String(nd.winner || '');
+    _ttCol(a, x, y, !w || String(ps[0]) === w ? col : '#555', FONT.MENU);
+    _ttCol('vs', x + (a.length + 1) * FONT.MENU, y, '#666', FONT.MENU);
+    _ttCol(b, x + (a.length + 4) * FONT.MENU, y, !w || String(ps[1]) === w ? col : '#555', FONT.MENU);
+}
+// The right-hand column of a node row: what it is played ON, or how it closed when it never
+// was. Only one of the two can ever be true of the same node, so they share the column.
+function _ttNodeTag(nd){
+    const st = String(nd.state || '');
+    if(st === 'void')   return 'VOID';
+    if(st === 'frozen') return 'FROZEN';
+    if(nd.draw)         return 'DRAW';
+    return nd.lvl ? ('L' + (nd.lvl | 0)) : '';
 }
 // One node as a line: the pairing, plus the result once there is one. An empty slot is a
 // BYE -- a phantom seed in an odd round, or a void below that the bracket advanced past --
@@ -1779,10 +1876,13 @@ function _ttMatchLine(t, nid, nd){
 //
 // `stage` is a TOKEN, not a caption: the wording belongs to the client, and a token this
 // build has never heard of has to render as something true rather than as nothing.
+// What a round is CALLED. Every name here is set as a headline beside the ROUND n/m marker,
+// which leaves twelve characters before the two would touch -- QUARTER FINALS did not fit and
+// is the round everybody calls the quarters anyway.
 function _ttStage(tok, round){
     switch(String(tok || '')){
         case 'group':   return 'GROUP STAGE';
-        case 'quarter': return 'QUARTER FINALS';
+        case 'quarter': return 'QUARTERS';
         case 'semi':    return 'SEMI FINALS';
         case 'final':   return 'THE FINAL';
     }
@@ -1802,7 +1902,9 @@ function _ttRowName(r){
 // under -- and the only one who cannot read the board out to somebody else. It is set at the
 // size of the row it marks rather than at the size of a footnote: it is read ACROSS, in one
 // line with the name beside it, and it keeps a gap wide enough to stay out of the table.
-function _ttMine(x, y){ _ttCol('YOU', x, y, '#7fff7f', FONT.MENU, 'right'); }
+// It is bracketed, and at ONE x on every board: a marker that moves screen to screen is a
+// marker a player has to find again each time instead of glancing at.
+function _ttYou(y){ _ttCol('[YOU]', TT_X_YOU, y, '#7fff7f', FONT.MENU); }
 function _ttBreakName(b, id){
     for(const r of ((b && b.rows) || [])) if(r && String(r.id) === String(id)) return _ttRowName(r);
     return _ttName(id);
@@ -1814,7 +1916,7 @@ function drawTourneyRound(){
     // The headline is what is ABOUT to be played, not what just finished: the table below
     // already says how the last round went, and the thing everybody wants first is whether
     // they are still in it and what they are walking into.
-    ctg(_ttStage(b.stage, b.next), CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    _ttHead(_ttStage(b.stage, b.next), b.next | 0, t);
     const mt = b.matches | 0, hm = _duelHearts(b.hm);
     // What is about to be PLAYED, and only that. How many got through is the table right
     // below it -- the cut is ruled across it and everything above the rule is lit -- and a
@@ -1825,24 +1927,27 @@ function drawTourneyRound(){
     // it is the same board it is during one, and reading it should not be a different job.
     // W-L-D is what kept it a fifth column too many to fit at that size, and it says in three
     // numbers what the points beside it say in one.
-    _ttCol('#',      CW/2 - 194, 68, '#666', FONT.HINT);
-    _ttCol('PLAYER', CW/2 - 164, 68, '#666', FONT.HINT);
+    _ttCol('#',      TT_X_COL,  68, '#666', FONT.HINT);
+    _ttCol('PLAYER', TT_X_NAME, 68, '#666', FONT.HINT);
     _ttCol('PTS',    CW/2 + 126, 68, '#666', FONT.HINT, 'right');
     _ttCol('DIFF',   CW/2 + 216, 68, '#666', FONT.HINT, 'right');
     const rows = (b.rows || []).slice(0, tourneyMax());
+    // THE CUT: the line between who is through and who is out, drawn where the server put it.
+    // Taking it from the first row that is not `adv` under one that is, is what stops it from
+    // ever disagreeing with the colours above and below it.
+    const cut = rows.findIndex((r, i) => i && !r.adv && rows[i - 1].adv);
     rows.forEach((r, i) => {
-        // A pitch that still clears the buttons with a full field of ten on the board.
-        const y = 84 + i * 19, me = String(r.id) === getPlayerId();
+        // A pitch that still clears the button strip below with a full field of ten on the
+        // board AND the cut's own line spent inside it.
+        const y = 84 + i * TT_ROW_H + (cut > 0 && i >= cut ? TT_CUT_GAP : 0);
+        const me = String(r.id) === getPlayerId();
         // Four readings in the order they matter: this player forfeited, this is me, this
         // player is through, this player is not.
         const col = r.gone ? '#555' : me ? '#7fff7f' : r.adv ? '#ffd700' : '#888';
-        // THE CUT: the line between who is through and who is out, drawn where the server
-        // put it. Sitting it between the last `adv` row and the first that is not is what
-        // stops it from ever disagreeing with the colours above and below it.
-        if(i && !r.adv && rows[i - 1].adv){ ctx.fillStyle = '#4a7a4a'; ctx.fillRect(CW/2 - 200, y - 10, 424, 1); }
-        if(me) _ttMine(CW/2 - 226, y);
-        _ttCol(String(r.rank != null ? r.rank : i + 1), CW/2 - 194, y, col, FONT.MENU);
-        _ttCol(_ttRowName(r).slice(0, 15),              CW/2 - 164, y, col, FONT.MENU);
+        if(i === cut) _ttCut(y);
+        if(me) _ttYou(y);
+        _ttCol(String(r.rank != null ? r.rank : i + 1), TT_X_COL,  y, col, FONT.MENU);
+        _ttCol(_ttClip(_ttRowName(r), 15),              TT_X_NAME, y, col, FONT.MENU);
         _ttCol(String(r.pts != null ? r.pts : 0),       CW/2 + 126, y, col, FONT.MENU, 'right');
         _ttCol(((r.diff | 0) > 0 ? '+' : '') + String(r.diff | 0), CW/2 + 216, y, col, FONT.MENU, 'right');
         // The one thing the rule cannot say: this player is not out, they WALKED OUT. It is
@@ -1853,7 +1958,7 @@ function drawTourneyRound(){
         if(r.gone) _ttCol('GONE', CW/2 + 231, y, '#555', FONT.HINT);
     });
     if(!rows.length) ct('NO STANDINGS' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
-    _ttDrawRows(274, 26);
+    _ttDrawRows(284, 26);
     const ui = tourneyUi();
     if(ui.msg) drawStatus(ui.msg);
     // Only the host has a button. Everyone else is told whose press they are waiting on --
@@ -1869,6 +1974,7 @@ function drawTourneyCeremony(){
     if(!r){ drawTourneyBracket(); return; }
     drawGrid(); drawOvBg(0.92);
     const ps = r.players || [], you = String(r.you || 'idle');
+    _ttWhere(r.round, t);
     ct(_ttStage(r.stage, r.round) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''),
        CW/2, 60, '#888', FONT.HINT);
     ctg(_ttName(ps[0]).slice(0, 12), CW/2, 116, '#7fff7f', FONT.TITLE, GLOW.TITLE);
@@ -1892,7 +1998,9 @@ function drawTourneyCeremony(){
     // which: a watcher staring at one word cannot tell anyone what they are looking at.
     const st = (you === 'spectate' && typeof specStatus === 'function' && specStatus()) || 'CONNECTING';
     drawStatus(tourneyUi().msg || (st + _ttDots()));
-    ct('ESC:bracket', CW/2, HINT_Y, '#888', FONT.HINT);
+    // The player being called up has no key here and is offered none: a hint naming a way
+    // off this screen is the reason somebody takes it.
+    if(!tourneyUp()) ct('ESC:show ' + _ttBoard(t).toLowerCase(), CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The last screen of the tournament, built as the CEREMONY screen's other half: same title
 // height, same context line under it, the same three-line name band at the same heights, the
@@ -1918,7 +2026,7 @@ function drawTourneyPodium(){
     const place = [['1ST', '#ffd700', 116], ['2ND', '#cccccc', 146], ['3RD', '#cd7f32', 176]];
     place.forEach((pl, i) => {
         if(!pod[i]) return;
-        if(pod[i] === me) _ttMine(CW/2 - 190, pl[2]);
+        if(pod[i] === me) _ttYou(pl[2]);
         ct(pl[0], CW/2 - 150, pl[2], pl[1], FONT.HINT);
         ctg(_ttRealName(pod[i]).slice(0, 12), CW/2, pl[2], pl[1], FONT.TITLE, i ? GLOW.FAINT : GLOW.TITLE);
     });

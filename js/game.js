@@ -802,7 +802,11 @@ function _updateBtnDim() {
     // Keyed on phase AND online-ness: the same duel phase has a different live set
     // online, so phase alone would cache the wrong one.
     const online = typeof netGameActive==='function' && netGameActive();
-    const key = phase + (online ? '|net' : '');
+    // The ceremony screen's ESC is the way to the board, and the player it is calling up
+    // does not get one (UI_INPUT.tourneyCeremony). Same phase, two different live sets, so
+    // it has to be in the key or the first one drawn would be cached for both.
+    const up = phase==='tourneyCeremony' && typeof tourneyUp==='function' && tourneyUp();
+    const key = phase + (online ? '|net' : '') + (up ? '|up' : '');
     if(key===_dimKey) return;
     _dimKey=key;
     document.body.dataset.phase = phase;
@@ -810,6 +814,7 @@ function _updateBtnDim() {
     // An online duel cannot pause (togglePause refuses: one player must not freeze
     // the peer), so the button is dimmed rather than left live-but-inert.
     if(online) live = live.filter(id => id !== 'pause');
+    if(up) live = live.filter(id => id !== 'esc');
     for(const id in _CTRL_ELS){ const el=_CTRL_ELS[id]; if(el) el.classList.toggle('dim', live.indexOf(id)<0); }
 }
 

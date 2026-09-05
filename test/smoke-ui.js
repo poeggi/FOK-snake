@@ -146,28 +146,38 @@ runTest('SMOKE-UI', `
 
     // TOURNAMENT screens draw, and the lobby roster reads like the FRIENDS list: an id on
     // EVERY row plus a name column beside it, with a dimmed stand-in where a player never set
-    // a name -- which used to leave a blank line where a person was supposed to be.
+    // a name -- which used to leave a blank line where a person was supposed to be. Every
+    // tournament list is drawn on ONE grid, so the columns are told apart by the x they are
+    // drawn at: the marker in the margin, the name, and the id to the right of it.
     {
-        const oRow=_drawRowName, oItem=menuItem, oCt=ct;
-        let names=[], ids=[], sum=null;
-        const cap=()=>{ names=[]; ids=[]; sum=null;
-            _drawRowName=(nm,y,sel,col)=>{ names.push({nm:nm,y:y,col:col||''}); };
-            menuItem=(t,y)=>{ ids.push({t:t,y:y}); };
+        const oCol=_ttCol, oItem=menuItem, oCt=ct;
+        let names=[], ids=[], acts=[], mine=[], sum=null;
+        const cap=()=>{ names=[]; ids=[]; acts=[]; mine=[]; sum=null;
+            _ttCol=(t,x,y,col)=>{ if(x===TT_X_COL) names.push({nm:t,y:y,col:col||''});
+                                  else if(x===TT_X_YOU) mine.push(y);
+                                  else if(x===CW/2+126) ids.push({t:t,y:y}); };
+            menuItem=(t,y)=>{ acts.push({t:t,y:y}); };
             ct=(t,x,y)=>{ if(/PLAYERS? - /.test(String(t))) sum=y; }; };
-        const rel=()=>{ _drawRowName=oRow; menuItem=oItem; ct=oCt; };
+        const rel=()=>{ _ttCol=oCol; menuItem=oItem; ct=oCt; };
         phase='tourneyLobby'; _ttUi.sel=0; _ttUi.msg='';
         _tt={ tid:'t1', code:'PQKKSV', state:'open', host:'aaaa0001', max:8, stakes:false,
               players:[{id:'aaaa0001',name:'KAI LAPTOP'},{id:'bbbb0002',name:'KAI MOBIL'},{id:'cccc0003',name:''}] };
         cap(); drawTourneyLobby(); rel();
         const top3=names.length?names[0].y:0;
         if(names.length!==3) throw 'every player needs a name column, the nameless included: '+names.length;
-        if(names[2].nm!=='NO NAME' || !names[2].col) throw 'a nameless player must get a DIMMED stand-in, not a blank row';
-        if(names[0].col) throw 'a player who HAS a name keeps the ordinary row colour';
+        if(names[2].nm!=='NO NAME') throw 'a nameless player must get a stand-in, not a blank row';
+        if(names[2].col===names[0].col) throw 'the stand-in must be DIMMED, so it does not read as a name';
         // An id row and a name row are the SAME row, so they are matched by their y -- the
         // action rows go through menuItem too, and which end of the screen they sit at is a
         // layout decision this assertion has no business pinning down.
         const rIds=ids.filter(i=>names.some(n=>n.y===i.y)).map(i=>i.t).join(',');
         if(rIds!=='AAAA-0001,BBBB-0002,CCCC-0003') throw 'every roster row must show its id: '+rIds;
+        // The row that is YOURS is marked in the margin, on exactly one row, at the one x every
+        // tournament board puts it at -- a marker that moves screen to screen is a marker a
+        // player has to find again instead of glancing at.
+        const oPid0=getPlayerId; getPlayerId=()=>'bbbb0002';
+        cap(); drawTourneyLobby(); rel(); getPlayerId=oPid0;
+        if(mine.length!==1||mine[0]!==names[1].y) throw 'exactly your own row carries the marker: '+mine.join(',');
         // A FULL room fills the SAME band from the SAME top: the roster grows downward as
         // people arrive, so the row you are on is yours for as long as you are in the room and
         // the host never slides up the screen. The host is the top row of it, whatever order
@@ -180,14 +190,14 @@ runTest('SMOKE-UI', `
         if(names[0].y!==top3) throw 'the roster fills from a fixed top, it does not slide: '+top3+' -> '+names[0].y;
         const topId=ids.filter(i=>i.y===names[0].y).map(i=>i.t).join(',');
         if(topId!=='0000-0005') throw 'the host is the top row of its own roster: '+topId;
-        const above=ids.filter(i=>!names.some(n=>n.y===i.y)&&i.y<names[0].y).map(i=>i.y);
+        const above=acts.filter(i=>i.y<names[0].y).map(i=>i.y);
         if(!above.length||names[0].y-Math.max.apply(null,above)<14)
             throw 'the roster must clear the action rows above it: '+names[0].y+' under '+above.join(',');
         _tt.host='aaaa0001';
         // The summary is the screen's FOOTER, not a caption under the last player: it sits below
         // every player AND below the way out, on the band SHOP keeps its balance on and
         // ACHIEVEMENTS its unlocked count.
-        const lastRow=Math.max.apply(null, ids.map(i=>i.y));
+        const lastRow=Math.max.apply(null, acts.concat(ids).map(i=>i.y));
         if(sum!==BAND_Y||sum<=names[9].y||sum<=lastRow)
             throw 'the summary belongs on the status band, under the last row: '+sum;
         // One row does BACK and CANCEL, and says which: the host cancels the room, a guest
@@ -200,7 +210,15 @@ runTest('SMOKE-UI', `
         if(tourneyRows()[1].t!=='SHOW JOIN CODE') throw 'the join code needs a row of its own, under START';
         if(tail()!=='BACK - CANCEL TOURNAMENT') throw 'the host exit must say what it does: '+tail();
         getPlayerId=()=>'zzzz9999';
-        if(tourneyRows()[0].t!=='SHOW JOIN CODE') throw 'a guest has no START, so the code is its top row: '+tourneyRows()[0].t;
+        // A guest sees the SAME lobby: START is still there, dark, saying whose press the room
+        // is waiting on, so SHOW JOIN CODE keeps one place on both. And it opens UNARMED --
+        // the row the cursor would land on is the one row that is not a guest's to press.
+        const gs=tourneyRows(), oSel0=_ttUi.sel; _ttUi.sel=-1;
+        if(gs[0].t!=='START TOURNAMENT'||gs[0].en!==false) throw 'a guest still sees START, dark: '+gs[0].t;
+        if(gs[0].note!=='HOST ONLY') throw 'a dark START must say whose press it is: '+gs[0].note;
+        if(gs[1].t!=='SHOW JOIN CODE') throw 'the code keeps its row index for a guest: '+gs[1].t;
+        if(tourneySel(gs)!==-1) throw 'a guest lobby must not open on the host-only row';
+        _ttUi.sel=oSel0;
         if(tail()!=='BACK - LEAVE TOURNAMENT') throw 'a guest exit must say what it does: '+tail();
         if(tourneyRows().some(r=>/^CANCEL/.test(r.t))) throw 'CANCEL must live in the back row, not beside it';
         // ONE row once the bracket is RUNNING, for the same reason: there is no stepping off a
@@ -284,22 +302,26 @@ runTest('SMOKE-UI', `
         // disagree with each other about exactly one player.
         [['STANDINGS',()=>drawTourneyBracket()], ['ROUND BOARD',()=>drawTourneyRound()]].forEach(tc=>{
             cap(); tc[1](); rel();
-            const mine=cols.filter(o=>o.t==='YOU');
+            const mine=cols.filter(o=>o.t==='[YOU]');
             if(mine.length!==1) throw tc[0]+': want exactly one YOU marker, got '+mine.length;
-            const row=at(cols, mine[0].y).filter(o=>o.t!=='YOU');
+            const row=at(cols, mine[0].y).filter(o=>o.t!=='[YOU]');
             if(!row.length) throw tc[0]+': the YOU marker sits on no row at all';
             if(!row.some(o=>o.t==='KAI')) throw tc[0]+': my row does not carry my name: '+row.map(o=>o.t).join(',');
             // LEFT OF THE LIST, not inside it: the marker has to clear the leftmost column the
             // rows themselves use, or it is a fourth column and the table has to make room.
             const left=Math.min.apply(null, row.map(o=>o.x));
             if(!(mine[0].x<left)) throw tc[0]+': the YOU marker sits at x '+mine[0].x+', not left of the list ('+left+')';
+            // ...at the SAME distance from the left edge on every board: a marker that moves
+            // screen to screen is one a player has to find again instead of glancing at.
+            if(mine[0].x!==TT_X_YOU) throw tc[0]+': the YOU marker is off the shared grid: '+mine[0].x;
             // ...and read ACROSS with the row it marks: one line, one size, and a gap the table
             // does not close on. A marker set smaller than the name beside it reads as a note
             // about the row instead of as part of it, and one crowding the first column reads
             // as a column of its own that the table then has to make room for.
             const nm=row.filter(o=>o.t==='KAI')[0];
             if(mine[0].f!==nm.f) throw tc[0]+': the YOU marker is set at '+mine[0].f+', the row it marks at '+nm.f;
-            if(left-mine[0].x<24) throw tc[0]+': the YOU marker crowds the table ('+(left-mine[0].x)+' clear)';
+            const end=mine[0].x+mine[0].t.length*mine[0].f;
+            if(left-end<16) throw tc[0]+': the YOU marker crowds the table ('+(left-end)+' clear)';
             // Everybody else keeps the name they played under, and nobody else is marked.
             const others=cols.filter(o=>o.t==='JO'||o.t==='MO');
             if(others.length!==2) throw tc[0]+': the other players lost their names: '+others.length;
@@ -332,14 +354,14 @@ runTest('SMOKE-UI', `
         const verdict=pod.filter(o=>o.y===228);
         if(!verdict.length) throw 'the podium verdict is not on the ceremony verdict height (228)';
         if(verdict[0].t!=='SECOND PLACE') throw 'a runner-up was told nothing: '+verdict[0].t;
-        if(!cols.some(o=>o.t==='YOU')) throw 'the podium does not mark which step is yours';
+        if(!cols.some(o=>o.t==='[YOU]')) throw 'the podium does not mark which step is yours';
         getPlayerId=()=>'bbbb0002'; cap(); drawTourneyPodium(); rel();
         if(!big.some(o=>o.y===228&&o.t==='YOU WON IT')) throw 'the winner lost their line';
         getPlayerId=()=>'zzzz9999'; cap(); drawTourneyPodium(); rel();
         const out=big.filter(o=>o.y===228);
         if(!out.length||!/ WON IT$/.test(out[0].t)||out[0].t==='YOU WON IT')
             throw 'a player off the podium must still be told who won: '+(out[0]&&out[0].t);
-        if(cols.some(o=>o.t==='YOU')) throw 'a player off the podium was marked as being on it';
+        if(cols.some(o=>o.t==='[YOU]')) throw 'a player off the podium was marked as being on it';
         getPlayerId=oPid; _tt=null; _ttUi.sel=0; phase='menu';
         log('podium ok: the ceremony name band and verdict heights reused, one type size for all three places, a line for every player and the YOU marker only on your own step');
     }

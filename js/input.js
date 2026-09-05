@@ -350,10 +350,16 @@ const UI_INPUT = {
     },
     tourneyCeremony: {
         // Nothing to choose here: the match is being set up and the next thing to happen
-        // is the game itself. ESC steps back to the bracket without cancelling anything.
+        // is the game itself. ESC steps back to the board without cancelling anything --
+        // but only for the people this screen is asking to WAIT. For the player it names,
+        // the next screen is their duel, and walking off to read the standings while the
+        // link to their opponent is coming up is the one thing they must not do here.
         nav(){},
         confirm(){ Snd.sfxPlay('fail',cfg.music); },
-        back(){ phase='tourneyBracket'; Snd.sfxPlay('nav',cfg.music); },
+        back(){
+            if(tourneyUp()){ Snd.sfxPlay('fail',cfg.music); return; }
+            phase='tourneyBracket'; Snd.sfxPlay('nav',cfg.music);
+        },
     },
     settings: {
         nav(key){
