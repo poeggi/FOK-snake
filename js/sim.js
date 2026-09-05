@@ -12,7 +12,7 @@ function startLen(lvl) {
 function _lvlGper(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
 let boostDir=null, boosting=false;
 let _gAt=0;   // engine tick of the last accrual boundary: a boost flip authored after it has changed nothing yet
-const BOOST_GRACE_TICKS=12;   // ~200ms hold before boost engages (was 10/167ms: a tap could trip it)
+const BOOST_GRACE_TICKS=6;    // 100ms of aligned hold before boost engages: enough that the tap that turns you is never read as a boost
 function clearBoost(){boostDir=null;boosting=false;}
 
 // Sim timing constants (ticks -> ms via T from assets.js). Declared HERE so the sim is
