@@ -154,6 +154,11 @@ function _duelExit(){
     // teardown: the report reads the score off the live session.
     if(typeof tourneyMatchLeft === 'function') tourneyMatchLeft();
     if(typeof netEndSession === 'function') netEndSession();
+    // A watch does not end with the session: the links, the ask ladder and netP2POnly
+    // are the spectator's own and only specStop puts them down. AFTER the teardown, so
+    // that its session-end branch finds nothing left to do -- walking out on purpose is
+    // not a lost feed and must not sound like one.
+    if(typeof netSpectating === 'function' && netSpectating() && typeof specStop === 'function') specStop('');
     inGame=false; _wsend({t:'phase',phase:'menu'});
     // Leaving on purpose says nothing. _duelMsg is never cleared, only overwritten, so
     // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
@@ -489,7 +494,13 @@ const UI_INPUT = {
         confirm(){
             Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){
+                // ESC-YES is the THIRD way out of a duel and owes what the other two owe:
+                // a tournament match walked out on is a match lost, said before the teardown
+                // (the report reads the score off the live session), and a watch put down
+                // after it. Without them a spectator kept a feed running from the 1:1 menu.
+                if(typeof tourneyMatchLeft==='function') tourneyMatchLeft();
                 if(typeof netEndSession==='function') netEndSession();   // online duel: bye + teardown (no-op otherwise)
+                if(typeof netSpectating==='function' && netSpectating() && typeof specStop==='function') specStop('');
                 const wasDuel = (prevPhase && prevPhase.indexOf('duel')===0) || !!players;   // quitting a 1:1 returns to the 1:1 menu, not main ('dying' needs the players marker)
                 inGame=false; showHUD(false);
                 Snd.musicFadeOut(0.25); Snd.duck(false);   // leave: fade the game track 0.25s, sfx back to normal (fadeOut cleared the track, so duck skips music)
@@ -498,9 +509,12 @@ const UI_INPUT = {
                 // Quitting on purpose says nothing: _duelMsg is never cleared, only
                 // overwritten, so an in-game line from the last 2.6s would follow us out
                 // and draw on the menu as if it had happened there. (_duelExit does the
-                // same -- these are the TWO ways out of a duel.)
+                // same -- these are the two ways out that a person CHOOSES.)
                 _duelMsg=''; _duelMsgAt=0;
-                phase = wasDuel ? 'duel11' : 'menu';   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
+                // Back to where the match was started from: a tournament match walked out
+                // on lands on the tournament, not on the 1:1 menu, so the field is still
+                // there to be re-joined (minus the match just forfeited).
+                phase = (typeof tourneyExitPhase==='function' && tourneyExitPhase()) || (wasDuel ? 'duel11' : 'menu');   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
             }   // quit: leave gameplay, keep the worker clock running for menu animations
             else { phase=prevPhase; Snd.duck(false); }   // back to the game at full volume
         },

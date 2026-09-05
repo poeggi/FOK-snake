@@ -20,7 +20,7 @@
 //
 // Run: node test/tourney-e2e.js
 const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
-        TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS, TT_CONNECT_TRIES } = require('./tourney-world');
+        TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
 // clnt-CI-<the four hex that tell these ids apart>: the shape the live probes register
@@ -227,8 +227,26 @@ async function finish(m, plan){
     if(plan.miss != null) srv.mute(IDS[plan.miss], true);
     const sc = plan.score || [7, 4];
     if(plan.mode === 'walkout'){
-        C[m.ia].walkOut('host', m.pb, sc);
-        C[m.ia].inGame(false);          // the quit path leaves the duel on its own
+        // ESC over the match, then YES: the way a person leaves. It owes a forfeit at
+        // once (the field is not made to wait out the walkover ladder) and it owes the
+        // screen the match was started from -- the tournament, still there to be
+        // re-joined, and not the 1:1 menu with the whole field left behind it.
+        C[m.ia].quitOut('host', m.pb, sc);
+        A(!C[m.ia].live() && C[m.ia].phase().indexOf('tourney') === 0,
+          '2 ' + m.nid + ': ESC out of a tournament match landed on ' + C[m.ia].phase());
+        // A spectator quits through the same handler and owes the same two things: the
+        // tournament to land on, and no watch left running behind it. It has no result
+        // to report and must not invent one.
+        let isp = -1;
+        for(let i = 0; i < N; i++) if(i !== m.ia && i !== m.ib){ isp = i; break; }
+        const sBefore = srv.log.filter(x => x.action === 'result' && x.id === IDS[isp]).length;
+        C[isp].spFeedDead();
+        C[isp].quitOut('peer', m.pa, [0, 0]);
+        A(!C[isp].spOn() && !C[isp].p2p() && C[isp].phase().indexOf('tourney') === 0,
+          '2 ' + m.nid + ': a spectator that quit sits on ' + C[isp].phase()
+          + ' watching=' + C[isp].spOn() + ' p2pOnly=' + C[isp].p2p());
+        A(srv.log.filter(x => x.action === 'result' && x.id === IDS[isp]).length === sBefore,
+          '2 ' + m.nid + ': a spectator that quit reported a result of its own');
         // The other side's duel ends too, with a win it dutifully reports -- onto a node
         // the server has already settled from the loss. A replay is a no-op, not a freeze.
         C[m.ib].endMatch('guest', m.pa, 1, sc);
@@ -479,8 +497,19 @@ async function passBreak(opts){
             // the tournament picks the returning client back up.
             C[m.ib].inGame(false);
             await pump(1);
+            // The WATCHERS of this node meanwhile -- feedless in this world, where a watch is
+            // asked for but never served -- asked for their feed again while the win was held.
+            // The rule does not know a result is pending, only that the node is not finished
+            // on their side; and what they asked for was THIS node's feed, not something new.
+            for(let i = 0; i < N; i++){
+                if(i === m.ia || i === m.ib) continue;
+                const w = C[i].rec().watches;
+                A(w.length >= 1 && w.every(x => x.nid === m.nid && x.tid === srv.T.tid),
+                  '7: ' + NAMES[i] + ' asked ' + JSON.stringify(w) + ' while the lone win was held');
+            }
+            clearAll();
             rows.push('7 no-show: the peer never reported, the lone win was held for ' + (RESULT_MS / 1000)
-                      + 's and then stood');
+                      + 's and then stood; the feedless watchers asked for the feed again meanwhile');
             continue;
         }
         await finish(m, { win: k % 3 === 0 ? 1 : (k % 5 === 0 ? 2 : 0), score:[5 + (k % 4), 2 + (k % 3)] });
@@ -702,79 +731,94 @@ async function passBreak(opts){
     rows.push('16 report binding: a result names the node whose match was on the board, never the '
               + 'one dealt while it was still up -- walking out cannot forfeit the next match');
 
-    // ---- 17. an offer that arrives mid-over-screen is kept, not dropped ---------------
-    // THE HANG. The feeder offers the instant it engages; its peer may still be looking at
-    // the previous match's over screen, where net-session refuses every offer because a live
-    // game owns the session. Signals are one-shot, so that offer is the only one there will
-    // be for the next 20 seconds -- and the answerer, which never offers, sat on CONNECTING
-    // for a match whose invitation had already been delivered and thrown away.
+    // ---- 17. the sheet that lands on the over screen, and the offer right behind it ---
+    // The feeder offers the instant it engages, and a tournament deals the next node the
+    // moment the last result settles -- so the answerer is usually still looking at the
+    // previous match's over screen when the sheet arrives, with the offer in the SAME
+    // signal drain. Signals are one-shot and the offer trickles its ICE 400ms behind the
+    // SDP: it has to land in a real session NOW, not be kept for later. So a finished match
+    // gives the board up the moment the sheet arrives, and the offer is answered.
     const pk = C[3];
     pk.clear();
-    pk.inGame(true);                             // the last match is still on the board
+    pk.endMatch('peer', IDS[0], 0, [1, 5]);      // the last match: over screen up
+    A(pk.live(), '17: the over screen is not a live board');
     pk.sigTo({ event:'roles', tid:pk.tt().tid, nid:'park1', round:9, stage:'ko', lvl:1, hm:2,
                stakes:false, players:[IDS[0], IDS[3]], feeder:IDS[0], primaries:[],
                secondaries:[], names:{}, you:'play' });   // players[0] feeds: we answer
+    A(!pk.live() && pk.rec().exits === 1, '17: the finished match kept the board under the new sheet');
+    A(pk.phase() === 'tourneyCeremony', '17: the sheet did not open the ceremony, phase ' + pk.phase());
     pk.sigRaw('offer', IDS[0], { sdp:{ type:'offer', sdp:'v=0 park' }, seed:77 });
-    A(pk.rec().answers.length === 0 && pk.rec().offers.length === 0,
-      '17: the offer was acted on while a match still held the board');
-    pk.inGame(false);
-    pk.tick();                                   // the board clears: the sheet engages
     const ans = pk.rec().answers;
     A(ans.length === 1 && ans[0].peer === IDS[0] && ans[0].seed === 77,
-      '17: the parked offer was never answered, got ' + JSON.stringify(ans));
+      '17: the offer behind the sheet was not answered, got ' + JSON.stringify(ans));
     A(pk.rec().offers.length === 0, '17: the answerer offered as well -- both sides would offer');
+    // ...and an offer the sheet does not authorise is not answered, whoever sends it -- the
+    // sheet is re-read instead. A match that starts undressed is one nobody reports.
+    const st0 = pk.rec().posts.filter(p => p.action === 'state').length;
+    pk.sigRaw('offer', IDS[5], { sdp:{ type:'offer', sdp:'v=0 stranger' }, seed:78 });
+    A(pk.rec().answers.length === 1, '17: an offer from a peer the sheet does not name was answered');
+    A(pk.rec().posts.filter(p => p.action === 'state').length === st0 + 1,
+      '17: a stray offer did not make the client re-read the sheet');
     pk.clear();
-    rows.push('17 parked offer: an offer that lands while the previous match is still on the '
-              + 'board is answered the moment it clears, instead of being lost for good');
+    rows.push('17 sheet on the over screen: a finished match gives the board up at once and the offer '
+              + 'behind the sheet lands in a session; an offer the sheet does not name is refused');
 
-    // ---- 18. THE RECOVERY LADDER IS NOT A PROPERTY OF THE SCREEN ---------------------
-    // The re-offer ladder and the walkover it ends in used to run only while the ceremony
-    // itself was the screen in front of the player, so anything that took that screen away
-    // silently removed both -- and the node hung for the whole tournament, not just for the
-    // client that moved. A spectator pressing ESC to read the board, a player opening the
-    // leave dialog, a reload landing back on the bracket: the match is being set up either
-    // way, and the client that owes the offer owes it from wherever it is standing.
+    // ---- 18. THE RULE IS NOT A PROPERTY OF THE SCREEN, AND IT DOES NOT GIVE UP --------
+    // A sheet that names us is turned into a connection, and turned into one again every
+    // TT_CONNECT_MS for as long as the node is not finished on our side -- from wherever
+    // the client is standing. Leaving the ceremony for the bracket, a leave dialog, a
+    // reload landing on the standings: the match is being set up either way. And it is
+    // never this client's call to declare the match dead: who did not show up is the
+    // server's verdict, and a pair that is merely slow is never taken away from itself.
     const es = C[2];
     es.clear(); es.inGame(false);
-    es.sigTo({ event:'roles', tid:es.tt().tid, nid:'esc1', round:9, stage:'ko', lvl:1, hm:2,
-               stakes:false, players:[IDS[2], IDS[0]], feeder:IDS[2], primaries:[],
-               secondaries:[], names:{}, you:'play' });   // we feed, so we offer
+    const esSheet = (nid) => ({ event:'roles', tid:es.tt().tid, nid, round:9, stage:'ko', lvl:1, hm:2,
+                                stakes:false, players:[IDS[2], IDS[0]], feeder:IDS[2], primaries:[],
+                                secondaries:[], names:{}, you:'play' });   // we feed, so we offer
+    es.sigTo(esSheet('esc1'));
     es.tick();
     A(es.phase() === 'tourneyCeremony' && es.rec().offers.length === 1,
       '18: the ceremony did not open with an offer');
     es.setPhase('tourneyBracket');                        // the ceremony stops being the screen
-    for(let t = 1; t < TT_CONNECT_TRIES; t++){
+    for(let t = 1; t <= 6; t++){
         clock(TT_CONNECT_MS + 1000); es.tick(); es.tick();
         A(es.rec().offers.length === t + 1,
           '18: re-offer ' + t + ' never happened away from the ceremony (' + es.rec().offers.length + ' offers)');
+        A(es.playNid() === 'esc1' && es.msg().indexOf('WAITING FOR ') === 0,
+          '18: re-offer ' + t + ' gave the node up or said the wrong thing, msg "' + es.msg() + '"');
+        A(es.phase() === 'tourneyBracket', '18: re-offer ' + t + ' took the screen back to ' + es.phase());
     }
-    clock(TT_CONNECT_MS + 1000); es.tick();
-    A(es.msg() === 'MATCH DID NOT CONNECT',
-      '18: the ladder never gave the node back to the server, msg "' + es.msg() + '"');
-    A(es.playNid() === '', '18: a match that never connected still holds the board');
-    // ...and a ceremony that DID become a match leaves nothing behind for the ladder to trip
-    // over: the quiet after a match that played is not a match that failed to connect.
+    // A match that played to a RESULT arms nothing: the node is finished on this side.
     es.clrMsg(); es.clear();
-    es.sigTo({ event:'roles', tid:es.tt().tid, nid:'esc2', round:9, stage:'ko', lvl:1, hm:2,
-               stakes:false, players:[IDS[2], IDS[0]], feeder:IDS[2], primaries:[],
-               secondaries:[], names:{}, you:'play' });
-    es.tick();
-    es.inGame(true); es.tick();                           // the match goes live
-    es.inGame(false); es.setPhase('tourneyBracket');      // ...and ends, back to the bracket
+    es.sigTo(esSheet('esc2')); es.tick();
+    es.endMatch('host', IDS[0], 0, [5, 2]);               // played, won, reported
+    A(es.rec().posts.filter(p => p.action === 'result' && p.nid === 'esc2').length === 1,
+      '18: the match that played was not reported');
+    es.inGame(false); es.setPhase('tourneyBracket');      // over screen gone, back to the bracket
     clock(TT_CONNECT_MS * 2); es.tick(); es.tick();
     A(es.rec().offers.length === 1 && es.msg() === '',
-      '18: the ladder fired again after a match that had already played, msg "' + es.msg() + '"');
+      '18: the rule fired again after a match that had already played, msg "' + es.msg() + '"');
+    // A match that went live and ended WITHOUT a result -- the link died, nothing was
+    // reported, the node is still open on the server -- is the same sheet, engaged again.
+    es.clrMsg(); es.clear();
+    es.sigTo(esSheet('esc3')); es.tick();
+    es.inGame(true); es.tick();                           // the match went live
+    es.inGame(false); es.setPhase('tourneyBracket');      // ...and fell off the board, no result
+    clock(TT_CONNECT_MS + 1000); es.tick(); es.tick();
+    A(es.rec().offers.length === 2 && es.playNid() === 'esc3',
+      '18: a match that died without a result was not set up again (' + es.rec().offers.length + ' offers)');
+    A(es.rec().posts.filter(p => p.action === 'result').length === 0,
+      '18: a match that died without a result was reported anyway');
     es.clear();
-    rows.push('18 the recovery ladder is not a property of the screen: leaving the ceremony keeps both the '
-              + 're-offer ladder and the walkover that ends it, and a match that played arms neither');
+    rows.push('18 the rule is not a property of the screen and never gives the node up: re-offers '
+              + 'keep coming from the bracket, a match that played arms nothing, a match that died '
+              + 'without a result is set up again');
 
-    // ---- 19. a watcher's ladder never ends ------------------------------------------
-    // The connect ladder ends in a walkover: four tries, then the node goes back to the
-    // server. That verdict belongs to a PLAYER, who owes somebody a result. A watcher owes
-    // nobody anything, and the match it cannot reach is most likely being played perfectly
-    // well by the two people in it. Failing its ladder dropped it out of the ceremony and
-    // onto the standings for the rest of the node -- one client stuck on the bracket while
-    // the other spectator watched the same match without trouble.
+    // ---- 19. a watcher keeps looking, and says so --------------------------------------
+    // The same rule for a spectator: the sheet names a feed and the feed is asked for again
+    // every TT_CONNECT_MS for as long as the node is not finished. A watcher owes nobody
+    // anything, and the match it cannot reach is most likely being played perfectly well by
+    // the two people in it -- so it never declares the node dead, it says what it is doing.
     es.clrMsg(); es.clear(); es.inGame(false); es.setPhase('tourneyBracket');
     es.sigTo({ event:'roles', tid:es.tt().tid, nid:'spec1', round:9, stage:'ko', lvl:1, hm:2,
                stakes:false, players:[IDS[0], IDS[1]], feeder:IDS[0], primaries:[],
@@ -782,19 +826,28 @@ async function passBreak(opts){
     es.tick();
     A(es.rec().watches.length === 1,
       '19: the sheet asked ' + es.rec().watches.length + ' nodes for a feed instead of the feeder');
-    for(let t = 1; t <= TT_CONNECT_TRIES + 1; t++){
+    A(es.phase() === 'tourneyCeremony', '19: the sheet did not open the ceremony, phase ' + es.phase());
+    es.setPhase('tourneyBracket');
+    for(let t = 1; t <= 5; t++){
         clock(TT_CONNECT_MS + 1000); es.tick(); es.tick();
         A(es.rec().watches.length === t + 1,
           '19: re-ask ' + t + ' never happened (' + es.rec().watches.length + ' asks)');
-        A(es.msg() !== 'MATCH DID NOT CONNECT',
-          '19: a watcher declared the match dead after ' + t + ' unanswered asks');
+        A(es.msg() === 'STILL LOOKING FOR A FEED',
+          '19: re-ask ' + t + ' did not say so, msg "' + es.msg() + '"');
         A(es.playNid() === '', '19: a spectated node took the board');
+        A(es.phase() === 'tourneyBracket', '19: re-ask ' + t + ' took the screen back to ' + es.phase());
     }
-    A(es.msg() === 'STILL LOOKING FOR A FEED',
-      '19: the watcher sat on a ceremony that had stopped meaning anything, msg "' + es.msg() + '"');
+    // ...and a feed watched to its END is finished: nothing is asked for again.
     es.clrMsg(); es.clear();
-    rows.push('19 watcher ladder: a spectator that cannot reach the feed keeps asking and says '
-              + 'so, where a player hands the node back after four tries');
+    es.endMatch('peer', IDS[0], 0, [3, 1]);               // the watched match ran out
+    A(es.rec().posts.filter(p => p.action === 'result').length === 0, '19: a watcher reported a result');
+    es.inGame(false); es.setPhase('tourneyBracket');
+    clock(TT_CONNECT_MS * 2); es.tick(); es.tick();
+    A(es.rec().watches.length === 0 && es.msg() === '',
+      '19: a feed watched to its end was asked for again (' + es.rec().watches.length + ' asks, msg "' + es.msg() + '")');
+    es.clrMsg(); es.clear();
+    rows.push('19 watcher: a spectator that cannot reach the feed keeps asking from wherever it stands '
+              + 'and says so, never declares the match dead, and stops once the feed ran its course');
 
     // ---- 20+21) the leave dialog, and the way back into a tournament left behind ------
     // A SECOND world, because both of these need a tournament that is RUNNING and the one

@@ -795,7 +795,9 @@ function _rbApplyResync(m){
         // one tick ahead of the adopted world -> a permanent 1-tick game-phase + 1-cell own-snake
         // divergence (seen when a RESYNC-burst 'rs' lands here right after the catch-up wiped the
         // ring). Never rewind (T <= simTick: keep our tick so the shared world is not dragged back).
-        const anchor = T > simTick ? T - 1 : simTick;
+        // A watcher owns nothing on the board, so it may also go BACK to the checkpoint: the
+        // never-rewind rule protects a player's own head, and a watcher has none.
+        const anchor = (spec || T > simTick) ? T - 1 : simTick;
         snap.simTick = anchor; snap.simNow = anchor * TICK_MS; simApply(snap); _rbRing = []; _rbLog = new Map(); _rbHeads = new Map(); _rbFix = null;
         if(!spec) _rbSendState(anchor, simSnapshot());
     }

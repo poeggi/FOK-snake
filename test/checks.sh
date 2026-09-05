@@ -73,7 +73,9 @@ fi
 # five-player tournament for real: two sims in lockstep with three spectators on the relay
 # tree, over a wire with latency, jitter, loss and a blackout walking around the tree. It is
 # the only run that answers whether a tournament survives a bad evening rather than only
-# good bookkeeping, and it takes a couple of minutes.
+# good bookkeeping. Both sides fly a named pilot -- gem farmer, hunter, crasher -- so the
+# matches cross level boundaries, spend hearts, blow gear loose and steal it. It takes
+# about ten minutes, which is why it is asked for and never scheduled.
 if [ "${1:-}" = "--tourney-sim" ]; then
     echo "[checks] played tournament: twelve real matches over a misbehaving wire"
     node test/tourney-sim.js

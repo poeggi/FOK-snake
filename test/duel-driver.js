@@ -81,7 +81,11 @@ const HOOKS = (id) => `
   // apart>, the shape the live probes register under (test/peer-net.sh, test/items-live.js),
   // so a name in a log or on a production row traces back to the id that wore it.
   globalThis._ciName = (id)=> 'clnt-CI-' + String(id || '').slice(0, 4);
-  globalThis.__p2pStart = (seed, role, mine, theirs)=>{
+  // opt = { lvl, hearts }: the two parameters a TOURNAMENT round negotiates on its 'go' and
+  // that a 1:1 never touches. Omitted, a match opens exactly where a 1:1 opens -- level 1,
+  // START_LIVES hearts -- so every existing lane, goldens included, boots the same match it
+  // always did. Both go through the same untrusted-input clamps the wire path uses.
+  globalThis.__p2pStart = (seed, role, mine, theirs, opt)=>{
     _netSync = { ofs:0, rtt:1, at:Date.now() };
     simTick = role==='host' ? 45000 : 3000; simNow = simTick*TICK_MS; inGame = true;
     _netSess = _netMkSess('ffffffff', role);
@@ -92,7 +96,11 @@ const HOOKS = (id) => `
     _netSess.dc = { readyState:'open', bufferedAmount:0, send(j){ __out.push(j); }, close(){} };
     _netMarkRecv(_netSess);
     _netLiveStart();
-    startDuel(seed>>>0, _duelWsLists(role === 'host'));
+    var _o = opt || {};
+    _netSess.hearts = _duelHearts((_o.hearts | 0) || _netSess.hearts);
+    _netSess.lvl0 = _duelLvl(_o.lvl | 0); _netSess.lvl = _netSess.lvl0;
+    _duelHeartsMax = _netSess.hearts;   // read by startDuel when it deals the lives
+    startDuel(seed>>>0, _duelWsLists(role === 'host'), _netSess.lvl0);
     _rbReset();
     _netSess.startPts = Date.now();
   };

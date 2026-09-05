@@ -125,6 +125,15 @@ const SPEC_HOOKS = `
   globalThis.__startPts = ()=> _netSess ? _netSess.startPts : null;
   globalThis.__hearts   = ()=> _netSess ? _netSess.hearts : null;
   globalThis.__target   = ()=> netTickTarget();
+  // The reconnect ladder, called the way the visibility handler and the live check call it.
+  // RTCPeerConnection is absent here and _netReconnect refuses without one, so a stand-in
+  // is present for the length of the call -- enough for the guards INSIDE to be what decides.
+  globalThis.__reconnect = ()=>{
+    const had = globalThis.RTCPeerConnection;
+    globalThis.RTCPeerConnection = function(){};
+    try { _netReconnect(_netSess); } finally { globalThis.RTCPeerConnection = had; }
+    return { rc:!!(_netSess && _netSess.reconnectAt), warn:netDuelWarn() };
+  };
   // Every call that reaches the AUTHORING end while spectating. _armIndex already returns
   // -1 up at the input layer, so a healthy spectator never even tries; the swallow inside
   // netLocalInput is the second half of the belt-and-braces. Zero is the iron-rule
@@ -159,7 +168,14 @@ const S_ID = ['cccccccc', 'dddddddd', 'eeeeeeee', 'abababab', 'cdcdcdcd'];
 //   opts.kill        [{ at, who }]   -- cut every spectator link of that client
 //   opts.outage      [{ at, ms, who }] -- a SHORT blackout on one node ('*' = the whole wire)
 //   opts.settleTail  ms of CALM run after secs (default 0 = off)
-//   opts.director    input director (default duel-driver's autopilot)
+//   opts.lvl         level the match OPENS at (default 1 -- a tournament round ladder)
+//   opts.hearts      hearts each side gets (default 3 -- a tournament round deals 2)
+//   opts.ws          { A:[ids], B:[ids] } each side's own worn windswept gear; omitted,
+//                    both snakes start bare and no steal rule ever fires
+//   opts.director    input director for A (default duel-driver's autopilot)
+//   opts.dirB        input director for B (default: the same one A flies). Two people do
+//                    not play alike, and two identical pilots on one seed produce the
+//                    mirror-image draw a knockout cannot take.
 //   opts.onSample    (now, cl) diagnostic tap
 function runSpec(opts){
     const secs = opts.secs || 14;
@@ -168,6 +184,7 @@ function runSpec(opts){
     const SW = opts.specWire || { base:W.base, jit:W.jit };
     const SIG = opts.sigMs == null ? 120 : opts.sigMs;
     const dir = opts.director || autopilot;
+    const dirB = opts.dirB || dir;
     resetPilot();               // a run is reproducible on its own, not on what ran before it
     const watchers = opts.watchers || [];
     const kills = (opts.kill || []).map(k => ({ at:Math.round(k.at * 1000), who:k.who, done:false }));
@@ -212,9 +229,11 @@ function runSpec(opts){
     // asks has no timeline to serve yet. That window is the ordinary case rather than an
     // edge, so it belongs in the driver and not in a test that fakes it.
     let started = false;
+    const WS = opts.ws || {};
+    const MP = { lvl:opts.lvl | 0, hearts:opts.hearts | 0 };
     const startPlayers = ()=>{
-        cl.A.c.__p2pStart(seed, 'host', null, null);
-        cl.B.c.__p2pStart(seed, 'peer', null, null);
+        cl.A.c.__p2pStart(seed, 'host', WS.A, WS.B, MP);
+        cl.B.c.__p2pStart(seed, 'peer', WS.B, WS.A, MP);
         cl.A.c.__setPeer(P_ID.B); cl.B.c.__setPeer(P_ID.A);
         started = true;
     };
@@ -294,7 +313,7 @@ function runSpec(opts){
         o.c.__now = 0 | o.next;
         if(!o.spec){
             const v = o.c.__view();
-            if(v) applyDir(o.c, dir(v));
+            if(v) applyDir(o.c, (o.name === 'B' ? dirB : dir)(v));
         }
         if(o.c.__alive()) o.c.__tick1();
         if(o.c.__alive()) o.c.__tickCatchup();   // the spectator's whole pacing story rides this
@@ -314,21 +333,38 @@ function runSpec(opts){
     // The two PLAYERS get the same from/to/clean bookkeeping a spectator gets, and for the
     // same reason. While the wire is dark both sides run on prediction, so a blackout leaves
     // a wrong stretch of shared history behind it and "they never disagreed" was never the
-    // claim rollback makes. The claim is that they agreed AGAIN afterwards -- a last
-    // agreement past the last disagreement, which is the spectator predicate one tier up.
-    const pair = { divN:0, divFrom:null, divTo:null, divClean:null };
+    // claim rollback makes. The claim is that they agreed AGAIN afterwards -- an agreement
+    // later IN COMPARISON ORDER than the last disagreement, which is the spectator predicate
+    // one tier up.
+    const pair = { divN:0, divTicks:0, divFrom:null, divTo:null, divClean:null, divOpen:false, divBoundary:false };
     const cmp = { checks:0 };
+    // simTick RESTARTS at 0 on every level-up and every respawn ('startDuelLevel' /
+    // 'startDuelRespawn' in sim.js), so a tick number orders comparisons only WITHIN one
+    // level: tick 141 of level 2 comes AFTER tick 279 of level 1. Healing is therefore
+    // tracked as a flag flipped in comparison order -- did it agree AGAIN after the last
+    // time it was wrong -- and `gen` counts the restarts so the report can say whether the
+    // agreement came back inside the level or only once the boundary rebuilt the world.
+    let gen = 0, lastTk = -1;
+    // divN counts COMPARISONS, and the same settled tick is compared on many passes before
+    // the window moves on; divTicks counts the DISTINCT ticks that were wrong, which is the
+    // number that means something to a reader.
+    const wrong = (o, tk) => { if(o.divFrom == null) o.divFrom = tk;
+        if(o.divAtTk !== tk){ o.divTicks = (o.divTicks | 0) + 1; o.divAtTk = tk; }
+        o.divTo = tk; o.divToGen = gen; o.divN = (o.divN | 0) + 1; o.divOpen = true; };
+    const right = (o, tk) => { if(o.divTo == null) return;
+        o.divClean = tk; o.divOpen = false; o.divBoundary = gen !== o.divToGen; };
     const checkDiverge = () => {
         const st = Math.min(cl.A.c.__simTick(), cl.B.c.__simTick()) - LAG;
         const tk = st - (st % SNAP);
         if(tk < SNAP) return;
+        if(tk < lastTk) gen++;   // the clock went back: a level boundary rebuilt the world
+        lastTk = tk;
         const ha = cl.A.c.__ringHashAt(tk), hb = cl.B.c.__ringHashAt(tk);
         if(ha != null && hb != null){
             if(ha !== hb){
                 if(!firstDiverge) firstDiverge = { who:'A/B', tick:tk, fields:diffFields(cl.A.c, cl.B.c, tk) };
-                if(pair.divFrom == null) pair.divFrom = tk;
-                pair.divTo = tk; pair.divN++;
-            } else if(pair.divTo != null) pair.divClean = tk;
+                wrong(pair, tk);
+            } else right(pair, tk);
         }
         if(ha == null) return;
         for(const n of names){
@@ -344,9 +380,8 @@ function runSpec(opts){
                 // history behind it. The claim is not "never wrong": it is that every mismatch
                 // sits inside a known outage and that the node re-converges EXACTLY afterwards.
                 if(!firstDiverge) firstDiverge = { who:n, tick:tk, fields:diffFields(cl.A.c, o.c, tk) };
-                if(o.divFrom == null) o.divFrom = tk;
-                o.divTo = tk; o.divN = (o.divN | 0) + 1;
-            } else if(o.divTo != null) o.divClean = tk;
+                wrong(o, tk);
+            } else right(o, tk);
         }
     };
     const diffFields = (x, y, tk) => {
@@ -394,6 +429,37 @@ function runSpec(opts){
         levelUps++;
     };
 
+    // ---- what actually happened in the match ----
+    // The steal state is HASHED duel state, so the two sides reading the identical string at
+    // the identical tick is the property; counting transitions in it also gives the run its
+    // two gameplay facts for free. A blow = an item came loose. A steal = the loose item was
+    // picked up by the OTHER snake, which is the whole round trip: roll, flight, pickup.
+    let wsBlows = 0, wsSteals = 0, wsSplit = 0, wsPrev = null;
+    const sampleWs = () => {
+        const a = cl.A.c.__wsSt(); if(a == null){ wsPrev = null; return; }
+        if(cl.B.c.__wsSt() !== a) wsSplit++;
+        if(wsPrev !== null && wsPrev !== a){
+            const p = wsPrev.split('|'), c = a.split('|');
+            if(!p[2] && c[2]) wsBlows++;
+            if(p[2] && !c[2]){
+                const at = p[2].split('@'), id = at[0], own = +at[1];
+                if(c[1 - own].split('.').indexOf(id) >= 0) wsSteals++;
+            }
+        }
+        wsPrev = a;
+    };
+    // Rollbacks, summed across the whole match rather than read off the end of it: every
+    // level and respawn boundary calls _rbReset, which zeroes the counter. A wire that never
+    // provoked one tested the repair path not at all, so the total is the evidence.
+    const rbTot = { A:0, B:0 }, rbPrev = { A:0, B:0 }, reTot = { A:0, B:0 }, rePrev = { A:0, B:0 };
+    const sampleRb = () => {
+        for(const n of ['A', 'B']){
+            const d = cl[n].c.__rbDbg();
+            const rb = d.rb | 0, re = d.resim | 0;
+            rbTot[n] += rb >= rbPrev[n] ? rb - rbPrev[n] : rb; rbPrev[n] = rb;
+            reTot[n] += re >= rePrev[n] ? re - rePrev[n] : re; rePrev[n] = re;
+        }
+    };
     // ---- run ----
     let exitReason = null, diedAt = 0, levelReached = 1, nextLive = 0;
     const trace = [], txSeries = [], pairB = {};
@@ -452,6 +518,8 @@ function runSpec(opts){
             txSeries.push(row);
         }
         if(!calm) maybeLevelUp();   // no new boundary in the coda: it is a settle, not more game
+        sampleWs();
+        if(now % 16 === 0) sampleRb();
         checkDiverge();
         if(now % 50 === 0) sampleLag(now);
         const va = cl.A.c.__view(); if(va) levelReached = Math.max(levelReached, va.level);
@@ -468,6 +536,7 @@ function runSpec(opts){
             upTypes: o.c.__upTypes(),
             cmp: o.cmp | 0, divFrom: o.divFrom == null ? null : o.divFrom, divTo: o.divTo == null ? null : o.divTo,
             divN: o.divN | 0, divClean: o.divClean == null ? null : o.divClean,
+            divOpen: !!o.divOpen, divBoundary: !!o.divBoundary, divTicks: o.divTicks | 0,
             inN: o.c.__inN(), outN: o.c.__outN(), subN: o.c.__subN(), askN: o.c.__askN(), txB: o.txB | 0,
             lag: (o.c.__specOn() && o.c.__alive()) ? cl.A.c.__simTick() - o.c.__simTick() : null,
             lagMin: o.lagMin == null ? null : o.lagMin, lagMax: o.lagMax == null ? null : o.lagMax,
@@ -485,6 +554,8 @@ function runSpec(opts){
                                               dbg:cl[n].c.__specDbg(), sig:cl[n].c.__sigDump() };
     return {
         firstDiverge, pairDiv:pair, exitReason, diedAt, levelUps, levelReached, checks:cmp.checks, txSeries, pairB,
+        wsBlows, wsSteals, wsSplit, wsSame: cl.A.c.__wsSt() === cl.B.c.__wsSt(),
+        rb:{ A:rbTot.A, B:rbTot.B }, resim:{ A:reTot.A, B:reTot.B },
         lagSpread,
         // The match's own verdict, straight off the sim: -1 nobody yet, 0/1 a winner, 2 a draw.
         winner: cl.A.c.__winner(), score: cl.A.c.__score(), lives: cl.A.c.__lives(), len: cl.A.c.__len(),

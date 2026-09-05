@@ -56,6 +56,14 @@ function common(tag, r, name){
     A(s.warn === 'SPECTATING', tag + ' ' + name + ': banner is ' + JSON.stringify(s.warn));
     return s;
 }
+// G: how many settled ticks a watcher may be wrong for after G's blackout. Three seconds is
+// longer than the rollback ring (RB_RING * RB_SNAP_EVERY ticks), so the checkpoint that
+// comes back with the line has aged out of it, and longer than the checkpoint period, so one
+// is held. The judge runs RB_SETTLE ticks behind the head: the ticks it judged DURING the
+// blackout are wrong whatever happens -- 36 with the rewind, 69 when the watcher waits for
+// the NEXT checkpoint instead (both measured; the second is the code before the rule). The
+// bound sits between the two, so the old anchor fails it.
+const G_MAX_WRONG = 50;
 function noDiverge(tag, r){
     if(!r.firstDiverge) return;
     A(false, tag + ': ' + r.firstDiverge.who + ' diverged at tick ' + r.firstDiverge.tick
@@ -159,6 +167,61 @@ if(lane.step()){
     A(r.players.A.outN === 1, 'E: the feeder serves ' + r.players.A.outN + ' links (want 1)');
     rows.push('E early ask: watching ' + (onAt - START * 1000) + 'ms after the match began, '
               + r.checks + ' checks, no divergence');
+}
+
+// ---- F) the reconnect ladder is a PLAYER's ----------------------------------------------
+// net-api asks for a reconnect when the tab comes back into view, and so does the live check
+// on silence. A watcher's session has no channel of its own to rebuild -- its feed links are
+// net-spec's, with their own repair -- and the only thing that ever takes the RECONNECTING
+// banner down again is the live check, which a watcher does not run. So for a watcher the
+// ladder was a one-way trip: RECONNECTING, for good, over a feed that was working. The same
+// call on a player is the control: the ladder has to stay reachable for the one it is for.
+if(lane.step()){
+    const rc = {};
+    const r = runSpec({ secs:12, seed:0x4E5A, wire:WIRE, watchers:[{ at:1.2, from:'A' }],
+                        onSample:(now, c)=>{ if(now === 6000){ rc.S = c.S1.c.__reconnect(); rc.B = c.B.c.__reconnect(); } } });
+    common('F', r, 'S1');
+    noDiverge('F', r);
+    A(!r.exitReason, 'F: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    A(rc.B && rc.B.rc && rc.B.warn === 'RECONNECTING...',
+      'F control: the ladder did not run for a player, ' + JSON.stringify(rc.B));
+    A(r.warnB !== 'RECONNECTING...', 'F control: the player never recovered from its reconnect');
+    A(rc.S && !rc.S.rc && rc.S.warn === 'SPECTATING',
+      'F: the ladder ran for a watcher, ' + JSON.stringify(rc.S));
+    rows.push('F reconnect: a player asked to reconnect does (and recovers), a watcher asked the same '
+              + 'stays a watcher -- banner ' + JSON.stringify(rc.S && rc.S.warn));
+}
+
+// ---- G) a watcher's line goes dark, and comes back ---------------------------------------
+// The feed is a reliable, ordered channel: what the feeder sent while the watcher's line was
+// down arrives all at once when it comes back -- inputs for ticks the watcher's sim has
+// already extrapolated past, and a checkpoint older than its rollback ring. The anchor rule
+// for such a checkpoint is a PLAYER's: never rewind, because a player's own head must not be
+// dragged back non-causally. A watcher has no head to protect, and the stream that followed
+// the checkpoint is right behind it in the same burst -- so a watcher goes BACK to the
+// checkpoint and replays, and is on the players' history again off the late checkpoint
+// itself, not the next one.
+if(lane.step()){
+    const OUT = { at:5.0, ms:3000, who:'S1' };
+    const r = runSpec({ secs:14, seed:0x6A1C, wire:WIRE, watchers:[{ at:1.2, from:'A' }],
+                        outage:[OUT], settleTail:2000 });
+    const s = r.spectators.S1;
+    A(s && s.on, 'G: not spectating at the end of the run');
+    A(!r.exitReason, 'G: the match ended early (' + r.exitReason + ' @' + r.diedAt + 's)');
+    if(s){
+        A(s.authored === 0 && s.duelOut === 0,
+          'G: the watcher sent ' + s.duelOut + ' duel packet(s) toward the players over the blackout');
+        A(s.dbg.boot === 1, 'G: the watcher booted ' + s.dbg.boot + ' times -- the blackout ended the feed');
+        A(s.divN === 0 || (!s.divOpen && s.divClean != null),
+          'G: the watcher never came back to the players history -- ' + s.divTicks
+          + ' settled tick(s) wrong, last one ' + s.divTo + ', last agreement ' + s.divClean);
+        A(s.divTicks <= G_MAX_WRONG,
+          'G: ' + s.divTicks + ' settled tick(s) wrong -- the late checkpoint did not heal the watcher on its own');
+        A(s.warn === 'SPECTATING', 'G: banner is ' + JSON.stringify(s.warn));
+        rows.push('G blackout ' + OUT.ms + 'ms on the watcher: ' + s.divTicks + ' settled tick(s) wrong'
+                  + (s.divN === 0 ? ', none at all' : ', the last one tick ' + s.divTo + ', agreeing again since'
+                     + (s.divBoundary ? ' (across a level boundary)' : '')));
+    }
 }
 
 console.log(rows.join('\n'));

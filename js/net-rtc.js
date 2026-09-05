@@ -678,6 +678,11 @@ function _netLiveCheck(){
 // dead RTCPeerConnection/DataChannel; epoch, seed and sim state are untouched.
 function _netReconnect(s){
     if(!s || s.reconnectAt || s.relay || !_netRtcAvail()) return;   // s.relay: DEPRECATED(relay)
+    // A watcher's session has no channel of its own to rebuild -- its feed links are
+    // net-spec's, repaired on their own ladder -- and nothing would ever take down the
+    // RECONNECTING banner this puts up (_netReconnectDone is the live check's, which a
+    // spectator does not run).
+    if(typeof netSpectating === 'function' && netSpectating()) return;
     s.reconnectAt = Date.now();   // wall clock: the timeout must survive a suspend too
     s.reconnecting = true;             // _netPollDue() polls again so the re-handshake signals flow
     _netPollAbortNow();                // start a fresh poll immediately, don't wait out a held one

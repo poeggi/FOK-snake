@@ -24,8 +24,7 @@ const MAX_DIRECT   = 2;        // SPEC_MAX_DIRECT
 const MAX_LEVEL    = 10;       // MAX_LEVELS: the ladder cannot go deeper than the game does
 // Client-side timings the run has to step over.
 const TT_OVER_MS   = 4000;     // tourney.js: how long a settled match holds the screen
-const TT_CONNECT_MS    = 20000;   // tourney.js: a ceremony that has not connected by now re-offers
-const TT_CONNECT_TRIES = 4;       // tourney.js: re-offers before the node goes back to the server
+const TT_CONNECT_MS = 20000;   // tourney.js: a sheet that has not become a match by now is engaged again
 const TT_STATE_MS  = 5000;     // tourney.js: the floor between unforced state() read-backs
 
 // ============================================================================
@@ -454,6 +453,14 @@ function driverSrc(id){
         + '        players = [{ score:sc[0] | 0 }, { score:sc[1] | 0 }]; duelWinner = winner; inGame = true;\n'
         + '        phase = "duelOver"; tourneyMatchOver();\n'
         + '    },\n'
+        // Walking out the way a person actually does it: ESC over a live match, then YES.
+        // Everything the real handler owes -- the forfeit, the watch, the screen it lands
+        // on -- is decided inside UI_INPUT.quitConfirm.confirm and nowhere else.
+        + '    quitOut: function(role, peer, sc){\n'
+        + '        _netSess = { role:role, peer:peer, mid:"m-quit", game:true };\n'
+        + '        players = [{ score:sc[0] | 0 }, { score:sc[1] | 0 }]; duelWinner = -1; inGame = true;\n'
+        + '        prevPhase = "duel"; phase = "quitConfirm";\n'
+        + '        return C.key("confirm", 0); },\n'
         + '    walkOut: function(role, peer, sc){\n'
         + '        _netSess = { role:role, peer:peer, mid:"m-walk", game:true };\n'
         + '        players = [{ score:sc[0] | 0 }, { score:sc[1] | 0 }]; duelWinner = -1; inGame = true;\n'
@@ -464,6 +471,7 @@ function driverSrc(id){
         + '    spFeedDead: function(){ _spOn = true; _spHops = 2; _spFeedAt = _spNow() - 9999; },\n'
         + '    spServe: function(peer){ _spOut.push({ peer:peer, dc:null, pc:null }); },\n'
         + '    spOut: function(){ return _spOut.length; },\n'
+        + '    spOn: function(){ return _spOn; },\n'
         + '    spStandDown: function(){ specStandDown(); },\n'
         + '    spOrphan: function(){ _spOrphan(); },\n'
         + '    spGranted: function(pid){ return !!_spGrant[pid]; },\n'
@@ -504,7 +512,8 @@ function driverSrc(id){
         // A RELOAD, which is the only way the way-back ever gets exercised for real:
         // the picture of the tournament is gone from memory, the id on disk is not.
         // Deliberately not _ttDrop -- that is the terminal route, and it wipes the id.
-        + '    forget: function(){ _tt = null; _ttPend = null; _ttNid = ""; _ttPlayNid = ""; _ttBack = null; },\n'
+        + '    forget: function(){ _tt = null; _ttNid = ""; _ttDone = ""; _ttEngAt = 0; _ttRolesAt = 0;\n'
+        + '                        _ttPlayNid = ""; _ttWatchNid = ""; _ttBack = null; },\n'
         + '  };\n'
         + '})();\n';
 }
@@ -570,4 +579,4 @@ function mkWorld(ids, names, opts){
 
 module.exports = { mkServer, driverSrc, mkWorld,
                    RESULT_MS, BREAK_MS, BREAK_TTL_MS, MAX_DIRECT, MAX_LEVEL,
-                   TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS, TT_CONNECT_TRIES };
+                   TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS };
