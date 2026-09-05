@@ -1158,8 +1158,7 @@ function simApply(s){
 }
 // ---- Local boost arming (DEVICE-local: never in the snapshot or the hash) ----
 // A held direction ARMS a boost; after BOOST_GRACE_TICKS of aligned live ticks the
-// REAL engage is issued through the home's `simArmIssue` hook, which routes it like
-// any other input (classic: simCommand + replay log; online: netLocalInput -> wire).
+// REAL engage is issued through simArmIssue, which routes it like any other input.
 // Disalignment or release while boosting issues the real end the same way -- so only
 // true transitions ever reach the sim or the wire. `instant` (touch double-tap /
 // swipe) skips the wait. Ticked once per LIVE engine tick by each sim home; never
@@ -1194,9 +1193,19 @@ function simArmTick(){
         }
     }
 }
-// Default issue hook: straight into the sim. Homes with a wire (duel-core) or a
-// replay log (game.js classic) override this.
-var simArmIssue = function(p, kind, d){
+// THE issue path for an arming transition: one body, every home, no per-home override.
+// The stage above decides WHAT transition happens (engage, re-aim end, release end);
+// this decides only WHERE the resulting command goes, and that is transport, not mechanic.
+// netLocalInput is the online destination AND the test for one: it owns the wire's rules
+// (author a tick ahead, log it, apply it from the log on both sides, author nothing at all
+// while spectating) and it declines -- returns false -- whenever there is no online duel to
+// author into. So single player, local 1:1 and online 1:1 all run this same line, and a
+// transition reaches the sim exactly the way every other input does. Its `0` is the LOCAL
+// player, not the sim index: online the local snake is netMyIndex(), which netLocalInput
+// resolves for itself. Do not fork this hook per home -- two issue bodies is how the modes
+// drift apart while the mechanic above them still looks single-sourced.
+function simArmIssue(p, kind, d){
+    if(typeof netLocalInput === 'function' && netLocalInput(kind, 0, d, true)) return;
     simCommand(kind === 'bs' ? { t:'boost', p, dir:d } : { t:'boostend', p });
     if(players) return;
     // Classic score submissions replay the input log server-side: the ENGAGE (not the
@@ -1205,7 +1214,7 @@ var simArmIssue = function(p, kind, d){
     // (in-process + headless), ride a tick-stamped event out of the worker otherwise.
     if(typeof netLogBoost === 'function'){ if(kind === 'bs') netLogBoost(d, simTick); else netLogBoostEnd(simTick); }
     else simEvents.push(kind === 'bs' ? { t:'blog', k:'bs', d:{ x:d.x, y:d.y }, tk:simTick } : { t:'blog', k:'be', tk:simTick });
-};
+}
 // Duel-scoped apply: exactly the globals a duel tick can touch (duel-core.js _rbDuelSnap),
 // for rollback restores. simApply assigns EVERY field unconditionally, so feeding it a
 // duel-scoped snapshot would wipe the classic-mode globals with undefined; this writes

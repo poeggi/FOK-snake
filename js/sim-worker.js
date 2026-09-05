@@ -94,10 +94,6 @@ self._rbRollback = function(toTick){
     if(r && (!_dcRewTo || toTick < _dcRewTo)) _dcRewTo = toTick;
     return r;
 };
-// Online, the arming stage's real transitions go through the input path (wire + log);
-// local 1:1 / classic keep the default straight-to-sim issue.
-const _armIssueSim = simArmIssue;
-self.simArmIssue = (p, kind, d) => { if (_dcOn) netLocalInput(kind, 0, d, true); else _armIssueSim(p, kind, d); };
 // Phase is SET, only when the shared grid moves (duel start, and a re-anchor via
 // duelClock). Seed the accumulator so ticks fire mid-window on the grid. NOT polled:
 // e = ft - simTick - 0.5 sweeps a full unit every tick period, so a continuous detector

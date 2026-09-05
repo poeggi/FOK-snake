@@ -1254,14 +1254,6 @@ function _netPeerInput(m, srcIdx){
     // tick reaches the identical state as N separate rollbacks would, at a fraction of the cost.
     if(earliest < _rbRewindTo) _rbRewindTo = earliest;
 }
-// In-process ONLINE home: the arming stage's real transitions go through the input
-// path (wire + log). Local 1:1 and classic keep the straight-to-sim default; the
-// worker home installs its own wrapper over this one (sim-worker.js).
-{ const _armSim = simArmIssue;
-  simArmIssue = (p, kind, d) => {
-      if(netGameActive() && !(typeof netWorkerDuelOn === 'function' && netWorkerDuelOn())) netLocalInput(kind, 0, d, true);
-      else _armSim(p, kind, d);
-  }; }
 // Local input during an online duel. It is applied IMMEDIATELY -- exactly like
 // single player -- and also logged for the tick it belongs to, so a rollback
 // re-simulation reproduces it.
