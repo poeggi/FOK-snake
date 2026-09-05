@@ -87,6 +87,48 @@ const driver = `
     }
     R.steps.push('1:1, pill up: identical outcome to single player for BOTH players ('+CLASSIC_LEN+' left, '+CLASSIC_LOST+' lost)');
 
+    // ---- a bite outlives the death that follows it ----
+    // The shortening is permanent. A death restarts the level from the carried baseline
+    // (_levelStartLen), so if the bite did not lower that baseline the respawn would hand
+    // the whole tail back and the bite would read as a temporary graze. Level 3 is used
+    // because its natural start length (5) is longer than what the fixture bites down to.
+    const atLevel = (lvl)=>{
+      simCommand({t:'start', seed:99});
+      level=lvl; _levelStartLen=0; beginLevel();
+      phase='playing'; spawnAt=-100000;
+      gem=null; heart=null; powerPellet=null; timeCrystal=null; bars=[]; _barsV++;
+      _gourangaActive=false;
+    };
+    atLevel(3);
+    const NAT = _levelStartLen;
+    A(NAT===5, 'level 3 no longer starts at 5 segments (got '+NAT+'), so this case proves nothing');
+    beginLevel(true);
+    A(snake.length===NAT, 'a respawn with no bite did not return the level start length (control)');
+    R.steps.push('control: a plain respawn returns the level start length ('+NAT+')');
+
+    atLevel(3);
+    _powerMode=true; _powerModeAt=simNow;
+    snake=cp(); dir={x:0,y:1}; dirQueue=[];
+    step(simNow);
+    const BITTEN = snake.length;
+    A(BITTEN===BITE_AT+1, 'the fixture did not bite down to '+(BITE_AT+1)+' (got '+BITTEN+')');
+    A(BITTEN < NAT, 'the fixture bites to '+BITTEN+', which is not shorter than the level start '+NAT);
+    A(_levelStartLen===BITTEN, 'the bite left the respawn baseline at '+_levelStartLen+', expected '+BITTEN);
+    beginLevel(true);
+    A(snake.length===BITTEN, 'the respawn handed the tail back: came back at '+snake.length+', expected '+BITTEN);
+    R.steps.push('a bite survives the death after it: respawn at '+BITTEN+', not the level start '+NAT);
+
+    // ...and it only ever shortens. A bite that leaves the snake longer than the baseline
+    // must not stretch the respawn to match it, or eating would quietly become permanent too.
+    atLevel(1);
+    const NAT1 = _levelStartLen;
+    _powerMode=true; _powerModeAt=simNow;
+    snake=cp(); dir={x:0,y:1}; dirQueue=[];
+    step(simNow);
+    A(snake.length > NAT1, 'the level-1 fixture no longer ends up longer than the start length');
+    A(_levelStartLen===NAT1, 'a bite that left the snake longer still moved the baseline to '+_levelStartLen);
+    R.steps.push('the baseline only ever falls: a bite ending longer than the level start leaves it at '+NAT1);
+
     // ---- the floor ----
     // A bite so shallow it would leave a head with no body reads as a broken render rather
     // than a hit taken, so the chomp goes as deep as it can and stops. Unreachable by

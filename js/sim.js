@@ -908,6 +908,13 @@ function step(now) {
     if(selfAt > 0){
         const n = snake.length;
         _powerBite(snake, selfAt);
+        // A bite is permanent, death included: the length you come back at drops with it, so
+        // a respawn never hands back a tail already lost -- you grow again from where the
+        // bite left you. The baseline only ever falls here; the level's own start length
+        // still applies to anything longer. (Classic bookkeeping: a duel respawn is a fixed
+        // DUEL_LEN by match rule, so there is no carried baseline there to lower. The
+        // shortening itself is _powerBite, the one implementation every mode calls.)
+        if(_levelStartLen > snake.length) _levelStartLen = snake.length;
         emit({t:'bite', p:0, x:head.x, y:head.y, n:n - snake.length});
     }
 }
