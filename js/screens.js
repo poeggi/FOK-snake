@@ -1739,8 +1739,11 @@ function drawTourneyCode(){
     ctg('JOIN CODE', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
     // MAX players, not the count: this screen exists to be pointed a camera at, and what the
     // person holding that camera needs to know is how big the room they are joining can get.
-    // The number of people already in it is on the lobby they land in a second later.
-    ct((t.code || '------') + '   MAX PLAYERS: ' + tourneyMax(), CW/2, 50, '#ffd700', FONT.MENU);
+    // The number of people already in it is on the lobby they land in a second later. It is
+    // grey because the line is not two facts of equal weight: the CODE is what is being
+    // handed over, and the room's size is a note about it.
+    _ttRun([[t.code || '------', '#ffd700'], ['   MAX PLAYERS: ' + tourneyMax(), '#888']],
+           50, FONT.MENU);
     // Deliberately the MY ID screen's geometry, down to the module size: the two screens do the
     // same job -- hold a phone up to this -- and a person who has held one up already should
     // not have to work out that they are looking at the same thing again.
