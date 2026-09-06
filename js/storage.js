@@ -366,7 +366,7 @@ async function cloudBackup(silent) {
     try {
         const snap=_saveSnapshot(); snap.crc=_sumOf(snap);
         const payload=JSON.stringify(snap);
-        const _post=(body)=>fetch(NET_BASE+'/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const _post=(body)=>netBgFetch('/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const tok=getCloudToken();
         let r=await _post(tok ? { id:getPlayerId(), payload, token:tok } : { id:getPlayerId(), payload });
         let j=await r.json().catch(()=>null);
@@ -404,7 +404,7 @@ async function cloudRestore() {
     if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=simNow; return; }
     _dataMsg='CLOUD RESTORE...'; _dataMsgAt=simNow;
     try {
-        const r=await fetch(NET_BASE+'/api/backup.php?id='+getPlayerId()+'&token='+encodeURIComponent(tok));
+        const r=await netBgFetch('/api/backup.php?id='+getPlayerId()+'&token='+encodeURIComponent(tok));
         const j=await r.json().catch(()=>null);
         if(r.status===200 && j && j.ok && typeof j.payload==='string'){
             let d=null; try{ d=JSON.parse(j.payload); }catch(e){}

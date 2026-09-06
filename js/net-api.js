@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 4;   // built against 4.4 (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; server-set pacing in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 4;   // built against 4.4, including its RE-RELEASE (the roster on hello's `friends_list`, and `pace.gap_ms`: both feature-detected, never version-gated, because a server may answer to 4.4 without them) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; server-set pacing in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -176,6 +176,10 @@ function _netSigLog(line){ _netDbg.sigLog.unshift(line); if(_netDbg.sigLog.lengt
 // flowing, so it schedules against nothing -- and counting it would mean never anchoring
 // on a matchmaking screen, where a poll is open by design, all of the time.
 var _netFlight = 0;
+// The high-water mark of that count. A 135ms wait read against a 3 here is this client
+// queueing behind itself; the same wait against a 1 is a genuinely busy host, and they
+// are different problems. Never reset -- it is the worst moment of the session.
+var _netFlightMax = 0;
 // q_ms is how long a request waited for a PHP worker BEFORE any PHP ran. It is the one
 // figure no client can measure for itself: the wait is over before our code starts, and
 // inside our round trip it is indistinguishable from network delay. A non-trivial reading
@@ -195,12 +199,69 @@ var _netResync = false;
 // occupies a PHP worker for its whole duration, so a server under pressure withdraws
 // holding first and widens the intervals after. A 4.3 server sends none of this, and then
 // these defaults -- exactly what this client did before -- stand.
-var _netPace = { hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0 };
+var _netPace = { hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0, gap_ms:0 };
 // The jitter offset is drawn ONCE per session and kept: it exists so that clients which
 // started together do not stay together, and re-drawing it per request would be noise that
 // never separates anybody. Re-drawn only when a shrunk budget no longer contains it.
 var _netSpread = -1;
 function netPaceSpread(){ return _netSpread > 0 ? _netSpread : 0; }
+// How many 1s ticks apart an UNHELD mailbox read sits. The server's own poll_ms is the
+// cadence it asked for; the ceiling is what keeps a signal from expiring unread.
+const NET_UNHELD_MAX_S = 15;
+function _netUnheldEvery(){
+    const s = _netPace.poll_ms > 0 ? Math.round(_netPace.poll_ms / 1000) : NET_UNHELD_MAX_S;
+    return Math.max(1, Math.min(NET_UNHELD_MAX_S, s));
+}
+// ---- the background gate (`pace.gap_ms`, 4.4) ----
+// What a request costs this host is not its bytes: it is the slice it waits for a PHP
+// worker before any PHP runs, and that slice is paid PER REQUEST IN FLIGHT. Two of ours
+// leaving in the same instant pay it twice -- which is what a 135ms hello and a 127ms
+// friend list from one client in one second are a picture of.
+//
+// So background traffic -- the heartbeat, the roster, items, the cloud backup, scores --
+// goes out ONE AT A TIME through here, spaced by the gap the server asked for and never
+// beside anything else of ours. None of it is anything a player is waiting for. The duel
+// path (signal, start, poll, match) does NOT come through here: that is the latency a
+// player feels, and delaying it would be spending the thing we are trying to buy.
+const NET_GAP_MS = 250;        // the spacing to keep when the server names none
+const NET_GAP_MAX_MS = 2000;   // ...and the most one may ask for; background must not stall outright
+const NET_GAP_STEP_MS = 20;
+const NET_GAP_TRIES = 40;      // ~2s of patience, counted in steps rather than measured
+function _netGapMs(){ return _netPace.gap_ms > 0 ? _netPace.gap_ms : NET_GAP_MS; }
+var _netSentAt = 0;            // when the last request of ours -- either lane -- went out
+var _netGapQ = null;           // the tail of the background queue
+// How long a background request must still wait, or 0 for "go now". THE rule, kept apart
+// from the waiting so it can be read at a glance and tested without a clock:
+//   anything of ours in flight -> wait, whatever the time says. This is the whole point.
+//   otherwise -> whatever is left of the gap since the last request went out.
+// _netFlight deliberately does not count a HELD poll: it is parked server-side with nothing
+// flowing, so it schedules against nothing -- and counting it would stall every heartbeat
+// behind the poll a lobby holds open by design.
+function _netGapWait(now, flight){
+    if(flight > 0) return NET_GAP_STEP_MS;
+    return Math.max(0, _netSentAt + _netGapMs() - now);
+}
+function _netGate(){
+    // No timer host, no pacing: the same line the heartbeat and the connect timers draw.
+    // A build without one cannot schedule anything anyway, so gating there would only park
+    // traffic against a wait that never comes due. The RULE above is what is worth testing,
+    // and it is a pure function precisely so it can be tested without a clock.
+    if(!_netTimers) return Promise.resolve();
+    const run = async () => {
+        // Counted, NOT clock-bounded: a request whose promise never settles would leave a
+        // clock-bounded wait spinning for ever. Past the count we go anyway -- a background
+        // request delayed for ever is a heartbeat never sent, and that reads as offline.
+        for(let i = 0; i < NET_GAP_TRIES; i++){
+            const w = _netGapWait(Date.now(), _netFlight);
+            if(w <= 0) break;
+            await new Promise(res => setTimeout(res, Math.min(w, _netGapMs())));
+        }
+        _netSentAt = Date.now();
+    };
+    const p = (_netGapQ || Promise.resolve()).then(run, run);
+    _netGapQ = p;
+    return p;
+}
 function _netPaceOf(j){
     const p = j && j.pace;
     if(!p || typeof p !== 'object') return;
@@ -208,6 +269,10 @@ function _netPaceOf(j){
     if(typeof p.poll_ms   === 'number') _netPace.poll_ms   = Math.max(0, Math.min(60000, p.poll_ms|0));
     if(typeof p.hold      === 'boolean') _netPace.hold     = p.hold;
     if(typeof p.spread_ms === 'number') _netPace.spread_ms = Math.max(0, Math.min(60000, p.spread_ms|0));
+    // FEATURE-DETECTED, never version-gated: gap_ms arrives on a re-release of the same
+    // MINOR, so a 4.4 server may or may not name it. Absent means our own default rather
+    // than no spacing at all -- the collision it separates is ours either way.
+    if(typeof p.gap_ms === 'number') _netPace.gap_ms = Math.max(0, Math.min(NET_GAP_MAX_MS, p.gap_ms|0));
     if(_netSpread < 0 || _netSpread > _netPace.spread_ms)
         _netSpread = _netPace.spread_ms ? Math.floor(Math.random() * _netPace.spread_ms) : 0;
 }
@@ -222,9 +287,13 @@ function _netIcesPeerOk(v){ const m = /^\s*v?(\d+)/i.exec(String(v || '')); retu
 // ---- transport (soft-fail JSON; null = any kind of failure) ----
 // Returns {status, json}: json is null unless the server said ok. status 0 = the
 // request never completed. Callers that only care "did it work" use _netPost.
-async function _netPostRes(path, body){
+async function _netPostRes(path, body, bg){
     if(!_netOk()) return { status:0, json:null };
+    if(bg) await _netGate();
+    if(!_netOk()) return { status:0, json:null };   // the gate is a wait, and offline can be switched on inside it
     _netFlight++;   // ...so the clock sync can tell a quiet wire from this one
+    _netSentAt = Date.now();
+    if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
     try {
         const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), cache:'no-store', priority:'high' });
         _netDbg.lastSrvAt = performance.now();   // a POST always carries data both ways = real communication
@@ -236,12 +305,16 @@ async function _netPostRes(path, body){
     } catch(e){ return { status:0, json:null, body:null, err:'' }; }
     finally { _netFlight--; }
 }
-async function _netPost(path, body){ return (await _netPostRes(path, body)).json; }
-async function _netGet(path, signal, held){
+async function _netPost(path, body, bg){ return (await _netPostRes(path, body, bg)).json; }
+async function _netGet(path, signal, held, bg){
+    if(!_netOk()) return null;
+    if(bg) await _netGate();
     if(!_netOk()) return null;
     // held: a long poll parked server-side with nothing flowing. It schedules against
     // nothing, so it does not make the wire busy for the clock sync's purposes.
     if(!held) _netFlight++;
+    _netSentAt = Date.now();
+    if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
     try {
         // no-store: never let an intermediary cache a held-poll reply; high priority:
         // these are the match's critical path, ahead of any incidental page fetch.
@@ -259,6 +332,19 @@ async function _netGet(path, signal, held){
         return (j && j.ok) ? j : null;
     } catch(e){ return null; }
     finally { if(!held) _netFlight--; }
+}
+// Background traffic that cannot use the helpers above: the cloud backup reads the raw
+// response because it acts on 403 / 404 / 413 itself, which a soft-fail helper has already
+// thrown away. It is still this client's traffic, so it is still counted (the clock sync
+// must see it) and still paced (the gate must see it) -- the request a client sends least
+// often is the last one that should be invisible to both.
+async function netBgFetch(path, opt){
+    await _netGate();
+    _netFlight++;
+    _netSentAt = Date.now();
+    if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
+    try { return await fetch(NET_BASE + path, opt); }
+    finally { _netFlight--; }
 }
 // Every caller ignored the result of this, so the server REFUSING a signal was
 // indistinguishable from success: a 403 (no accepted friendship), a 400 (our clock
@@ -712,7 +798,8 @@ function netDebugInfo(){
              // requests the batching actually saved, and srvQueueMs is the server telling
              // us how long its last answer waited for a worker.
              iceSignals:_netDbg.iceTx|0, iceBatches:_netDbg.iceBat|0, srvQueueMs:_netDbg.qMs|0,
-             pace:{ helloMs:_netPace.hello_ms, pollMs:_netPace.poll_ms, hold:_netPace.hold, spreadMs:netPaceSpread() },
+             pace:{ helloMs:_netPace.hello_ms, pollMs:_netPace.poll_ms, hold:_netPace.hold, spreadMs:netPaceSpread(), gapMs:_netGapMs(), roster:_netFrHello ? 'hello' : 'friend' },
+             flightMax:_netFlightMax,
              counts:_netCounts };
 }
 
@@ -760,6 +847,11 @@ async function _netHello(){
     if(Date.now() - _netLat.at > 180000 && !netHostBusy()) _netTimeSync(true);   // re-measure every few minutes (lands next hello) -- but never into a queue we were just told about
     if(_netSess && _netSess.game) body.duel_with = _netSess.peer;
     if(phase === 'lobby' || phase === 'friends') body.friends = getFriends().slice(0,64);
+    // The ROSTER, which the friends_* maps above are not: they answer for ids we already
+    // named, this is who our friends ARE -- pending rows, outgoing rows, names for ids this
+    // device has never seen. Asked for only on the screen that shows it, and only so that
+    // screen stops sending a friend.php list beside a heartbeat it was sending anyway.
+    if(phase === 'friends') body.friends_list = true;
     // The announce is served only when asked for, so ask only while it can be seen.
     if(phase === 'tourneyLobby') body.tourneys = true;
     // Our own public addresses, both families (see net-rtc.js: the server can only observe the
@@ -781,7 +873,7 @@ async function _netHello(){
     // by itself ('self'), and deriving one from the other would erase that difference.
     if((cfg.debug|0) > 0) body.debug = true;
     const t0 = performance.now();
-    const r = await _netPost('/api/hello.php', body);
+    const r = await _netPost('/api/hello.php', body, true);
     _netHelloBusy = false;
     if(r){ _netDbg.rtt = performance.now() - t0; if(r.now) _netDbg.srvOfs = r.now + _netDbg.rtt/2 - Date.now(); }   // now = server PTS in ms
     // Undelivered signals expire server-side after 30s; we bail a bit sooner
@@ -815,6 +907,11 @@ async function _netHello(){
     if(r.friends_online) _netFriendsOnline = r.friends_online;
     _netFriendsPlaying = r.friends_playing || {};   // absent on a pre-4.1 server: nobody is watchable
     if(body.tourneys) _netTourneys = Array.isArray(r.tourneys) ? r.tourneys : [];
+    // FEATURE-DETECTED, never version-gated: the roster on hello is a re-release of 4.4,
+    // so a server answering "4.4" may or may not carry it. It answered once = it answers,
+    // and the periodic friend.php list stands down. It never answered = that call stays,
+    // which is the whole reason this is a fallback and not a minor check.
+    if(body.friends_list && Array.isArray(r.friends)){ _netFrHello = true; _netFrAdopt(r.friends, false); }
     if(r.friends_latency) _netFriendsLat = r.friends_latency;
     if(r.friends_name) for(const k in r.friends_name) _netNameSeen(k, r.friends_name[k]);   // authorization-gated: accepted friends only
     _netFrFlushRemovals();
@@ -875,6 +972,13 @@ let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 // down, keep-alive reuses it for the next one. Re-arming happens the moment a
 // response lands (below) rather than on the next tick, so exactly one request is
 // outstanding at all times and the link is never left idle.
+// A duel is being SET UP: an offer out, an offer in, or a session that has not started
+// playing yet. It is the window where everything else this client sends competes with the
+// handshake for the same worker pool, and the handshake is the part a player is watching.
+function netForming(){
+    return !!(_netHs.offerTo || _netHs.sent || _netHs.accepting || (_netSess && !_netSess.game)
+           || (typeof specHandshaking === 'function' && specHandshaking()));
+}
 async function _netPollOnce(){
     if(_netPollBusy || !_netOk() || !_netPollDue()) return;
     // The tournament screens are matchmaking screens like the rest, and hold like them:
@@ -891,6 +995,21 @@ async function _netPollOnce(){
     // idle client costs a busy host); the 1 Hz tick below then carries the mailbox instead,
     // which is slower per signal but costs the server a worker only while it answers.
     const held = _netPace.hold && _netPace.poll_ms > 0 && _held;
+    // Withdrawing the hold must not COST the server requests. Falling back to the 1s tick
+    // sends nine unheld polls where the 9s held one sent a single request: cheaper per
+    // request, nine times as many of them, and the count in flight is the thing the whole
+    // pacing contract is about. So when we wanted to hold and were not allowed to, read the
+    // mailbox at the cadence the server named instead -- "poll without waiting and lean on
+    // the heartbeat". Never further apart than an undelivered signal's 30s life, which is
+    // also why poll_ms 0 does not mean never.
+    //
+    // ONLY while merely browsing, which is also the only tier the server withdraws the hold
+    // from first. Anything with a handshake in flight keeps the 1s tick: the offer ladder
+    // retries every 2s and gives up after three, so a mailbox read that lands seconds late
+    // would answer an offer that has already been abandoned at the other end.
+    const _idle = !_netSess && !netForming()
+               && !(typeof tourneyActive === 'function' && tourneyActive());
+    if(_held && !held && _idle && (_netPollTick % _netUnheldEvery())) return;
     const wait = Math.max(1, Math.min(9, Math.round(_netPace.poll_ms / 1000)));
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
@@ -915,7 +1034,11 @@ if(_netTimers) setInterval(()=>{
     // The tournament lobby belongs in this set for the same reason: its announce list
     // rides on hello and NOTHING else, so on the 30s heartbeat alone a tournament
     // somebody just created stayed invisible for half a minute.
-    if((phase === 'lobby' || phase === 'friends' || phase === 'friendId' || phase === 'tourneyLobby') && _netPollTick % 5 === 0){ _netHello(); if(phase === 'friends') _netFrRefresh(false); }   // keep auto_accept fresh on the QR screen
+    if((phase === 'lobby' || phase === 'friends' || phase === 'friendId' || phase === 'tourneyLobby') && _netPollTick % 5 === 0) _netHello();   // keep auto_accept fresh on the QR screen
+    // The roster rides that heartbeat wherever the server serves it (friends_list above).
+    // Where it does not, the list is still a second request -- but on its OWN tick, never
+    // the heartbeat's: two requests leaving in one tick is the collision this pays for.
+    if(phase === 'friends' && !_netFrHello && _netPollTick % 5 === 2) _netFrRefresh(false);
     _netPollOnce();
 }, 1000);
 
@@ -934,7 +1057,14 @@ if(typeof document !== 'undefined' && document.addEventListener){
         const awayMs = _netHiddenAt ? Date.now() - _netHiddenAt : 0; _netHiddenAt = 0;
         _netPollAbortNow();
         _netHelloBusy = false;
-        if(_netOk()){ _netTimeSync(true).then(()=>_netHello()); _netHello(); if(phase === 'friends') _netFrRefresh(false); }
+        // SEQUENCED, not fanned out. This used to fire a clock sync, a heartbeat and a
+        // roster read into the same instant -- and the clock sample was then taken against
+        // the two requests standing beside it, which is the one thing a sample must never
+        // be. A resume is exactly when a client re-anchors, so a sample polluted here lands
+        // in the offset the whole lockstep timeline hangs from. Heartbeat first (it is what
+        // tells the server we are back), the anchor second, once the wire is our own again;
+        // the roster comes with the heartbeat or on its own tick above.
+        if(_netOk()) _netHello().then(()=>_netTimeSync(true), ()=>_netTimeSync(true));
         // A screen-off/background almost always kills the p2p transport (ICE times out while
         // suspended), but performance.now() and the timers freeze -- so the silence timer can
         // miss it on wake. Measure the away time on the WALL clock and rebuild if it was more
@@ -995,6 +1125,9 @@ if(typeof window !== 'undefined' && window.addEventListener) window.addEventList
 // them -- the local list is just the UI seed. Adds run the request handshake,
 // removals reach the server (queued through localStorage when offline). ----
 let _netFr = { list:null, at:0, loading:false, sel:0, confirm:null, confirmSel:1, msg:'' };
+// Has a hello ever come back carrying the roster? Latched on the first one that does, and
+// never re-checked: this is a property of the server, not of a response.
+var _netFrHello = false;
 var _netMyIdAt = 0;   // last moment the MY ID screen (our QR) was on display
 // Friendships that reached ACCEPTED at least once: an accepted id vanishing from
 // the authoritative server list means the PEER removed it -- mirror that locally.
@@ -1012,10 +1145,13 @@ function netFriendBanned(){ return Date.now() < _netFrBannedUntil; }
 // after a streak, on top of the 1h spam ban. retry_after carries the wait in seconds;
 // without it (a pre-3.5 server, or a body-less 429) fall back to a minute.
 function _netFrWait(res){ const w = res.body && +res.body.retry_after; return w > 0 ? Math.min(w, 3600) : 60; }
-function _netFriendApi(action, peer){
+// bg: everything periodic or deferred -- the roster read and the queued removals -- is
+// paced with the rest of the background traffic. A 'request' is NOT: the invite path
+// awaits it before it may offer at all, so a gap there is a gap in a duel setup.
+function _netFriendApi(action, peer, bg){
     const body = { id: getPlayerId(), action };
     if(peer) body.peer = peer;
-    return _netPostRes('/api/friend.php', body).then(res => {
+    return _netPostRes('/api/friend.php', body, bg).then(res => {
         if(res.status === 429) _netFrBannedUntil = Date.now() + _netFrWait(res)*1000;   // re-checked, not trusted: quiet for the stated wait, then try again
         return res.json;
     });
@@ -1079,36 +1215,47 @@ function netFriendVerify(id){
 }
 function netFriendsEnter(){
     _netFr.sel = 0; _netFr.confirm = null; _netFr.msg = '';
-    _netFrRefresh(true);
+    // The screen wants the roster NOW, not up to 5s from now, so something is sent either
+    // way -- but where the server serves the roster on the heartbeat, that something is the
+    // heartbeat, which brings the presence maps with it for the same one request. friend.php
+    // stays the route until we know the flag is answered; the migration it runs has already
+    // happened once at startup regardless of which route this screen takes.
+    if(_netFrHello) _netHello();
+    else _netFrRefresh(true);
 }
 function _netFrRefresh(migrate){
     if(!_netOk() || _netFr.loading) return;
     _netFr.loading = true;
-    _netFriendApi('list').then(r => {
+    _netFriendApi('list', null, true).then(r => {
         _netFr.loading = false;
-        if(!r || !Array.isArray(r.friends)) return;
-        _netFr.list = r.friends; _netFr.at = Date.now();
-        const seen = {};
-        for(const f of r.friends){
-            seen[f.id] = true;
-            if(f.name) _netNameSeen(f.id, f.name);
-            if(f.state === 'accepted') _netFrOkMark(f.id);
-            // an incoming request from someone we also added locally: accept right away
-            if(f.state === 'pending' && !f.outgoing && getFriends().indexOf(f.id) >= 0) _netFrAccept(f.id);
-        }
-        for(const id of getFriends()){
-            if(seen[id]) continue;
-            if(_netFrOk[id]){
-                // Was accepted, now gone from the server: the peer ended it. Mirror
-                // the removal -- one side cancelled means GONE, no manual cleanup.
-                removeFriend(id); _netFrOkClear(id);
-                const gnm = netFriendName(id) || fmtFriendId(id);
-                _netFr.msg = gnm + ' REMOVED THE FRIENDSHIP';
-                _netLb.msg = _netFr.msg; _duelMsg = _netFr.msg; _duelMsgAt = _msgNow();
-            } else if(migrate) netFriendRequest(id);   // never synced: run the handshake
-        }
-        _uiDirty = true;
+        if(r && Array.isArray(r.friends)) _netFrAdopt(r.friends, migrate);
     });
+}
+// THE one place a roster is read, whichever request brought it. hello's friends_list and
+// friend.php's list answer byte for byte, and a roster that meant different things by the
+// route it arrived on would be a roster nothing could trust.
+function _netFrAdopt(list, migrate){
+    _netFr.list = list; _netFr.at = Date.now();
+    const seen = {};
+    for(const f of list){
+        seen[f.id] = true;
+        if(f.name) _netNameSeen(f.id, f.name);
+        if(f.state === 'accepted') _netFrOkMark(f.id);
+        // an incoming request from someone we also added locally: accept right away
+        if(f.state === 'pending' && !f.outgoing && getFriends().indexOf(f.id) >= 0) _netFrAccept(f.id);
+    }
+    for(const id of getFriends()){
+        if(seen[id]) continue;
+        if(_netFrOk[id]){
+            // Was accepted, now gone from the server: the peer ended it. Mirror
+            // the removal -- one side cancelled means GONE, no manual cleanup.
+            removeFriend(id); _netFrOkClear(id);
+            const gnm = netFriendName(id) || fmtFriendId(id);
+            _netFr.msg = gnm + ' REMOVED THE FRIENDSHIP';
+            _netLb.msg = _netFr.msg; _duelMsg = _netFr.msg; _duelMsgAt = _msgNow();
+        } else if(migrate) netFriendRequest(id);   // never synced: run the handshake
+    }
+    _uiDirty = true;
 }
 function _netFrAccept(id){
     _netFrOkMark(id);
@@ -1130,14 +1277,14 @@ function _netFrRemove(id){
     if(_netFr.list) _netFr.list = _netFr.list.filter(f => f.id !== id);
     delete _netFrRequested[id];
     _netFr.msg = 'REMOVED ' + (netFriendName(id) || fmtFriendId(id));
-    const done = _netFriendApi('remove', id);
+    const done = _netFriendApi('remove', id, true);
     if(done && done.then) done.then(r => { if(!r){ const q=_netFrRmQueue(); if(q.indexOf(id) < 0){ q.push(id); _netFrRmSave(q); } } });
     _uiDirty = true;
 }
 function _netFrFlushRemovals(){
     const q = _netFrRmQueue();
     if(!q.length || !_netOk()) return;
-    for(const id of q.slice()) _netFriendApi('remove', id).then(r => { if(r) _netFrRmSave(_netFrRmQueue().filter(x => x !== id)); });
+    for(const id of q.slice()) _netFriendApi('remove', id, true).then(r => { if(r) _netFrRmSave(_netFrRmQueue().filter(x => x !== id)); });
 }
 // Rows for the FRIENDS screen: the server list is authoritative when present;
 // local-only ids show as NOT SYNCED (handshake pending / offline).
@@ -1172,27 +1319,42 @@ function netSubmitScore(name, sc, lvl, completed){
         seed: _netSeed, inputs: _netInputs,
         completed: !!completed,   // the run CLEARED level 10 (a win), not merely reached it
         pts: netPts() != null ? netPts() - 50 : undefined,   // the game-over moment on the PTS clock
-    }).then(r => { if(r){ _netScores = null; _netScoresAt = 0; } });   // bust the cache: the tab shows the fresh board
+    }, true).then(r => { if(r){ _netScores = null; _netScoresAt = 0; } });   // bust the cache: the tab shows the fresh board
 }
 let _netScores = null, _netScoresAt = 0, _netScoresLoading = false;
 function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, single-flight
     if(!_netOk() || _netScoresLoading) return;
     if(_netScores && Date.now() - _netScoresAt < 60000) return;
     _netScoresLoading = true; _uiDirty = true;
-    _netGet('/api/scores.php?limit=100').then(r => {
+    _netGet('/api/scores.php?limit=100', undefined, false, true).then(r => {
         _netScoresLoading = false;
         if(r && Array.isArray(r.scores)){ _netScores = r.scores; _netScoresAt = Date.now(); }
         _uiDirty = true;
     });
 }
 
+// How long until the next heartbeat. The beat re-arms itself rather than sitting on a fixed
+// interval, so the server can move it (`pace.hello_ms`) and so this session's own jitter
+// offset rides on it -- which is what keeps a roomful of clients that booted together from
+// beating together.
+//
+// That offset is a one-time PHASE shift, and it SHORTENS the interval it lands on. Adding it
+// to every interval instead would make the real period hello_ms + spread_ms: longer than the
+// beat the server asked for, and past the 60s presence window at the wider end of what the
+// two fields may legally say together -- a client that beats every 65s is a client the
+// server reports as offline and whose duel it times out. Shifting the phase once separates a
+// roomful just as well and can never overshoot.
+var _netPhased = false;
+function _netBeatMs(){
+    const d = Math.max(5000, _netPace.hello_ms);
+    if(_netPhased || netPaceSpread() <= 0) return d;
+    _netPhased = true;
+    return Math.max(5000, d - netPaceSpread());
+}
 // ---- boot: the ~30s heartbeat, always-on while online is allowed. First one after
 // a short delay so boot itself never touches the network path. All soft-fail. ----
 if(_netTimers){
-    // The heartbeat re-arms itself rather than sitting on a fixed interval, so the server
-    // can move it (`pace.hello_ms`) and so this session's own jitter offset rides on it --
-    // which is what keeps a roomful of clients that booted together from beating together.
-    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, Math.max(5000, _netPace.hello_ms + netPaceSpread())); })();
+    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, _netBeatMs()); })();
     setTimeout(_netHello, 3000);
     setTimeout(()=>{ if(_netOk()) _netFrRefresh(true); }, 3500);   // contract: reconcile the local friend list vs the server at startup
     // Sync the clock DURING the coin-drop splash (bounded) so menu music can start already

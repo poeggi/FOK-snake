@@ -160,10 +160,19 @@ function _itemSeqOfUid(uid){
 }
 // Ask for a drain soon. Cheap and idempotent: a drain already running, or a
 // backoff not yet expired, just leaves the timer alone.
+// A duel being SET UP is the one window worth delaying a drain for: the handshake is what
+// the player is actually waiting for, and this queue has its own retry ladder and loses
+// nothing by draining a moment later.
+// ONE wait, decided when the drain is asked for and never re-taken: re-checking on the way
+// out would re-arm itself for as long as the answer stayed yes, and 'forming' is not bounded
+// by the offer ladder alone -- a session parked before its game (a reconnect, a spectator
+// ladder) holds it indefinitely. An item queue that never drains is worse than a drain that
+// lands beside a handshake: an unsent loss claim is a peer's gain nobody ever settles.
+const ITEM_FORM_MS = 1000;
 function itemKick(){
-    if(_itemBusy || !_itemOnline()) return;
-    const wait = Math.max(0, _itemRetryAt - Date.now());
-    if(_itemTimer) return;
+    if(_itemBusy || !_itemOnline() || _itemTimer) return;
+    const forming = typeof netForming === 'function' && netForming();
+    const wait = Math.max(0, _itemRetryAt - Date.now(), forming ? ITEM_FORM_MS : 0);
     _itemTimer = setTimeout(() => { _itemTimer = 0; itemFlush(); }, wait);
 }
 // Retry at the current delay and THEN grow it, so the first attempt after a blip comes
@@ -193,7 +202,7 @@ async function itemFlush(){
         while(mq.length){
             const m = mq[0];
             const r = await _netPostRes(ITEM_API, { action:'mint', id:getPlayerId(),
-                                                    item_id:m.id, origin:m.origin });
+                                                    item_id:m.id, origin:m.origin }, true);
             if(_itemSoft(r.status)){ _itemFail(); return; }   // incl. 429 over the hourly cap
             if(r.json && ITEM_UID_RE.test(r.json.uid || '')){
                 // Only record it if we still hold the item: it may have been lost
@@ -230,7 +239,7 @@ async function itemFlush(){
                            from:c.from, to:c.to, tick:c.tick|0, seq:c.seq|0,
                            ws_digest:c.digest, my_tag:c.myTag };
             if(c.peerTag) body.peer_tag = c.peerTag;
-            const r = await _netPostRes(ITEM_API, body);
+            const r = await _netPostRes(ITEM_API, body, true);
             if(_itemSoft(r.status)){ _itemFail(); return; }
             if(r.json && Number.isInteger(r.json.seq) && c.item && c.to === getPlayerId()){
                 // Settled, confirmed or held, the server's seq is the one a later
@@ -295,14 +304,14 @@ async function itemSync(){
         // where the player enrolled, and guards the whole thing with a
         // players.items_seeded flag, so a retry after a timeout cannot double-mint.
         const owned = _itemCatalog().filter(o => (cfg.shopItems || {})[o.id]).map(o => o.id);
-        const r = await _netPostRes(ITEM_API, { action:'seed', id, items:owned });
+        const r = await _netPostRes(ITEM_API, { action:'seed', id, items:owned }, true);
         if(!r.json || !Array.isArray(r.json.items)) return;   // stay unseeded and try again later
         cfg.itemsSeeded = 1;
         const reg = _itemReg();
         for(const it of r.json.items) if(ITEM_UID_RE.test(it.uid || '')) reg[it.item_id] = { uid:it.uid, seq:0 };
         saveCfg();
     }
-    const r = await _netPostRes(ITEM_API, { action:'list', id });
+    const r = await _netPostRes(ITEM_API, { action:'list', id }, true);
     if(!r.json || !Array.isArray(r.json.items)) return;
     const si = cfg.shopItems || (cfg.shopItems = {});
     const wi = cfg.wornItems || (cfg.wornItems = {});

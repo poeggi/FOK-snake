@@ -436,6 +436,34 @@ runTest('SMOKE-NET', `
         _netPaceOf({pace:{hold:true, poll_ms:0}});
         poll();
         if(/wait=/.test(_url||'')) throw 'poll_ms 0 must withdraw the hold as well, got ' + _url;
+        // ...and an unheld poll must not cost the server MORE requests than the held one it
+        // replaced. Nine unheld polls a second apart where one 9s hold used to sit is the
+        // opposite of what withdrawing the hold is for, so an idle browsing client reads the
+        // mailbox at the cadence the server named instead.
+        _netPace={hello_ms:30000, poll_ms:9000, hold:false, spread_ms:0};
+        const _oTick=_netPollTick, _oSess=_netSess, _oSent=_netHs.sent, _oAcc=_netHs.accepting;
+        _netSess=null; _netHs.sent=null; _netHs.accepting=null;
+        let _hits=0;
+        for(let i=0;i<27;i++){ _netPollTick=i; poll(); if(_url) _hits++; }
+        if(_hits!==3) throw 'an idle unheld poll must land on the served cadence (3 in 27s), got ' + _hits;
+        // But only while merely browsing. The offer ladder retries every 2s and gives up
+        // after three, so a handshake in flight keeps the 1s tick whatever the pace says --
+        // a mailbox read seconds late would answer an offer already abandoned at the far end.
+        _netHs.offerTo='deadbeef';
+        _hits=0;
+        for(let i=0;i<9;i++){ _netPollTick=i; poll(); if(_url) _hits++; }
+        _netHs.offerTo=null; _netPollTick=_oTick;
+        _netSess=_oSess; _netHs.sent=_oSent; _netHs.accepting=_oAcc;
+        if(_hits!==9) throw 'a handshake in flight must keep the 1s tick, got ' + _hits + ' of 9';
+        // The jitter offset shifts the PHASE once; it never lengthens the beat. hello_ms plus
+        // a legal spread_ms is past the 60s presence window, and a client that beats every
+        // 65s is one the server reports offline and whose duel it times out.
+        _netPace={hello_ms:30000, poll_ms:9000, hold:true, spread_ms:20000};
+        _netSpread=8000; _netPhased=false;
+        const _b1=_netBeatMs(), _b2=_netBeatMs(), _b3=_netBeatMs();
+        if(_b1!==22000) throw 'the first beat must carry the phase shift, got ' + _b1;
+        if(_b2!==30000 || _b3!==30000) throw 'every later beat must be exactly the served hello_ms, got ' + _b2 + '/' + _b3;
+        _netSpread=-1; _netPhased=false;
         // Clamped, never adopted: a wrong (or hostile) pace must not be able to park this
         // client for an hour or spin it flat out.
         _netPaceOf({pace:{hello_ms:1, poll_ms:999999, spread_ms:-5}});
@@ -474,7 +502,126 @@ runTest('SMOKE-NET', `
         _netPace={hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0}; _netSpread=-1;
         _netGet=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
     }
-    log('pacing ok: hold/poll_ms drive the poll and clamp, the spread is drawn once and re-drawn only when it shrinks; q_ms flags a busy host and expires');
+    log('pacing ok: hold/poll_ms drive the poll and clamp, an unheld poll costs the served cadence and not 1 Hz (a handshake excepted), the spread shifts the phase once without lengthening the beat, q_ms flags a busy host and expires');
+
+    // ---- ONE gate for our own background traffic + the roster on hello (4.4 re-release) ----
+    // What the live host charges is a scheduling slice paid PER REQUEST IN FLIGHT, not per
+    // byte: two of OUR OWN requests in the same instant pay it twice. Batching the ICE burst
+    // only MOVED that cost -- hello and friend.php then arrived together instead. So every
+    // background request queues behind one gate, and the duel handshake goes past it.
+    {
+        const _oPaceG={hello_ms:_netPace.hello_ms, poll_ms:_netPace.poll_ms, hold:_netPace.hold, spread_ms:_netPace.spread_ms, gap_ms:_netPace.gap_ms};
+        const _oSentG=_netSentAt, _oFlightG=_netFlight, _oFetchG=globalThis.fetch;
+        // (a) gap_ms is FEATURE-DETECTED, never version-gated: it arrives on a RE-RELEASE of
+        // the same MINOR, so a server calling itself 4.4 may or may not name it.
+        _netPaceOf({pace:{gap_ms:400}});
+        if(_netGapMs()!==400) throw 'a served gap_ms must set the spacing, got ' + _netGapMs();
+        _netPaceOf({pace:{gap_ms:99999}});
+        if(_netGapMs()!==2000) throw 'gap_ms must clamp to the 2s ceiling, got ' + _netGapMs();
+        _netPaceOf({pace:{gap_ms:0}});
+        if(_netGapMs()!==250) throw '0 means our own default, not no spacing at all, got ' + _netGapMs();
+        _netPaceOf({api:'4.4'});
+        if(_netGapMs()!==250) throw 'a hello with no pace block at all must leave a spacing in force';
+        // (b) THE rule, in one place: anything of ours in flight holds the next background
+        // request back whatever the clock says; otherwise the wait is what is LEFT of the gap.
+        _netSentAt=1000;
+        if(_netGapWait(1000, 1)<=0) throw 'a request of ours in flight must hold the next one back';
+        if(_netGapWait(1e9, 1)<=0) throw 'in flight must beat any amount of elapsed time';
+        if(_netGapWait(1000, 0)!==250) throw 'a request right behind ours must cost the whole gap, got ' + _netGapWait(1000,0);
+        if(_netGapWait(1100, 0)!==150) throw 'the wait must be what is left of the gap, got ' + _netGapWait(1100,0);
+        if(_netGapWait(1250, 0)!==0) throw 'past the gap on a quiet wire the request goes at once';
+        if(_netGapWait(9999, 0)!==0) throw 'a long-quiet wire must never owe a wait';
+        // (c) ...but a HELD poll is parked server-side with nothing flowing. It schedules
+        // against nothing, and counting it would park every heartbeat behind the poll a lobby
+        // holds open by design. The transport decides that, so ask the transport.
+        globalThis.fetch=()=>new Promise(()=>{});   // never settles: the flight counter IS the assertion
+        _netFlight=0;
+        _netGet('/api/poll.php?wait=9', undefined, true);
+        if(_netFlight!==0) throw 'a held poll must not make the wire busy, got ' + _netFlight;
+        _netGet('/api/poll.php', undefined, false);
+        if(_netFlight!==1) throw 'an unheld request must count as in flight, got ' + _netFlight;
+        if(!(_netFlightMax>=1)) throw 'the field readout must keep the high-water mark of our own concurrency';
+        _netFlight=_oFlightG;
+        // (d) the roster now rides the heartbeat wherever the server serves it: one request
+        // instead of two. Asked for only where the list is actually on screen.
+        globalThis.fetch=()=>({ then:()=>({ catch:()=>{} }) });
+        const _oPostG=_netPost, _oPhaseG=phase, _oBusyG=_netHelloBusy;
+        let _hb=null;
+        _netPost=async (p,b)=>{ if(p.indexOf('hello')>=0) _hb=b; return null; };
+        phase='friends'; _netHelloBusy=false; _netHello();
+        if(!_hb || _hb.friends_list!==true) throw 'the friends screen must ask for the roster on the hello it already sends';
+        _hb=null; phase='lobby'; _netHelloBusy=false; _netHello();
+        if(_hb && _hb.friends_list) throw 'the roster must not be asked for where it is not shown';
+        _netPost=_oPostG; phase=_oPhaseG; _netHelloBusy=_oBusyG;
+        // (e) ONE adoption path, whichever request paid for the list: names learned, accepted
+        // friendships marked, and a screen that never has to know which route it came by.
+        localStorage.removeItem('fok-snake-friends');
+        const _oListG=_netFr.list;
+        _netFrAdopt([{id:'00ff00dd',state:'accepted',outgoing:false,name:'ROS',online:true,latency:9}], false);
+        if(!_netFr.list || _netFr.list.length!==1) throw 'the adopted roster must become the list the screen draws';
+        if(netFriendName('00ff00dd')!=='ROS') throw 'adoption must learn the names the roster carries';
+        if(!_netFrOk['00ff00dd']) throw 'an accepted friendship must be marked on adoption';
+        _netFrOkClear('00ff00dd'); _netFr.list=_oListG; _netFr.at=0;
+        localStorage.removeItem('fok-snake-friends');
+        // ...and which route it was is a property of the SERVER, not of one response, so the
+        // field readout names it: a 4.4 without the re-release still pays for friend.php.
+        const _oFrHelloG=_netFrHello;
+        _netFrHello=true;
+        if(netDebugInfo().pace.roster!=='hello') throw 'a roster served on hello must read as such';
+        _netFrHello=false;
+        if(netDebugInfo().pace.roster!=='friend') throw 'without it the fallback route must be named';
+        if(netDebugInfo().pace.gapMs!==250) throw 'the field readout must carry the spacing in force';
+        // ...and the screen entry follows the same route: where the roster rides the
+        // heartbeat, entering asks for a heartbeat rather than a second request beside it.
+        const _oRefG=_netFrRefresh, _oHelloG=_netHello, _oPh2=phase;
+        let _refs=0, _hellos=0;
+        _netFrRefresh=()=>{ _refs++; }; _netHello=()=>{ _hellos++; };
+        phase='friends';
+        _netFrHello=false; netFriendsEnter();
+        if(_refs!==1 || _hellos!==0) throw 'without the roster on hello the screen must read friend.php';
+        _netFrHello=true; _refs=0; _hellos=0; netFriendsEnter();
+        if(_hellos!==1 || _refs!==0) throw 'with the roster on hello the screen must ask for the heartbeat, not a second request';
+        _netFrRefresh=_oRefG; _netHello=_oHelloG; phase=_oPh2;
+        _netFrHello=_oFrHelloG;
+        // (f) 'a duel is being set up' is ONE predicate, because three schedulers ask it: the
+        // poll cadence, the item queue and the ICE batcher. They must all mean the same thing.
+        const _oOfferG=_netHs.offerTo, _oSentHsG=_netHs.sent, _oAccG=_netHs.accepting, _oSessG=_netSess, _oSpecG=specHandshaking;
+        specHandshaking=()=>false;
+        _netHs.offerTo=null; _netHs.sent=null; _netHs.accepting=null; _netSess=null;
+        if(netForming()) throw 'an idle client is not forming a duel';
+        _netHs.offerTo='00ff00aa'; if(!netForming()) throw 'an offer going out is a duel forming';
+        _netHs.offerTo=null; _netHs.sent={to:'00ff00aa'}; if(!netForming()) throw 'an offer already sent is a duel forming';
+        _netHs.sent=null; _netHs.accepting='00ff00aa'; if(!netForming()) throw 'accepting an offer is a duel forming';
+        _netHs.accepting=null; _netSess={game:false}; if(!netForming()) throw 'a session with no game yet is a duel forming';
+        _netSess={game:true}; if(netForming()) throw 'a duel under way is no longer being SET UP';
+        specHandshaking=()=>true; if(!netForming()) throw 'a spectator handshake is a setup too -- same predicate';
+        specHandshaking=_oSpecG;
+        // (g) the item queue is background traffic as well, and a mint landing in the same
+        // instant as an offer is precisely the collision this pays for: while a duel is being
+        // set up the queue looks again instead of sending. Its own retry ladder loses nothing.
+        const _oSetT=globalThis.setTimeout, _oITimer=_itemTimer, _oIBusy=_itemBusy, _oIRetry=_itemRetryAt;
+        let _stMs=-1, _stFn=null;
+        globalThis.setTimeout=(fn,ms)=>{ _stMs=ms; _stFn=fn; return 1; };
+        _netHs.offerTo=null; _netSess=null; _itemTimer=0; _itemBusy=false; _itemRetryAt=0;
+        itemKick();
+        if(_stMs!==0) throw 'an idle client must drain the item queue at once, got ' + _stMs;
+        _itemTimer=0; _stMs=-1; _netHs.offerTo='00ff00aa';
+        itemKick();
+        if(_stMs!==ITEM_FORM_MS) throw 'a duel being set up must stand the item queue aside, got ' + _stMs;
+        // FALSIFICATION: ONE wait, never a loop. Re-asking on the way out re-arms itself for
+        // as long as the answer stays yes -- and a session parked before its game says yes
+        // indefinitely, which strands the queue instead of delaying it.
+        const _oFlushG=itemFlush; let _drains=0;
+        itemFlush=async ()=>{ _drains++; };
+        _stFn();
+        if(_itemTimer) throw 'the stand-aside must not re-arm itself while the duel is still forming';
+        if(_drains!==1) throw 'once the wait is over the drain must go out whatever the handshake is doing, got ' + _drains;
+        itemFlush=_oFlushG;
+        globalThis.setTimeout=_oSetT; _itemTimer=_oITimer; _itemBusy=_oIBusy; _itemRetryAt=_oIRetry;
+        _netHs.offerTo=_oOfferG; _netHs.sent=_oSentHsG; _netHs.accepting=_oAccG; _netSess=_oSessG;
+        _netPace=_oPaceG; _netSentAt=_oSentG; globalThis.fetch=_oFetchG;
+    }
+    log('background gate ok: gap_ms feature-detected and clamped, our own request in flight holds the next one back while a held poll does not, the roster rides hello where served and falls back to friend.php, one forming predicate parks the item queue');
 
     // ---- our own public addresses (hello nets, server 4.2) ----------------------
     // The server sees us on ONE family per request; ICE can see both, so we gather them

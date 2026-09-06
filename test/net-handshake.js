@@ -229,6 +229,7 @@ const HOOKS = (myId) => `
   // the backslash and would leave a regex matching a literal 'd' that never fires.
   globalThis.__peerV4  = ()=> String(_swVersion || '').replace(/[0-9]+/, '4');
   globalThis.__iceOut  = (c)=>{ _netIceOut(_netSess.peer, c); };
+  globalThis.__flight = (n)=>{ _netFlight = n|0; };
   globalThis.__icePend = ()=>{ const q = _netIceTx[_netSess.peer]; return q ? q.buf.length : -1; };
   // The 4.4 clock gates, probed on the REAL _netRequestStart. rtt starts absurd so any
   // sample would be an improvement: whatever blocks the adoption is then the gate, not
@@ -386,6 +387,26 @@ try {
     if(!Array.isArray(arr) || arr.length !== 4) throw new Error('the payload must be an array of the whole tail, got ' + out[0].payload.slice(0,60));
     if(addrs(arr) !== '2001:db8::2,2001:db8::3,2001:db8::4,2001:db8::5')
         throw new Error('the batch must keep gather order, got ' + addrs(arr));
+  });
+
+
+  // The first candidate goes alone because it is the one that matters -- but "alone" costs a
+  // request of its own, and a request of OURS already in flight is exactly the collision the
+  // gather window exists to avoid. So the head skips its solo trip and rides the batch.
+  await acheck('4.4: with a request of ours in flight the first candidate rides the batch', async () => {
+    const A = txSess(4, null);
+    A.__flight(1);
+    for(let i = 1; i <= 3; i++) A.__iceOut(cand(i));
+    if(A.__out.length !== 0)
+        throw new Error('nothing may leave beside our own request, got ' + JSON.stringify(A.__out.map(x=>x.type)));
+    if(A.__icePend() !== 3) throw new Error('the head must be buffered with the tail, pending=' + A.__icePend());
+    await new Promise(r => setTimeout(r, 150));   // the gather window
+    A.__flight(0);
+    const out = A.__out.splice(0);
+    if(out.length !== 1 || out[0].type !== 'ices')
+        throw new Error('the whole burst must leave as ONE ices, got ' + JSON.stringify(out.map(x=>x.type)));
+    if(addrs(JSON.parse(out[0].payload)) !== '2001:db8::1,2001:db8::2,2001:db8::3')
+        throw new Error('the batch must carry the head as well, got ' + addrs(JSON.parse(out[0].payload)));
   });
 
   // FALSIFICATION 1: the server's gate. A 4.3 server refuses a signal type it has never

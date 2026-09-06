@@ -276,7 +276,15 @@ function _netIceOut(to, cand){
     if(!ok){ _netSignalIce(to, JSON.stringify(cand)); return; }
     let q = _netIceTx[to];
     if(!q) q = _netIceTx[to] = { buf:[], bytes:0, t:null, open:false };
-    if(!q.open){ q.open = true; _netSignalIce(to, JSON.stringify(cand)); return; }
+    // The first candidate goes alone and at once -- unless one of OUR OWN requests is still
+    // in flight. "At once" would then mean queueing behind that request and paying the
+    // worker wait a second time, for a candidate the peer cannot act on before the offer or
+    // answer it belongs to has landed anyway. So it rides the ordinary window instead:
+    // still its own request, ~50ms later, with nothing of ours to queue behind.
+    if(!q.open){
+        q.open = true;
+        if(_netFlight <= 0){ _netSignalIce(to, JSON.stringify(cand)); return; }
+    }
     const b = JSON.stringify(cand).length + 1;
     if(q.buf.length && q.bytes + b > NET_ICES_BYTES) _netIceTxFlush(to);
     q.buf.push(cand); q.bytes += b;
