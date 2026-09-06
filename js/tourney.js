@@ -23,8 +23,10 @@ const TT_STATE_MS   = 5000;    // floor between unforced state() read-backs
 // (`after_ms`, API 4.4). A broadcast reaches the whole field in the same instant, so every
 // recipient reacts in the same instant too, and their read-backs arrive as one burst -- on
 // a shared host that burst is the thing that queues. Bounded here as well as server-side:
-// a delay long enough to be a stall is not a delay we would honour.
-const TT_AFTER_MAX  = 5000;
+// a delay long enough to be a stall is not a delay we would honour. The server's own budget
+// (`tourney_after_ms`) is bounded well under a second, so this ceiling is a guard against a
+// wrong number and not a wait anybody is meant to reach.
+const TT_AFTER_MAX  = 1000;
 const TT_OVER_MS    = 4000;    // how long the duelOver banner holds before the next match
 const TT_CONNECT_MS = 20000;   // a sheet that has not become a match by now is engaged again
 const TT_MSG_MS     = 6000;

@@ -10,7 +10,7 @@
 //   * ONE EVENT, ONE CALL. A roles sheet carries the whole match, so it IS a state read and
 //     nothing may ask the server to repeat it -- least of all the housekeeping tick, which
 //     used to ask at exactly that millisecond.
-//   * after_ms is this seat's slice of the server's pace_spread_ms, and it applies to the
+//   * after_ms is this seat's slice of the server's tourney_after_ms, and it applies to the
 //     CALL, not to the render: the screen goes up now, the request the sheet provokes waits.
 //   * every tournament round trip asks for the paced lane, so the deal burst is one request
 //     behind another instead of two side by side.

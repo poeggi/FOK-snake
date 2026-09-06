@@ -207,12 +207,7 @@ var _netResync = false;
 // occupies a PHP worker for its whole duration, so a server under pressure withdraws
 // holding first and widens the intervals after. A 4.3 server sends none of this, and then
 // these defaults -- exactly what this client did before -- stand.
-var _netPace = { hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0, gap_ms:0 };
-// The jitter offset is drawn ONCE per session and kept: it exists so that clients which
-// started together do not stay together, and re-drawing it per request would be noise that
-// never separates anybody. Re-drawn only when a shrunk budget no longer contains it.
-var _netSpread = -1;
-function netPaceSpread(){ return _netSpread > 0 ? _netSpread : 0; }
+var _netPace = { hello_ms:30000, poll_ms:9000, hold:true, gap_ms:0 };
 // How many 1s ticks apart an UNHELD mailbox read sits. The server's own poll_ms is the
 // cadence it asked for; the ceiling is what keeps a signal from expiring unread.
 const NET_UNHELD_MAX_S = 15;
@@ -238,7 +233,9 @@ function _netUnheldEvery(){
 // the queue, where one behind the other pays it once. So the duel's SERVER ROUND TRIPS come
 // through here as well now. What stays outside is the long poll itself: it IS the parked
 // slot the rule allows beside one other request, and gating it would only park the mailbox.
-const NET_GAP_MS = 250;        // the spacing to keep when the server names none
+// SPACING, not a wait: it is sized just above what one request costs, so a stacked burst
+// drains in milliseconds and no single call is ever held long enough for a player to feel it.
+const NET_GAP_MS = 100;        // the spacing to keep when the server names none
 const NET_GAP_MAX_MS = 2000;   // ...and the most one may ask for; background must not stall outright
 const NET_GAP_STEP_MS = 20;
 const NET_GAP_TRIES = 40;      // ~2s of patience, counted in steps rather than measured
@@ -306,13 +303,10 @@ function _netPaceOf(j){
     if(typeof p.hello_ms  === 'number') _netPace.hello_ms  = Math.max(5000, Math.min(600000, p.hello_ms|0));
     if(typeof p.poll_ms   === 'number') _netPace.poll_ms   = Math.max(0, Math.min(60000, p.poll_ms|0));
     if(typeof p.hold      === 'boolean') _netPace.hold     = p.hold;
-    if(typeof p.spread_ms === 'number') _netPace.spread_ms = Math.max(0, Math.min(60000, p.spread_ms|0));
     // FEATURE-DETECTED, never version-gated: gap_ms arrives on a re-release of the same
     // MINOR, so a 4.4 server may or may not name it. Absent means our own default rather
     // than no spacing at all -- the collision it separates is ours either way.
     if(typeof p.gap_ms === 'number') _netPace.gap_ms = Math.max(0, Math.min(NET_GAP_MAX_MS, p.gap_ms|0));
-    if(_netSpread < 0 || _netSpread > _netPace.spread_ms)
-        _netSpread = _netPace.spread_ms ? Math.floor(Math.random() * _netPace.spread_ms) : 0;
 }
 // Batched ICE (`ices`, API 4.4) is only safe toward a peer that KNOWS the type: an older
 // client hands an unknown signal to its default branch and the WHOLE array is gone --
@@ -856,7 +850,7 @@ function netDebugInfo(){
              // itself: the same wait read against 1 is the server's load, against 3 it is ours.
              iceSignals:_netDbg.iceTx|0, iceBatches:_netDbg.iceBat|0, srvQueueMs:_netDbg.qMs|0,
              srvQueueFlight:_netQ.flight|0, selfStacked:netSelfStacked(),
-             pace:{ helloMs:_netPace.hello_ms, pollMs:_netPace.poll_ms, hold:_netPace.hold, spreadMs:netPaceSpread(), gapMs:_netGapMs(), roster:_netFrHello ? 'hello' : 'friend' },
+             pace:{ helloMs:_netPace.hello_ms, pollMs:_netPace.poll_ms, hold:_netPace.hold, gapMs:_netGapMs(), roster:_netFrHello ? 'hello' : 'friend' },
              flightMax:_netFlightMax,
              counts:_netCounts };
 }
@@ -1407,23 +1401,11 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
 }
 
 // How long until the next heartbeat. The beat re-arms itself rather than sitting on a fixed
-// interval, so the server can move it (`pace.hello_ms`) and so this session's own jitter
-// offset rides on it -- which is what keeps a roomful of clients that booted together from
-// beating together.
-//
-// That offset is a one-time PHASE shift, and it SHORTENS the interval it lands on. Adding it
-// to every interval instead would make the real period hello_ms + spread_ms: longer than the
-// beat the server asked for, and past the 60s presence window at the wider end of what the
-// two fields may legally say together -- a client that beats every 65s is a client the
-// server reports as offline and whose duel it times out. Shifting the phase once separates a
-// roomful just as well and can never overshoot.
-var _netPhased = false;
-function _netBeatMs(){
-    const d = Math.max(5000, _netPace.hello_ms);
-    if(_netPhased || netPaceSpread() <= 0) return d;
-    _netPhased = true;
-    return Math.max(5000, d - netPaceSpread());
-}
+// interval, so the server can move it (`pace.hello_ms`). What used to ride on it as well was
+// a one-time phase shift out of a served jitter budget; the budget is gone, and what
+// separates a roomful of clients now is the gate they all queue at (NET_GAP_MS), which
+// spaces the calls themselves rather than the sessions that make them.
+function _netBeatMs(){ return Math.max(5000, _netPace.hello_ms); }
 // ---- boot: the ~30s heartbeat, always-on while online is allowed. First one after
 // a short delay so boot itself never touches the network path. All soft-fail. ----
 if(_netTimers){
