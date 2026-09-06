@@ -208,7 +208,7 @@ async function _netRelayLoop(s){
         // (leaving a match, or unload), long after we stopped caring about it.
         s.relayAbort = (typeof AbortController === 'function') ? new AbortController() : null;
         const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=9',
-                                s.relayAbort ? s.relayAbort.signal : undefined);
+                                s.relayAbort ? s.relayAbort.signal : undefined, true);   // held: parked server-side, so not traffic the clock sync has to wait out
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;
         if(!r && _netTimers) await new Promise(res => setTimeout(res, 1000));   // transport error: back off

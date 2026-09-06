@@ -961,6 +961,32 @@ async function passBreak(opts){
         A(R.rows()[0].t === 'CREATE TOURNAMENT', '21: REJOIN outlived the tournament it pointed at');
         W.srv.T.state = 'running';
 
+        // ---- 22) after_ms (API 4.4): the news is drawn at once, the ASKING waits ---------
+        // A broadcast reaches the whole field in the same instant, so every recipient reacts
+        // in the same instant too and their read-backs arrive as one burst -- on a shared
+        // host that burst is the thing that queues. The delay the server names applies to
+        // what the event MAKES US ASK FOR and to nothing else.
+        // FALSIFICATION FIRST: with no spread named, the same event reads back at once. Run
+        // ahead of the delayed one so it cannot be the delay that makes it pass.
+        G.clear(); G.setPhase('tourneyCeremony');
+        G.sigTo({ event:'standings', tid:tid2, rows:[], advancers:[] });
+        await W.settleAsync();
+        A(G.rec().posts.some(p => p.action === 'state'),
+          '22: an ordinary standings event must read the board back at once');
+
+        G.clear(); G.setPhase('tourneyCeremony');
+        G.sigTo({ event:'standings', tid:tid2, rows:[{ id:IDS[1], pts:3 }], advancers:[IDS[1]], after_ms:300 });
+        await W.settleAsync();
+        A(G.tt().standings.length === 1, '22: the standings were not adopted the moment they landed');
+        A(G.phase() === 'tourneyBracket', '22: the event did not move the screen the moment it landed');
+        A(!G.rec().posts.some(p => p.action === 'state'), '22: a spread event asked anyway');
+        // ...and DEFERRED, never dropped: the answer is still needed, just not in this
+        // millisecond. Waiting it out and then asking is the whole point.
+        G.clear();
+        await new Promise(r => setTimeout(r, 400));
+        await W.settleAsync();
+        A(G.rec().posts.some(p => p.action === 'state'), '22: the deferred read-back was dropped, not delayed');
+
         // ---- 20, the last answer: YES ends it, everywhere ------------------------------
         H.setPhase('tourneyRound'); H.pick('BACK - END TOURNAMENT FOR ALL');
         A(H.phase() === 'tourneyQuit', '20: the ending was not asked about the second time');
@@ -975,6 +1001,8 @@ async function passBreak(opts){
               + 'YES ends the tournament, and one that finishes underneath still takes it down');
     rows.push('21 the way back: walking off the screens keeps the id, a reload finds it through '
               + 'the probe and REJOIN is the first row, and a tournament that has ended forgets it');
+    rows.push('22 after_ms: a pushed event is rendered the moment it lands and the read-back it '
+              + 'provokes waits out the server spread, then happens -- deferred, never dropped');
 
     console.log(rows.join('\n'));
     if(fails){ console.log('\nTOURNEY-E2E FAIL: ' + fails + ' assertion(s)'); process.exit(1); }

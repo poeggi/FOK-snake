@@ -19,6 +19,12 @@ const TT_TICK_MS    = 1000;    // housekeeping cadence while a tournament is hel
 const TT_REPORT_MS  = 2500;    // result-report retry spacing (the POST is idempotent)
 const TT_REPORT_MAX = 24;      // ~1 minute of retries, well inside the 3-min walkover ladder
 const TT_STATE_MS   = 5000;    // floor between unforced state() read-backs
+// A pushed event may name a delay the server wants before the requests that event provokes
+// (`after_ms`, API 4.4). A broadcast reaches the whole field in the same instant, so every
+// recipient reacts in the same instant too, and their read-backs arrive as one burst -- on
+// a shared host that burst is the thing that queues. Bounded here as well as server-side:
+// a delay long enough to be a stall is not a delay we would honour.
+const TT_AFTER_MAX  = 5000;
 const TT_OVER_MS    = 4000;    // how long the duelOver banner holds before the next match
 const TT_CONNECT_MS = 20000;   // a sheet that has not become a match by now is engaged again
 const TT_MSG_MS     = 6000;
@@ -50,6 +56,7 @@ var _ttWant = null;    // the match parameters an inbound answer must be dressed
 var _ttPlayNid = '', _ttWatchNid = '';
 var _ttOverAt = 0;
 var _ttStateAt = 0, _ttT = null;
+var _ttAfter = 0, _ttAfterT = null;   // when the server's spread lets us ask again, and the one-shot that does
 
 // tourneyQuit is one of them: the leave dialog is a tournament screen like any other, so
 // a tournament that ends underneath it takes it down with the rest rather than leaving a
@@ -268,9 +275,23 @@ function _ttSetBreak(b){
     // alike, which is what makes the round screen survive a missed signal or a reload.
     if(!same && !inGame && _TT_PHASES[_ttFace()] && _ttFace() !== 'tourneyPodium') _ttGo('tourneyRound');
 }
+// The delay applies to what an event MAKES US ASK FOR, never to the event itself: the
+// screen is redrawn the moment the news lands, exactly as before.
+function _ttAfterNote(d){
+    const a = (d && d.after_ms | 0) || 0;
+    if(a > 0) _ttAfter = Math.max(_ttAfter, _msgNow() + Math.min(a, TT_AFTER_MAX));
+}
 async function _ttSync(force){
     if(!_tt) return;
     const now = _msgNow();
+    // Wait the server's spread out rather than adding to the burst. `force` says the caller
+    // needs the answer, not that it needs it in this millisecond -- so a forced read is
+    // deferred and then made, never dropped.
+    if(_ttAfter > now){
+        if(typeof setTimeout === 'function' && !_ttAfterT)
+            _ttAfterT = setTimeout(()=>{ _ttAfterT = null; _ttAfter = 0; _ttSync(true); }, _ttAfter - now);
+        return;
+    }
     if(!force && now - _ttStateAt < TT_STATE_MS) return;
     _ttStateAt = now;
     const tid = _tt.tid;
@@ -328,6 +349,7 @@ function _ttOnSignal(d){
     // Not our tournament: it is either an echo from one we left or a mix-up. Either way we
     // render what state() says, and state() is only worth asking about the one we hold.
     if(!_tt || _tt.tid !== tid) return;
+    _ttAfterNote(d);
     switch(ev){
         case 'lobby':
             _ttAdopt(d);

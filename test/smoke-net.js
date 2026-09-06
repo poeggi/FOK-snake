@@ -376,13 +376,18 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _applyHello({api:'4.3'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.3: the same version must read as up to date';
+    _applyHello({api:'4.4'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.4: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
     // without it _netOk() is false and both halves of the assertion pass vacuously.
     const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==3 || !netTourneyOk()) throw 'a same-major 4.3 server must open the tournament gate';
+    if(netSrvMinor()!==4 || !netTourneyOk()) throw 'a same-major 4.4 server must open the tournament gate';
+    // 4.4 is also what the batched-ICE and pacing features gate on, so the minor a hello
+    // reports has to survive an older server rolling back under us.
+    _applyHello({api:'4.3'});
+    if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.3) must read as up to date';
+    if(netSrvMinor()!==3) throw 'a 4.3 server must report minor 3 -- the ices gate reads this';
     // The tournament gate is a >= 4.1 gate, not an equality: a server that has tournament.php
     // but not the hello nets field must keep serving tournaments.
     _applyHello({api:'4.1'});
@@ -395,7 +400,7 @@ runTest('SMOKE-NET', `
     _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
     if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
     globalThis.fetch=_oFetchT;
-    _applyHello({api:'4.4'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:'4.5'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible
@@ -403,6 +408,73 @@ runTest('SMOKE-NET', `
     _netApiNewer=false; _netApiOutdated=false;
     log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
     cfg.debug=0;
+
+    // ---- server-set pacing + the queue gauge (hello pace, q_ms; API 4.4) ----
+    // What one idle client costs a contended host is dominated by the HELD poll: it owns a
+    // PHP worker for its whole duration. That is why hold is a lever of its own and not
+    // just a very long poll_ms -- and why withdrawing it has to fall back to reading the
+    // mailbox on the tick, never to reading nothing.
+    {
+        const _oGetP=_netGet, _oFetchP=globalThis.fetch;
+        globalThis.fetch=()=>({});                                  // _netOk(): online
+        let _url=null, _heldArg=null;
+        _netGet=async (p,sig,held)=>{ _url=p; _heldArg=!!held; return null; };
+        // _netPollOnce is async, but everything up to the _netGet call is not: the URL is
+        // captured by the time it returns. Clear the busy latch by hand since the tail of
+        // the previous call has not run yet.
+        const poll=()=>{ _url=null; _heldArg=null; _netPollBusy=false; phase='lobby'; _netPollOnce(); };
+        _netPace={hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0}; _netSpread=-1;
+        poll();
+        if(!/[?&]wait=9$/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
+        _netPaceOf({pace:{poll_ms:3000}});
+        poll();
+        if(!/[?&]wait=3$/.test(_url||'')) throw 'poll_ms must set how long the poll is held, got ' + _url;
+        _netPaceOf({pace:{hold:false}});
+        poll();
+        if(/wait=/.test(_url||'') || _heldArg) throw 'hold:false must withdraw the held poll, got ' + _url;
+        if(!/poll[.]php/.test(_url||'')) throw 'hold:false must still read the mailbox, got ' + _url;
+        _netPaceOf({pace:{hold:true, poll_ms:0}});
+        poll();
+        if(/wait=/.test(_url||'')) throw 'poll_ms 0 must withdraw the hold as well, got ' + _url;
+        // Clamped, never adopted: a wrong (or hostile) pace must not be able to park this
+        // client for an hour or spin it flat out.
+        _netPaceOf({pace:{hello_ms:1, poll_ms:999999, spread_ms:-5}});
+        if(_netPace.hello_ms!==5000) throw 'hello_ms must clamp up to the 5s floor';
+        if(_netPace.poll_ms!==60000) throw 'poll_ms must clamp down to the 60s ceiling';
+        if(_netPace.spread_ms!==0) throw 'a negative spread must clamp to 0';
+        // The jitter budget is drawn ONCE per session. Re-drawing it every heartbeat is not
+        // a spread: the field would re-synchronise on the average and the burst come back.
+        _netSpread=-1; _netPaceOf({pace:{spread_ms:20000}});
+        const _s1=netPaceSpread();
+        if(!(_s1>=0 && _s1<20000)) throw 'the drawn spread must sit inside the budget, got ' + _s1;
+        for(let i=0;i<20;i++) _netPaceOf({pace:{spread_ms:20000}});
+        if(netPaceSpread()!==_s1) throw 'the spread must be drawn once per session, not per heartbeat';
+        // ...unless the budget SHRANK below what we drew: keeping it would spend a spread
+        // the server has just withdrawn.
+        _netPaceOf({pace:{spread_ms:5}});
+        if(netPaceSpread()>=5) throw 'a budget that shrank below the drawn value must force a re-draw';
+        // q_ms is the server's own report of how long this request queued before PHP ran.
+        // Half of that wait lands straight in the clock offset, so a fresh reading over the
+        // floor is what marks a sample unclean -- and it must EXPIRE, not latch: a host that
+        // recovered would otherwise keep this client on the degraded path for ever.
+        _netQNote({q_ms:51});
+        if(!netHostBusy()) throw 'a fresh 51ms queue wait must read as a busy host';
+        _netQNote({q_ms:0});
+        if(netHostBusy()) throw 'an idle queue must not read as busy';
+        _netQNote({q_ms:51}); _netQ.at=Date.now()-9000;
+        if(netHostBusy()) throw 'a stale queue reading must expire rather than latch';
+        if(_netDbg.qMs!==51) throw 'the debug overlay must carry the last queue wait';
+        // ...and the field readout must carry it out of the device: this whole change is
+        // only worth what can be MEASURED afterwards, and that is the one way to read it.
+        const _dbg=netDebugInfo();
+        if(_dbg.srvQueueMs!==51) throw 'the debug export must carry the server queue wait';
+        if(typeof _dbg.iceSignals!=='number' || typeof _dbg.iceBatches!=='number') throw 'the debug export must count ice signals against ice batches';
+        if(!_dbg.pace || _dbg.pace.hold!==true || _dbg.pace.pollMs!==60000) throw 'the debug export must carry the pace in force, got ' + JSON.stringify(_dbg.pace);
+        _netQ={ms:0,at:0};
+        _netPace={hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0}; _netSpread=-1;
+        _netGet=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
+    }
+    log('pacing ok: hold/poll_ms drive the poll and clamp, the spread is drawn once and re-drawn only when it shrinks; q_ms flags a busy host and expires');
 
     // ---- our own public addresses (hello nets, server 4.2) ----------------------
     // The server sees us on ONE family per request; ICE can see both, so we gather them
@@ -825,6 +897,11 @@ runTest('SMOKE-NET', `
     netSubmitScore('KAI', 500, 3, false);
     if(!_scoreBody || _PLATS.indexOf(_scoreBody.platform)<0) throw 'score submit must tag a valid platform: '+(_scoreBody&&_scoreBody.platform);
     _netPost=_oPost2; globalThis.fetch=_oFetch2;
+    // That stub is a thenable that never settles, so any request it swallowed is still
+    // counted as in flight. Nothing in a browser behaves that way -- fetch rejects on a
+    // dead link -- so clear the fiction rather than let it make the wire look busy for
+    // every clock sample the rest of this suite takes.
+    _netFlight=0;
     simTick=0; simNow=0; startDuel(0xF00D); bars=[];
     fakeSess('host'); _netSess.peerProfile={name:'BUD',color:1,shopItems:{},platform:'mobile'};
     const _dp=netDuelPlatforms();

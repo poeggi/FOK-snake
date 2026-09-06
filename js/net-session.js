@@ -141,6 +141,15 @@ function _netSeekStop(){
 }
 
 // ---- signal dispatch (from hello + poll; each message is delivered exactly once) ----
+// ONE arrived candidate: parked until the remote description settles, then handed to the
+// mDNS de-obfuscation pass. Shared by 'ice' and 'ices' so a batched candidate can never
+// take a different path from a lone one.
+function _netIceTake(s, cand){
+    if(!cand || typeof cand !== 'object') return;
+    _netIceAdd(s, cand);   // parked until the remote description settles
+    const extra = _netDeobfuscateCand(cand, _netPeerNet[s.peer]);   // mDNS -> real IPv6, probed in parallel
+    if(extra){ _netIceAdd(s, extra); _netDbg.iceDeob = (_netDbg.iceDeob|0)+1; }
+}
 function _netOnSignal(sig){
     try {
         const from = String(sig.from||'');
@@ -242,6 +251,7 @@ function _netOnSignal(sig){
                         _netSignal(from, 'bye', '');
                         break;
                     }
+                    _netSess.peerV = String(d.v || '');   // from here our own ICE may go out batched
                     if(d.profile){
                         _netSess.peerProfile = _netClampProfile(d.profile);
                         _netNameSeen(from, _netSess.peerProfile.name);
@@ -265,13 +275,17 @@ function _netOnSignal(sig){
                 break;
             }
             case 'ice':
-                if(_netSess && _netSess.peer === from && _netSess.pc){
-                    const cand = _netJson(pl);
-                    _netIceAdd(_netSess, cand);   // parked until the remote description settles
-                    const extra = _netDeobfuscateCand(cand, _netPeerNet[from]);   // mDNS -> real IPv6, probed in parallel
-                    if(extra){ _netIceAdd(_netSess, extra); _netDbg.iceDeob = (_netDbg.iceDeob|0)+1; }
-                }
+                if(_netSess && _netSess.peer === from && _netSess.pc) _netIceTake(_netSess, _netJson(pl));
                 break;
+            // 4.4: SEVERAL candidates in one signal, in the order they were gathered. The
+            // batch is a cheaper envelope and nothing else -- each candidate takes exactly
+            // the path it would have taken alone, so nothing downstream can tell them apart.
+            case 'ices': {
+                if(!(_netSess && _netSess.peer === from && _netSess.pc)) break;
+                const arr = _netJsonArr(pl);
+                for(let i = 0; i < arr.length && i < NET_ICES_MAX; i++) _netIceTake(_netSess, arr[i]);
+                break;
+            }
             case 'peer-net': {
                 // Server hint (delivered with the accept, before offer/answer): the peer's
                 // public IP + family and our own. Stored to de-obfuscate mDNS candidates.
@@ -471,7 +485,12 @@ async function _netRequestStart(s, reason){
     // mid-match re-anchor still on this server path; a level routes P2P above and a respawn
     // opens its boundary directly) bounds the sweep so the player is not held on the cover;
     // the first start keeps the full-quality sweep (see NET_LEVEL_SYNC_MS).
-    await _netTimeSync(true, (reason === 'first' || !reason) ? undefined : NET_LEVEL_SYNC_MS);
+    // ...and a FULL sweep when the server told this pair that its two anchors disagree
+    // (`resync`, 4.4). The bound exists to keep a player off the cover between rounds;
+    // starting a tick apart from the opponent costs the match more than that wait does.
+    const _fullSweep = (reason === 'first' || !reason) || _netResync;
+    _netResync = false;
+    await _netTimeSync(true, _fullSweep ? undefined : NET_LEVEL_SYNC_MS);
     if(_netSess !== s || !s.game) return;
     if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
     const _t0 = performance.now();
@@ -502,8 +521,15 @@ async function _netRequestStart(s, reason){
     // so any error here lands directly in how far apart they begin. Same min-RTT rule
     // as the clock samples -- only adopt it when this round trip beat our best one,
     // since a slower one carries a worse estimate.
-    if(typeof d.now === 'number' && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
+    // ...and never off a round trip the server spent queueing: q_ms says how much of this
+    // rtt was a wait for a worker rather than time on the wire, and that part is not
+    // symmetric -- halving it puts the whole error into the offset instead of half of it.
+    if(typeof d.now === 'number' && !(d.q_ms > NET_QMS_BUSY) && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
         _netSync = { ofs: d.now + _rtt/2 - _wall(), rtt: _rtt, at: Date.now() };
+    // The pair cross-check: the server proved BOTH clients' clocks against the same start
+    // and found them too far apart -- the one thing neither client can see for itself.
+    // Nothing is wrong with this start; the next one gets the full sweep above.
+    if(d.resync === true) _netResync = true;
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
     // The item-registry match handle plus THIS side's attestation secret. duel-core MACs its
     // ownership digest with the secret once a second, which is what lets the server verify a

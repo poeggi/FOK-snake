@@ -52,6 +52,7 @@ const HOOKS = (myId) => `
   };
   globalThis.__setFrStatus = (n)=>{ __frStatus = n|0; };
   _netGet  = async ()=>null;
+  const _realTimeSync = _netTimeSync;
   _netTimeSync = async ()=>{};
   // start.php is stubbed for the handshake tests, but the RESTART tests need the real
   // one: the bug lives in what it sends, not in what it does.
@@ -215,6 +216,59 @@ const HOOKS = (myId) => `
   // (unlike an invite, whose accept payload carries one).
   globalThis.__qmOffer   = (to)=> cfg.noP2P ? _netRelayOffer(to) : _netRtcOffer(to);   // returns the offer promise: the p2p path is async
   globalThis.__ageOffer  = (ms)=>{ _netHs.offeredAt -= ms; };
+  // API 4.4. The stub pc never gathers, so hand candidates to _netIceOut directly --
+  // that IS the callback the real pc.onicecandidate calls, so the batcher under test is
+  // the shipping one. Both of its gates are settable: the server minor and the peer build.
+  globalThis.__srvMin  = (n)=>{ _netSrvMin = n|0; };
+  globalThis.__setPeerV= (v)=>{ if(_netSess) _netSess.peerV = String(v); };
+  // This build's own version line with its MAJOR forced to the one that speaks 4.4. It
+  // tracks the FORMAT of APP_VERSION -- which is where the bug was: the constant reads
+  // 'v4.0.0', leading 'v' and all -- without pinning the test to a version number the
+  // release hook rewrites after these checks have already run.
+  // [0-9] and not a backslash class: this suite body is a template literal, which eats
+  // the backslash and would leave a regex matching a literal 'd' that never fires.
+  globalThis.__peerV4  = ()=> String(_swVersion || '').replace(/[0-9]+/, '4');
+  globalThis.__iceOut  = (c)=>{ _netIceOut(_netSess.peer, c); };
+  globalThis.__icePend = ()=>{ const q = _netIceTx[_netSess.peer]; return q ? q.buf.length : -1; };
+  // The 4.4 clock gates, probed on the REAL _netRequestStart. rtt starts absurd so any
+  // sample would be an improvement: whatever blocks the adoption is then the gate, not
+  // the min-RTT rule. __syncArgs records the budget the next start asks _netTimeSync for
+  // (undefined = the full sweep a resync buys).
+  globalThis.__syncArgs = [];
+  globalThis.__startWith = async (extra)=>{
+    _netSync = { ofs:0, rtt:99999, at:Date.now() };
+    _netTimeSync = async (f, b)=>{ __syncArgs.push(b === undefined ? 'full' : b|0); };
+    _netPostRes = async ()=>({ status:200, err:'',
+      json: Object.assign({ ok:true, start_pts:netPts()+50, epoch:0, now:netPts() }, extra||{}) });
+    beginOnlineDuel = ()=>{};
+    const realST = setTimeout, realPing = _netBurstPing;
+    globalThis.setTimeout = (fn)=>{ fn(); return -1; };
+    _netBurstPing = (s)=>{ realPing(s); _netHandleMsg(JSON.stringify({ t:'bs', pts:netPts(), rts:netRawPts(), sq:1, mr:0, mn:NET_BURST_MIN })); };
+    // 'rematch': a level routes P2P and never asks the server at all, so the only
+    // reasons that reach start.php are the identity ones -- and a rematch is the
+    // bounded-sweep one, which is what the resync hint has to be able to widen.
+    try { await _realReqStart(_netSess, 'rematch'); }
+    finally { globalThis.setTimeout = realST; _netBurstPing = realPing; }
+    return { rtt:_netSync.rtt, sync:__syncArgs.splice(0) };
+  };
+  // The cleanliness rule of the real clock sweep (4.4). A sample taken while our own
+  // requests are in flight measured our own burst, so it may not be REPORTED as latency:
+  // start.php works this pair's lead time out of that figure, and an inflated one widens
+  // the start for the opponent too. Being anchored is not optional though, so a sweep with
+  // nothing clean in it still adopts the least bad sample.
+  globalThis.__syncRough = async (flight)=>{
+    _netSync = { ofs:null, rtt:-1, at:0 };
+    _netLat = { value:0, at:0, pending:false };
+    _netQ = { ms:0, at:0 };
+    _netFlight = flight|0;
+    inGame = false; phase = 'menu';
+    const _oFetch = globalThis.fetch;
+    globalThis.fetch = async ()=>{ throw new Error('no header route'); };   // fall through to time.php
+    _netGet = async ()=>({ t: 1700000000000 });
+    try { await _realTimeSync(true); }
+    finally { globalThis.fetch = _oFetch; _netGet = async ()=>null; _netFlight = 0; }
+    return { anchored: _netSync.ofs != null, reported: !!_netLat.pending };
+  };
   globalThis.__state = ()=>({
     sess: _netSess ? { peer:_netSess.peer, role:_netSess.role, relay:!!_netSess.relay,
                        game:!!_netSess.game, seed:_netSess.seed>>>0 } : null,
@@ -298,6 +352,169 @@ try {
     if(B.__iceAdded().length !== n0) throw new Error('a v4 literal must wait out the v6 head start');
     await new Promise(r => setTimeout(r, 250));
     if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
+  });
+
+  // ------------------------------------------------- API 4.4: batched ICE (`ices`)
+  // v6 literals so every arrival is immediate: a v4 literal waits out the happy-eyeballs
+  // head start, which would confuse "did the batch arrive" with "did it arrive yet".
+  const cand = (i)=>({ candidate:'candidate:' + i + ' 1 udp 2113937151 2001:db8::' + i + ' 5000 typ host',
+                       sdpMid:'0', sdpMLineIndex:0 });
+  const addrs = (list)=> list.map(c => (/ (2001:db8::[0-9a-f]+) /.exec(c.candidate||'')||[])[1]).join(',');
+  // peerV null = dress the peer in a line shaped like THIS build's own. Spelling it out as
+  // a literal is how the leading 'v' of 'v4.0.0' got past the gate's own test once already:
+  // the wire carries APP_VERSION, never a hand-typed version.
+  const txSess = (srvMin, peerV)=>{
+    const A = mk(A_ID);
+    A.__setRelay(false); A.__gameSess(B_ID, 'host');
+    A.__srvMin(srvMin); A.__setPeerV(peerV === null ? A.__peerV4() : peerV);
+    A.__out.splice(0);
+    return A;
+  };
+
+  await acheck('4.4: the first candidate goes alone, the tail leaves as one ices', async () => {
+    const A = txSess(4, null);
+    for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
+    let out = A.__out.splice(0);
+    if(out.length !== 1 || out[0].type !== 'ice')
+        throw new Error('the first candidate must go alone and at once, got ' + JSON.stringify(out.map(x=>x.type)));
+    if(A.__icePend() !== 4) throw new Error('the tail must still be collecting, pending=' + A.__icePend());
+    await new Promise(r => setTimeout(r, 150));   // the ~50ms gather window
+    out = A.__out.splice(0);
+    if(out.length !== 1 || out[0].type !== 'ices')
+        throw new Error('the tail must leave as ONE ices, got ' + JSON.stringify(out.map(x=>x.type)));
+    const arr = JSON.parse(out[0].payload);
+    if(!Array.isArray(arr) || arr.length !== 4) throw new Error('the payload must be an array of the whole tail, got ' + out[0].payload.slice(0,60));
+    if(addrs(arr) !== '2001:db8::2,2001:db8::3,2001:db8::4,2001:db8::5')
+        throw new Error('the batch must keep gather order, got ' + addrs(arr));
+  });
+
+  // FALSIFICATION 1: the server's gate. A 4.3 server refuses a signal type it has never
+  // heard of, so against the instance that is live today nothing may batch at all.
+  check('FALSIFICATION: a 4.3 server gets one ice per candidate, never an ices', () => {
+    const A = txSess(3, '4.0.0');
+    for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
+    const out = A.__out.splice(0);
+    if(out.length !== 5) throw new Error('expected 5 singles, got ' + out.length);
+    if(out.some(x => x.type !== 'ice')) throw new Error('a 4.3 server must never be sent an ices');
+    if(A.__icePend() !== -1) throw new Error('nothing may be buffered when the feature is off');
+  });
+
+  // FALSIFICATION 2: the contract's gate. A client built before 4.4 drops the whole
+  // array through its default branch WITHOUT A WORD -- the one failure mode that would
+  // look like a flaky connect rather than a bug, so it must be impossible by construction.
+  check('FALSIFICATION: a peer that predates 4.4 gets one ice per candidate', () => {
+    for(const v of ['v3.9.2', '3.9.2', '']){
+      const A = txSess(4, v);
+      for(let i = 1; i <= 4; i++) A.__iceOut(cand(i));
+      const out = A.__out.splice(0);
+      if(out.length !== 4 || out.some(x => x.type !== 'ice'))
+          throw new Error('peer v"' + v + '" must get singles, got ' + JSON.stringify(out.map(x=>x.type)));
+    }
+  });
+
+  check('a batch never exceeds the contract cap of 24', () => {
+    const A = txSess(4, null);
+    for(let i = 1; i <= 30; i++) A.__iceOut(cand(i));   // 1 alone + 29 into the buffer
+    const out = A.__out.splice(0);
+    const bat = out.filter(x => x.type === 'ices');
+    if(bat.length !== 1) throw new Error('expected exactly one full-cap flush, got ' + bat.length);
+    const arr = JSON.parse(bat[0].payload);
+    if(arr.length !== 24) throw new Error('the cap must flush at 24, got ' + arr.length);
+    if(A.__icePend() !== 5) throw new Error('the remainder must stay buffered, pending=' + A.__icePend());
+  });
+
+  // Half a batch is exactly the silent narrowing of the candidate set the retry exists
+  // to prevent: the retry re-sends the WHOLE array, never its last element.
+  await acheck('a 5xx retry re-sends the whole array', async () => {
+    const A = txSess(4, null);
+    A.__iceOut(cand(1));            // the lone first candidate, accepted: it has its own retry
+    A.__setSigFail(500);
+    for(let i = 2; i <= 4; i++) A.__iceOut(cand(i));
+    await new Promise(r => setTimeout(r, 150));
+    A.__out.splice(0);                              // the first (refused) attempt
+    await new Promise(r => setTimeout(r, 500));     // the one retry
+    const out = A.__out.splice(0);
+    if(out.length !== 1 || out[0].type !== 'ices') throw new Error('expected exactly one ices retry, got ' + JSON.stringify(out.map(x=>x.type)));
+    const arr = JSON.parse(out[0].payload);
+    if(arr.length !== 3) throw new Error('the retry must carry the whole array, got ' + arr.length);
+    if(addrs(arr) !== '2001:db8::2,2001:db8::3,2001:db8::4') throw new Error('the retry must carry the same array, got ' + addrs(arr));
+    A.__setSigFail(0);
+  });
+
+  // The receiving half: what A batched is what B feeds its pc, in order and unchanged --
+  // a batched candidate must take exactly the path a lone one takes.
+  await acheck('4.4: the batch A sends is the candidate set B adds, in order', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(false); B.__setRelay(false);
+    const flush = () => new Promise(r=>setTimeout(r,0));
+    A.__invite(B_ID); pump(A, B);
+    B.__answer(true); pump(B, A);
+    await flush();
+    pump(A, B);                       // A's offer -> B builds its answerer PC
+    await flush();                    // ...and its remote description settles
+    if(!B.__state().sess) throw new Error('B has no P2P session to add candidates to');
+    A.__srvMin(4); A.__setPeerV(A.__peerV4());
+    A.__out.splice(0);
+    for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
+    await new Promise(r => setTimeout(r, 150));
+    const types = pump(A, B);
+    if(types.join(',') !== 'ice,ices') throw new Error('expected one ice then one ices, got ' + types.join(','));
+    await flush();
+    const added = B.__iceAdded();
+    if(added.length !== 5) throw new Error('B must add all five candidates, got ' + added.length);
+    if(addrs(added) !== '2001:db8::1,2001:db8::2,2001:db8::3,2001:db8::4,2001:db8::5')
+        throw new Error('B must add them in gather order, got ' + addrs(added));
+    // FALSIFICATION: the payload is an ARRAY by contract. Anything else is a peer that
+    // does not speak this, and one bad signal may never poison a forming connection.
+    const n0 = added.length;
+    B.__deliver({ from:A_ID, to:B_ID, type:'ices', payload: JSON.stringify(cand(9)) });
+    B.__deliver({ from:A_ID, to:B_ID, type:'ices', payload: 'not json at all' });
+    await flush();
+    if(B.__iceAdded().length !== n0) throw new Error('a non-array ices payload must be ignored');
+  });
+
+  await acheck('4.4: a sweep taken on a busy wire still anchors, but reports no latency', async () => {
+    const A = mk(A_ID);
+    const dirty = await A.__syncRough(1);
+    if(!dirty.anchored) throw new Error('an unanchored client cannot play at all: the least bad sample must be adopted');
+    if(dirty.reported) throw new Error('a sample that measured our own burst must not be reported as latency');
+    // FALSIFICATION: with the wire quiet the same sweep DOES report -- otherwise the
+    // assertion above would hold just as well for a client that never reports anything.
+    const clean = await A.__syncRough(0);
+    if(!clean.anchored || !clean.reported) throw new Error('a quiet sweep must anchor AND report');
+  });
+
+  // ------------------------------------- API 4.4: the clock anchor and its two hints
+  // q_ms is the part of this round trip the server spent waiting for a worker. It is not
+  // symmetric, so halving it puts the WHOLE error into the offset instead of half of it --
+  // and half of a 51ms queue is 1.5 ticks at 60Hz, which is a visibly different start.
+  await acheck('4.4: a start the server queued behind does not move the clock', async () => {
+    const A = mk(A_ID);
+    A.__gameSess(B_ID, 'host');
+    const busy = await A.__startWith({ q_ms: 51 });
+    if(busy.rtt !== 99999) throw new Error('a queued start must not be adopted as the best sample, rtt=' + busy.rtt);
+    // FALSIFICATION: the same response with an idle queue IS adopted -- otherwise the
+    // test above would pass just as well against a client that never adopts anything.
+    const B = mk(B_ID);
+    B.__gameSess(A_ID, 'host');
+    const idle = await B.__startWith({ q_ms: 0 });
+    if(idle.rtt === 99999) throw new Error('an unqueued start must still anchor the clock');
+  });
+
+  // The pair cross-check: only the server sees BOTH clients' clocks proved against the
+  // same start. `resync` is a hint, never a rejection -- this start is fine, the NEXT one
+  // pays for a full sweep instead of the bounded between-levels one.
+  await acheck('4.4: resync buys the next start a full sync sweep, once', async () => {
+    const A = mk(A_ID);
+    A.__gameSess(B_ID, 'host');
+    await A.__startWith({});                       // the ordinary case, for contrast
+    const plain = await A.__startWith({});
+    if(plain.sync.join(',') === 'full') throw new Error('an ordinary between-levels start must be budgeted, got ' + plain.sync.join(','));
+    await A.__startWith({ resync: true });
+    const after = await A.__startWith({});
+    if(after.sync.join(',') !== 'full') throw new Error('the start after a resync must sweep fully, got ' + after.sync.join(','));
+    const later = await A.__startWith({});
+    if(later.sync.join(',') === 'full') throw new Error('resync must be spent once, not latched');
   });
 
   // The REAL test: a structural desync (which the per-owner 'st' can never heal -- it carries no

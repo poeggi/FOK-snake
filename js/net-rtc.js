@@ -203,7 +203,8 @@ function _netMkSess(peer, role){
              lastRecvWall:0, reconnectAt:0, reconnecting:false,
              // simSeenWall: the last time we had PROOF the peer's sim advanced (see _netSimStalled).
              // 0 means "no baseline yet", which is never a fault -- a match that has not ticked cannot stall.
-             simSeenWall:0, peerTk:null };   // lastRecvWall: Date.now() clock; mid-game p2p rebuild
+             simSeenWall:0, peerTk:null,
+             peerV:'' };   // peerV: the peer's build line once it has named one -- the `ices` gate (net-api.js)
     // A tournament match's parameters live on the ROLES SHEET, and the offer carries none
     // of them. Both sides mint their session here, so this is the one point both paths
     // share -- and the answerer, which never gets to speak, is dressed by it too.
@@ -220,15 +221,74 @@ let _netHiddenAt = 0;   // Date.now() when we last went hidden, for the wake-up 
 // direct-IPv6 route rides exactly one of these). Other signals have their own
 // retry ladders (offer re-send, invite staleness) or are expendable.
 async function _netSignalIce(to, payload){
+    _netDbg.iceTx = (_netDbg.iceTx|0) + 1;
     const r = await _netSignal(to, 'ice', payload);
     if(r && !r.json && r.status >= 500 && typeof setTimeout === 'function')
         setTimeout(() => { _netSignal(to, 'ice', payload); }, 400);
+}
+// ---- ICE, batched into one signal (`ices`, API 4.4) ----
+// A duel start trickles a dozen candidates inside a second, and today that is a dozen
+// signal.php POSTs. The measurement that motivates this says the cost is per REQUEST and
+// not per byte: requests fired into the same instant queue behind one another on the one
+// connection, on workers that were already warm. So the TAIL of a gather goes out as one
+// array instead.
+//
+// The FIRST candidate never waits. It is usually the host candidate that connects a LAN
+// duel outright, and holding it back to save a request would trade the thing being
+// optimised (a fast connect) for the thing being paid with (a cheap one).
+const NET_ICES_MAX = 24;          // contract cap: entries in one `ices` payload
+const NET_ICES_BYTES = 15000;     // ...under the 16KB payload limit, with room for the envelope
+const NET_ICES_WINDOW_MS = 50;    // how long the tail collects before it goes
+var _netIceTx = {};               // peer id -> { buf, bytes, t, open }
+// A fresh RTCPeerConnection gathers afresh: its first candidate is a first candidate
+// again, and anything still buffered belongs to a connection that no longer exists.
+function _netIceTxReset(to){
+    const q = _netIceTx[to];
+    if(q && q.t) clearTimeout(q.t);
+    delete _netIceTx[to];
+}
+// The retry re-sends the WHOLE array, never its last element: half a batch is exactly the
+// silent narrowing of the candidate set that the one 5xx retry exists to prevent.
+async function _netSignalIces(to, arr){
+    const payload = JSON.stringify(arr);
+    _netDbg.iceBat = (_netDbg.iceBat|0) + 1;
+    const r = await _netSignal(to, 'ices', payload);
+    if(r && !r.json && r.status >= 500 && typeof setTimeout === 'function')
+        setTimeout(() => { _netSignal(to, 'ices', payload); }, 400);
+}
+function _netIceTxFlush(to){
+    const q = _netIceTx[to];
+    if(!q) return;
+    if(q.t){ clearTimeout(q.t); q.t = null; }
+    const buf = q.buf; q.buf = []; q.bytes = 0;
+    if(!buf.length) return;
+    if(buf.length === 1){ _netSignalIce(to, JSON.stringify(buf[0])); return; }   // one candidate is not a batch
+    _netSignalIces(to, buf);
+}
+// TWO gates, and both have to hold. The peer's build is the contract's gate: a client that
+// does not know `ices` drops the whole array through its default branch without a word.
+// The server's minor is ours: a 4.3 server refuses a signal type it has never heard of, so
+// without it this feature would break every connect against the server that is live today.
+function _netIceOut(to, cand){
+    const s = _netSess;
+    const ok = typeof setTimeout === 'function' && netSrvMinor() >= 4
+            && s && s.peer === to && _netIcesPeerOk(s.peerV);
+    if(!ok){ _netSignalIce(to, JSON.stringify(cand)); return; }
+    let q = _netIceTx[to];
+    if(!q) q = _netIceTx[to] = { buf:[], bytes:0, t:null, open:false };
+    if(!q.open){ q.open = true; _netSignalIce(to, JSON.stringify(cand)); return; }
+    const b = JSON.stringify(cand).length + 1;
+    if(q.buf.length && q.bytes + b > NET_ICES_BYTES) _netIceTxFlush(to);
+    q.buf.push(cand); q.bytes += b;
+    if(q.buf.length >= NET_ICES_MAX){ _netIceTxFlush(to); return; }
+    if(!q.t) q.t = setTimeout(() => _netIceTxFlush(to), NET_ICES_WINDOW_MS);
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
     const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
     _netSess.pc = pc;
-    pc.onicecandidate = e => { if(e.candidate) _netSignalIce(peer, JSON.stringify(e.candidate)); };
+    _netIceTxReset(peer);
+    pc.onicecandidate = e => { if(e.candidate) _netIceOut(peer, e.candidate); };
     pc.onconnectionstatechange = () => {
         const s = _netSess;
         // DEPRECATED(relay): the fallback hook -- without net-relay.js a failed P2P just ends the attempt.
@@ -279,11 +339,19 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     const pc = _netRtcInit(peer, 'peer');
     _netSess.offKey = okey;
     _netSess.peerProfile = _netClampProfile(d.profile);
+    // The offer names the peer's build, so the ANSWERER may batch its ICE from the very
+    // first candidate. The offerer only learns it from the answer and sends singles until
+    // then -- an asymmetry that costs a handful of requests once and heals itself.
+    _netSess.peerV = String((d && d.v) || '');
     _netNameSeen(peer, _netSess.peerProfile.name);
     _netSess.seed = (d.seed>>>0) || 1;
     _netHs.accepting = null;
     _netWire(pc.createDataChannel('fok', NET_DC_OPTS));   // pre-negotiated: open our own end at the same id as the offerer
-    _netTimeSync();   // in parallel with the ICE handshake: synced by the time the go arrives
+    // NO clock sync here. It used to run in parallel with the ICE handshake, which is the
+    // single busiest instant this client ever has: its own candidates, the answer, and the
+    // peer's candidates all crossing at once. Half of whatever queueing a sample met there
+    // landed straight in the offset, and the offset is what the whole duel timeline rests
+    // on. The anchor is taken in _netRequestStart instead -- channel open, wire quiet.
     try {
         await pc.setRemoteDescription(d.sdp);
         if(_netSess && _netSess.pc === pc){ _netSess.rdOk = true; _netIceFlush(_netSess); }
@@ -314,6 +382,10 @@ function _netWire(dc){
         _netSeekStop();
         s.game = true; _netMarkRecv(s);
         _netLiveStart();
+        // The session IS the DataChannel from here, and the mailbox poll is one more thing
+        // of ours parked on the wire while _netRequestStart takes the match's anchor. Let
+        // it go; the 1 Hz tick re-arms the slow in-match cadence within five seconds.
+        _netPollAbortNow();
         _netRequestStart(s);
         // the shared start (seed + start_pts) arrives via this request; no state frames
     };
@@ -702,7 +774,8 @@ function _netRtcRebuild(s){
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
     const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
     s.pc = pc;
-    pc.onicecandidate = e => { if(e.candidate) _netSignalIce(s.peer, JSON.stringify(e.candidate)); };
+    _netIceTxReset(s.peer);
+    pc.onicecandidate = e => { if(e.candidate) _netIceOut(s.peer, e.candidate); };
     pc.onconnectionstatechange = () => { /* a failed rebuild is owned by the liveness timeout */ };
     return pc;
 }
