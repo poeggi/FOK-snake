@@ -231,6 +231,7 @@ const HOOKS = (myId) => `
   globalThis.__iceOut  = (c)=>{ _netIceOut(_netSess.peer, c); };
   globalThis.__flight = (n)=>{ _netFlight = n|0; };
   globalThis.__icePend = ()=>{ const q = _netIceTx[_netSess.peer]; return q ? q.buf.length : -1; };
+  globalThis.__iceWin  = ()=>NET_ICES_WINDOW_MS;
   // The spectator leg of the same batcher. The link is built for REAL and its own
   // onicecandidate is what fires, so the wiring under test is the shipping one rather than
   // a hand-rolled call into the middle of it.
@@ -388,6 +389,15 @@ try {
     return A;
   };
 
+  // Every wait in this block outlasts the gather window by design. Read the window rather
+  // than infer it: a widening that slipped past those waits would leave each of them timing
+  // out into an empty __out and reporting a batcher that never fired as one that never batched.
+  check('the gather window is the one every wait in this block is sized for', () => {
+    const A = txSess(4, null);
+    if(A.__iceWin() !== 100) throw new Error('expected a 100ms gather window, got ' + A.__iceWin());
+    if(A.__iceWin() >= 200) throw new Error('a window the waits below cannot outlast: ' + A.__iceWin());
+  });
+
   await acheck('4.4: the first candidate goes alone, the tail leaves as one ices', async () => {
     const A = txSess(4, null);
     for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
@@ -395,7 +405,7 @@ try {
     if(out.length !== 1 || out[0].type !== 'ice')
         throw new Error('the first candidate must go alone and at once, got ' + JSON.stringify(out.map(x=>x.type)));
     if(A.__icePend() !== 4) throw new Error('the tail must still be collecting, pending=' + A.__icePend());
-    await new Promise(r => setTimeout(r, 150));   // the ~50ms gather window
+    await new Promise(r => setTimeout(r, 200));   // the gather window
     out = A.__out.splice(0);
     if(out.length !== 1 || out[0].type !== 'ices')
         throw new Error('the tail must leave as ONE ices, got ' + JSON.stringify(out.map(x=>x.type)));
@@ -416,7 +426,7 @@ try {
     if(A.__out.length !== 0)
         throw new Error('nothing may leave beside our own request, got ' + JSON.stringify(A.__out.map(x=>x.type)));
     if(A.__icePend() !== 3) throw new Error('the head must be buffered with the tail, pending=' + A.__icePend());
-    await new Promise(r => setTimeout(r, 150));   // the gather window
+    await new Promise(r => setTimeout(r, 200));   // the gather window
     A.__flight(0);
     const out = A.__out.splice(0);
     if(out.length !== 1 || out[0].type !== 'ices')
@@ -467,7 +477,7 @@ try {
     A.__iceOut(cand(1));            // the lone first candidate, accepted: it has its own retry
     A.__setSigFail(500);
     for(let i = 2; i <= 4; i++) A.__iceOut(cand(i));
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, 200));
     A.__out.splice(0);                              // the first (refused) attempt
     await new Promise(r => setTimeout(r, 500));     // the one retry
     const out = A.__out.splice(0);
@@ -493,7 +503,7 @@ try {
     A.__srvMin(4); A.__setPeerV(A.__peerV4());
     A.__out.splice(0);
     for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, 200));
     const types = pump(A, B);
     if(types.join(',') !== 'ice,ices') throw new Error('expected one ice then one ices, got ' + types.join(','));
     await flush();
@@ -526,7 +536,7 @@ try {
         throw new Error('the first candidate must go alone to the feeder, got ' + JSON.stringify(out.map(x=>x.type)));
     const one = JSON.parse(out[0].payload);
     if(one.sp !== 1 || !one.c) throw new Error('a lone spectator candidate must keep the sp marker: ' + out[0].payload.slice(0,60));
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, 200));
     out = A.__out.splice(0);
     if(out.length !== 1 || out[0].type !== 'ices')
         throw new Error('the tail must leave as ONE ices, got ' + JSON.stringify(out.map(x=>x.type)));

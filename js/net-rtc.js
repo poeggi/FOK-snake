@@ -236,9 +236,19 @@ async function _netSignalIce(to, payload){
 // The FIRST candidate never waits. It is usually the host candidate that connects a LAN
 // duel outright, and holding it back to save a request would trade the thing being
 // optimised (a fast connect) for the thing being paid with (a cheap one).
+//
+// The window is the CEILING on how late a tail candidate reaches the peer, and that lateness
+// is real: the peer sits on a HELD poll for the whole handshake, answered the millisecond a
+// signal lands, so none of it is absorbed by a poll cadence. It is nonetheless the looser of
+// the two failure directions. A window narrower than the spacing a gather actually trickles
+// at collects nothing and charges the wait anyway -- one request per candidate, at the one
+// moment the connect is busiest -- whereas a wider one costs a bounded delay on candidates
+// the peer cannot use before the offer or answer they belong to has landed. It stays bounded
+// because the timer below is ARM-ONCE and not a debounce: it is measured from the first
+// buffered candidate, so a slow trickle can never widen it.
 const NET_ICES_MAX = 24;          // contract cap: entries in one `ices` payload
 const NET_ICES_BYTES = 15000;     // ...under the 16KB payload limit, with room for the envelope
-const NET_ICES_WINDOW_MS = 50;    // how long the tail collects before it goes
+const NET_ICES_WINDOW_MS = 100;   // how long the tail collects before it goes
 var _netIceTx = {};               // peer id -> { buf, bytes, t, open }
 // A fresh RTCPeerConnection gathers afresh: its first candidate is a first candidate
 // again, and anything still buffered belongs to a connection that no longer exists.
@@ -285,7 +295,7 @@ function _netIceOut(to, cand, ver){
     // in flight. "At once" would then mean queueing behind that request and paying the
     // worker wait a second time, for a candidate the peer cannot act on before the offer or
     // answer it belongs to has landed anyway. So it rides the ordinary window instead:
-    // still its own request, ~50ms later, with nothing of ours to queue behind.
+    // still its own request, one window later, with nothing of ours to queue behind.
     if(!q.open){
         q.open = true;
         if(_netFlight <= 0){ _netSignalIce(to, JSON.stringify(cand)); return; }
