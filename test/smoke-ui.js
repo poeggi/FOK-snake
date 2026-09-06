@@ -434,8 +434,8 @@ runTest('SMOKE-UI', `
                     a:{hx:5,x:6}, b:{hx:6,x:5}, ca:5, cb:6 }];
         for(const g of HO) for(const boost of [false,true]){
             _crashFx=[];
-            armCrash({p:0,hx:g.a.hx,hy:5,x:g.a.x,y:5,into:'headon',boost:boost}, 1000);
-            armCrash({p:1,hx:g.b.hx,hy:5,x:g.b.x,y:5,into:'headon',boost:boost}, 1000);
+            armCrash({p:0,hx:g.a.hx,hy:5,x:g.a.x,y:5,into:'headon',boost:boost,gp:2}, 1000);
+            armCrash({p:1,hx:g.b.hx,hy:5,x:g.b.x,y:5,into:'headon',boost:boost,gp:2}, 1000);
             if(_crashFx.length!==2) throw 'the head-on wreck was not staged';
             for(const age of [0,40,120,300]){
                 const d=headMid(1,g.cb,1000+age)-headMid(0,g.ca,1000+age);
@@ -448,7 +448,7 @@ runTest('SMOKE-UI', `
         }
         // ...and the lean is specific to a head-on: a snake that hit a BAR is already against
         // it, so its wreck still recoils away from the impact rather than into it.
-        _crashFx=[]; armCrash({p:0,hx:5,hy:5,x:6,y:5,into:'bar',boost:false}, 1000);
+        _crashFx=[]; armCrash({p:0,hx:5,hy:5,x:6,y:5,into:'bar',boost:false,gp:2}, 1000);
         const bj=_crashJolt(0,1000);
         if(!bj||!(bj(0)[0]<0)) throw 'a bar crash must still recoil backwards, not lean forward';
         _crashFx=[]; _simpleGfx=oSimple; _reduceMotion=oMotion;

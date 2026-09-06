@@ -115,43 +115,87 @@ runTest('SMOKE-GAME', `
     log('blow-off tumble: rises and grows to the apex, falls back to resting size ok');
 
     // Crash wreck: staged from the DEFERRED 'crash' event, so a rolled-back death never
-    // wrecks the board; dropped whole under SIMPLE gfx or REDUCE MOTION; and boosting has to
-    // fold the tail visibly harder than normal speed. The 0.5s added to DEATH_DUR is what it
-    // all plays in, so guard that too.
+    // wrecks the board; dropped whole under SIMPLE gfx or REDUCE MOTION. The 0.5s added to
+    // DEATH_DUR is what it all plays in, so guard that too.
     if(!FX_DEFER.has('crash')) throw 'crash fx is not deferred -- a rolled-back death would wreck the board';
     if(Math.round(DEATH_DUR-T(54))!==500) throw 'the 0.5s gap the crash animation plays in is gone';
     _ws.it=null; _wsFly=null;
-    const hit={ t:'crash', p:0, hx:9, hy:5, x:10, y:5, into:'bar', boost:false };
+    // The wreck is a COMPACTION FRONT: it starts at the head and walks back down the body,
+    // shutting each carriage's gap as it arrives. Depth and travel are both read off the
+    // speed the impact happened at, which is why the event carries the level's game tick
+    // (gp). So every sample below names an age late enough for the front to have got there.
+    // 16 carriages is a real mid-level body: startLen 3..10 plus 2 a gem over 10 gems.
+    const straight16=lane(10,5,16);
+    put(straight16, lane(16,8,6));
+    const hit={ t:'crash', p:0, hx:9, hy:5, x:10, y:5, into:'bar', boost:false, gp:2 };
     _crashFx.length=0;
     cfg.gfxMode=0; armCrash(hit, simNow);
     cfg.gfxMode=1; cfg.reduceMotion=true; armCrash(hit, simNow);
     cfg.reduceMotion=false;
     if(_crashFx.length!==0) throw 'SIMPLE gfx / REDUCE MOTION still staged a crash';
-    armCrash(hit, simNow);
-    const jn=_crashJolt(0, simNow+40);
-    _crashFx.length=0; armCrash(Object.assign({}, hit, {boost:true}), simNow);
-    const jb=_crashJolt(0, simNow+40);
-    if(!jn || !jb) throw 'no crash jolt while the wreck is still fresh';
+    const fold=(ev,age)=>{ _crashFx.length=0; armCrash(ev, simNow); return _crashJolt(0, simNow+age); };
+    const jn=fold(hit, 40);
+    if(!jn) throw 'no crash jolt while the wreck is still fresh';
     if(!(jn(0)[0]<0)) throw 'the head did not recoil back off what it hit';
     if(!(jn(0)[2]<0 && jn(0)[3]>0)) throw 'the head did not squash flat against the wall';
-    if(!(Math.abs(jb(5)[0]) > Math.abs(jn(5)[0])*2)) throw 'boosting did not fold the tail visibly harder';
-    // The fold has a SHAPE, not just a size: once the buckle wave has run the length of the
-    // body, neighbouring carriages sit on opposite sides (the zigzag) and the pile-up toward
-    // the impact grows monotonically down the body (the snake is visibly shorter). Both are
-    // still there at the end of the beat -- a wreck stays wrecked.
-    const jf=_crashJolt(0, simNow+CRASH_DUR-30);
+    // Depth follows the impact speed rather than a boost flag: boosting arrives at twice the
+    // cells per second, and the gentlest crash the game can produce has to leave the body
+    // near enough intact next to the hardest one.
+    const jc=fold(hit, 300);
+    const jb=fold(Object.assign({}, hit, {boost:true}), 300);
+    const jsl=fold(Object.assign({}, hit, {gp:7}), 300);
+    if(!(jb(5)[0] > jc(5)[0]*1.3)) throw 'boosting did not fold the tail visibly harder: '+[jc(5)[0],jb(5)[0]];
+    if(!(jb(5)[0] > jsl(5)[0]*3)) throw 'the gentlest crash folds nearly as hard as the hardest: '+[jsl(5)[0],jb(5)[0]];
+    // The front runs at a fixed multiple of the snake, so a slow crash has a slow front: past
+    // FOLD_STOP it recruits nobody. What it never reached keeps its gap and stays unkicked,
+    // rather than still creeping down the tail while the respawn is coming.
+    const slowWave=(1000/(60/(7*2)))*FRONT_RATIO;
+    const past=Math.ceil(FOLD_STOP/slowWave)+1;
+    if(past>=16) throw 'the FOLD_STOP guard reads past the end of the test body';
+    const jse=fold(Object.assign({}, hit, {gp:7}), CRASH_DUR-30);
+    if(jse(past)[1]!==0) throw 'the front kept kicking carriages past FOLD_STOP';
+    if(jse(past+1)[0]!==jse(past)[0]) throw 'the front kept closing gaps past FOLD_STOP';
+    // The fold has a SHAPE, not just a size: neighbouring carriages sit on opposite sides
+    // (the zigzag) and the pile-up toward the impact grows down the body (the snake is
+    // visibly shorter). Both are still there at the end of the beat -- a wreck stays wrecked.
+    const jf=fold(Object.assign({}, hit, {boost:true}), CRASH_DUR-30);
     for(let i=1;i<6;i++){
         if(!(jf(i)[1]*jf(i+1)[1] < 0)) throw 'the crash fold is not a zigzag: carriages '+i+'/'+(i+1)+' kick the same way';
         if(!(jf(i+1)[0] > jf(i)[0])) throw 'the crash fold does not pile up: carriage '+(i+1)+' did not close on the impact';
+        // Sign alone is not the test: a kick that rings out to nothing still alternates. Most
+        // of it has to be STILL THERE at the end of the beat, which is what a wreck looks like.
+        if(!(Math.abs(jf(i)[1]) > CS*0.15)) throw 'the zigzag rang out instead of holding: carriage '+i+' sits '+jf(i)[1]+'px off';
     }
-    if(jf(Math.ceil(FOLD_STOP/7)+1)[1]!==0) throw 'the buckle wave kept spreading past FOLD_STOP';
+    // A gap shuts by at most all of itself, so carriage i travels at most i cells and stops
+    // dead on the head's own cell. That is what keeps the wreck out of the wall it just hit.
+    for(let i=1;i<16;i++) if(jf(i)[0] > i*CS) throw 'carriage '+i+' was driven past the head into the wall';
+    // Every corner absorbs part of the front, so the more the body is folded back on itself
+    // the less of the wreck reaches its tail. Same impact, same length, four shapes.
+    // All three bodies put every corner in the first few carriages and then run straight to
+    // the tail, so carriage 15 travels along a single leg and the offset vector's LENGTH is
+    // the distance the front actually pushed it. Comparing a folded body's chord against a
+    // straight one would not do: a bent walk is shorter than a straight one whatever the
+    // damping does, so that comparison holds up even with the damping switched off.
+    const corner1=[{x:10,y:5},{x:9,y:5}].concat(Array.from({length:14},(_,i)=>({x:9,y:6+i})));
+    const corner3=[{x:10,y:5},{x:9,y:5},{x:9,y:6},{x:8,y:6}].concat(Array.from({length:12},(_,i)=>({x:8,y:7+i})));
+    // legCells is how many carriages of unbroken straight body sit between the tail and the
+    // last corner; the reading is only a distance while the push stays inside that.
+    const reach=(segs, legCells)=>{ put(segs, lane(16,8,6));
+        const j=fold(Object.assign({}, hit, {boost:true}), CRASH_DUR-30);
+        const o=j(15), leg=Math.hypot(o[0], o[1]);
+        if(leg > legCells*CS) throw 'the damping probe ran off its straight leg -- the reading is a chord, not a distance';
+        return leg; };
+    const r0=reach(straight16, 15), r1=reach(corner1, 14), r3=reach(corner3, 12);
+    if(!(r1 < r0*0.85)) throw 'one corner did not damp the compaction front: '+[r0,r1];
+    if(!(r3 < r1*0.85)) throw 'the extra corners did not damp the front any further: '+[r1,r3];
+    put(straight16, lane(16,8,6));
     if(_crashJolt(0, simNow+CRASH_DUR)) throw 'the wreck never settles';
     _crashFx.length=0; armCrash(hit, simNow);
     drawDuelBoard(simNow); drawDuelBoard(simNow+600);
     if(_crashFx.length!==1) throw 'the wreck was dropped while it was still playing';
     drawDuelBoard(simNow+CRASH_DUR);
     if(_crashFx.length!==0) throw 'the wreck outlived CRASH_DUR';
-    log('crash wreck: deferred, gated on gfx mode, concertinas into a zigzag that holds, folds harder at boost, settles ok');
+    log('crash wreck: deferred, gated on gfx mode, a compaction front that zigzags and holds, scales with impact speed, stops at FOLD_STOP, damps at every corner and never reaches past the head ok');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

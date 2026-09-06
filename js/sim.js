@@ -515,7 +515,7 @@ function duelStep(now) {
         for (let i = 0; i < 2; i++) if (dead[i]) {
             const at = hitAt[i] || players[i].snake[0];
             emit({t:'crash',p:i,hx:players[i].snake[0].x,hy:players[i].snake[0].y,
-                  x:at.x,y:at.y,into:into[i]||'snake',boost:!!players[i].boosting});
+                  x:at.x,y:at.y,into:into[i]||'snake',boost:!!players[i].boosting,gp:gPer});
         }
         emit({t:'sfx',name:'die'});
         // EVERY death takes the same beat as single player, the last one included: the sim
@@ -924,7 +924,7 @@ function step(now) {
 function die(now, into, at) {
     lives--; phase='dying'; phaseAt=now;
     deathMsg=lives>0?`LIFE LOST  (${lives} left)`:'GAME OVER!';
-    if(into) emit({t:'crash',p:-1,hx:snake[0].x,hy:snake[0].y,x:at.x,y:at.y,into,boost:!!boosting});
+    if(into) emit({t:'crash',p:-1,hx:snake[0].x,hy:snake[0].y,x:at.x,y:at.y,into,boost:!!boosting,gp:gPer});
     emit({t:'sfx',name:'die'}); emit({t:'mpause'});
 }
 

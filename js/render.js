@@ -297,7 +297,7 @@ function armCrash(e, now){
     const dy = ((e.y-e.hy+ROWS+ROWS/2)%ROWS)-ROWS/2;
     const fx = { at:now, p:e.p, x:e.x, y:e.y, hx:e.hx, hy:e.hy,
                  ax:Math.sign(dx), ay:Math.sign(dy),
-                 into:e.into, boost:!!e.boost, lean:0 };
+                 into:e.into, boost:!!e.boost, gp:e.gp, lean:0 };
     _crashFx.push(fx);
     if(e.into === 'headon') _crashPair(fx);
 }
@@ -327,42 +327,101 @@ function _crashFor(p){
 // then a buckle wave runs back down the train, and each carriage in turn shortens its
 // coupling and kicks out to the alternate side. So a straight -------O folds into a jagged
 // /\/\/\o in about a fifth of a second. Two parts make that read:
-//   PILE  -- every link ahead of a carriage has shortened, so the displacement toward the
-//            impact ACCUMULATES down the body and the whole snake visibly gets shorter.
-//   KICK  -- the length lost axially goes sideways, alternating each carriage, which is what
-//            turns compression into a zigzag instead of a heap.
-// Both fade out along the body (exp(-i/reach)): the front folds, the tail is still straight.
-// And a wreck STAYS wrecked -- the fold holds for the whole beat, only the rattle settles.
-// Boosting hits far harder and reaches much further back; the impact itself times the same.
+// The wreck is a COMPACTION FRONT rather than an envelope hanging off the head. A carriage's
+// gap to the one ahead shuts only once the front reaches it, shuts by the same share wherever
+// along the body it sits, and then stays shut -- so what travels visibly down the snake is the
+// compression itself, compacted body behind the front and untouched body ahead of it. The
+// front runs until the crash budget is spent, and that budget is a share of the body read off
+// the impact speed: CRUSH_AT_MAX at the fastest crash the game can produce, next to nothing at
+// level 1. Depth and travel are therefore one thing rather than two knobs.
+//
+// Three properties fall out of stating the fold as gap CLOSURE instead of as displacement:
+//   - a gap can shut by at most all of itself, so carriage i advances by at most i cells. It
+//     can reach the head's cell and stop dead there. Nothing crosses its neighbour and nothing
+//     is driven through the wall it hit -- here that is arithmetic, not a clamp.
+//   - the walk follows the BODY corner by corner, so a folded snake compacts along its own
+//     shape instead of sliding bodily along the impact axis.
+//   - every corner absorbs some of the shock (CORNER_DAMP), so a coiled snake swallows the
+//     front within a few bends while a straight one carries it all the way back.
+// KICK -- the length lost axially goes sideways, alternating carriage to carriage, which is
+// what makes the wreck a zigzag instead of a heap. Most of that kick HOLDS for the whole beat
+// (a wreck stays wrecked) and only the remainder rings out.
+const CRUSH_AT_MAX = 0.85;  // share of the body the wreck eats at 30 cells/s, the game's hardest crash
+const CORNER_DAMP  = 0.72;  // what is left of the front once it has turned one corner
+const ZIG_HOLD     = 0.65;  // share of the sideways kick that stays put instead of ringing out
+const FRONT_RATIO  = 0.40;  // ms per carriage as a fraction of ms per cell: the front runs 2.5x the snake
 function _crashJolt(p, now){
     const e = _crashFor(p);
     if(!e) return null;
     const age = now-e.at;
     if(age<0 || age>=CRASH_DUR) return null;
-    // Timed on a REAL body, not a round number: growth is +2 a gem over 10 gems a level and
-    // startLen runs 3/5/7/10 by level band, so a snake caught mid-level averages ~16 carriages
-    // (6.2 + 10). 16*7+90 lands the last of them at ~200ms. The wave is not capped: a very long
-    // snake simply keeps folding past that, and the beat ending is the only thing that stops it.
-    const wave  = 7;                 // ms before the buckle reaches the next carriage back
-    const buck  = 90;                // ms that one carriage takes to fold once the wave hits it
-    const reach = e.boost?7:3;       // carriages the fold is still violent at
-    const comp  = e.boost?0.48:0.18; // link shortening at full fold, as a fraction of a cell
-    const amp   = e.boost?0.5:0.2;   // sideways kick at full fold, as a fraction of a cell.
-    // 0.5 is the ceiling, not a taste call: neighbouring carriages swing to OPPOSITE sides, so
-    // a bigger kick puts more than CS between them and the fold breaks into loose blocks.
-    const rattle = Math.exp(-age/200)*Math.cos(age/34);   // the shake, not the fold: this is what settles
-    // Hard stop on the wave: past 500ms it recruits no further carriages and whatever it has
-    // not reached stays straight, so the fold can never still be creeping down the tail while
-    // the respawn is coming. A carriage already buckling finishes its 90ms -- aborting mid-fold
-    // would read as a glitch, not a stop. At 7ms a carriage, that reaches back to 71 -- past any
-    // real body, since a level caps at startLen+20 = 30 -- so it is a guarantee, not a normal path.
-    const k = i => { if(i*wave > FOLD_STOP) return 0; const s = age - i*wave; return s<=0 ? 0 : Math.min(1, s/buck); };
-    const pile = [0];                // prefix sum, built once per frame rather than per segment
-    const pileTo = i => { while(pile.length<=i){ const j=pile.length; pile.push(pile[j-1]+comp*CS*k(j)*Math.exp(-j/reach)); } return pile[i]; };
+    // The fold needs the body; the head's own recoil and squash do not. A wreck outlives the
+    // snake it belongs to around a respawn, and in a duel it is drawn before players is even
+    // populated -- len 0 simply means there is nothing behind the head left to compact.
+    const segs = p<0 ? snake : (players && players[p] ? players[p].snake : null);
+    const len  = segs && segs.length>1 ? segs.length : 0;
+    // Impact speed in cells per second. A step is one cell, the engine ticks at 60Hz, and boost
+    // is a parity toggle rather than a re-divisor -- so this runs 4.29 (level 1 easy, coasting)
+    // to 30.00 (level 10 hard, boosting), and every number below is read off it.
+    const cps  = 60/(e.gp*(e.boost?1:2));
+    const fr   = Math.pow(Math.min(1, cps/30), 1.2);
+    const frac = Math.min(CRUSH_AT_MAX, fr);            // share of THIS body the wreck eats
+    const u0   = Math.min(0.92, 0.30+0.78*fr);          // how hard one gap shuts as the front passes
+    const cap  = Math.min(0.90*len, frac*len*1.08)*CS;  // the ring may dig a little past it, briefly
+    const sweep= Math.min(len-1, (frac*len)/u0);        // so this is how far the front gets
+    const wave = Math.max(4, Math.min(120, (1000/cps)*FRONT_RATIO));   // ms before the front reaches the next carriage
+    const buck = 32;                 // ms that one carriage takes to fold once the front arrives
+    const amp  = 0.37;               // sideways kick at full fold, as a fraction of a cell.
+    // Under half a cell is the ceiling, not a taste call: neighbouring carriages swing to
+    // OPPOSITE sides, so a bigger kick puts more than CS between them and the zigzag breaks
+    // into loose blocks instead of reading as one folded body.
+    const os = 1.16, ring = 95, per = 48;   // the gap slams past where it settles, then rings back
+    // Hard stop on the front: past FOLD_STOP it recruits no further carriages and whatever it
+    // has not reached stays straight, so the fold can never still be creeping down the tail
+    // while the respawn is coming. A carriage already buckling finishes its 32ms -- aborting
+    // it mid-fold would read as a glitch, not as a stop.
+    const k  = i => { if(i*wave > FOLD_STOP) return 0; const s = age - i*wave; return s<=0 ? 0 : Math.min(1, s/buck); };
+    const kr = i => { const s = age - i*wave; return s<=0 ? 0 : k(i)*(1+os*Math.exp(-s/ring)*Math.cos(s/per)); };
+    // dirs[i] is the unit step from carriage i toward the one ahead of it, measured the short
+    // way round the torus so a body wrapping an edge folds the same as one that does not.
+    const dirs = [null];
+    for(let i=1;i<len;i++){
+        const ddx = ((segs[i-1].x-segs[i].x+COLS+COLS/2)%COLS)-COLS/2;
+        const ddy = ((segs[i-1].y-segs[i].y+ROWS+ROWS/2)%ROWS)-ROWS/2;
+        dirs.push({ x:Math.sign(ddx), y:Math.sign(ddy) });
+    }
+    const pile = [0], dmp = [1];     // prefix sums, built once per frame rather than per segment
+    const pileTo = i => {
+        while(pile.length<=i){
+            const j = pile.length;
+            const turn = j>1 && (dirs[j].x!==dirs[j-1].x || dirs[j].y!==dirs[j-1].y);
+            dmp.push(turn ? dmp[j-1]*CORNER_DAMP : dmp[j-1]);
+            const u = Math.min(1, u0*dmp[j]*kr(j));      // a gap shuts by at most all of itself
+            pile.push(Math.min(pile[j-1]+u*CS, cap, j*CS));
+        }
+        return pile[i];
+    };
+    // Walk the closed distance head-ward ALONG THE BODY. i*CS is the whole way to the head's
+    // own cell and pileTo can never exceed it, so the walk cannot run off the front of the
+    // snake -- which is what used to shove carriages through the wall.
+    const advance = (i, dist) => {
+        let ox=0, oy=0, n=i, rem=Math.min(dist, i*CS);
+        while(rem>1e-6 && n>=1){
+            const st = Math.min(rem, CS);
+            ox += dirs[n].x*st; oy += dirs[n].y*st; rem -= st; n--;
+        }
+        return [ox, oy];
+    };
     return i=>{
         if(i===0){
-            const c = (e.boost?9:5)*(0.55+0.45*Math.exp(-age/180));   // stays squashed: it is a wreck
-            const b0 = e.boost?4:2.5, decay = Math.exp(-age/180);
+            // The head reads the impact speed like the rest of the wreck, but its two numbers
+            // are bounded by things the body's are not. The squash is drawn against a CS-2
+            // head, so past ten pixels or so it eats the head instead of flattening it; and
+            // the recoil is bounded by the head-on lean below, which has to leave the two
+            // heads drawn against each other for the whole beat -- pull back by much over
+            // half a cell and they visibly part company under a message saying they collided.
+            const c = (3.5+6.5*fr)*(0.55+0.45*Math.exp(-age/180));   // stays squashed: it is a wreck
+            const b0 = 2.2+2.2*fr, decay = Math.exp(-age/180);
             // A HEAD-ON is the one crash whose impact cell holds NEITHER snake. Every other
             // death leaves the head already against what killed it -- the bar, the body -- so
             // the wreck reads right from the cell the head stands on. Here both heads stopped
@@ -373,9 +432,16 @@ function _crashJolt(p, now){
             const push = e.into==='headon' ? e.lean - b0*(1-decay) : -b0*decay;
             return [ e.ax*push, e.ay*push, e.ax?-c:c*0.8, e.ay?-c:c*0.8 ];
         }
-        const kick = amp*CS*Math.exp(-i/reach)*k(i)*(i%2?1:-1)*(1+0.35*rattle);
-        const p2 = pileTo(i);
-        return [ e.ax*p2 - e.ay*kick, e.ay*p2 + e.ax*kick, 0, 0 ];
+        if(i>=len) return [0,0,0,0];
+        const o = advance(i, pileTo(i));           // pileTo first: it is what fills dmp[i]
+        const d = dirs[i], s = age - i*wave;
+        let kick = 0;
+        if(s>0){
+            const hold = ZIG_HOLD + (1-ZIG_HOLD)*Math.exp(-s/ring)*Math.cos(s/per);
+            const fade = Math.max(0, 1-Math.max(0, i-sweep)/3);   // the zigzag stops where the front stopped
+            kick = amp*CS*(i%2?1:-1)*k(i)*hold*fade*dmp[i];
+        }
+        return [ o[0]+d.y*kick, o[1]-d.x*kick, 0, 0 ];
     };
 }
 function _crashDent(e, age){
@@ -979,7 +1045,13 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt, pi) 
     const sc=SNAKE_COLORS[colorIdx||0];
     const cols = flash ? null : _bodyCols(segs.length, sc.h);
     const sw=CS-2,sh=CS-2,len=segs.length;
-    segs.forEach((seg,i)=>{
+    // Draw order is tail first and the head LAST. It only matters in a crash, where the fold
+    // piles carriages onto one another: this way each one covers the one behind it and the head
+    // ends up on top of the wreck instead of buried under it. Nothing overlaps in normal play.
+    const order=[]; for(let i=len-1;i>=1;i--) order.push(i);
+    if(len>0) order.push(0);
+    order.forEach(i=>{
+        const seg=segs[i];
         const j=jolt?jolt(i):null;   // crash fold: a DRAW offset only, the cells themselves never move
         const x=seg.x*CS+1+(j?j[0]:0),y=seg.y*CS+1+(j?j[1]:0);
         if(i>0){

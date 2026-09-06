@@ -15,7 +15,9 @@ const SHARED = new Set(['phase']);   // main sets phase for menu navigation by d
 const violations = [];
 for (const file of ['storage.js', 'game.js', 'text.js', 'qr.js', 'render.js', 'screens.js', 'input.js', 'net-api.js', 'net-rtc.js', 'net-relay.js', 'net-session.js']) {
     J(file).split('\n').forEach((line, i) => {
-        const code = line.replace(/\/\/.*$/, '');   // ignore line comments
+        // Trim the CR first: JS '.' does not match one, so on a CRLF checkout the
+        // strip below matches nothing and every comment is scanned as code.
+        const code = line.replace(/\r$/, '').replace(/\/\/.*$/, '');   // ignore line comments
         for (const v of fields) {
             if (SHARED.has(v)) continue;
             const re = new RegExp('(?<![.\\w$])' + v +
