@@ -406,6 +406,7 @@ function _updateDbgSnapBtn(){
     const on = (cfg.debug||0) >= 3;
     if(on && !_dbgSnapBtn){
         _dbgSnapBtn = document.createElement('div');
+        _dbgSnapBtn.id = 'dbg-snap';   // the swipe reader masks live controls by id, not by class
         _dbgSnapBtn.className = 'dbg-snap'; _dbgSnapBtn.textContent = 'SNAP';
         _dbgSnapBtn.addEventListener('click', (e)=>{ e.stopPropagation(); captureDebugSnapshot(); });
         document.body.appendChild(_dbgSnapBtn);

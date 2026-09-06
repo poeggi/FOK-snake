@@ -892,10 +892,11 @@ function _dbgSteerLog(p, d){
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 // Swipes are read on the whole document; a touch starting on a live control (the gamepad cluster,
-// or the MUTE/FPS boxes) is excluded, grown by a margin so a near-miss isn't stolen as a swipe.
+// the MUTE/FPS boxes, or the level-3 SNAP button) is excluded, grown by a margin so a near-miss
+// isn't stolen as a swipe.
 const _MASK_MARGIN=16;
 function _inControlMask(x,y){
-    for(const id of ['gamepad','btn-mute','fps-el']){
+    for(const id of ['gamepad','btn-mute','fps-el','dbg-snap']){
         const el=document.getElementById(id);
         if(!el) continue;
         const r=el.getBoundingClientRect();
