@@ -145,13 +145,32 @@ function netSpecLook(){ return (_spOn && _spCtx && _spCtx.look && typeof _spCtx.
 // ---- small helpers -------------------------------------------------------
 function _spNow(){ return (typeof _wall === 'function') ? _wall() : Date.now(); }
 function _spRtcOk(){ return typeof RTCPeerConnection === 'function'; }
+// A fan-out serializes the envelope ONCE and shares the string: the same bytes go to every
+// subscribed link, and serializing per link would re-encode one packet as many times as there
+// are spectators, at tick rate, on the machine that is also playing the duel. Nothing is
+// serialized at all with nobody subscribed, so a leaf -- which relays to no one -- pays for
+// none of this. The size refusal sits with the serialize, so an oversize envelope is refused
+// for the whole fan-out and _spDbg.over counts envelopes rather than link attempts.
+function _spEnv(o){
+    let j; try{ j = JSON.stringify(o); }catch(e){ return ''; }
+    if(j.length > SPEC_PKT_MAX){ _spDbg.over++; return ''; }
+    return j;
+}
+function _spSendJ(l, j){
+    if(!j || !l || !l.dc || l.dc.readyState !== 'open') return false;
+    try{ l.dc.send(j); _spDbg.tx++; return true; }catch(e){ return false; }
+}
 function _spSend(l, o){
     if(!l || !l.dc || l.dc.readyState !== 'open') return false;
-    try{
-        const j = JSON.stringify(o);
-        if(j.length > SPEC_PKT_MAX){ _spDbg.over++; return false; }
-        l.dc.send(j); _spDbg.tx++; return true;
-    }catch(e){ return false; }
+    return _spSendJ(l, _spEnv(o));
+}
+function _spFan(env){
+    let sub = false;
+    for(const l of _spOut) if(l.sub){ sub = true; break; }
+    if(!sub) return;
+    const j = _spEnv(env);
+    if(!j) return;
+    for(const l of _spOut) if(l.sub) _spSendJ(l, j);
 }
 function _spFind(arr, peer){ for(const l of arr) if(l.peer === peer) return l; return null; }
 // Take a pending watch request off the list, answering "was this reply ours to act on" --
@@ -511,7 +530,7 @@ function _spWrap(m, p){ return { t:'sp', g:_spGen | 0, n:_spSeq++, p:p | 0, m };
 function _spPush(env){
     _spBuf.push(env);
     if(_spBuf.length > SPEC_BUF_MAX) _spBuf.shift();
-    for(const l of _spOut) if(l.sub) _spSend(l, env);
+    _spFan(env);
 }
 // The two taps a feeder puts on its own duel. OUTBOUND: our packets, forwarded from
 // the point where _netSend has finished stamping them -- so a spectator receives the
@@ -534,7 +553,7 @@ function _spRelay(env){
     if(!_spOut.length) return;
     _spBuf.push(env);
     if(_spBuf.length > SPEC_BUF_MAX) _spBuf.shift();
-    for(const l of _spOut) if(l.sub) _spSend(l, env);
+    _spFan(env);
 }
 // A fresh link asks for the stream; we answer with the whole bootstrap in order.
 // A warm STANDBY unsubscribes right after (ssub 0): a secondary's second
@@ -596,7 +615,7 @@ function _spCkpt(force){
     const env = _spOn ? { t:'sp', g:_spGen | 0, n:_spSeen | 0, o:_spLine, p:0, m:rs }
                       : Object.assign(_spWrap(rs, netMyIndex()), { o:getPlayerId() });
     _spRs = env; _spBuf = [];
-    for(const l of _spOut) if(l.sub) _spSend(l, env);
+    _spFan(env);
 }
 
 // ---- consuming (spectator) ----------------------------------------------
@@ -647,7 +666,7 @@ function _spOnFeedMsg(l, txt){
     if((d.n | 0) <= _spSeen){ _spDbg.dup++; return; }
     _spSeen = d.n | 0;
     // Keep serving what we consume (a primary is a spectator that also feeds).
-    if(d.m && d.m.t === 'rs'){ _spRs = d; _spBuf = []; for(const o of _spOut) if(o.sub) _spSend(o, d); }
+    if(d.m && d.m.t === 'rs'){ _spRs = d; _spBuf = []; _spFan(d); }
     else _spRelay(d);
     if(_spBootT != null){ _spQ.push(d); if(_spQ.length > SPEC_BUF_MAX) _spQ.shift(); return; }
     if(!_spOn) return;                          // context refused / not booted: nothing to drive

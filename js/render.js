@@ -591,6 +591,9 @@ function drawOvBg(a) { ctx.fillStyle=`rgba(7,7,14,${a||0.88})`; ctx.fillRect(0,0
 // confirmation dialog stays readable over any busy screen. Canvas is CW x CH with no DPR
 // scaling, so it blurs cleanly onto itself; the blur is guarded for contexts without filter.
 function drawGlass() {
+    // SIMPLE graphics: no frosting. The self-blur is the costliest single draw the game has,
+    // so the dialog sits on plain black instead.
+    if(_simpleGfx()){ ctx.fillStyle='#040409'; ctx.fillRect(0,0,CW,CH); return; }
     try { ctx.save(); ctx.filter='blur(6px)'; ctx.drawImage(ctx.canvas, 0, 0); ctx.filter='none'; ctx.restore(); } catch(e) {}
     ctx.fillStyle='rgba(4,4,9,0.82)'; ctx.fillRect(0,0,CW,CH);
 }

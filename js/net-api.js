@@ -911,8 +911,12 @@ async function _netHello(){
     // when nothing changed, so it costs nothing -- and needs no version gate: a 4.1 server
     // ignores the unknown key. The refresh is throttled by its own ~5min TTL, so riding the
     // heartbeat here is one RTCPeerConnection every few minutes, not one per hello.
+    // ...and not DURING a match: a gather opens a throwaway peer connection and spends STUN
+    // round trips beside the duel's own DataChannel, while the addresses it finds are only
+    // ever used to open the NEXT one. What is already known still rides along; the TTL means
+    // the first hello after the match refreshes.
     if(typeof netNetsRefresh === 'function'){
-        netNetsRefresh();
+        if(!(typeof netGameActive === 'function' && netGameActive())) netNetsRefresh();
         const nets = netPublicNets();
         if(nets.length) body.nets = nets;
     }

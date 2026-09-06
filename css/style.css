@@ -107,14 +107,17 @@ body[data-phase="splash"] #btn-mute, body[data-phase="splash"] #fps-el { opacity
 /* Click-only controls: never show a focus ring or a text-selection highlight. Mute also carries
    tabindex="-1" so Tab skips it; the FPS span was never tab-focusable but its text is drag-selectable. */
 #fps-el, #btn-mute { -webkit-user-select: none; user-select: none; }
-#fps-el:focus, #btn-mute:focus, #fps-el:focus-visible, #btn-mute:focus-visible { outline: none; }
+#fps-el:focus, #btn-mute:focus { outline: none; }
+/* Own rule: an engine that does not know :focus-visible drops the whole selector list it
+   sits in, and the plain :focus line above must survive that. */
+#fps-el:focus-visible, #btn-mute:focus-visible { outline: none; }
 /* MUTE also takes a ten-second hold (the ringtone easter egg), so iOS must not answer that
    hold with its own long-press callout. */
 #btn-mute { -webkit-touch-callout: none; touch-action: manipulation; }
 /* The ringtone panel that hold opens: same chrome as the gamepad buttons, so it reads as
    part of the cabinet rather than as a browser dialog. Built by js/input.js on first open. */
 #ring-egg {
-    position: fixed; inset: 0; z-index: 99998;
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 99998;   /* inset is Chrome 87 / Safari 14.1 */
     display: flex; align-items: center; justify-content: center;
     padding: 16px; background: rgba(0,0,0,0.8);
     font-family: 'Press Start 2P',monospace; font-size: var(--fs-hint-px, 10px);

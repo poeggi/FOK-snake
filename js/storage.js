@@ -17,16 +17,20 @@ const CFG_KEY = 'fok-snake-cfg';
 // only has to be current by the time the tab is hidden or closed.
 const _lsPending = new Map();
 let _lsFlushScheduled = false;
+// A value may be a THUNK: it is serialized at flush time, so a burst of saves of one growing
+// object (cfg, written after every entry an item drain settles) costs one serialize, not one per
+// call. The idle callback carries a deadline so a device that is never idle still writes.
 function _lsFlush() {
     _lsFlushScheduled = false;
-    for (const [k, v] of _lsPending) { try { localStorage.setItem(k, v); } catch (e) {} }
+    for (const [k, v] of _lsPending) { try { localStorage.setItem(k, typeof v === 'function' ? v() : v); } catch (e) {} }
     _lsPending.clear();
 }
 function saveLater(key, value) {
     _lsPending.set(key, value);
     if (_lsFlushScheduled) return;
     _lsFlushScheduled = true;
-    (typeof requestIdleCallback === 'function' ? requestIdleCallback : (fn) => setTimeout(fn, 0))(_lsFlush);
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(_lsFlush, { timeout: 2000 });
+    else setTimeout(_lsFlush, 0);
 }
 try { addEventListener('pagehide', _lsFlush); } catch (e) {}
 try { document.addEventListener('visibilitychange', () => { if (document.hidden) _lsFlush(); }); } catch (e) {}
@@ -62,7 +66,9 @@ function addScore(name, sc, lvl, won) {
     try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch (e) {}
     addFOKoins(sc);
 }
-function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} _wsend({ t:'cfg', cfg:_cfgForWorker() }); }
+// The worker gets its subset NOW (a settings change must reach the sim this tick); the disk copy
+// is batched like every other save, because this runs on gameplay paths (a mid-duel item claim).
+function saveCfg() { saveLater(CFG_KEY, () => JSON.stringify(cfg)); _wsend({ t:'cfg', cfg:_cfgForWorker() }); }
 // Fresh default config each call (new objects, so nothing is shared/aliased).
 // cfg.offline: when ON, future online features (1v1 dualplay, global online stats)
 // must stay disabled -- gate all networking on !cfg.offline.
@@ -300,6 +306,7 @@ function removeFriend(id) {
 function fmtFriendId(id) { return id.toUpperCase().replace(/(.{4})(?=.)/g, '$1-'); }
 
 function _saveSnapshot() {
+    _lsFlush();   // the backup reads the disk copy: settle what is still pending
     return { v:1,
         hs:    localStorage.getItem(HS_KEY),
         coins: localStorage.getItem(FK_KEY),
@@ -326,6 +333,7 @@ function _downloadJSON(filename, obj){
 function _applyRestoredConfig(d){
     if(!d || typeof d!=='object') return false;
     if(d.crc && d.crc!==_sumOf(d)) return false;
+    _lsFlush();   // a pending pre-restore write must not land on top of the restored keys
     const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
     set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name'); set(PID_KEY,'pid'); set(FRIENDS_KEY,'friends');
     if(/^[0-9a-f]{8}$/.test(d.pid||'')) _pidCookieSet(d.pid);   // identity into the cookie (master) too

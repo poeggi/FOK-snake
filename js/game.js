@@ -847,8 +847,9 @@ const SCREENS = {
     friends:      { d:()=>drawFriends(),         hud:false },
     invite:       { d:()=>drawInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
     // The tournament screens are static pictures of what the server last said, so they
-    // freeze like every other menu. The lobby and the ceremony animate their waiting dots,
-    // which is the only thing on them that moves while nothing happens.
+    // freeze like every other menu -- except that all four waiting screens animate their
+    // waiting dots (_ttDots) and the bracket also counts the host's CONTINUE row down, so
+    // those redraw every frame.
     tourneyLobby:    { d:()=>drawTourneyLobby(),    hud:false, freeze:true, anim:()=> true },
     tourneyBracket:  { d:()=>drawTourneyBracket(),  hud:false, freeze:true, anim:()=> true },
     tourneyRound:    { d:()=>drawTourneyRound(),    hud:false, freeze:true, anim:()=> true },
