@@ -186,9 +186,17 @@ var _netFlightMax = 0;
 // means the host is queueing in this very instant.
 const NET_QMS_BUSY = 5;          // ms; 0 is the ordinary reading, the slice we measured showed 51
 const NET_QMS_FRESH_MS = 4000;   // how long a reading stands for -- load moves, and a stale figure is not evidence
-var _netQ = { ms:0, at:0 };
-function _netQNote(j){ if(j && typeof j.q_ms === 'number'){ _netQ = { ms: Math.max(0, j.q_ms|0), at: Date.now() }; _netDbg.qMs = _netQ.ms; } }
+var _netQ = { ms:0, at:0, flight:0 };
+// ...and it is read together with how many requests of ours were open when it was taken --
+// the reading itself cannot tell a busy host from a client queueing behind ITSELF, and the
+// two are different problems with different fixes. The count is taken before the request
+// leaves the flight counter, so 1 means this request alone.
+function _netQNote(j){ if(j && typeof j.q_ms === 'number'){ _netQ = { ms: Math.max(0, j.q_ms|0), at: Date.now(), flight: _netFlight }; _netDbg.qMs = _netQ.ms; } }
 function netHostBusy(){ return !!_netQ.at && Date.now() - _netQ.at < NET_QMS_FRESH_MS && _netQ.ms >= NET_QMS_BUSY; }
+// The self-check the server asked for: a queue wait measured while more than one request of
+// ours was open is OUR overlap, not the host's load. Shown in the debug overlay, because
+// the whole point of the gate above is that this never reads true.
+function netSelfStacked(){ return netHostBusy() && _netQ.flight > 1; }
 // start.php compared our proof of the shared clock against our opponent's and found the two
 // too far apart. Only the server ever sees both, so this is the only evidence that exists
 // that a PAIR is mis-anchored -- and it is a hint, not a refusal: the start it rides on
@@ -220,13 +228,34 @@ function _netUnheldEvery(){
 //
 // So background traffic -- the heartbeat, the roster, items, the cloud backup, scores --
 // goes out ONE AT A TIME through here, spaced by the gap the server asked for and never
-// beside anything else of ours. None of it is anything a player is waiting for. The duel
-// path (signal, start, poll, match) does NOT come through here: that is the latency a
-// player feels, and delaying it would be spending the thing we are trying to buy.
+// beside anything else of ours. None of it is anything a player is waiting for.
+//
+// The duel path used to be exempt outright, on the grounds that it is the latency a player
+// feels. The server then measured what that exemption costs: at the moment a match was
+// dealt, one client had start.php and tournament.php leave in the same millisecond and BOTH
+// waited 128ms for a worker while the pool mean was 2.5ms. Being past the gate is not the
+// same as going out together -- two exempt calls in one tick race each other and both pay
+// the queue, where one behind the other pays it once. So the duel's SERVER ROUND TRIPS come
+// through here as well now. What stays outside is the long poll itself: it IS the parked
+// slot the rule allows beside one other request, and gating it would only park the mailbox.
 const NET_GAP_MS = 250;        // the spacing to keep when the server names none
 const NET_GAP_MAX_MS = 2000;   // ...and the most one may ask for; background must not stall outright
 const NET_GAP_STEP_MS = 20;
 const NET_GAP_TRIES = 40;      // ~2s of patience, counted in steps rather than measured
+// TWO background tiers. The default one is background but still time-bound -- the
+// heartbeat, the roster, the scores -- and may go out beside a poll parked server-side.
+// NET_BG_IDLE is the tier nobody is waiting for at all (items, the cloud backup), and it
+// stands aside for a HELD poll as well: parked or not, that poll owns a connection the
+// whole time, and the slice is paid per request in flight up there, not per running PHP.
+// Bounded like every other wait here, so an idle-tier request is delayed, never dropped.
+const NET_BG_IDLE = 'idle';
+// ...and NET_BG_SOLO is the third: a request that must not go out BESIDE another of ours,
+// but owes no spacing once the wire is clear. That is the signalling burst -- an offer, an
+// ICE batch, a bye. Serialised, because the contract counts requests in flight and does not
+// care which of them a player is waiting for; unspaced, because a handshake that is merely
+// second in line still costs a connection nothing, while a handshake held back a quarter of
+// a second per message costs one visibly.
+const NET_BG_SOLO = 'solo';
 function _netGapMs(){ return _netPace.gap_ms > 0 ? _netPace.gap_ms : NET_GAP_MS; }
 var _netSentAt = 0;            // when the last request of ours -- either lane -- went out
 var _netGapQ = null;           // the tail of the background queue
@@ -236,12 +265,21 @@ var _netGapQ = null;           // the tail of the background queue
 //   otherwise -> whatever is left of the gap since the last request went out.
 // _netFlight deliberately does not count a HELD poll: it is parked server-side with nothing
 // flowing, so it schedules against nothing -- and counting it would stall every heartbeat
-// behind the poll a lobby holds open by design.
-function _netGapWait(now, flight){
+// behind the poll a lobby holds open by design. Where a held poll DOES have to count -- the
+// idle tier -- the CALLER adds it, so this rule stays one line and one meaning.
+// The solo lane owes the first line and not the second: never beside another of ours, but
+// nothing more once the wire is clear.
+function _netGapWait(now, flight, tier){
     if(flight > 0) return NET_GAP_STEP_MS;
+    if(tier === NET_BG_SOLO) return 0;
     return Math.max(0, _netSentAt + _netGapMs() - now);
 }
-function _netGate(){
+// What the gate hands the rule above: our own requests in flight, plus -- for the idle tier
+// only -- a HELD poll, which is parked in PHP but still holding a connection open up where
+// the slice is actually paid. Split out from the waiting so both tiers can be read and
+// tested without a clock, exactly like the rule itself.
+function _netGapFlight(tier){ return _netFlight + ((tier === NET_BG_IDLE && _netPollHeld) ? 1 : 0); }
+function _netGate(tier){
     // No timer host, no pacing: the same line the heartbeat and the connect timers draw.
     // A build without one cannot schedule anything anyway, so gating there would only park
     // traffic against a wait that never comes due. The RULE above is what is worth testing,
@@ -252,7 +290,7 @@ function _netGate(){
         // clock-bounded wait spinning for ever. Past the count we go anyway -- a background
         // request delayed for ever is a heartbeat never sent, and that reads as offline.
         for(let i = 0; i < NET_GAP_TRIES; i++){
-            const w = _netGapWait(Date.now(), _netFlight);
+            const w = _netGapWait(Date.now(), _netGapFlight(tier), tier);
             if(w <= 0) break;
             await new Promise(res => setTimeout(res, Math.min(w, _netGapMs())));
         }
@@ -289,13 +327,17 @@ function _netIcesPeerOk(v){ const m = /^\s*v?(\d+)/i.exec(String(v || '')); retu
 // request never completed. Callers that only care "did it work" use _netPost.
 async function _netPostRes(path, body, bg){
     if(!_netOk()) return { status:0, json:null };
-    if(bg) await _netGate();
+    const idle = (bg === NET_BG_IDLE);
+    if(bg) await _netGate(bg);
     if(!_netOk()) return { status:0, json:null };   // the gate is a wait, and offline can be switched on inside it
     _netFlight++;   // ...so the clock sync can tell a quiet wire from this one
     _netSentAt = Date.now();
     if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
     try {
-        const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), cache:'no-store', priority:'high' });
+        // priority: the duel path and the heartbeat are what a player is waiting for; the idle
+        // tier is not, and telling the browser so lets it put its stream last on the shared
+        // connection instead of scheduling it beside the traffic it was asked to stand behind.
+        const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), cache:'no-store', priority: idle ? 'low' : 'high' });
         _netDbg.lastSrvAt = performance.now();   // a POST always carries data both ways = real communication
         let j = null; try{ j = await r.json(); }catch(e){}   // an error status may carry no JSON at all
         _netQNote(j);   // every response carries the queue wait, error replies included
@@ -308,7 +350,7 @@ async function _netPostRes(path, body, bg){
 async function _netPost(path, body, bg){ return (await _netPostRes(path, body, bg)).json; }
 async function _netGet(path, signal, held, bg){
     if(!_netOk()) return null;
-    if(bg) await _netGate();
+    if(bg) await _netGate(bg);
     if(!_netOk()) return null;
     // held: a long poll parked server-side with nothing flowing. It schedules against
     // nothing, so it does not make the wire busy for the clock sync's purposes.
@@ -339,7 +381,7 @@ async function _netGet(path, signal, held, bg){
 // must see it) and still paced (the gate must see it) -- the request a client sends least
 // often is the last one that should be invisible to both.
 async function netBgFetch(path, opt){
-    await _netGate();
+    await _netGate(NET_BG_IDLE);   // the cloud backup is the idle tier by definition: nobody is waiting for it
     _netFlight++;
     _netSentAt = Date.now();
     if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
@@ -356,7 +398,10 @@ async function _netSignal(to, type, payload){
     const body = { id:getPlayerId(), to, type, payload: payload||'' };
     const pts = (typeof netPts === 'function') ? netPts() : null;
     if(pts != null) body.pts = pts - 50;   // stamped slightly in the past: the server hard-rejects future PTS
-    const res = await _netPostRes('/api/signal.php', body);
+    // The solo lane: a signal never goes out beside another request of ours (the deal burst
+    // is exactly that -- a sheet, an offer and a start in the same tick), and never waits
+    // out the background spacing either. See NET_BG_SOLO.
+    const res = await _netPostRes('/api/signal.php', body, NET_BG_SOLO);
     if(!res.json){
         _netSigLog('! ' + type + ' FAILED ' + (res.status || 'net') + (res.err ? ' ' + res.err : ''));
         // Contract: 'bogus pts: in the future' means OUR clock drifted ahead. Re-sync
@@ -515,6 +560,10 @@ async function _netClockMs(){
         const m = h && /t=(\d+)/.exec(h);
         if(m) return Number(m[1]) / 1000;   // the header is MICROseconds; PTS is milliseconds
     } catch(e){}
+    // Ungated, and the only round trip left that is: the gate is a WAIT, and a wait taken
+    // here would land inside the round trip this function measures -- straight into the
+    // clock offset both clients start a match from. _netQuiet() has already established a
+    // clear wire before any sweep runs, which is the serialisation this one needs.
     const j = await _netGet('/api/time.php');
     return (j && typeof j.t === 'number') ? j.t : null;
 }
@@ -687,6 +736,12 @@ function netDebugQuad(){
             : 'idle';
         Nx.push('srv ' + conn + ' | data ' + fmt(performance.now() - d.lastSrvAt) + ' ago');
     }
+    // The queue wait, with what it means: x1 is the host's own load, anything above it is
+    // this client's overlap. SELF-STACKED takes a level-2 line because it is a bug in here,
+    // not a condition out there; mx is the worst concurrency of the whole session.
+    if(_netQ.at && Date.now() - _netQ.at < NET_QMS_FRESH_MS)
+        (netSelfStacked() ? Nm : Nx).push('q ' + _netQ.ms + 'ms x' + _netQ.flight
+            + (netSelfStacked() ? ' SELF-STACKED' : '') + '  mx' + _netFlightMax);
     for(const e of _netDbg.sigLog.slice(-3)) Nx.push(e);   // last few only -- ICE floods it mid-game
     return { net:{main:Nm,more:Nx}, time:{main:Tm,more:Tx}, sim:{main:Sm,more:Sx} };
 }
@@ -797,7 +852,10 @@ function netDebugInfo(){
              // 4.4, and the whole point of it: iceSignals vs iceBatches says how many
              // requests the batching actually saved, and srvQueueMs is the server telling
              // us how long its last answer waited for a worker.
+             // ...and srvQueueFlight is what tells a busy HOST from a client queueing behind
+             // itself: the same wait read against 1 is the server's load, against 3 it is ours.
              iceSignals:_netDbg.iceTx|0, iceBatches:_netDbg.iceBat|0, srvQueueMs:_netDbg.qMs|0,
+             srvQueueFlight:_netQ.flight|0, selfStacked:netSelfStacked(),
              pace:{ helloMs:_netPace.hello_ms, pollMs:_netPace.poll_ms, hold:_netPace.hold, spreadMs:netPaceSpread(), gapMs:_netGapMs(), roster:_netFrHello ? 'hello' : 'friend' },
              flightMax:_netFlightMax,
              counts:_netCounts };
@@ -837,7 +895,7 @@ function _netNameSeen(id, name){
     try{ localStorage.setItem('fok-snake-friend-names', JSON.stringify(_netFriendNames)); }catch(e){}
 }
 function netFriendName(id){ return _netFriendNames[id] || null; }
-let _netHelloBusy = false;
+let _netHelloBusy = false, _netHelloSeen = false;
 async function _netHello(){
     if(_netHelloBusy || netOffline() || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
     _netHelloBusy = true;
@@ -884,6 +942,12 @@ async function _netHello(){
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
     _netSrvErr = false;
     _netPaceOf(r);   // how often to come back, and whether we may hold a worker while we wait
+    // The session's FIRST item drain rides the first ANSWERED heartbeat rather than a
+    // load-time timer: a fixed delay after load lands in the middle of the resume burst,
+    // where a wire this client is about to make busy looks quiet, while a hello that just
+    // came back is the one moment we know for certain nothing else of ours is out. It also
+    // arrives with the pace the server just named already applied.
+    if(!_netHelloSeen){ _netHelloSeen = true; if(typeof itemKick === 'function') itemKick(); }
     const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
     _netSrvMin = (_srvMaj === NET_API_BUILT && _srvMin !== null) ? _srvMin : -1;   // only a same-MAJOR minor means anything to us
     _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // newer MAJOR gates online off
@@ -961,6 +1025,9 @@ function _netHsTick(){
     _netSignal(_netHs.offerTo, 'offer', _netHs.offerPayload);
 }
 let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
+// Is a HELD poll open right now? Not a debug readout: the idle tier waits on this (see
+// NET_BG_IDLE). An unheld poll is a request like any other and is counted by _netFlight.
+let _netPollHeld = false;
 // Hold the connection OPEN on every matchmaking screen (1:1 menu, lobby, friends,
 // MY ID) and during a handshake: a long-poll -- the server HOLDS the request and
 // re-checks the mailbox every ~20ms (a server-side poll, NOT a push), answering as
@@ -1013,9 +1080,15 @@ async function _netPollOnce(){
     const wait = Math.max(1, Math.min(9, Math.round(_netPace.poll_ms / 1000)));
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
+    _netPollHeld = held;
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + wait : ''), _netPollAbort ? _netPollAbort.signal : undefined, held);
-    _netPollBusy = false; _netPollAbort = null; _netDbg.pollAt = 0;
+    // A HELD poll goes out ungated: it is the parked slot the contract allows beside one
+    // other request, and holding it back would only park the mailbox itself. An UNHELD one
+    // is an ordinary request and takes the solo lane like any other -- second in line rather
+    // than beside, which is the whole rule.
+    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + wait : ''),
+                            _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
+    _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
     // Straight back in, no gap. Only on a SUCCESSFUL reply: a failure (or an abort
     // from backgrounding) falls through to the 1s tick, which is the backoff that
@@ -1048,7 +1121,7 @@ if(_netTimers) setInterval(()=>{
 // reload. So: drop the connection on blur, build a FRESH one on focus. ----
 function _netPollAbortNow(){
     if(_netPollAbort){ try{ _netPollAbort.abort(); }catch(e){} _netPollAbort = null; }
-    _netPollBusy = false;
+    _netPollBusy = false; _netPollHeld = false;
 }
 if(typeof document !== 'undefined' && document.addEventListener){
     document.addEventListener('visibilitychange', ()=>{
@@ -1200,7 +1273,7 @@ function netFriendVerify(id){
     if(!_netOk()) return Promise.resolve({ offline:true });
     if(netFriendBanned()) return Promise.resolve({ error:'rate', wait:Math.ceil((_netFrBannedUntil-Date.now())/1000) });
     _netFrRequested[id] = Date.now();
-    return _netPostRes('/api/friend.php', { id:getPlayerId(), action:'request', peer:id }).then(res => {
+    return _netPostRes('/api/friend.php', { id:getPlayerId(), action:'request', peer:id }, true).then(res => {
         if(res.status === 429){ const w=_netFrWait(res); _netFrBannedUntil = Date.now() + w*1000; return { error:'rate', wait:w }; }
         if(!res.status || res.status >= 500) return { offline:true };   // no answer / server fault: not a verdict on the ID
         if(!res.json) return { error:'unknown' };   // 4xx: the server refused this peer outright

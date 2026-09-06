@@ -417,15 +417,18 @@ runTest('SMOKE-NET', `
     {
         const _oGetP=_netGet, _oFetchP=globalThis.fetch;
         globalThis.fetch=()=>({});                                  // _netOk(): online
-        let _url=null, _heldArg=null;
-        _netGet=async (p,sig,held)=>{ _url=p; _heldArg=!!held; return null; };
+        let _url=null, _heldArg=null, _bgP='none';
+        _netGet=async (p,sig,held,bg)=>{ _url=p; _heldArg=!!held; _bgP=bg; return null; };
         // _netPollOnce is async, but everything up to the _netGet call is not: the URL is
         // captured by the time it returns. Clear the busy latch by hand since the tail of
         // the previous call has not run yet.
-        const poll=()=>{ _url=null; _heldArg=null; _netPollBusy=false; phase='lobby'; _netPollOnce(); };
+        const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='lobby'; _netPollOnce(); };
         _netPace={hello_ms:30000, poll_ms:9000, hold:true, spread_ms:0}; _netSpread=-1;
         poll();
         if(!/[?&]wait=9$/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
+        // ...and a HELD poll waits on nothing: it IS the parked slot the gate lets one other
+        // request stand beside, so gating it would park the client behind itself for 9s.
+        if(_bgP !== undefined) throw 'a held poll must not be sent through the gate, got ' + String(_bgP);
         _netPaceOf({pace:{poll_ms:3000}});
         poll();
         if(!/[?&]wait=3$/.test(_url||'')) throw 'poll_ms must set how long the poll is held, got ' + _url;
@@ -433,6 +436,10 @@ runTest('SMOKE-NET', `
         poll();
         if(/wait=/.test(_url||'') || _heldArg) throw 'hold:false must withdraw the held poll, got ' + _url;
         if(!/poll[.]php/.test(_url||'')) throw 'hold:false must still read the mailbox, got ' + _url;
+        // An UNHELD poll is an ordinary request that returns at once, so it counts against
+        // the one-other-request rule like any other -- on the solo lane, since a mailbox read
+        // is something the player is waiting for and owes no background spacing.
+        if(_bgP !== NET_BG_SOLO) throw 'an unheld poll must take the solo lane, got ' + String(_bgP);
         _netPaceOf({pace:{hold:true, poll_ms:0}});
         poll();
         if(/wait=/.test(_url||'')) throw 'poll_ms 0 must withdraw the hold as well, got ' + _url;
@@ -492,6 +499,18 @@ runTest('SMOKE-NET', `
         _netQNote({q_ms:51}); _netQ.at=Date.now()-9000;
         if(netHostBusy()) throw 'a stale queue reading must expire rather than latch';
         if(_netDbg.qMs!==51) throw 'the debug overlay must carry the last queue wait';
+        // ...and the reading cannot tell a busy HOST from this client queueing behind itself.
+        // The count in flight when it was taken is what does, so it is taken with it: 1 is
+        // this request alone, more is our own overlap and a bug in the gate below.
+        const _oFlightQ=_netFlight;
+        _netFlight=1; _netQNote({q_ms:51});
+        if(!netHostBusy()) throw 'a 51ms wait is still a busy reading';
+        if(netSelfStacked()) throw 'one request of ours alone is the HOST queueing, not us';
+        _netFlight=3; _netQNote({q_ms:51});
+        if(!netSelfStacked()) throw 'a queue wait measured with three of ours open is OUR overlap';
+        _netFlight=3; _netQNote({q_ms:0});
+        if(netSelfStacked()) throw 'no wait at all is nothing to attribute to anybody';
+        _netFlight=_oFlightQ; _netQNote({q_ms:51}); _netQ.at=Date.now()-9000;
         // ...and the field readout must carry it out of the device: this whole change is
         // only worth what can be MEASURED afterwards, and that is the one way to read it.
         const _dbg=netDebugInfo();
@@ -541,7 +560,40 @@ runTest('SMOKE-NET', `
         _netGet('/api/poll.php', undefined, false);
         if(_netFlight!==1) throw 'an unheld request must count as in flight, got ' + _netFlight;
         if(!(_netFlightMax>=1)) throw 'the field readout must keep the high-water mark of our own concurrency';
-        _netFlight=_oFlightG;
+        // (c2) ...for the HEARTBEAT tier. The idle tier -- items, the cloud backup, the traffic
+        // nobody is waiting for -- stands aside for that held poll anyway: parked in PHP or not,
+        // it holds a connection open the whole time, and the slice is paid per request in flight
+        // up there. Bounded by the same count as every other wait here, so the drain is delayed
+        // and never dropped.
+        const _oHeldG=_netPollHeld;
+        _netFlight=0; _netPollHeld=true;
+        if(_netGapFlight(NET_BG_IDLE)!==1) throw 'the idle tier must stand aside for a held poll, got ' + _netGapFlight(NET_BG_IDLE);
+        if(_netGapFlight(true)!==0) throw 'the heartbeat must NOT be parked behind the poll a lobby holds open by design';
+        _netPollHeld=false;
+        if(_netGapFlight(NET_BG_IDLE)!==0) throw 'with no poll open the idle tier owes nothing extra';
+        _netFlight=1;
+        if(_netGapFlight(true)!==1) throw 'a real request of ours in flight counts for every tier';
+        _netPollHeld=_oHeldG; _netFlight=_oFlightG;
+        // (c3) the SOLO lane, for the traffic a player is waiting for that must not be SPACED
+        // -- the signalling burst of a forming duel, and an unheld poll. The server measured
+        // what the old blanket exemption costs: two exempt calls in one tick race each other
+        // and BOTH pay the queue wait. So solo owes the first half of the rule and not the
+        // second: never beside another of ours, nothing once the wire is clear.
+        _netSentAt=1000;
+        if(_netGapWait(1000, 1, NET_BG_SOLO)<=0) throw 'the solo lane must still stand behind a request of ours';
+        if(_netGapWait(1000, 0, NET_BG_SOLO)!==0) throw 'but must owe no spacing on a clear wire, got ' + _netGapWait(1000,0,NET_BG_SOLO);
+        if(_netGapWait(1000, 0)!==250) throw 'while the background lane still pays the whole gap';
+        if(NET_BG_SOLO===NET_BG_IDLE || NET_BG_SOLO===true) throw 'the three lanes must be distinguishable from one another';
+        _netFlight=0; _netPollHeld=true;
+        if(_netGapFlight(NET_BG_SOLO)!==0) throw 'solo is not the idle tier: the parked poll IS the slot it is allowed beside';
+        _netPollHeld=_oHeldG; _netFlight=_oFlightG;
+        // (c4) ...and a lane nothing opts into is not a lane. The deal moment is made of
+        // signals, so ask the transport which one a signal actually asks for.
+        const _oPostS=_netPostRes; let _bgS='none';
+        _netPostRes=async (p,b,bg)=>{ _bgS=bg; return {status:200,json:{ok:true},body:null,err:''}; };
+        _netSignal('deadbeef','ice','x');
+        if(_bgS!==NET_BG_SOLO) throw 'a signal must go out on the solo lane, got ' + String(_bgS);
+        _netPostRes=_oPostS;
         // (d) the roster now rides the heartbeat wherever the server serves it: one request
         // instead of two. Asked for only where the list is actually on screen.
         globalThis.fetch=()=>({ then:()=>({ catch:()=>{} }) });

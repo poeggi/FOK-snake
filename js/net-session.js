@@ -126,7 +126,7 @@ function _netSeekStart(){
     _netLb.seeking = true; _netLb.msg = '';
     _netSeekT = setInterval(async ()=>{
         if(!_netLb.seeking || _netSess){ _netSeekStop(); return; }
-        const r = await _netPost('/api/match.php', { id:getPlayerId(), action:'seek' });
+        const r = await _netPost('/api/match.php', { id:getPlayerId(), action:'seek' }, true);
         if(!r || !r.matched) return;
         _netSeekStop();
         if(r.peer_name) _netNameSeen(String(r.matched), r.peer_name);   // strangers: the pairing is the entitlement
@@ -137,7 +137,7 @@ function _netSeekStart(){
 }
 function _netSeekStop(){
     _netLb.seeking = false;
-    if(_netSeekT){ clearInterval(_netSeekT); _netSeekT = null; _netPost('/api/match.php', { id:getPlayerId(), action:'cancel' }); }
+    if(_netSeekT){ clearInterval(_netSeekT); _netSeekT = null; _netPost('/api/match.php', { id:getPlayerId(), action:'cancel' }, true); }
 }
 
 // ---- signal dispatch (from hello + poll; each message is delivered exactly once) ----
@@ -493,6 +493,13 @@ async function _netRequestStart(s, reason){
     await _netTimeSync(true, _fullSweep ? undefined : NET_LEVEL_SYNC_MS);
     if(_netSess !== s || !s.game) return;
     if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
+    // Through the gate, and BEFORE the pts is read: the server measured this very request
+    // leaving beside a tournament.php and both paying the full queue wait for it (see the
+    // gate in net-api.js). The gate is a wait, and a pts read before it would be a wait old
+    // by the time it is sent -- start.php rejects a stale one -- so the body is built after.
+    // The rtt is measured from the same point, or the wait would land in the clock offset.
+    await _netGate(true);
+    if(_netSess !== s || !s.game) return;
     const _t0 = performance.now();
     const r = await _netPostRes('/api/start.php', { id: getPlayerId(), peer: s.peer,
         epoch: s.epoch|0, reason: reason || 'first', pts: netPts() });

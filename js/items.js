@@ -202,7 +202,7 @@ async function itemFlush(){
         while(mq.length){
             const m = mq[0];
             const r = await _netPostRes(ITEM_API, { action:'mint', id:getPlayerId(),
-                                                    item_id:m.id, origin:m.origin }, true);
+                                                    item_id:m.id, origin:m.origin }, NET_BG_IDLE);
             if(_itemSoft(r.status)){ _itemFail(); return; }   // incl. 429 over the hourly cap
             if(r.json && ITEM_UID_RE.test(r.json.uid || '')){
                 // Only record it if we still hold the item: it may have been lost
@@ -239,7 +239,7 @@ async function itemFlush(){
                            from:c.from, to:c.to, tick:c.tick|0, seq:c.seq|0,
                            ws_digest:c.digest, my_tag:c.myTag };
             if(c.peerTag) body.peer_tag = c.peerTag;
-            const r = await _netPostRes(ITEM_API, body, true);
+            const r = await _netPostRes(ITEM_API, body, NET_BG_IDLE);
             if(_itemSoft(r.status)){ _itemFail(); return; }
             if(r.json && Number.isInteger(r.json.seq) && c.item && c.to === getPlayerId()){
                 // Settled, confirmed or held, the server's seq is the one a later
@@ -304,14 +304,14 @@ async function itemSync(){
         // where the player enrolled, and guards the whole thing with a
         // players.items_seeded flag, so a retry after a timeout cannot double-mint.
         const owned = _itemCatalog().filter(o => (cfg.shopItems || {})[o.id]).map(o => o.id);
-        const r = await _netPostRes(ITEM_API, { action:'seed', id, items:owned }, true);
+        const r = await _netPostRes(ITEM_API, { action:'seed', id, items:owned }, NET_BG_IDLE);
         if(!r.json || !Array.isArray(r.json.items)) return;   // stay unseeded and try again later
         cfg.itemsSeeded = 1;
         const reg = _itemReg();
         for(const it of r.json.items) if(ITEM_UID_RE.test(it.uid || '')) reg[it.item_id] = { uid:it.uid, seq:0 };
         saveCfg();
     }
-    const r = await _netPostRes(ITEM_API, { action:'list', id }, true);
+    const r = await _netPostRes(ITEM_API, { action:'list', id }, NET_BG_IDLE);
     if(!r.json || !Array.isArray(r.json.items)) return;
     const si = cfg.shopItems || (cfg.shopItems = {});
     const wi = cfg.wornItems || (cfg.wornItems = {});
@@ -369,7 +369,11 @@ function itemWornUids(){
 // before any of it is believed.
 function itemResync(){ _itemSynced = false; itemKick(); }
 
-// A connection coming back is the cheapest possible trigger, and the first drain
-// of the session is deferred so every script has finished loading first.
+// A connection coming back is the cheapest possible trigger. The session's FIRST drain is
+// kicked by the first answered heartbeat instead (net-api.js): a fixed delay after load
+// lands in the middle of the resume burst, where a wire this client is about to make busy
+// still looks quiet. This timer is only the fallback for a session whose hello never lands
+// -- a queued loss claim has to leave eventually either way -- so it sits well past that
+// burst rather than inside it.
 try { addEventListener('online', () => { _itemRetryAt = 0; _itemRetryMs = ITEM_RETRY_MIN; itemKick(); }); } catch(e){}
-setTimeout(itemKick, 1500);
+setTimeout(itemKick, 8000);

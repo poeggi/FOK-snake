@@ -236,11 +236,20 @@ const HOOKS = (myId) => `
   // the min-RTT rule. __syncArgs records the budget the next start asks _netTimeSync for
   // (undefined = the full sweep a resync buys).
   globalThis.__syncArgs = [];
+  globalThis.__order = [];
   globalThis.__startWith = async (extra)=>{
     _netSync = { ofs:0, rtt:99999, at:Date.now() };
     _netTimeSync = async (f, b)=>{ __syncArgs.push(b === undefined ? 'full' : b|0); };
-    _netPostRes = async ()=>({ status:200, err:'',
-      json: Object.assign({ ok:true, start_pts:netPts()+50, epoch:0, now:netPts() }, extra||{}) });
+    // The pacing gate this request passes, and the order it passes it in. The server caught
+    // start.php and a tournament.php leaving in the SAME millisecond and both paying a 128ms
+    // wait for a worker on an idle host, so this one is gated like every other round trip --
+    // and gated BEFORE its body is built, because start.php rejects a pts older than ~2s and
+    // a pts read on the wrong side of the wait is a start that cannot be made.
+    const _oGate = _netGate;
+    _netGate = async (tier)=>{ __order.push('gate:' + String(tier)); };
+    _netPostRes = async (p, b)=>{ __order.push('post:' + (b && b.pts != null ? 'pts' : 'nopts'));
+      return { status:200, err:'',
+        json: Object.assign({ ok:true, start_pts:netPts()+50, epoch:0, now:netPts() }, extra||{}) }; };
     beginOnlineDuel = ()=>{};
     const realST = setTimeout, realPing = _netBurstPing;
     globalThis.setTimeout = (fn)=>{ fn(); return -1; };
@@ -249,8 +258,8 @@ const HOOKS = (myId) => `
     // reasons that reach start.php are the identity ones -- and a rematch is the
     // bounded-sweep one, which is what the resync hint has to be able to widen.
     try { await _realReqStart(_netSess, 'rematch'); }
-    finally { globalThis.setTimeout = realST; _netBurstPing = realPing; }
-    return { rtt:_netSync.rtt, sync:__syncArgs.splice(0) };
+    finally { globalThis.setTimeout = realST; _netBurstPing = realPing; _netGate = _oGate; }
+    return { rtt:_netSync.rtt, sync:__syncArgs.splice(0), order:__order.splice(0) };
   };
   // The cleanliness rule of the real clock sweep (4.4). A sample taken while our own
   // requests are in flight measured our own burst, so it may not be REPORTED as latency:
@@ -520,6 +529,17 @@ try {
     B.__gameSess(A_ID, 'host');
     const idle = await B.__startWith({ q_ms: 0 });
     if(idle.rtt === 99999) throw new Error('an unqueued start must still anchor the clock');
+  });
+
+  // A request that goes out beside another of ours pays the scheduling slice twice over --
+  // which is what the server measured at the deal moment. start.php is one of the two calls
+  // it caught, so it owes the gate like everything else.
+  await acheck('4.4: the start request passes the pacing gate before its body is built', async () => {
+    const A = mk(A_ID);
+    A.__gameSess(B_ID, 'host');
+    const r = await A.__startWith({});
+    if(r.order.join(' ') !== 'gate:true post:pts')
+      throw new Error('start.php must take the paced lane first, then read a fresh pts: ' + r.order.join(' '));
   });
 
   // The pair cross-check: only the server sees BOTH clients' clocks proved against the

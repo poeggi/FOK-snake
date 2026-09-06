@@ -40,7 +40,12 @@ const HOOKS = `
   _itemTimer = 1;
   globalThis.__posts = [];
   globalThis.__reply = null;             // (body) -> a _netPostRes result
-  _netPostRes = async (path, body)=>{ __posts.push(body); return __reply ? __reply(body) : __ok({}); };
+  // The TIER each post asked for is recorded too: the gate's stand-aside for a held poll is
+  // dead code unless items.js actually asks for the tier that has it.
+  globalThis.__tiers = [];
+  globalThis.__idle = NET_BG_IDLE;
+  globalThis.__takeTiers = ()=>__tiers.splice(0);
+  _netPostRes = async (path, body, bg)=>{ __posts.push(body); __tiers.push(bg); return __reply ? __reply(body) : __ok({}); };
   globalThis.__ok  = (j)=>{ const b = Object.assign({ ok:true }, j); return { status:200, json:b, body:b, err:'' }; };
   globalThis.__bad = (code, msg)=>({ status:code, json:null, body:{ ok:false, error:msg }, err:msg });
   globalThis.__take = ()=>__posts.splice(0);
@@ -371,6 +376,22 @@ try {
         S.__duel({ [UID]: 1 });                       // start.php issued a new mid + secret
         S.__attest(64, S.__snap({}, { crown: UID }));
         eq(S.__claims.length, 0, 'the previous match ownership is not a transfer in this one');
+    });
+
+    // The queue nobody is waiting for must SAY so: the gate can only stand a drain aside for
+    // a held poll if the drain asks for the tier that does it. A gate nothing opts into is
+    // the leading-'v' bug all over again -- live traffic ungated while every test passes.
+    await check('every items.php post goes out on the idle tier', async () => {
+        S.__reset(1);
+        S.__unsync();                                  // so the drain sends its list as well as the mint
+        S.__cfg().mintQ = [{ id: 'crown', origin: 'shop' }];
+        S.__reply = (b) => (b.action === 'list' ? S.__ok({ items: [] }) : S.__ok({ uid: UID, seq: 0 }));
+        S.__takeTiers();
+        await S.__flush();
+        const tiers = S.__takeTiers();
+        if (!tiers.length) throw new Error('the drain posted nothing at all, so this asserts nothing');
+        eq(tiers.every(t => t === S.__idle), true, 'every post must ask for the idle tier');
+        eq(S.__idle === true, false, 'and that tier must be distinguishable from the plain background flag');
     });
 
     console.log(results.join('\n'));

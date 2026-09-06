@@ -170,9 +170,14 @@ function tourneyExitPhase(){
     if(_tt.state === 'done') return 'tourneyPodium';
     return _tt.brk ? 'tourneyRound' : 'tourneyBracket';
 }
+// Through the pacing gate, like every other server round trip of ours. A tournament call is
+// not background -- somebody is looking at the screen it fills -- but the cost the gate
+// exists for is paid per request IN FLIGHT, and what the server measured was this endpoint
+// and start.php leaving in the same millisecond and both waiting 128ms for a worker on an
+// idle host. Second in line costs one wait; side by side costs two.
 async function _ttPost(action, extra){
     const body = Object.assign({ id: getPlayerId(), action }, extra || {});
-    return await _netPostRes('/api/tournament.php', body);
+    return await _netPostRes('/api/tournament.php', body, true);
 }
 function _ttArm(){ if(!_ttT && typeof setInterval === 'function') _ttT = setInterval(_ttTick, TT_TICK_MS); }
 function _ttDisarm(){ if(_ttT){ clearInterval(_ttT); _ttT = null; } }
@@ -280,6 +285,18 @@ function _ttSetBreak(b){
 function _ttAfterNote(d){
     const a = (d && d.after_ms | 0) || 0;
     if(a > 0) _ttAfter = Math.max(_ttAfter, _msgNow() + Math.min(a, TT_AFTER_MAX));
+}
+// ...and the delay has to be applied to the CALL, not only to the state read-back that used
+// to be the only thing an event provoked. A sheet provokes an offer, and the offer provokes
+// the pair's two start.php calls, so a spread that stops at _ttSync leaves the whole field
+// dealing itself into the same millisecond anyway. Everything local -- the ceremony, the
+// match parameters, the session dressing -- has already happened by the time this is
+// reached; only what goes on the wire waits, and only for this node.
+function _ttAfterDo(nid, fn){
+    const w = _ttAfter - _msgNow();
+    if(!(w > 0) || typeof setTimeout !== 'function'){ fn(); return; }
+    const n = String(nid || '');
+    setTimeout(()=>{ if(_tt && _ttNid === n && _ttDone !== n) fn(); }, Math.min(w, TT_AFTER_MAX));
 }
 async function _ttSync(force){
     if(!_tt) return;
@@ -416,6 +433,14 @@ function _ttRoles(d){
     // and no invite, exactly as the server's signal gating allows.
     if(typeof specGrant === 'function') specGrant([].concat(d.players || [], d.primaries || [], d.secondaries || []));
     if(typeof specNode === 'function') specNode(_tt.tid, nid);
+    // ONE EVENT, ONE CALL. The sheet carries everything a match needs -- nid, hm, lvl,
+    // stakes, players, feeder, primaries, secondaries, names and `you` -- so it IS a state
+    // read, and the safety-net read below owes nothing for a full floor after it. Without
+    // this the housekeeping tick asked the server to repeat what had just been pushed, and
+    // it asked at the one moment the client is busiest: beside the start.php the same sheet
+    // provokes. What the floor does NOT cover is a doubtful sheet -- an offer we hold no
+    // sheet for still forces a read (tourneyOfferOk).
+    _ttStateAt = _msgNow();
     _uiDirty = true;
     if(_ttNid === nid) return;   // the same node again (a state re-read, a repeat delivery)
     _ttNid = nid; _ttRolesAt = _msgNow(); _ttEngAt = 0; _tt.frozen = '';
@@ -469,18 +494,18 @@ function _ttEngage(d){
         // players[0] is the feeder and the feeder is always the offerer, so the two sides
         // never both offer. This is the quick-match path verbatim -- an offer needs no
         // friendship, which is exactly why strangers can be drawn against each other.
-        if(String(d.feeder) === me) _netRtcOffer(peer);
+        if(String(d.feeder) === me) _ttAfterDo(d.nid, ()=>_netRtcOffer(peer));
         return;
     }
     if(you === 'spectate'){
         if(typeof specWatch !== 'function') return;
         const pr = (d.primaries || []).map(String);
         _ttWatchNid = String(d.nid || '');
-        if(pr.indexOf(me) >= 0){ specWatch(String(d.feeder), _tt.tid, d.nid); return; }
+        if(pr.indexOf(me) >= 0){ _ttAfterDo(d.nid, ()=>specWatch(String(d.feeder), _tt.tid, d.nid)); return; }
         // A secondary asks BOTH primaries: one answers with the feed, the other is held
         // open and silent, so a failover costs a flag instead of a connect (net-spec.js).
         const src = pr.length ? pr : [String(d.feeder)];
-        for(const p of src.slice(0, SPEC_MAX_DIRECT)) specWatch(p, _tt.tid, d.nid);
+        for(const p of src.slice(0, SPEC_MAX_DIRECT)) _ttAfterDo(d.nid, ()=>specWatch(p, _tt.tid, d.nid));
     }
 }
 // net-session asks before it answers an offer. In a tournament the sheet says who may
@@ -536,7 +561,7 @@ async function _ttFlushRep(){
     if(_ttRep.tries >= TT_REPORT_MAX){ _ttRep = null; return; }   // the walkover ladder has it from here
     _ttRep.at = now; _ttRep.tries++;
     _ttRepBusy = true;
-    const r = await _netPostRes('/api/tournament.php', _ttRep.body);
+    const r = await _netPostRes('/api/tournament.php', _ttRep.body, true);
     _ttRepBusy = false;
     if(!_ttRep) return;
     // 403/404/409 are all terminal: not our match, no such node, or a node that has moved
