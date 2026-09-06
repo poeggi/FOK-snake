@@ -172,9 +172,14 @@ function _netOnSignal(sig){
             if(typeof _spOnWatch === 'function') _spOnWatch(from, _netJson(pl));
             return;
         }
-        if((sig.type === 'offer' || sig.type === 'answer' || sig.type === 'ice')){
+        // An `ices` payload is a JSON ARRAY, which has nowhere to carry the sp marker that
+        // tells a spectator signal from a duel one -- so every ENTRY carries it, and the
+        // first one answers for the batch: a batch is one pc's candidates and cannot be
+        // half of each.
+        if((sig.type === 'offer' || sig.type === 'answer' || sig.type === 'ice' || sig.type === 'ices')){
             const sd = _netJson(pl);
-            if(sd && sd.sp){
+            const sp = Array.isArray(sd) ? !!(sd[0] && sd[0].sp) : !!(sd && sd.sp);
+            if(sp){
                 if(typeof _spOnSignal === 'function') _spOnSignal(sig.type, from, sd);
                 return;
             }

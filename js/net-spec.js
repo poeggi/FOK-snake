@@ -255,11 +255,27 @@ function specHandshaking(){
     for(const l of _spIn)  if(!l.dead && (!l.dc || l.dc.readyState !== 'open')) return true;
     return _spOkAt > 0 && _spNow() - _spOkAt < SPEC_HS_MS;
 }
+// OUR candidates go out through the duel's batcher (net-rtc.js). A gather is a dozen of
+// them, the cost on this host is per REQUEST, and they are aimed at the node in the match
+// that drains its mailbox slowest -- the feeder, who is playing. One candidate per POST is
+// the same burst the duel already stopped sending; there is no reason for the spectator leg
+// to keep paying it, and no reason for a second batcher to exist to spare it.
+// What rides in the batch is our OWN wrapped candidate, so the sp marker sits on EVERY
+// entry: `ices` is contractually a JSON array, and an array has nowhere else to put it.
+// `l.ver` is the peer's build, empty until it names it -- the batcher then sends singles,
+// which is the contract's rule and heals itself the moment the offer or answer lands.
+function _spIceOut(l, cand){
+    if(typeof _netIceOut === 'function'){ _netIceOut(l.peer, { c:cand, sp:1 }, l.ver || ''); return; }
+    _spSignal(l.peer, 'ice', { c:cand });
+}
 function _spMkPc(peer, arr, kind){
     const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
     const l = { peer, pc, dc:null, rdOk:false, iceQ:[], sub:false, kind, dead:false,
-                openAt:0, lastAt:_spNow(), live:false };
-    pc.onicecandidate = e => { if(e.candidate) _spSignal(peer, 'ice', { c:e.candidate }); };
+                openAt:0, lastAt:_spNow(), live:false, ver:'' };
+    // A fresh pc gathers afresh, so whatever is still buffered for this peer belongs to a
+    // connection that no longer exists.
+    if(typeof _netIceTxReset === 'function') _netIceTxReset(peer);
+    pc.onicecandidate = e => { if(e.candidate) _spIceOut(l, e.candidate); };
     pc.onconnectionstatechange = () => {
         if(pc.connectionState !== 'failed' && pc.connectionState !== 'closed') return;
         _spDbg.fail++;
@@ -285,7 +301,7 @@ async function _spOffer(peer){
     try{
         const of = await l.pc.createOffer();
         await l.pc.setLocalDescription(of);
-        _spSignal(peer, 'offer', { sdp:l.pc.localDescription });
+        _spSignal(peer, 'offer', { sdp:l.pc.localDescription, v:_swVersion });
         _spArm();
     }catch(e){ _spDrop(_spIn, peer); }
 }
@@ -300,6 +316,7 @@ async function _spAnswer(peer, d){
     if(_spOut.length >= SPEC_MAX_DIRECT && !_spFind(_spOut, peer)) return;
     _spDrop(_spOut, peer);
     const l = _spMkPc(peer, _spOut, 'out');
+    l.ver = String(d.v || '');   // named in the offer, so this side may batch from the first candidate
     l.dc = l.pc.createDataChannel('fokspec', SPEC_DC_OPTS);
     _spWire(l, _spOnServeMsg);
     try{
@@ -307,7 +324,7 @@ async function _spAnswer(peer, d){
         l.rdOk = true; _spIceFlush(l);
         const an = await l.pc.createAnswer();
         await l.pc.setLocalDescription(an);
-        _spSignal(peer, 'answer', { sdp:l.pc.localDescription });
+        _spSignal(peer, 'answer', { sdp:l.pc.localDescription, v:_swVersion });
         _spArm();
     }catch(e){ _spDrop(_spOut, peer); }
 }
@@ -329,7 +346,13 @@ function _spOnSignal(type, from, d){
     if(!l || !l.pc) return;
     if(type === 'answer'){
         if(!d.sdp) return;
+        l.ver = String(d.v || '');
         l.pc.setRemoteDescription(d.sdp).then(()=>{ l.rdOk = true; _spIceFlush(l); }).catch(()=>{});
+        return;
+    }
+    if(type === 'ices'){
+        const a = Array.isArray(d) ? d : [];
+        for(let i = 0; i < a.length && i < NET_ICES_MAX; i++) _spIceAdd(l, a[i] && a[i].c);
         return;
     }
     if(type === 'ice') _spIceAdd(l, d.c);

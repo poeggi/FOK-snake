@@ -231,6 +231,13 @@ const HOOKS = (myId) => `
   globalThis.__iceOut  = (c)=>{ _netIceOut(_netSess.peer, c); };
   globalThis.__flight = (n)=>{ _netFlight = n|0; };
   globalThis.__icePend = ()=>{ const q = _netIceTx[_netSess.peer]; return q ? q.buf.length : -1; };
+  // The spectator leg of the same batcher. The link is built for REAL and its own
+  // onicecandidate is what fires, so the wiring under test is the shipping one rather than
+  // a hand-rolled call into the middle of it.
+  globalThis.__spMkIn   = (peer, ver)=>{ const l = _spMkPc(peer, _spIn, 'in'); l.ver = String(ver||''); l.rdOk = true; };
+  globalThis.__spGather = (peer, c)=>{ const l = _spFind(_spIn, peer); if(l) l.pc.onicecandidate({ candidate:c }); };
+  globalThis.__spAdded  = (peer)=>{ const l = _spFind(_spIn, peer) || _spFind(_spOut, peer); return l ? l.pc._ice.slice() : []; };
+  globalThis.__spDrop   = (peer)=>{ _spDrop(_spIn, peer); };
   // The 4.4 clock gates, probed on the REAL _netRequestStart. rtt starts absurd so any
   // sample would be an improvement: whatever blocks the adoption is then the gate, not
   // the min-RTT rule. __syncArgs records the budget the next start asks _netTimeSync for
@@ -501,6 +508,78 @@ try {
     B.__deliver({ from:A_ID, to:B_ID, type:'ices', payload: 'not json at all' });
     await flush();
     if(B.__iceAdded().length !== n0) throw new Error('a non-array ices payload must be ignored');
+  });
+
+  // The SPECTATOR leg. It negotiates its own connection to somebody who is not the duel
+  // peer, and until now it paid one signal.php POST per candidate -- a dozen requests aimed
+  // at the feeder, who is playing the match and is the slowest node in it to drain a
+  // mailbox. Same batcher, same window, same cap; only whose build gates it differs.
+  const SPEC_PEER = 'cccccccc';
+  const uncork = (list)=> list.map(x => x.c);
+  await acheck('4.4: a spectator link batches its ICE through the duel batcher', async () => {
+    const A = txSess(4, null);
+    A.__spMkIn(SPEC_PEER, A.__peerV4());
+    A.__out.splice(0);
+    for(let i = 1; i <= 5; i++) A.__spGather(SPEC_PEER, cand(i));
+    let out = A.__out.splice(0);
+    if(out.length !== 1 || out[0].type !== 'ice' || out[0].to !== SPEC_PEER)
+        throw new Error('the first candidate must go alone to the feeder, got ' + JSON.stringify(out.map(x=>x.type)));
+    const one = JSON.parse(out[0].payload);
+    if(one.sp !== 1 || !one.c) throw new Error('a lone spectator candidate must keep the sp marker: ' + out[0].payload.slice(0,60));
+    await new Promise(r => setTimeout(r, 150));
+    out = A.__out.splice(0);
+    if(out.length !== 1 || out[0].type !== 'ices')
+        throw new Error('the tail must leave as ONE ices, got ' + JSON.stringify(out.map(x=>x.type)));
+    const arr = JSON.parse(out[0].payload);
+    // An array has nowhere to carry ONE marker, so every entry carries it: the routing at
+    // the far end reads the first, and a batch is one pc worth of candidates or nothing.
+    if(!arr.every(e => e && e.sp === 1))
+        throw new Error('every entry of a spectator batch must carry the sp marker: ' + out[0].payload.slice(0,80));
+    if(addrs(uncork(arr)) !== '2001:db8::2,2001:db8::3,2001:db8::4,2001:db8::5')
+        throw new Error('the batch must keep gather order, got ' + addrs(uncork(arr)));
+    A.__spDrop(SPEC_PEER);
+  });
+
+  // FALSIFICATION: the gate is the PEER's build, and a watcher does not learn the feeder's
+  // until the answer lands. A batch sent before that is one nobody at the far end can read.
+  check('FALSIFICATION: a spectator whose peer has not named its build sends singles', () => {
+    const A = txSess(4, null);
+    A.__spMkIn(SPEC_PEER, '');
+    A.__out.splice(0);
+    for(let i = 1; i <= 5; i++) A.__spGather(SPEC_PEER, cand(i));
+    const out = A.__out.splice(0);
+    if(out.length !== 5 || out.some(x => x.type !== 'ice'))
+        throw new Error('an unnamed build must be sent one ice per candidate, got ' + JSON.stringify(out.map(x=>x.type)));
+    A.__spDrop(SPEC_PEER);
+  });
+
+  // The marker is the whole of what tells a spectator signal from a duel one. Both arrive
+  // here from the SAME id, which is what the router has to get right with nobody to ask.
+  await acheck('4.4: an ices is routed by its marker, never by who sent it', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(false); B.__setRelay(false);
+    const flush = () => new Promise(r=>setTimeout(r,0));
+    A.__invite(B_ID); pump(A, B);
+    B.__answer(true); pump(B, A);
+    await flush();
+    pump(A, B);
+    await flush();
+    if(!B.__state().sess) throw new Error('B has no P2P session to route against');
+    B.__spMkIn(A_ID, B.__peerV4());     // ...and a feed from the very same id
+    const d0 = B.__iceAdded().length, s0 = B.__spAdded(A_ID).length;
+    B.__deliver({ from:A_ID, to:B_ID, type:'ices',
+                  payload: JSON.stringify([1, 2].map(i => ({ c:cand(i), sp:1 }))) });
+    await flush();
+    if(B.__iceAdded().length !== d0) throw new Error('spectator candidates must never reach the duel pc');
+    if(B.__spAdded(A_ID).length !== s0 + 2)
+        throw new Error('the spectator link must take the whole batch, got ' + (B.__spAdded(A_ID).length - s0));
+    // ...and the same array unmarked still belongs to the match.
+    B.__deliver({ from:A_ID, to:B_ID, type:'ices', payload: JSON.stringify([cand(3), cand(4)]) });
+    await flush();
+    if(B.__spAdded(A_ID).length !== s0 + 2) throw new Error('an unmarked batch must not reach the spectator link');
+    if(B.__iceAdded().length !== d0 + 2)
+        throw new Error('an unmarked batch belongs to the duel, got ' + (B.__iceAdded().length - d0));
+    B.__spDrop(A_ID);
   });
 
   await acheck('4.4: a sweep taken on a busy wire still anchors, but reports no latency', async () => {

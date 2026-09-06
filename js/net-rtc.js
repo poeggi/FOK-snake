@@ -269,10 +269,15 @@ function _netIceTxFlush(to){
 // does not know `ices` drops the whole array through its default branch without a word.
 // The server's minor is ours: a 4.3 server refuses a signal type it has never heard of, so
 // without it this feature would break every connect against the server that is live today.
-function _netIceOut(to, cand){
+// `ver` names the peer's build for a link this module does not own -- a spectator feed,
+// which negotiates with somebody who is not the duel peer and learns their build the same
+// way, off the offer or the answer. Left out, the gate is the duel session, as before. The
+// buffered ELEMENT is whatever the caller hands over, so a spectator's wrapped candidate
+// rides the same window, the same cap and the same 5xx retry as the duel's bare one.
+function _netIceOut(to, cand, ver){
     const s = _netSess;
-    const ok = typeof setTimeout === 'function' && netSrvMinor() >= 4
-            && s && s.peer === to && _netIcesPeerOk(s.peerV);
+    const pv = ver === undefined ? ((s && s.peer === to) ? s.peerV : '') : ver;
+    const ok = typeof setTimeout === 'function' && netSrvMinor() >= 4 && _netIcesPeerOk(pv);
     if(!ok){ _netSignalIce(to, JSON.stringify(cand)); return; }
     let q = _netIceTx[to];
     if(!q) q = _netIceTx[to] = { buf:[], bytes:0, t:null, open:false };
