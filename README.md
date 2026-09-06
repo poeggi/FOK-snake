@@ -27,7 +27,7 @@ Snake FOK Edition uses classic Snake as its starting point, but it is as much a 
 | Escape | Quit to menu (in-game) |
 | Enter / OK | Select / confirm |
 | Backspace | Delete (name entry) |
-| M | Toggle music |
+| M | Mute / unmute (music and SFX) |
 
 Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. Tap the canvas during name entry to open the keyboard.
 
@@ -39,6 +39,7 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 | Barricades | Few | Standard | Many |
 | Growth per gem | +1 | +2 | +2 |
 | Snake length at level start | Resets | Resets | Carries over from previous level |
+| Lucky / Epic gem odds | Standard | Standard | Doubled |
 | Achievements | Basic only | Full | Full + Iron Snake |
 
 **Easy** awards only: first gem, level 1, level 5, and FOKoin milestones. Completing all 10 levels requires Normal or higher.
@@ -60,7 +61,14 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - Arcade SFX for eating, dying, level up
 - High score table (saved locally, top 10)
 - FOKoins: lifetime score accumulator across all sessions, spent in the shop
-- Shop with two pages of cosmetics: necktie, sunglasses, cylinder hat, monocle, bow tie (page 1); shoes, moustache, halo, wizard hat, royal crown, and the invisible gown that shimmers only while you outscore the record (page 2); plus a repeatable DONATE
+- Shop with four pages: two of buyable cosmetics -- necktie, sunglasses, cylinder
+  hat, monocle, bow tie (page 1); shoes, moustache, halo, wizard hat, royal crown,
+  and the invisible gown that shimmers only while you outscore the record (page 2),
+  plus a repeatable DONATE -- then MY GEAR, everything you have won, and MYSTERY
+  BOX
+- Mystery boxes: four tiers (COMMON, RARE, EPIC, LEGENDARY) that roll FOKoins or a
+  cosmetic by rarity. Box-only gear shares the wear slots with the bought kind, so a
+  won hat and a bought crown compete for the same head
 - NEW SNAKE TIMES: in-game news page for release announcements (newspaper icon on the main menu)
 - Smileys allowed in high-score names (characters like : - ( ) [ ] ')
 - Achievements and expert achievements
@@ -73,7 +81,12 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
 - 1:1 duels, local (one keyboard) and ONLINE: classic level progression for two,
   power pellets that turn the opponent's snake into food, PLAY AGAIN rematches,
   and a camera shake when the two heads brush past -- heavier, with a sonic
-  boom, when both snakes are boosting through the pass
+  boom, when both snakes are boosting through the pass. That pass can also blow a
+  cosmetic clean off the snake wearing it (WINDSWEPT gear: hats, glasses, the
+  moustache and the rest of the loose kind). It lands on the board and belongs to
+  whoever reaches it first, either player. Online it really changes hands -- the
+  winner keeps it and wears it at once; a local duel plays the identical mechanic
+  but nothing outlives the match, because both players share one wardrobe
 - SPECTATING: watch a friend's online duel live. The watcher runs the very same
   sim as the two players, fed a forwarded copy of their inputs and deliberately
   held a little behind the live edge, so what it shows is the match itself and
