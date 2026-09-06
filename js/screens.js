@@ -32,6 +32,20 @@ function drawStatus(msg, y){
               : '#ffaa44';
     ct(msg, CW/2, y || STATUS_Y, col, FONT.HINT);
 }
+// A list whose rows can be greyed out and have to say why. The reason is a status message
+// like any other, so it goes to the ONE line above -- never to a height measured off the top
+// of the list. A note parked a fixed number of rows down IS the last row the moment the list
+// grows one, which is how MULTIPLAYER ended up printing its reason on top of FRIENDS. A live
+// message outranks the reason: what just happened is newer news than why a row is grey.
+function drawMenuRows(items, sel, msg){
+    items.forEach((it,i)=>{
+        const y=MENU_TOP+i*MENU_ROW, on=sel===i;
+        if(it.en) menuItem(it.t, y, on);
+        else ct(on?('> '+it.t+' <'):it.t, CW/2, y, on?'#777':'#555', FONT.MENU);
+    });
+    menuItem('BACK', BACK_Y, sel===items.length);   // BACK toward the bottom, like drawSettings
+    drawStatus(msg || (items[sel] && items[sel].note) || '');
+}
 
 // ================================================================
 // SCREEN RENDERING  (menu / shop / boxes / settings / scores / achievements / credits / news / name-entry)
@@ -1321,22 +1335,14 @@ function drawDuelMenu() {
     // at y=24 with glow 16, items from MENU_TOP in MENU_ROW steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
     ctg('MULTIPLAYER',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const startY=MENU_TOP, rowH=MENU_ROW;
     const items=[
         {t:'1:1 DUEL',    en:true},
-        {t:'TOURNAMENT',  en:_ttMenuOk(), note:_ttMenuOk()?null:(netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':'(NEEDS A CONNECTION)')},
+        {t:'TOURNAMENT',  en:_ttMenuOk(), note:_ttMenuOk()?null:(netStatusNotice()||'TOURNAMENTS NEED A CONNECTION')},
         {t:'MY ID',       en:true},
         {t:'ADD FRIEND',  en:true},
         {t:'FRIENDS',     en:true},
     ];
-    items.forEach((it,i)=>{
-        const y=startY+i*rowH, sel=duelSel===i;
-        if(it.en) menuItem(it.t,y,sel);
-        else ct(sel?('> '+it.t+' <'):it.t, CW/2, y, sel?'#777':'#555', FONT.MENU);
-    });
-    menuItem('BACK', BACK_Y, duelSel===items.length);   // BACK toward the bottom, like drawSettings
-    if(items[duelSel] && items[duelSel].note) ct(items[duelSel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
-    if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
+    drawMenuRows(items, duelSel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The 1:1 DUEL submenu: ONLINE opens the lobby, LOCAL is two players on one keyboard
@@ -1344,19 +1350,11 @@ function drawDuelMenu() {
 function drawDuel11() {
     drawGrid(); drawOvBg(0.92);
     ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const startY=MENU_TOP, rowH=MENU_ROW;
     const items=[
-        {t:'1:1 ONLINE', en:!netOffline(), note:netOffline()?'(OFFLINE MODE - SEE SETTINGS/NETWORK)':null},
-        {t:'1:1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'(PC + KEYBOARD ONLY)'},
+        {t:'1:1 ONLINE', en:!netOffline(), note:netOffline()?netStatusNotice():null},
+        {t:'1:1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'PC + KEYBOARD ONLY'},
     ];
-    items.forEach((it,i)=>{
-        const y=startY+i*rowH, sel=duel11Sel===i;
-        if(it.en) menuItem(it.t,y,sel);
-        else ct(sel?('> '+it.t+' <'):it.t, CW/2, y, sel?'#777':'#555', FONT.MENU);
-    });
-    menuItem('BACK', BACK_Y, duel11Sel===items.length);
-    if(items[duel11Sel] && items[duel11Sel].note) ct(items[duel11Sel].note, CW/2, startY+4.6*rowH, '#555', FONT.HINT);
-    if(_duelMsg && _msgNow()-_duelMsgAt<2600) drawStatus(_duelMsg);
+    drawMenuRows(items, duel11Sel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // MY ID: this player's identity + the friend-link QR (moved here from SETTINGS).

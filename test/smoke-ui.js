@@ -129,6 +129,51 @@ runTest('SMOKE-UI', `
         log('screen furniture ok: BACK at '+BACK_Y+', the summary band at '+BAND_Y+', hints at '+HINT_Y);
     }
 
+    // A MENU SPEAKS ON THE STATUS LINE OR NOT AT ALL. A greyed row has to say why, and that
+    // reason used to be parked a fixed 4.6 rows below the top of the list -- a height that was
+    // clear on the two-row 1:1 menu it was written for and sat on the last row of the five-row
+    // MULTIPLAYER menu it was copied into. So the reason is not checked against a number here;
+    // every line these menus draw has to land on furniture the whole game shares: the title, a
+    // row of the list, BACK, the status line, or the hints. A menu that grows a row moves its
+    // own reason with it, and a menu that invents a height fails on the spot.
+    {
+        const oItem=menuItem, oCt=ct, oCtg=ctg;
+        let seen=[];
+        const grab=(t,x,y)=>seen.push({t:String(t), y:y});
+        menuItem=(t,y)=>seen.push({t:String(t), y:y});
+        ct=grab; ctg=grab;
+        // On the row pitch, or on a piece of furniture the whole game shares. The rule is the
+        // PITCH, not a row count: a menu is allowed to grow a row, and pinning the check to how
+        // many rows it has today is how a guard becomes something people delete.
+        const onPitch=y=>Number.isInteger((y-MENU_TOP)/MENU_ROW) && y>=MENU_TOP;
+        const furniture=y=>y===24||y===BACK_Y||y===STATUS_Y||y===HINT_Y||onPitch(y);
+        const off0=cfg.offline; cfg.offline=true; _duelMsg='';
+        seen=[]; phase='duelMenu'; duelSel=1; drawDuelMenu();
+        const mp=seen;
+        seen=[]; phase='duel11'; duel11Sel=0; drawDuel11();
+        const d1=seen;
+        const why=netStatusNotice();   // read while still offline: it is what the menus just drew
+        menuItem=oItem; ct=oCt; ctg=oCtg; cfg.offline=off0; phase='menu';
+        const show=l=>l.t+'@'+l.y;
+        const stray=lines=>lines.filter(l=>!furniture(l.y)).map(show);
+        // Two lines at one height is the collision itself, and it is what a reason parked on a
+        // whole number of rows would do rather than fall off the pitch.
+        const doubled=lines=>lines.filter((l,i)=>lines.some((o,j)=>j!==i&&o.y===l.y)).map(show);
+        const sMp=stray(mp), sD1=stray(d1);
+        if(sMp.length) throw 'MULTIPLAYER drew a line at a height of its own: '+sMp.join(' ');
+        if(sD1.length) throw 'the 1:1 menu drew a line at a height of its own: '+sD1.join(' ');
+        if(doubled(mp).length) throw 'MULTIPLAYER drew two lines on one height: '+doubled(mp).join(' ');
+        if(doubled(d1).length) throw 'the 1:1 menu drew two lines on one height: '+doubled(d1).join(' ');
+        // ... and the reason is actually said, on that line, in the words the rest of the game
+        // uses for it -- the check above is also passed by a menu that simply stopped explaining.
+        if(!mp.some(l=>l.t===why && l.y===STATUS_Y)) throw 'MULTIPLAYER did not say why TOURNAMENT is grey: '+mp.map(l=>l.t+'@'+l.y).join(' ');
+        if(!d1.some(l=>l.t===why && l.y===STATUS_Y)) throw 'the 1:1 menu did not say why ONLINE is grey: '+d1.map(l=>l.t+'@'+l.y).join(' ');
+        // The control: the height this bug was written at is one the furniture set rejects, so
+        // the pass above is the placement being right, not the set being wide enough to fit it.
+        if(furniture(MENU_TOP+4.6*MENU_ROW)) throw 'the pitch check would have accepted the old note height';
+        log('menu notes ok: the reason sits on the status line at '+STATUS_Y+', not '+(MENU_TOP+4.6*MENU_ROW));
+    }
+
     // A scoreboard is a list of TEN -- the number the storage actually keeps -- drawn on the
     // pitch every other list in the game uses, and it still has to end clear of the hints.
     {
