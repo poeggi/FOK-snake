@@ -722,6 +722,11 @@ async function passBreak(opts){
     A(rp.playNid() === 'played',
       '16: a sheet for the next node moved the board under the live match, to "' + rp.playNid() + '"');
     rp.walkOut('peer', IDS[0], [2, 5]);          // ESC on the over screen
+    // A tournament round trip goes through the pacing gate now, so it leaves on the next
+    // microtask rather than inside the call that asked for it. What is under test is which
+    // node the report NAMES, and the body is built before the wait -- so the drain is how
+    // the assertion reaches the same post, not a softer version of it.
+    await settleAsync();
     const res = rp.rec().posts.filter(p => p.action === 'result');
     A(res.length === 1 && res[0].nid === 'played' && res[0].outcome === 'loss',
       '16: walking out reported ' + JSON.stringify(res.map(p => p.nid + '/' + p.outcome)));
@@ -756,6 +761,7 @@ async function passBreak(opts){
     // sheet is re-read instead. A match that starts undressed is one nobody reports.
     const st0 = pk.rec().posts.filter(p => p.action === 'state').length;
     pk.sigRaw('offer', IDS[5], { sdp:{ type:'offer', sdp:'v=0 stranger' }, seed:78 });
+    await settleAsync();                       // the re-read is paced (see 16)
     A(pk.rec().answers.length === 1, '17: an offer from a peer the sheet does not name was answered');
     A(pk.rec().posts.filter(p => p.action === 'state').length === st0 + 1,
       '17: a stray offer did not make the client re-read the sheet');
@@ -792,6 +798,7 @@ async function passBreak(opts){
     es.clrMsg(); es.clear();
     es.sigTo(esSheet('esc2')); es.tick();
     es.endMatch('host', IDS[0], 0, [5, 2]);               // played, won, reported
+    await settleAsync();                                 // the report is paced (see 16)
     A(es.rec().posts.filter(p => p.action === 'result' && p.nid === 'esc2').length === 1,
       '18: the match that played was not reported');
     es.inGame(false); es.setPhase('tourneyBracket');      // over screen gone, back to the bracket
