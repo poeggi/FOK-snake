@@ -23,13 +23,20 @@ Snake FOK Edition uses classic Snake as its starting point, but it is as much a 
 | Input | Action |
 |-------|--------|
 | Arrow keys | Move snake / navigate menus |
+| Arrow key (hold) | Boost, in the direction you are already going |
+| W A S D | Player 2 in a local duel -- steer, and hold to boost |
 | Space | Pause / unpause |
 | Escape | Quit to menu (in-game) |
 | Enter / OK | Select / confirm |
 | Backspace | Delete (name entry) |
 | M | Mute / unmute (music and SFX) |
 
-Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. Tap the canvas during name entry to open the keyboard.
+Boost doubles your speed while you hold the direction you are already travelling
+in. It engages only after a short aligned hold, so the tap that turns you is never
+read as a boost, and turning drops it again. Settings -> TURBO BOOST switches it
+off entirely.
+
+Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to boost. Swipe the canvas to steer, and swipe again the way you are already going to boost. Tap the canvas during name entry to open the keyboard.
 
 ## Difficulty modes
 
@@ -94,9 +101,10 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Swipe the canvas to steer. T
   waiting on -- nobody to ask, an unanswered ask, a link still opening, or the
   shared clock -- rather than a bare CONNECTING
 - TOURNAMENT mode: create a tournament, everyone on the same network sees it
-  announced (or joins with the 6-character code), 2 to 8 players. The server
-  deals the schedule -- a sparse round-robin at 2 hearts, then knockouts, then
-  a normal 3-heart final -- and settles every result. Only two people ever play
+  announced (or joins with the 6-character code), from 2 players up to a cap the
+  server sets (8 by default). The server deals the schedule -- a sparse
+  round-robin at 2 hearts, then knockouts, then a normal 3-heart final -- and
+  settles every result. Only two people ever play
   at a time and everyone else spectates, over a two-tier relay tree that fails
   over on its own when a forwarder puts their phone away. Item stakes are the
   creator's choice at creation, off by default
@@ -131,6 +139,9 @@ matchmaking, signaling, PTS time sync, latency reporting and global scores.
 This client requires an **API v4** server; an older one will not matchmake or
 start duels. Tournaments and spectating additionally need **4.1** -- against a
 4.0 server the menu entry stays greyed out and everything else works as before.
+The per-round detail described above -- a match starting at the level the bracket
+says, a finished round stopping on a scoreboard -- arrived in **4.3**; a 4.1 or
+4.2 server still runs tournaments, just without it.
 Single-player is unaffected either way.
 The engine runs on a deterministic fixed-timestep 60 Hz tick clock, which is
 what makes prediction netcode and replay-validated scores possible.
