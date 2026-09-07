@@ -58,7 +58,7 @@ var _ttWant = null;    // the match parameters an inbound answer must be dressed
 var _ttPlayNid = '', _ttWatchNid = '';
 var _ttOverAt = 0;
 var _ttStateAt = 0, _ttT = null;
-var _ttAfter = 0, _ttAfterT = null;   // when the server's spread lets us ask again, and the one-shot that does
+var _ttAfter = 0, _ttAfterT = null;   // when the server's stagger lets us ask again, and the one-shot that does
 
 // tourneyQuit is one of them: the leave dialog is a tournament screen like any other, so
 // a tournament that ends underneath it takes it down with the rest rather than leaving a
@@ -290,7 +290,7 @@ function _ttAfterNote(d){
 }
 // ...and the delay has to be applied to the CALL, not only to the state read-back that used
 // to be the only thing an event provoked. A sheet provokes an offer, and the offer provokes
-// the pair's two start.php calls, so a spread that stops at _ttSync leaves the whole field
+// the pair's two start.php calls, so a stagger that stops at _ttSync leaves the whole field
 // dealing itself into the same millisecond anyway. Everything local -- the ceremony, the
 // match parameters, the session dressing -- has already happened by the time this is
 // reached; only what goes on the wire waits, and only for this node.
@@ -303,7 +303,7 @@ function _ttAfterDo(nid, fn){
 async function _ttSync(force){
     if(!_tt) return;
     const now = _msgNow();
-    // Wait the server's spread out rather than adding to the burst. `force` says the caller
+    // Wait the server's stagger out rather than adding to the burst. `force` says the caller
     // needs the answer, not that it needs it in this millisecond -- so a forced read is
     // deferred and then made, never dropped.
     if(_ttAfter > now){

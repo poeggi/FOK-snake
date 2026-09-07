@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 4;   // built against 4.4, including its RE-RELEASE (the roster on hello's `friends_list`, and `pace.gap_ms`: both feature-detected, never version-gated, because a server may answer to 4.4 without them) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; server-set pacing in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 4;   // built against 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -202,27 +202,29 @@ function netSelfStacked(){ return netHostBusy() && _netQ.flight > 1; }
 // that a PAIR is mis-anchored -- and it is a hint, not a refusal: the start it rides on
 // stands, and the next one is given a full re-measure.
 var _netResync = false;
-// ---- the pace the server asks for (API 4.4) ----
-// The lever is REQUESTS, not bytes, and `hold` is the biggest one of them: a held poll
-// occupies a PHP worker for its whole duration, so a server under pressure withdraws
-// holding first and widens the intervals after. A 4.3 server sends none of this, and then
-// these defaults -- exactly what this client did before -- stand.
-var _netPace = { hello_ms:30000, poll_ms:9000, hold:true, gap_ms:0 };
-// How many 1s ticks apart an UNHELD mailbox read sits. The server's own poll_ms is the
-// cadence it asked for; the ceiling is what keeps a signal from expiring unread.
-const NET_UNHELD_MAX_S = 15;
-function _netUnheldEvery(){
-    const s = _netPace.poll_ms > 0 ? Math.round(_netPace.poll_ms / 1000) : NET_UNHELD_MAX_S;
-    return Math.max(1, Math.min(NET_UNHELD_MAX_S, s));
-}
-// ---- the background gate (`pace.gap_ms`, 4.4) ----
+// ---- the pace (API 4.4) ----
+// The beat is CONTRACT, not wire. These intervals are stated in the contract and are the
+// same for every client, so they live here as constants. An earlier 4.4 server also sent
+// them in `pace`; they never carried anything but these numbers, and reading them back off
+// the wire only bought a second place for the same value to be wrong.
+const NET_HELLO_MS = 30000;   // between heartbeats: half the 60s online window, so one missed beat never reads as offline
+const NET_POLL_S   = 9;       // the longest hold poll.php serves, in whole seconds (`wait=`)
+// One thing does depend on the moment, and it is the biggest lever there is: a held poll
+// owns a PHP worker for its whole duration, so a server under pressure withdraws `hold`
+// first, by tier. A 4.3 server sends none of this and this default -- exactly what the
+// client did before -- stands.
+var _netPace = { hold:true };
+// How many 1s ticks apart an UNHELD mailbox read sits: where the held poll's answer would
+// have landed, so withdrawing the hold does not cost the server nine requests for one.
+const NET_UNHELD_EVERY = NET_POLL_S;
+// ---- the background gate (the contract's 100ms request gap, 4.4) ----
 // What a request costs this host is not its bytes: it is the slice it waits for a PHP
 // worker before any PHP runs, and that slice is paid PER REQUEST IN FLIGHT. Two of ours
 // leaving in the same instant pay it twice -- which is what a 135ms hello and a 127ms
 // friend list from one client in one second are a picture of.
 //
 // So background traffic -- the heartbeat, the roster, items, the cloud backup, scores --
-// goes out ONE AT A TIME through here, spaced by the gap the server asked for and never
+// goes out ONE AT A TIME through here, spaced by the gap the contract states and never
 // beside anything else of ours. None of it is anything a player is waiting for.
 //
 // The duel path used to be exempt outright, on the grounds that it is the latency a player
@@ -235,8 +237,7 @@ function _netUnheldEvery(){
 // slot the rule allows beside one other request, and gating it would only park the mailbox.
 // SPACING, not a wait: it is sized just above what one request costs, so a stacked burst
 // drains in milliseconds and no single call is ever held long enough for a player to feel it.
-const NET_GAP_MS = 100;        // the spacing to keep when the server names none
-const NET_GAP_MAX_MS = 2000;   // ...and the most one may ask for; background must not stall outright
+const NET_GAP_MS = 100;        // the contract's spacing between any two requests of ours
 const NET_GAP_STEP_MS = 20;
 const NET_GAP_TRIES = 40;      // ~2s of patience, counted in steps rather than measured
 // TWO background tiers. The default one is background but still time-bound -- the
@@ -253,7 +254,6 @@ const NET_BG_IDLE = 'idle';
 // second in line still costs a connection nothing, while a handshake held back a quarter of
 // a second per message costs one visibly.
 const NET_BG_SOLO = 'solo';
-function _netGapMs(){ return _netPace.gap_ms > 0 ? _netPace.gap_ms : NET_GAP_MS; }
 var _netSentAt = 0;            // when the last request of ours -- either lane -- went out
 var _netGapQ = null;           // the tail of the background queue
 // How long a background request must still wait, or 0 for "go now". THE rule, kept apart
@@ -269,7 +269,7 @@ var _netGapQ = null;           // the tail of the background queue
 function _netGapWait(now, flight, tier){
     if(flight > 0) return NET_GAP_STEP_MS;
     if(tier === NET_BG_SOLO) return 0;
-    return Math.max(0, _netSentAt + _netGapMs() - now);
+    return Math.max(0, _netSentAt + NET_GAP_MS - now);
 }
 // What the gate hands the rule above: our own requests in flight, plus -- for the idle tier
 // only -- a HELD poll, which is parked in PHP but still holding a connection open up where
@@ -289,7 +289,7 @@ function _netGate(tier){
         for(let i = 0; i < NET_GAP_TRIES; i++){
             const w = _netGapWait(Date.now(), _netGapFlight(tier), tier);
             if(w <= 0) break;
-            await new Promise(res => setTimeout(res, Math.min(w, _netGapMs())));
+            await new Promise(res => setTimeout(res, Math.min(w, NET_GAP_MS)));
         }
         _netSentAt = Date.now();
     };
@@ -297,16 +297,12 @@ function _netGate(tier){
     _netGapQ = p;
     return p;
 }
+// `hold` is all of `pace` that is left. The interval fields an earlier 4.4 server still
+// sends beside it are IGNORED rather than adopted: they only ever carried the constants
+// above, and a second source for a number that has one is a second place to be wrong.
 function _netPaceOf(j){
     const p = j && j.pace;
-    if(!p || typeof p !== 'object') return;
-    if(typeof p.hello_ms  === 'number') _netPace.hello_ms  = Math.max(5000, Math.min(600000, p.hello_ms|0));
-    if(typeof p.poll_ms   === 'number') _netPace.poll_ms   = Math.max(0, Math.min(60000, p.poll_ms|0));
-    if(typeof p.hold      === 'boolean') _netPace.hold     = p.hold;
-    // FEATURE-DETECTED, never version-gated: gap_ms arrives on a re-release of the same
-    // MINOR, so a 4.4 server may or may not name it. Absent means our own default rather
-    // than no spacing at all -- the collision it separates is ours either way.
-    if(typeof p.gap_ms === 'number') _netPace.gap_ms = Math.max(0, Math.min(NET_GAP_MAX_MS, p.gap_ms|0));
+    if(p && typeof p === 'object' && typeof p.hold === 'boolean') _netPace.hold = p.hold;
 }
 // Batched ICE (`ices`, API 4.4) is only safe toward a peer that KNOWS the type: an older
 // client hands an unknown signal to its default branch and the WHOLE array is gone --
@@ -849,7 +845,7 @@ function netDebugInfo(){
              // itself: the same wait read against 1 is the server's load, against 3 it is ours.
              iceSignals:_netDbg.iceTx|0, iceBatches:_netDbg.iceBat|0, srvQueueMs:_netDbg.qMs|0,
              srvQueueFlight:_netQ.flight|0, selfStacked:netSelfStacked(),
-             pace:{ helloMs:_netPace.hello_ms, pollMs:_netPace.poll_ms, hold:_netPace.hold, gapMs:_netGapMs(), roster:_netFrHello ? 'hello' : 'friend' },
+             pace:{ hold:_netPace.hold, roster:_netFrHello ? 'hello' : 'friend' },
              flightMax:_netFlightMax,
              counts:_netCounts };
 }
@@ -938,7 +934,7 @@ async function _netHello(){
     if(_netHs.accepting && Date.now() - _netHs.acceptingAt > NET_INVITE_STALE_MS){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
     _netSrvErr = false;
-    _netPaceOf(r);   // how often to come back, and whether we may hold a worker while we wait
+    _netPaceOf(r);   // whether we may still hold a worker while we wait
     // The session's FIRST item drain rides the first ANSWERED heartbeat rather than a
     // load-time timer: a fixed delay after load lands in the middle of the resume burst,
     // where a wire this client is about to make busy looks quiet, while a hello that just
@@ -1058,14 +1054,13 @@ async function _netPollOnce(){
     // (a held poll owns a PHP worker for its whole duration -- the single biggest thing one
     // idle client costs a busy host); the 1 Hz tick below then carries the mailbox instead,
     // which is slower per signal but costs the server a worker only while it answers.
-    const held = _netPace.hold && _netPace.poll_ms > 0 && _held;
+    const held = _netPace.hold && _held;
     // Withdrawing the hold must not COST the server requests. Falling back to the 1s tick
     // sends nine unheld polls where the 9s held one sent a single request: cheaper per
     // request, nine times as many of them, and the count in flight is the thing the whole
     // pacing contract is about. So when we wanted to hold and were not allowed to, read the
-    // mailbox at the cadence the server named instead -- "poll without waiting and lean on
-    // the heartbeat". Never further apart than an undelivered signal's 30s life, which is
-    // also why poll_ms 0 does not mean never.
+    // mailbox where the hold's answer would have landed instead -- "poll without waiting and
+    // lean on the heartbeat", still well inside an undelivered signal's 30s life.
     //
     // ONLY while merely browsing, which is also the only tier the server withdraws the hold
     // from first. Anything with a handshake in flight keeps the 1s tick: the offer ladder
@@ -1073,8 +1068,7 @@ async function _netPollOnce(){
     // would answer an offer that has already been abandoned at the other end.
     const _idle = !_netSess && !netForming()
                && !(typeof tourneyActive === 'function' && tourneyActive());
-    if(_held && !held && _idle && (_netPollTick % _netUnheldEvery())) return;
-    const wait = Math.max(1, Math.min(9, Math.round(_netPace.poll_ms / 1000)));
+    if(_held && !held && _idle && (_netPollTick % NET_UNHELD_EVERY)) return;
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollHeld = held;
@@ -1083,7 +1077,7 @@ async function _netPollOnce(){
     // other request, and holding it back would only park the mailbox itself. An UNHELD one
     // is an ordinary request and takes the solo lane like any other -- second in line rather
     // than beside, which is the whole rule.
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + wait : ''),
+    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : ''),
                             _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
@@ -1403,16 +1397,15 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
     });
 }
 
-// How long until the next heartbeat. The beat re-arms itself rather than sitting on a fixed
-// interval, so the server can move it (`pace.hello_ms`). What used to ride on it as well was
-// a one-time phase shift out of a served jitter budget; the budget is gone, and what
-// separates a roomful of clients now is the gate they all queue at (NET_GAP_MS), which
-// spaces the calls themselves rather than the sessions that make them.
-function _netBeatMs(){ return Math.max(5000, _netPace.hello_ms); }
-// ---- boot: the ~30s heartbeat, always-on while online is allowed. First one after
+// ---- boot: the NET_HELLO_MS heartbeat, always-on while online is allowed. First one after
 // a short delay so boot itself never touches the network path. All soft-fail. ----
+// The beat's PHASE is load time and nothing else: each one re-arms off the previous, never
+// off Date.now() and never off the shared server clock, so two clients sit on the same
+// millisecond only if they loaded on it. A served jitter budget used to add an offset on top
+// of that; it bought nothing, because what separates a roomful of clients is the gate they
+// all queue at (NET_GAP_MS), which spaces the calls rather than the sessions making them.
 if(_netTimers){
-    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, _netBeatMs()); })();
+    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, NET_HELLO_MS); })();
     setTimeout(_netHello, 3000);
     setTimeout(()=>{ if(_netOk()) _netFrRefresh(true); }, 3500);   // contract: reconcile the local friend list vs the server at startup
     // Sync the clock DURING the coin-drop splash (bounded) so menu music can start already

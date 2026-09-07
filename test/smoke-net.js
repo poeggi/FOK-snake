@@ -409,11 +409,11 @@ runTest('SMOKE-NET', `
     log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
     cfg.debug=0;
 
-    // ---- server-set pacing + the queue gauge (hello pace, q_ms; API 4.4) ----
+    // ---- the hold decision + the queue gauge (hello pace, q_ms; API 4.4) ----
     // What one idle client costs a contended host is dominated by the HELD poll: it owns a
-    // PHP worker for its whole duration. That is why hold is a lever of its own and not
-    // just a very long poll_ms -- and why withdrawing it has to fall back to reading the
-    // mailbox on the tick, never to reading nothing.
+    // PHP worker for its whole duration. That is why hold is a lever of its own and the only
+    // thing left in the pace block -- and why withdrawing it has to fall back to reading the mailbox
+    // on the tick, never to reading nothing.
     {
         const _oGetP=_netGet, _oFetchP=globalThis.fetch;
         globalThis.fetch=()=>({});                                  // _netOk(): online
@@ -423,15 +423,18 @@ runTest('SMOKE-NET', `
         // captured by the time it returns. Clear the busy latch by hand since the tail of
         // the previous call has not run yet.
         const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='lobby'; _netPollOnce(); };
-        _netPace={hello_ms:30000, poll_ms:9000, hold:true};
+        _netPace={hold:true};
         poll();
         if(!/[?&]wait=9$/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
         // ...and a HELD poll waits on nothing: it IS the parked slot the gate lets one other
         // request stand beside, so gating it would park the client behind itself for 9s.
         if(_bgP !== undefined) throw 'a held poll must not be sent through the gate, got ' + String(_bgP);
-        _netPaceOf({pace:{poll_ms:3000}});
+        // FALSIFICATION: the interval fields an earlier 4.4 server still sends beside hold
+        // are IGNORED, never adopted. They only ever carried the contract's own constants, so
+        // a served one moving anything here would be a second source for a settled number.
+        _netPaceOf({pace:{hello_ms:45000, poll_ms:3000, gap_ms:400}});
         poll();
-        if(!/[?&]wait=3$/.test(_url||'')) throw 'poll_ms must set how long the poll is held, got ' + _url;
+        if(!/[?&]wait=9$/.test(_url||'')) throw 'a served poll_ms must not move the poll wait, got ' + _url;
         _netPaceOf({pace:{hold:false}});
         poll();
         if(/wait=/.test(_url||'') || _heldArg) throw 'hold:false must withdraw the held poll, got ' + _url;
@@ -440,14 +443,11 @@ runTest('SMOKE-NET', `
         // the one-other-request rule like any other -- on the solo lane, since a mailbox read
         // is something the player is waiting for and owes no background spacing.
         if(_bgP !== NET_BG_SOLO) throw 'an unheld poll must take the solo lane, got ' + String(_bgP);
-        _netPaceOf({pace:{hold:true, poll_ms:0}});
-        poll();
-        if(/wait=/.test(_url||'')) throw 'poll_ms 0 must withdraw the hold as well, got ' + _url;
         // ...and an unheld poll must not cost the server MORE requests than the held one it
         // replaced. Nine unheld polls a second apart where one 9s hold used to sit is the
         // opposite of what withdrawing the hold is for, so an idle browsing client reads the
-        // mailbox at the cadence the server named instead.
-        _netPace={hello_ms:30000, poll_ms:9000, hold:false};
+        // mailbox where the hold's answer would have landed instead.
+        _netPace={hold:false};
         const _oTick=_netPollTick, _oSess=_netSess, _oSent=_netHs.sent, _oAcc=_netHs.accepting;
         _netSess=null; _netHs.sent=null; _netHs.accepting=null;
         let _hits=0;
@@ -462,28 +462,15 @@ runTest('SMOKE-NET', `
         _netHs.offerTo=null; _netPollTick=_oTick;
         _netSess=_oSess; _netHs.sent=_oSent; _netHs.accepting=_oAcc;
         if(_hits!==9) throw 'a handshake in flight must keep the 1s tick, got ' + _hits + ' of 9';
-        // The beat is exactly what the server asked for, every time. It used to carry a
-        // one-time phase shift out of a served jitter budget; that budget is withdrawn, and
-        // a beat that still shortened itself would drift off the cadence for nothing.
-        _netPace={hello_ms:30000, poll_ms:9000, hold:true};
-        const _b1=_netBeatMs(), _b2=_netBeatMs(), _b3=_netBeatMs();
-        if(_b1!==30000 || _b2!==30000 || _b3!==30000)
-            throw 'every beat must be exactly the served hello_ms, got ' + _b1 + '/' + _b2 + '/' + _b3;
-        // FALSIFICATION: it is the SERVED value that is followed, not a constant -- and the
-        // 5s floor still holds under it.
-        _netPaceOf({pace:{hello_ms:45000}});
-        if(_netBeatMs()!==45000) throw 'a served hello_ms must move the beat, got ' + _netBeatMs();
-        // Clamped, never adopted: a wrong (or hostile) pace must not be able to park this
-        // client for an hour or spin it flat out.
-        _netPaceOf({pace:{hello_ms:1, poll_ms:999999}});
-        if(_netPace.hello_ms!==5000) throw 'hello_ms must clamp up to the 5s floor';
-        if(_netPace.poll_ms!==60000) throw 'poll_ms must clamp down to the 60s ceiling';
-        if(_netBeatMs()!==5000) throw 'the beat must sit on the clamped floor, got ' + _netBeatMs();
-        // A field the server has STOPPED sending is not an error and not a reason to forget
-        // what is in force: the contract lets a later server drop an optional key.
+        // A key the server has STOPPED sending is not an error and not a reason to forget
+        // what is in force: the contract lets a later server drop an optional field, and it
+        // has now dropped every one of them but hold.
+        _netPaceOf({pace:{hold:false}});
+        _netPaceOf({api:'4.4'});
+        if(_netPace.hold!==false) throw 'a hello with no pace block must leave the hold in force alone';
+        _netPaceOf({pace:{}});
+        if(_netPace.hold!==false) throw 'an empty pace block must leave the hold in force alone';
         _netPaceOf({pace:{hold:true}});
-        if(_netPace.hello_ms!==5000) throw 'an absent hello_ms must leave the one in force alone';
-        if(_netPace.poll_ms!==60000) throw 'an absent poll_ms must leave the one in force alone';
         // q_ms is the server's own report of how long this request queued before PHP ran.
         // Half of that wait lands straight in the clock offset, so a fresh reading over the
         // floor is what marks a sample unclean -- and it must EXPIRE, not latch: a host that
@@ -512,12 +499,12 @@ runTest('SMOKE-NET', `
         const _dbg=netDebugInfo();
         if(_dbg.srvQueueMs!==51) throw 'the debug export must carry the server queue wait';
         if(typeof _dbg.iceSignals!=='number' || typeof _dbg.iceBatches!=='number') throw 'the debug export must count ice signals against ice batches';
-        if(!_dbg.pace || _dbg.pace.hold!==true || _dbg.pace.pollMs!==60000) throw 'the debug export must carry the pace in force, got ' + JSON.stringify(_dbg.pace);
+        if(!_dbg.pace || _dbg.pace.hold!==true || !_dbg.pace.roster) throw 'the debug export must carry the pace in force, got ' + JSON.stringify(_dbg.pace);
         _netQ={ms:0,at:0};
-        _netPace={hello_ms:30000, poll_ms:9000, hold:true};
+        _netPace={hold:true};
         _netGet=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
     }
-    log('pacing ok: hold/poll_ms drive the poll and clamp, an unheld poll costs the served cadence and not 1 Hz (a handshake excepted), the beat is the served hello_ms, q_ms flags a busy host and expires');
+    log('pacing ok: hold alone drives the poll, a retired interval field moves nothing, an unheld poll costs the contract cadence and not 1 Hz (a handshake excepted), q_ms flags a busy host and expires');
 
     // ---- ONE gate for our own background traffic + the roster on hello (4.4 re-release) ----
     // What the live host charges is a scheduling slice paid PER REQUEST IN FLIGHT, not per
@@ -525,18 +512,15 @@ runTest('SMOKE-NET', `
     // only MOVED that cost -- hello and friend.php then arrived together instead. So every
     // background request queues behind one gate, and the duel handshake goes past it.
     {
-        const _oPaceG={hello_ms:_netPace.hello_ms, poll_ms:_netPace.poll_ms, hold:_netPace.hold, gap_ms:_netPace.gap_ms};
+        const _oPaceG={hold:_netPace.hold};
         const _oSentG=_netSentAt, _oFlightG=_netFlight, _oFetchG=globalThis.fetch;
-        // (a) gap_ms is FEATURE-DETECTED, never version-gated: it arrives on a RE-RELEASE of
-        // the same MINOR, so a server calling itself 4.4 may or may not name it.
+        // (a) the gap is a CONTRACT CONSTANT, the same for every client, so nothing on the
+        // wire can move it: an earlier 4.4 server still naming one must change nothing here.
+        _netSentAt=1000;
         _netPaceOf({pace:{gap_ms:400}});
-        if(_netGapMs()!==400) throw 'a served gap_ms must set the spacing, got ' + _netGapMs();
-        _netPaceOf({pace:{gap_ms:99999}});
-        if(_netGapMs()!==2000) throw 'gap_ms must clamp to the 2s ceiling, got ' + _netGapMs();
-        _netPaceOf({pace:{gap_ms:0}});
-        if(_netGapMs()!==100) throw '0 means our own default, not no spacing at all, got ' + _netGapMs();
+        if(_netGapWait(1000, 0)!==100) throw 'a served gap_ms must not move the spacing, got ' + _netGapWait(1000,0);
         _netPaceOf({api:'4.4'});
-        if(_netGapMs()!==100) throw 'a hello with no pace block at all must leave a spacing in force';
+        if(_netGapWait(1000, 0)!==100) throw 'a hello with no pace block at all must leave the spacing alone';
         // (b) THE rule, in one place: anything of ours in flight holds the next background
         // request back whatever the clock says; otherwise the wait is what is LEFT of the gap.
         _netSentAt=1000;
@@ -618,7 +602,6 @@ runTest('SMOKE-NET', `
         if(netDebugInfo().pace.roster!=='hello') throw 'a roster served on hello must read as such';
         _netFrHello=false;
         if(netDebugInfo().pace.roster!=='friend') throw 'without it the fallback route must be named';
-        if(netDebugInfo().pace.gapMs!==100) throw 'the field readout must carry the spacing in force';
         // ...and the screen entry follows the same route: where the roster rides the
         // heartbeat, entering asks for a heartbeat rather than a second request beside it.
         const _oRefG=_netFrRefresh, _oHelloG=_netHello, _oPh2=phase;
@@ -669,7 +652,7 @@ runTest('SMOKE-NET', `
         _netHs.offerTo=_oOfferG; _netHs.sent=_oSentHsG; _netHs.accepting=_oAccG; _netSess=_oSessG;
         _netPace=_oPaceG; _netSentAt=_oSentG; globalThis.fetch=_oFetchG;
     }
-    log('background gate ok: gap_ms feature-detected and clamped, our own request in flight holds the next one back while a held poll does not, the roster rides hello where served and falls back to friend.php, one forming predicate parks the item queue');
+    log('background gate ok: the 100ms gap is a constant no served field can move, our own request in flight holds the next one back while a held poll does not, the roster rides hello where served and falls back to friend.php, one forming predicate parks the item queue');
 
     // ---- our own public addresses (hello nets, server 4.2) ----------------------
     // The server sees us on ONE family per request; ICE can see both, so we gather them

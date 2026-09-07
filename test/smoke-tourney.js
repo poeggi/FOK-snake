@@ -1,4 +1,4 @@
-// Tournament PACING smoke (docs/API.md "tourney", "after_ms", "gap_ms"; contract 4.4): what
+// Tournament PACING smoke (docs/API.md "tourney", "after_ms", Pacing; contract 4.4): what
 // a client is allowed to have in flight at the one moment it is busiest -- the millisecond a
 // match is dealt. The server measured the old behaviour on a live 3-client tournament: ONE
 // client had three requests open, tournament.php and start.php left in the SAME millisecond,
