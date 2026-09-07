@@ -250,6 +250,14 @@ function resetPlayerId() {
     _pidCookieSet(id);
     return id;
 }
+// The name the player CHOSE, or '' when they never did. Unlike the id -- which is minted
+// for you on first read -- a name only exists once someone types one, so '' is a real state
+// every caller has to handle: the settings row prints '---', the splash asks for it, a score
+// prefills with it and the heartbeat leaves it off. ONE reader, so "is a name set?" is the
+// same question everywhere.
+function getPlayerName() {
+    try { return (localStorage.getItem('lastSName') || '').substring(0, MAX_NAME); } catch(e) { return ''; }
+}
 // Cloud-backup token: the server mints a 128-bit token on the first cloud backup and REQUIRES
 // it (with the id) for every later backup and every restore. Persist it like the id -- cookie
 // (master) + localStorage backup -- so it too survives a site-data wipe, and carry it in the

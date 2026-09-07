@@ -436,8 +436,7 @@ var _netMyNameC = { v:'', at:0 };
 function _netMyName(){
     const n = Date.now();
     if(n - _netMyNameC.at > 10000){
-        let s = ''; try{ s = localStorage.getItem('lastSName') || ''; }catch(e){}
-        _netMyNameC = { v:s, at:n };
+        _netMyNameC = { v:getPlayerName(), at:n };
     }
     return _netMyNameC.v;
 }

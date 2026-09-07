@@ -93,7 +93,8 @@ let _splashExiting = false, _splashExitAt = 0;
 function updateSplashExit() {
     if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
         _splashExiting = false;
-        phase = _inviteFid ? 'invite' : _tourneyLink ? 'tourneyLobby' : 'menu';
+        const dest = _inviteFid ? 'invite' : _tourneyLink ? 'tourneyLobby' : 'menu';
+        phase = dest;
         inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
         if (phase === 'tourneyLobby' && typeof tourneyEnter === 'function') tourneyEnter();
         // Hold menu music briefly for the clock sync (started during the coin drop), so it
@@ -101,6 +102,16 @@ function updateSplashExit() {
         if(typeof _netOk === 'function' && _netOk() && (typeof netPts !== 'function' || netPts() == null))
             _musicSyncWaitUntil = performance.now() + MUSIC_SYNC_WAIT_MS;
         _wsend({ t:'phase', phase:'menu' });   // sync the worker: it owns phaseAt
+        // A player who never named themselves is PLAYER to every peer and a dash in every
+        // server view, and SETTINGS > USER is the only place that has ever asked. So ask once
+        // on the way in -- the same dialog that row opens, returning to the MENU whether it is
+        // submitted or cancelled, so a first start still reaches the game in one keypress.
+        // A deep link keeps its own destination: someone is already waiting at the other end
+        // of an invite or a tournament code, and the name can still be set from settings.
+        // LAST in this function on purpose, and off `dest` rather than `phase`: the sim owns
+        // `phase` and the menu hand-over above writes it again on the no-worker fallback, so
+        // reading it here would both undo an earlier hand-over and lose the deep link.
+        if (dest === 'menu' && !getPlayerName() && typeof _entryOpen === 'function') _entryOpen('user', '', 'menu');
     }
 }
 // Set the in-process tick phase to the shared grid (mid-window firing), only on an
@@ -266,7 +277,7 @@ function drainSimEvents(){
             case 'gameover':
                 entryMode = 'score';
                 nameReason = e.reason || 'over';   // 'win' when set by the level-10 clear, else death
-                try{ nameStr=(localStorage.getItem('lastSName')||'').substring(0,MAX_NAME); }catch (e){ nameStr=''; }
+                nameStr=getPlayerName();
                 nameCharIdx=nameStr.length>0?NAME_CHARS.indexOf(' '):0; nameCursorPos=nameStr.length;
                 showHUD(false); Snd.musicStop(); break;
             // Every remaining deferred cosmetic waits its 2 ticks in _fxQ, where a rollback can

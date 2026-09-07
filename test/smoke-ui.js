@@ -17,6 +17,32 @@ runTest('SMOKE-UI', `
     press('Enter'); if(!_splashExiting) throw 'Enter should start the splash exit';
     log('splash key capture ok');
 
+    // FIRST START: with no name stored the splash hands over to the name entry instead of
+    // dropping onto the menu, and both ways out of it land on the MENU. A cancel leaves the
+    // name unset, so the next start asks again; a deep link is never interrupted.
+    localStorage.removeItem('lastSName');
+    _inviteFid=null; _tourneyLink=''; simNow=100000;
+    phase='splash'; _splashExiting=true; _splashExitAt=0; updateSplashExit();
+    if(phase!=='nameEntry'||entryMode!=='user') throw 'first start did not ask for a name (phase='+phase+')';
+    _splashLeftAt=-1e9;                                  // past the 200ms post-splash input guard
+    press('Escape');
+    if(phase!=='menu') throw 'a cancelled first-start name entry must land on the MENU';
+    phase='splash'; _splashExiting=true; _splashExitAt=0; updateSplashExit();
+    if(phase!=='nameEntry') throw 'a cancelled name is still no name: the next start must ask again';
+    _splashLeftAt=-1e9;
+    press('k'); press('a'); press('i'); press('Enter');
+    if(phase!=='menu') throw 'submitting the first-start name must land on the MENU (phase='+phase+')';
+    if(getPlayerName()!=='KAI') throw 'first-start name not persisted: '+getPlayerName();
+    phase='splash'; _splashExiting=true; _splashExitAt=0; updateSplashExit();
+    if(phase!=='menu') throw 'a named player must go straight to the menu';
+    localStorage.removeItem('lastSName'); _inviteFid='00ff00ee';
+    phase='splash'; _splashExiting=true; _splashExitAt=0; updateSplashExit();
+    // (the destination itself is not readable here: with no Worker in the harness the sim's
+    // own phase message lands on this very binding and reads back as 'menu' either way)
+    if(phase==='nameEntry') throw 'an invite link must not be interrupted by the name entry';
+    _inviteFid=null; localStorage.setItem('lastSName','KAI');
+    log('first start asks for a name once: cancel and submit both land on the menu');
+
     // From splash, force menu. Advance sim clock past the 200ms post-splash input guard.
     simNow=100000; _splashExiting=false; _splashLeftAt=-1e9; _splashKeyHeld=false;
     phase='menu'; menuSel=MENU_ITEMS.indexOf('SETTINGS'); settingsCat=-1; settingsSel=0;

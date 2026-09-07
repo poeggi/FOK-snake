@@ -342,8 +342,8 @@ const _tog=(label,key)=>({ lbl:()=>label+': '+(cfg[key]?'ON':'OFF'),
     act:()=>{cfg[key]=!cfg[key];Snd.sfxPlay('select',cfg.music);} });
 const SETTINGS_CATS = [
     { label:'USER', items:[
-        { lbl:()=>{ let n=''; try{ n=localStorage.getItem('lastSName')||''; }catch(e){} return 'NAME: '+(n||'---'); },
-          act:()=>{ let n=''; try{ n=localStorage.getItem('lastSName')||''; }catch(e){} Snd.sfxPlay('select',cfg.music); _entryOpen('user', n); } },
+        { lbl:()=>'NAME: '+(getPlayerName()||'---'),
+          act:()=>{ Snd.sfxPlay('select',cfg.music); _entryOpen('user', getPlayerName()); } },
         { lbl:()=>'SHOW MY ID', act:()=>{ Snd.sfxPlay('select',cfg.music); _friendIdBack='settings'; phase='friendId'; } },
     ]},
     { label:'AUDIO', items:[

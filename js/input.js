@@ -76,10 +76,16 @@ function _placeName(){
 function _syncDial(){ if(nameCursorPos<nameStr.length){const ci=_entryChars().indexOf(nameStr[nameCursorPos]);if(ci>=0)nameCharIdx=ci;} }
 // Open/close the shared entry dialog. Leaving always resets to 'score': that is the
 // only mode entered without _entryOpen (the sim's gameover event drives it).
-function _entryOpen(mode, prefill){
+//
+// Where 'user' mode returns to, submitted OR cancelled: SETTINGS when the settings row
+// opened it, the MENU when the splash did on a first start. The other modes name their own
+// destination inline (friend -> duelMenu, tcode -> tourneyLobby, score -> the scoreboard).
+let _entryTo='settings';
+function _entryOpen(mode, prefill, to){
     entryMode=mode; nameStr=(prefill||'').substring(0,_entryMax());
     nameCharIdx=nameStr.length>0?Math.max(0,_entryChars().indexOf(nameStr[0])):0;
     nameCursorPos=nameStr.length; phase='nameEntry';
+    _entryTo=to||'settings';
 }
 function _entryLeave(to){ _friendPending=false; scanStop(); _scanOk=''; _scanManualOff=false; entryMode='score'; phase=to; setTimeout(()=>nameInp.blur(),10); }
 // ADD FRIEND bookkeeping shared by the checked and the unchecked (no net-api) paths.
@@ -125,7 +131,7 @@ function _submitName(){
     if(!nameStr.trim()) return;
     try{localStorage.setItem('lastSName',nameStr);}catch (e){}
     if(typeof netNameChanged==='function') netNameChanged();
-    if(entryMode==='user'){ _entryLeave('settings'); Snd.sfxPlay('select',cfg.music); return; }
+    if(entryMode==='user'){ _entryLeave(_entryTo); Snd.sfxPlay('select',cfg.music); return; }
     if(_scoreTainted){   // x10 debug run: never touches the local board or the global one
         inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; showHUD(false);
         setTimeout(()=>nameInp.blur(),10); Snd.sfxPlay('select',cfg.music); return;
@@ -567,11 +573,12 @@ const UI_INPUT = {
         back(key){
             // Backspace always deletes a character. ESC is BACK on the friend screen
             // (leave ADD FRIEND at any time); in the name/user modes it cancels only on
-            // an EMPTY field, so a held Backspace never falls through and exits. Score
-            // mode has no cancel at all: a run always ends in a submit.
+            // an EMPTY field, so a held Backspace never falls through and exits. The cancel
+            // goes back to whoever opened the dialog (_entryTo), not always to SETTINGS.
+            // Score mode has no cancel at all: a run always ends in a submit.
             if(key!=='Backspace' && entryMode==='tcode'){ _entryLeave('tourneyLobby'); Snd.sfxPlay('nav',cfg.music); return; }
             if(key!=='Backspace' && entryMode==='friend'){ _entryLeave('duelMenu'); Snd.sfxPlay('nav',cfg.music); return; }
-            if(key!=='Backspace' && entryMode!=='score' && nameStr.length===0){ _entryLeave('settings'); Snd.sfxPlay('nav',cfg.music); }
+            if(key!=='Backspace' && entryMode!=='score' && nameStr.length===0){ _entryLeave(_entryTo); Snd.sfxPlay('nav',cfg.music); }
             else _nameDelete();
         },
         text(key){
