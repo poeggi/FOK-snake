@@ -36,6 +36,24 @@ case "${1:-}" in
     *) echo "usage: bash test/checks.sh [--full|--regression|--profile|--netprofile|--live|--tourney|--tourney-sim]"; exit 2 ;;
 esac
 
+# On-demand LIVE server contract (NOT part of the default run, and never in CI):
+# bash test/checks.sh --live. Needs the network and a running deployment, so it can
+# gate neither a commit nor a push. Two contracts live here: the peer-net hint the
+# direct-IPv6 path depends on (see test/peer-net.sh), and the API 4.0 item registry,
+# where a client/server disagreement over the attestation MAC would otherwise show up
+# only as a duel that silently refuses every steal.
+#
+# FIRST, ahead of the local tier: these two are the only answers this mode exists for,
+# and the only ones a missing network or a half-deployed server can take away. Reaching
+# them after a full local tier means waiting for work that cannot say anything about the
+# deployment before hearing whether the deployment is sound.
+if [ "${1:-}" = "--live" ]; then
+    echo "[checks] live server: peer-net direct-connection hint"
+    bash test/peer-net.sh
+    echo "[checks] live server: item registry contract"
+    node test/items-live.js
+fi
+
 node test/run-suites.js "$TIER" "${@:2}"
 
 if [ "$TIER" = --fast ]; then
@@ -81,15 +99,3 @@ if [ "${1:-}" = "--tourney-sim" ]; then
     node test/tourney-sim.js
 fi
 
-# On-demand LIVE server contract (NOT part of the default run, and never in CI):
-# bash test/checks.sh --live. Needs the network and a running deployment, so it can
-# gate neither a commit nor a push. Two contracts live here: the peer-net hint the
-# direct-IPv6 path depends on (see test/peer-net.sh), and the API 4.0 item registry,
-# where a client/server disagreement over the attestation MAC would otherwise show up
-# only as a duel that silently refuses every steal.
-if [ "${1:-}" = "--live" ]; then
-    echo "[checks] live server: peer-net direct-connection hint"
-    bash test/peer-net.sh
-    echo "[checks] live server: item registry contract"
-    node test/items-live.js
-fi

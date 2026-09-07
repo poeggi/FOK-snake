@@ -39,7 +39,10 @@ requests per client - and each half is useless without the other.
   read (_ttStateAt stamped in _ttRoles) - the housekeeping tick must never ask
   the server to repeat a pushed sheet. after_ms is honoured on the CALL, never
   the render (client bound TT_AFTER_MAX 1 s as a wrong-number guard; the server
-  serves 400 ms).
+  serves 400 ms). Entering the 1:1 screen is one event too: hello and the
+  friend list go first, then _netTimeSync - ONE hello, and the sweep measures
+  on a wire those two have cleared instead of racing a sample against a hello
+  about to dirty it. The latency figure rides the next hello (_netLat.pending).
 - Self-check: q_ms is stored with the in-flight count at the time of the
   reading, so netSelfStacked() separates the host's load from our own overlap.
 - The item queue stands aside ONCE while a duel forms, never in a loop - a
@@ -130,7 +133,9 @@ carrying one do not stand something local in its place.
 
 ## Open offers (flagged only - need an explicit go)
 
-- POST as text/plain to drop the CORS preflights (server jsonBody() never
-  checks Content-Type).
-- The double hello on entering the 1:1 screen (net-session.js); also the 5 s
-  screen tick on lobby/friends/tourney-lobby screens is not in the contract.
+- POST as text/plain to drop the CORS preflight (server jsonBody() never checks
+  Content-Type). The preflight no longer costs an FPM worker: Apache answers
+  OPTIONS on /api/ without starting PHP (server 1.4.12), so what is left to win
+  is one round trip on a cold start, not a slice.
+- The 5 s screen tick on lobby/friends/tourney-lobby screens is not in the
+  contract.
