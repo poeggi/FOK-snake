@@ -349,7 +349,10 @@ function _crashFor(p){
 const CRUSH_AT_MAX = 0.85;  // share of the body the wreck eats at 30 cells/s, the game's hardest crash
 const CORNER_DAMP  = 0.72;  // what is left of the front once it has turned one corner
 const ZIG_HOLD     = 0.65;  // share of the sideways kick that stays put instead of ringing out
-const FRONT_RATIO  = 0.40;  // ms per carriage as a fraction of ms per cell: the front runs 2.5x the snake
+const WAVE_MS      = 14;    // ms per carriage. A buckle wave is a property of the BODY, not of the
+                            // impact: what the speed governs is how much crumples, not how fast the
+                            // crumpling spreads. Tying it to the snake made a gentle crash read as a
+                            // slow-motion one -- the tail still folding half a second after the hit.
 function _crashJolt(p, now){
     const e = _crashFor(p);
     if(!e) return null;
@@ -369,19 +372,21 @@ function _crashJolt(p, now){
     const u0   = Math.min(0.92, 0.30+0.78*fr);          // how hard one gap shuts as the front passes
     const cap  = Math.min(0.90*len, frac*len*1.08)*CS;  // the ring may dig a little past it, briefly
     const sweep= Math.min(len-1, (frac*len)/u0);        // so this is how far the front gets
-    const wave = Math.max(4, Math.min(120, (1000/cps)*FRONT_RATIO));   // ms before the front reaches the next carriage
+    const wave = WAVE_MS;            // ms before the front reaches the next carriage, at any impact speed
     const buck = 32;                 // ms that one carriage takes to fold once the front arrives
     const amp  = 0.37;               // sideways kick at full fold, as a fraction of a cell.
     // Under half a cell is the ceiling, not a taste call: neighbouring carriages swing to
     // OPPOSITE sides, so a bigger kick puts more than CS between them and the zigzag breaks
     // into loose blocks instead of reading as one folded body.
     const os = 1.16, ring = 95, per = 48;   // the gap slams past where it settles, then rings back
+    // The front starts AT the head: carriage 1 buckles on the impact frame, carriage i one
+    // wave later. A body that waits a whole wave before anything moves reads as a delay.
     // Hard stop on the front: past FOLD_STOP it recruits no further carriages and whatever it
     // has not reached stays straight, so the fold can never still be creeping down the tail
     // while the respawn is coming. A carriage already buckling finishes its 32ms -- aborting
     // it mid-fold would read as a glitch, not as a stop.
-    const k  = i => { if(i*wave > FOLD_STOP) return 0; const s = age - i*wave; return s<=0 ? 0 : Math.min(1, s/buck); };
-    const kr = i => { const s = age - i*wave; return s<=0 ? 0 : k(i)*(1+os*Math.exp(-s/ring)*Math.cos(s/per)); };
+    const k  = i => { if((i-1)*wave > FOLD_STOP) return 0; const s = age - (i-1)*wave; return s<=0 ? 0 : Math.min(1, s/buck); };
+    const kr = i => { const s = age - (i-1)*wave; return s<=0 ? 0 : k(i)*(1+os*Math.exp(-s/ring)*Math.cos(s/per)); };
     // dirs[i] is the unit step from carriage i toward the one ahead of it, measured the short
     // way round the torus so a body wrapping an edge folds the same as one that does not.
     const dirs = [null];
@@ -420,8 +425,8 @@ function _crashJolt(p, now){
             // the recoil is bounded by the head-on lean below, which has to leave the two
             // heads drawn against each other for the whole beat -- pull back by much over
             // half a cell and they visibly part company under a message saying they collided.
-            const c = (3.5+6.5*fr)*(0.55+0.45*Math.exp(-age/180));   // stays squashed: it is a wreck
-            const b0 = 2.2+2.2*fr, decay = Math.exp(-age/180);
+            const c = (5.5+4.5*fr)*(0.55+0.45*Math.exp(-age/110));   // stays squashed: it is a wreck
+            const b0 = 2.2+2.2*fr, decay = Math.exp(-age/110);
             // A HEAD-ON is the one crash whose impact cell holds NEITHER snake. Every other
             // death leaves the head already against what killed it -- the bar, the body -- so
             // the wreck reads right from the cell the head stands on. Here both heads stopped
@@ -434,7 +439,7 @@ function _crashJolt(p, now){
         }
         if(i>=len) return [0,0,0,0];
         const o = advance(i, pileTo(i));           // pileTo first: it is what fills dmp[i]
-        const d = dirs[i], s = age - i*wave;
+        const d = dirs[i], s = age - (i-1)*wave;
         let kick = 0;
         if(s>0){
             const hold = ZIG_HOLD + (1-ZIG_HOLD)*Math.exp(-s/ring)*Math.cos(s/per);

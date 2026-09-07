@@ -145,16 +145,24 @@ runTest('SMOKE-GAME', `
     const jb=fold(Object.assign({}, hit, {boost:true}), 300);
     const jsl=fold(Object.assign({}, hit, {gp:7}), 300);
     if(!(jb(5)[0] > jc(5)[0]*1.3)) throw 'boosting did not fold the tail visibly harder: '+[jc(5)[0],jb(5)[0]];
-    if(!(jb(5)[0] > jsl(5)[0]*3)) throw 'the gentlest crash folds nearly as hard as the hardest: '+[jsl(5)[0],jb(5)[0]];
-    // The front runs at a fixed multiple of the snake, so a slow crash has a slow front: past
-    // FOLD_STOP it recruits nobody. What it never reached keeps its gap and stays unkicked,
-    // rather than still creeping down the tail while the respawn is coming.
-    const slowWave=(1000/(60/(7*2)))*FRONT_RATIO;
-    const past=Math.ceil(FOLD_STOP/slowWave)+1;
-    if(past>=16) throw 'the FOLD_STOP guard reads past the end of the test body';
+    // 2.5x, not more: with promptness no longer tied to the impact, this compares FINAL depth
+    // rather than depth plus the slow crash's late arrival, and final depth is what the crush
+    // budget sets.
+    if(!(jb(5)[0] > jsl(5)[0]*2.5)) throw 'the gentlest crash folds nearly as hard as the hardest: '+[jsl(5)[0],jb(5)[0]];
+    // The front runs at a rate of its OWN -- a buckle wave is a property of the body, not of
+    // the impact -- so a gentle crash folds as promptly as a hard one and only less deeply.
+    // Carriage 3 is reached at the same age whichever speed the snake arrived at.
+    const preS=fold(Object.assign({}, hit, {gp:7}), 2*WAVE_MS-10);
+    const preF=fold(Object.assign({}, hit, {boost:true}), 2*WAVE_MS-10);
+    if(preS(3)[1]!==0 || preF(3)[1]!==0) throw 'the front reached carriage 3 before its wave was due';
+    const onS=fold(Object.assign({}, hit, {gp:7}), 2*WAVE_MS+42);
+    const onF=fold(Object.assign({}, hit, {boost:true}), 2*WAVE_MS+42);
+    if(onS(3)[1]===0 || onF(3)[1]===0) throw 'the front had not reached carriage 3 at the same age in both crashes';
+    // What ENDS the fold is the crush budget, not the clock: past it a carriage keeps its gap
+    // and stays unkicked, rather than still creeping down the tail while the respawn is coming.
     const jse=fold(Object.assign({}, hit, {gp:7}), CRASH_DUR-30);
-    if(jse(past)[1]!==0) throw 'the front kept kicking carriages past FOLD_STOP';
-    if(jse(past+1)[0]!==jse(past)[0]) throw 'the front kept closing gaps past FOLD_STOP';
+    if(jse(12)[1]!==0) throw 'the front kept kicking carriages past the crush budget';
+    if(jse(13)[0]!==jse(12)[0]) throw 'the front kept closing gaps past the crush budget';
     // The fold has a SHAPE, not just a size: neighbouring carriages sit on opposite sides
     // (the zigzag) and the pile-up toward the impact grows down the body (the snake is
     // visibly shorter). Both are still there at the end of the beat -- a wreck stays wrecked.
@@ -195,7 +203,7 @@ runTest('SMOKE-GAME', `
     if(_crashFx.length!==1) throw 'the wreck was dropped while it was still playing';
     drawDuelBoard(simNow+CRASH_DUR);
     if(_crashFx.length!==0) throw 'the wreck outlived CRASH_DUR';
-    log('crash wreck: deferred, gated on gfx mode, a compaction front that zigzags and holds, scales with impact speed, stops at FOLD_STOP, damps at every corner and never reaches past the head ok');
+    log('crash wreck: deferred, gated on gfx mode, a compaction front that zigzags and holds, scales in depth with impact speed at a front speed of its own, stops at the crush budget, damps at every corner and never reaches past the head ok');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
