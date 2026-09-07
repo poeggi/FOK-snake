@@ -997,10 +997,11 @@ function _netMaybeRestart(){
     // independently and arrive at the same number, which is what lets the server hand
     // whichever asks second the identical start_pts.
     s.epoch = (s.epoch|0) + 1;
-    // A fresh sync always precedes a new start PTS (start.php rejects a pts older than
-    // ~2s as stale), and _netRequestStart owns that whole sequence -- sync, epoch,
-    // reason, the 409/400 handling and the re-check. Reuse it rather than re-implement
-    // a second, subtly different start path here.
+    // A rematch is a server-registered start (a new epoch on the pair's line) but never a
+    // clock sweep: its pts is computed at send time from the anchor already held.
+    // _netRequestStart owns that whole sequence -- epoch, reason, the 409/400 handling and
+    // the `now` re-check. Reuse it rather than re-implement a second, subtly different
+    // start path here.
     _netRequestStart(s, 'rematch');
 }
 // Advance to the next duel level online. EITHER player's OK press triggers it; the level
