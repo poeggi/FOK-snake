@@ -44,8 +44,9 @@ function netLobbyEnter(){
         _netHello();                                // presence/friends right away
         _netFrRefresh(false);                       // notice peer-side removals here too
         // Last of the three: every sample waits for our own wire to go quiet, so the
-        // two above clear it first. The figure rides the next hello (_netLat.pending).
-        _netTimeSync(true);
+        // two above clear it first. By AGE only -- a deep link lands here without passing
+        // the MULTIPLAYER entry, so the same refresh sits on both doors.
+        _netAnchorRefresh({ nudge:true });
     }
 }
 function netLobbyLeave(){
@@ -487,17 +488,16 @@ async function _netRequestStart(s, reason){
     // verify the pair's epoch line.
     if(reason === 'level'){ _netOpenBoundary(s, reason); return; }
     if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
-    // The contract: a fresh sync ALWAYS precedes a new start PTS. Not "a sync from a
-    // minute ago" -- start.php rejects a pts older than ~2s as stale. A rematch (the one
-    // mid-match re-anchor still on this server path; a level routes P2P above and a respawn
-    // opens its boundary directly) bounds the sweep so the player is not held on the cover;
-    // the first start keeps the full-quality sweep (see NET_LEVEL_SYNC_MS).
-    // ...and a FULL sweep when the server told this pair that its two anchors disagree
-    // (`resync`, 4.4). The bound exists to keep a player off the cover between rounds;
-    // starting a tick apart from the opponent costs the match more than that wait does.
-    const _fullSweep = (reason === 'first' || !reason) || _netResync;
+    // The anchor is refreshed by AGE, not by the start: the pts below is computed at send
+    // time from whatever anchor is held, so it is fresh by construction, and the server's
+    // stale gate is coarse enough to pass any client that ever synced. A FIRST start sweeps
+    // only when the anchor is older than NET_ANCHOR_MAX_AGE_MS -- three samples, nudged in
+    // by half; the pair's residual is the P2P burst's job, not this one's -- or when the
+    // server's resync hint (4.4) says this pair's two anchors disagree by more than it can
+    // account for. A REMATCH never sweeps: the anchor it holds carried the match just ended.
+    const _force = _netResync;
     _netResync = false;
-    await _netTimeSync(true, _fullSweep ? undefined : NET_LEVEL_SYNC_MS);
+    if(reason !== 'rematch') await _netAnchorRefresh({ n:3, nudge:true }, _force);
     if(_netSess !== s || !s.game) return;
     if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
     // Through the gate, and BEFORE the pts is read: the server measured this very request
@@ -534,15 +534,16 @@ async function _netRequestStart(s, reason){
     // matters most: both clients convert the SAME start_pts through their OWN offset,
     // so any error here lands directly in how far apart they begin. Same min-RTT rule
     // as the clock samples -- only adopt it when this round trip beat our best one,
-    // since a slower one carries a worse estimate.
+    // since a slower one carries a worse estimate -- and nudged in by half like any
+    // in-session reading.
     // ...and never off a round trip the server spent queueing: q_ms says how much of this
     // rtt was a wait for a worker rather than time on the wire, and that part is not
     // symmetric -- halving it puts the whole error into the offset instead of half of it.
     if(typeof d.now === 'number' && !(d.q_ms > NET_QMS_BUSY) && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
-        _netSync = { ofs: d.now + _rtt/2 - _wall(), rtt: _rtt, at: Date.now() };
+        _netSync = { ofs: _netSync.ofs + ((d.now + _rtt/2 - _wall()) - _netSync.ofs) / 2, rtt: _rtt, at: Date.now() };
     // The pair cross-check: the server proved BOTH clients' clocks against the same start
     // and found them too far apart -- the one thing neither client can see for itself.
-    // Nothing is wrong with this start; the next one gets the full sweep above.
+    // Nothing is wrong with this start; the next one sweeps regardless of the anchor's age.
     if(d.resync === true) _netResync = true;
     s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
     // The item-registry match handle plus THIS side's attestation secret. duel-core MACs its

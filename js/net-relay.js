@@ -42,7 +42,6 @@ function _netRelayOffer(peer, peerProfile){   // inviter/offerer in relay mode: 
     if(netP2POnly()){ _netRelayRefuse('offer'); return; }
     if(_netSess) _netTeardown();          // debris: replace it, never silently skip the offer
     const seed = (Math.random()*0x100000000)>>>0;
-    _netTimeSync();
     const payload = JSON.stringify({ seed, profile:_netProfile(), v:_swVersion });
     _netHs.offerTo = peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
     _netSignal(peer, 'offer', payload);
@@ -65,7 +64,6 @@ function _netRelayAnswer(peer, d){   // acceptor/answerer in relay mode: answer 
     }
     if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
     _netHs.accepting = null;
-    _netTimeSync();
     // `relay:true` tells an offerer that DID build a peer connection to come over now.
     // Without it, it waits out the full 6s P2P timer before falling back to the mode
     // we already committed to -- 6s of dead air on every mixed-setting pairing.

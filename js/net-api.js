@@ -63,14 +63,11 @@ const NET_PTS_TOL = 250;
 // thing being watched for has to arrive faster than the watcher's patience -- and
 // in-game the 16-tick input heartbeat (~267ms) is the real cadence anyway.
 const NET_KEEPALIVE_MS = 300;
-// Time budget for the server clock re-sync at a REMATCH (the one mid-match boundary still
-// served by start.php; level, respawn and resume boundaries are pure P2P and use the burst).
-// The full-quality sweep is 5 samples at a 200ms spread (~800ms) -- too long to sit on the
-// cover between matches. Bounded, _netTimeSync adopts the best min-RTT sample so far
-// and start.php's `now` gives it a final min-RTT refinement, so the anchor stays clean while
-// the wait roughly halves. THE lever if a rematch still feels slow (lower) or drifts (raise).
-// The FIRST start -- before anyone is watching a clock -- keeps the unbudgeted full sweep.
-const NET_LEVEL_SYNC_MS = 400;
+// The server anchor is refreshed by AGE, never by event: a sweep runs when the anchor is
+// older than this (the multiplayer door, a first start, a spectator boot), not because a
+// boundary came by. Drift is 1-3ms a minute, so a ten-minute anchor is tens of ms off at
+// worst -- inside what the P2P burst closes at the next boundary (NET_BURST_SLEW_MS).
+const NET_ANCHOR_MAX_AGE_MS = 600000;
 // ---- P2P boundary clock BURST (raw-clock measurement, host-computed residual, over the DataChannel) ----
 // During a duel the server clock sync is gated OFF (_netTimeSync refuses while playing: moving the
 // anchor moves the tick timeline under our feet). So the two peers keep their clocks in step
@@ -108,9 +105,9 @@ const NET_LEVEL_SYNC_MS = 400;
 // timeline (it converges over the next boundaries, inside the rollback window).
 const NET_BURST_N = 6;            // datagrams each side fires in one boundary burst; sq 0 is the pre-warm
 const NET_BURST_GAP_TICKS = 1;    // probe CREATION cadence in engine ticks (x TICK_MS, absolute deadlines from the run's t0 -- a late timer never stretches the schedule); the send itself is never paced
-const NET_BURST_WAIT_MS = 250;    // window past the LAST send == the max round trip the burst can verify; the early-out closes a healthy link at ~its own RTT
+const NET_BURST_WAIT_MS = 200;    // window past the LAST send == the max round trip the burst can verify; the early-out closes a healthy link at ~its own RTT
 const NET_BURST_MIN = 5;          // accept-gate per direction: 5 of 6 delivered = at most ONE loss; anything worse means the channel is too unreliable to trust
-const NET_BURST_SLEW_MS = 120;    // cap on the per-boundary clock nudge; a realistic offset (<150ms) is corrected in one
+const NET_BURST_SLEW_MS = 200;    // cap on the per-boundary clock nudge: damage control against ONE bad verdict, never reached by a realistic residual (<150ms = a 75ms nudge); ~12 ticks, well inside the rollback ring
 const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
 const NET_BURST_TRIES = 10;       // starved-burst retries before the boundary opens anyway on the PRIOR clock (itself
                                   // burst-verified at the last boundary). 10 x ~340ms (probe span + WAIT window) stays
@@ -239,7 +236,7 @@ const NET_UNHELD_EVERY = NET_POLL_S;
 // drains in milliseconds and no single call is ever held long enough for a player to feel it.
 const NET_GAP_MS = 100;        // the contract's spacing between any two requests of ours
 const NET_GAP_STEP_MS = 20;
-const NET_GAP_TRIES = 40;      // ~2s of patience, counted in steps rather than measured
+const NET_GAP_TRIES = 100;     // ~2s of patience, counted in steps rather than measured: outlasts a full clock sweep
 // TWO background tiers. The default one is background but still time-bound -- the
 // heartbeat, the roster, the scores -- and may go out beside a poll parked server-side.
 // NET_BG_IDLE is the tier nobody is waiting for at all (items, the cloud backup), and it
@@ -275,7 +272,10 @@ function _netGapWait(now, flight, tier){
 // only -- a HELD poll, which is parked in PHP but still holding a connection open up where
 // the slice is actually paid. Split out from the waiting so both tiers can be read and
 // tested without a clock, exactly like the rule itself.
-function _netGapFlight(tier){ return _netFlight + ((tier === NET_BG_IDLE && _netPollHeld) ? 1 : 0); }
+// ...and a RUNNING clock sweep counts as traffic on every lane, probes and the gaps between
+// them alike: the contract's sweep is exclusive, nothing of ours leaves until its last sample
+// is back.
+function _netGapFlight(tier){ return _netFlight + (_netSyncBusy ? 1 : 0) + ((tier === NET_BG_IDLE && _netPollHeld) ? 1 : 0); }
 function _netGate(tier){
     // No timer host, no pacing: the same line the heartbeat and the connect timers draw.
     // A build without one cannot schedule anything anyway, so gating there would only park
@@ -497,9 +497,9 @@ function _netClampProfile(p){
 }
 
 // ---- PTS clock sync (API: time synchronization). The server clock in unix
-// MILLISECONDS is the one PTS reality; we measure our offset via time.php
-// (5 samples, keep the lowest-RTT one) and adjust ourselves. REQUIRED before
-// an online game starts; re-synced when older than a minute. ----
+// MILLISECONDS is the one PTS reality; we measure our offset via t.txt
+// (3-5 samples, keep the lowest-RTT one) and adjust ourselves. REQUIRED before
+// an online game starts; refreshed by AGE (NET_ANCHOR_MAX_AGE_MS). ----
 var _netSync = { ofs:null, rtt:-1, at:0 };
 // The lockstep timeline rides the MONOTONIC clock, never Date.now(). Date.now() is the wall
 // clock, which the OS silently slews and steps (its time daemon disciplining toward network
@@ -521,9 +521,9 @@ function netPts(){ return _netSync.ofs == null ? null : Math.round(_wall() + _ne
 // stationary-across-nudges reading is the point (see the NET_BURST_* block). NEVER used by a
 // game mechanic -- the sim, the tick timeline and every other packet stamp run on netPts().
 function netRawPts(){ return Math.round(_wall()); }
-// MANDATED latency report (API: Latency measurement and reporting): the same
-// time.php samples yield the value -- at least three, an extreme FIRST sample
-// (cold connection: DNS/TCP/TLS) discarded, the rest averaged for stability.
+// OPTIONAL latency report (API: display only -- the admin UI and friends_latency; nothing
+// in gameplay reads it): the same clock samples yield the value -- at least three, an
+// extreme FIRST sample (cold connection: DNS/TCP/TLS) discarded, the rest averaged.
 var _netLat = { value:null, at:0, pending:false };
 function _netLatFromSamples(rtts){
     if(rtts.length < 3) return null;
@@ -533,9 +533,6 @@ function _netLatFromSamples(rtts){
     return Math.round(use.reduce((a,b)=>a+b,0) / use.length);
 }
 let _netSyncBusy = false;
-// A duel is PAUSED here: READY/GO between levels and after a death. Cheap moments to
-// re-anchor, because nothing is being steered.
-function _netSyncBreak(){ return phase === 'duelReady' || phase === 'duelOver'; }
 // The clock source, in PTS milliseconds. PREFERRED: a header on a STATIC file, so
 // Apache stamps it without PHP ever running. That matters because the wait for a
 // PHP-FPM worker happens BEFORE php starts -- php cannot see it, cannot subtract it,
@@ -543,12 +540,15 @@ function _netSyncBreak(){ return phase === 'duelReady' || phase === 'duelOver'; 
 // when the server is busiest. time.php stays as the fallback for when the header is
 // unreadable (a proxy stripping it, CORS).
 async function _netClockMs(){
+    // Counted like any request of ours: the gate must see the probe so nothing leaves beside it.
+    _netFlight++; _netSentAt = Date.now();
     try {
         const r = await fetch(NET_BASE + '/api/t.txt', { cache:'no-store', priority:'high' });
         const h = r.headers && r.headers.get && r.headers.get('X-Fok-T');
         const m = h && /t=(\d+)/.exec(h);
         if(m) return Number(m[1]) / 1000;   // the header is MICROseconds; PTS is milliseconds
     } catch(e){}
+    finally { _netFlight--; }
     // Ungated, and the only round trip left that is: the gate is a WAIT, and a wait taken
     // here would land inside the round trip this function measures -- straight into the
     // clock offset both clients start a match from. _netQuiet() has already established a
@@ -570,71 +570,77 @@ async function _netQuiet(){
         await new Promise(res => setTimeout(res, NET_QUIET_STEP_MS));
     return _netFlight <= 0;
 }
-async function _netTimeSync(force, budgetMs){
+// The anchor is refreshed by AGE, never by event: a sweep runs when nothing is anchored yet,
+// when the anchor is older than NET_ANCHOR_MAX_AGE_MS, or when a caller forces one (a
+// foreground, a "future pts" refusal, the server's resync hint).
+function _netAnchorStale(){ return _netSync.ofs == null || Date.now() - _netSync.at > NET_ANCHOR_MAX_AGE_MS; }
+async function _netAnchorRefresh(opts, force){ if(force || _netAnchorStale()) await _netTimeSync(true, opts); }
+// Adopt a sample. nudge = move the anchor HALF the way to the reading: the residual is left
+// to the next sweep and to the P2P burst, and one polluted reading can only ever do half
+// its damage. A missing anchor is always set outright -- there is nothing to nudge from.
+function _netAnchorAdopt(smp, nudge){
+    const cur = _netSync.ofs;
+    const ofs = (nudge && cur != null) ? cur + (smp.ofs - cur) / 2 : smp.ofs;
+    _netSync = { ofs, rtt: smp.rtt, at: Date.now() };
+    _netClockPush();
+}
+// opts: { n: samples (default 5), nudge: half-delta adoption (default: set outright) }.
+async function _netTimeSync(force, opts){
     if(_netSyncBusy || !_netOk()) return;
-    // NEVER re-anchor while a duel is being played. netPts() DRIVES the tick
-    // number, so moving the anchor moves the whole timeline under our feet -- a
-    // periodic self-inflicted desync. The anchor is set at the match start and
-    // re-set only with a negotiated start (new level, rematch); in between it stays
-    // exactly where it was, drift and all. A few ms of drift across one level is
-    // invisible; a step mid-game is not.
-    if((phase === 'duel' || phase === 'duelPaused') && !_netSyncBreak()) return;
-    if(!force && _netSync.ofs != null) return;   // anchored: it holds until a break re-anchors it
+    // NEVER re-anchor while a duel is being played. netPts() DRIVES the tick number, so
+    // moving the anchor moves the whole timeline under our feet -- a periodic
+    // self-inflicted desync. The anchor is set before the match and left exactly where it
+    // is, drift and all, until the match is over: the P2P burst keeps the two PEERS in step
+    // at every boundary, which is the only agreement play depends on. A few ms of drift
+    // across a match is invisible; a step mid-game is not.
+    if(phase === 'duel' || phase === 'duelPaused') return;
+    if(!force && _netSync.ofs != null) return;   // anchored: it holds until age or a caller re-anchors it
+    const n = (opts && opts.n) || 5;
+    const hadAnchor = _netSync.ofs != null;
     _netSyncBusy = true;
     let best = null, rough = null;
     const rtts = [];
-    // budgetMs (optional) caps how long we sample before adopting the best so far -- the
-    // menu-music sync passes a short one so it never holds the track past its 2s wall. The
-    // spread shrinks to fit, and a trailing request may overshoot by one round trip.
-    const _syncStart = (typeof performance !== 'undefined') ? performance.now() : 0;
-    const _spread = budgetMs ? Math.max(40, Math.min(200, Math.floor(budgetMs / 6))) : 200;
-    for(let i = 0; i < 5; i++){
-        // CLEAN = nothing of ours was in flight around this sample, and the server was not
-        // queueing while it answered. Only a clean sample may set the offset or be reported
-        // as latency: the reported figure is what start.php works this pair's lead time out
-        // of, so an inflated one does damage well beyond this device.
-        const quiet = await _netQuiet();
-        const t0 = performance.now();
-        const t = await _netClockMs();
-        const rtt = performance.now() - t0;
-        const clean = quiet && _netFlight <= 0 && !netHostBusy();
-        if(t != null){
-            const smp = { rtt, ofs: t + rtt/2 - _wall() };
-            // Keep the LOWEST-rtt sample, never an average: a sample delayed by queuing
-            // carries that delay straight into its offset, so averaging spreads the poison
-            // instead of discarding it. The fastest sample is the least polluted one.
-            if(clean){ rtts.push(rtt); if(!best || rtt < best.rtt) best = smp; }
-            else if(!rough || rtt < rough.rtt) rough = smp;
-            // Budgeted (menu-music) sync: adopt as soon as we have ANY sample so netPts()
-            // is usable within one round trip -- the menu gate then almost always sees a
-            // synced clock inside its short wall. Later samples only refine it. NEVER
-            // incrementally re-anchor mid-duel: that is the self-inflicted step we refuse.
-            if(budgetMs && !(phase === 'duel' || phase === 'duelPaused')){
-                const u = best || rough;
-                _netSync = { ofs: u.ofs, rtt: u.rtt, at: Date.now() };
+    try {
+        for(let i = 0; i < n; i++){
+            // CLEAN = nothing of ours was in flight around this sample, and the server was not
+            // queueing while it answered. Only a clean sample may set the offset or be reported
+            // as latency.
+            const quiet = await _netQuiet();
+            const t0 = performance.now();
+            const t = await _netClockMs();
+            const rtt = performance.now() - t0;
+            const clean = quiet && _netFlight <= 0 && !netHostBusy();
+            if(t != null){
+                const smp = { rtt, ofs: t + rtt/2 - _wall() };
+                // Keep the LOWEST-rtt sample, never an average: a sample delayed by queuing
+                // carries that delay straight into its offset, so averaging spreads the poison
+                // instead of discarding it. The fastest sample is the least polluted one.
+                if(clean){ rtts.push(rtt); if(!best || rtt < best.rtt) best = smp; }
+                else if(!rough || rtt < rough.rtt) rough = smp;
+                // Unanchored: adopt at once, so netPts() is usable after ONE round trip (the
+                // menu-music gate waits on exactly that). Later samples only refine it.
+                if(_netSync.ofs == null){ const u = best || rough; _netSync = { ofs: u.ofs, rtt: u.rtt, at: Date.now() }; }
             }
+            // SPREAD the samples by the request gap. Back-to-back requests hit the same server
+            // load and can all be slow together, leaving no clean sample to pick.
+            if(i < n - 1 && typeof setTimeout === 'function') await new Promise(res => setTimeout(res, NET_GAP_MS));
         }
-        if(budgetMs && performance.now() - _syncStart >= budgetMs) break;   // bounded: adopt best-so-far
-        // SPREAD the samples. Back-to-back requests hit the same server load and can
-        // all be slow together, leaving no clean sample to pick -- five bad samples
-        // give a bad offset just as confidently as one.
-        if(i < 4 && typeof setTimeout === 'function') await new Promise(res => setTimeout(res, _spread));
-    }
-    _netSyncBusy = false;
+    } finally { _netSyncBusy = false; }
     // Not one clean sample in the whole sweep: take the least bad one anyway. An unanchored
-    // client cannot play at all, and a rough anchor is corrected at the next quiet moment.
+    // client cannot play at all, and a rough anchor is corrected at the next sweep.
     if(!best) best = rough;
-    // Guard the ADOPTION, not just the start: five samples take ~500ms, so a sync
-    // begun at a break can land after play resumed -- and adopting it there would be
-    // the very mid-game step we just refused. Drop it; the next break re-anchors.
-    if(_netSync.ofs != null && (phase === 'duel' || phase === 'duelPaused') && !_netSyncBreak()) best = null;
-    if(best){ _netSync = { ofs: best.ofs, rtt: best.rtt, at: Date.now() }; _netClockPush(); }
+    // Guard the ADOPTION, not just the start: a sweep begun before a match can land after
+    // play began -- and adopting it there would be the very mid-game step we just refused.
+    if(_netSync.ofs != null && (phase === 'duel' || phase === 'duelPaused')) best = null;
+    if(best) _netAnchorAdopt(best, !!(opts && opts.nudge) && hadAnchor);
     const lat = _netLatFromSamples(rtts);
     // Nothing clean enough to report: say NOTHING rather than send a figure that measured
-    // our own burst. The timestamp still moves, so the re-measure keeps its usual cadence
-    // instead of retrying into the same congestion every heartbeat.
+    // our own burst.
     if(lat != null) _netLat = { value: Math.max(0, Math.min(60000, lat)), at: Date.now(), pending: true };
     else _netLat.at = Date.now();
+    // The sweep held the mailbox re-arm back (the gate counts a running sweep as traffic);
+    // let it go now rather than on the next 1s tick.
+    if(typeof _netPollOnce === 'function') _netPollOnce();
 }
 
 // ---- live network stats (DEBUG LEVEL 2+ overlay and the debug export) ----
@@ -891,7 +897,6 @@ async function _netHello(){
     const body = { id: getPlayerId() };
     { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }
     if(_netLat.pending && _netLat.value != null) body.latency = _netLat.value;   // the mandated report
-    if(Date.now() - _netLat.at > 180000 && !netHostBusy()) _netTimeSync(true);   // re-measure every few minutes (lands next hello) -- but never into a queue we were just told about
     if(_netSess && _netSess.game) body.duel_with = _netSess.peer;
     if(phase === 'lobby' || phase === 'friends') body.friends = getFriends().slice(0,64);
     // The ROSTER, which the friends_* maps above are not: they answer for ids we already
@@ -1040,7 +1045,7 @@ function netForming(){
            || (typeof specHandshaking === 'function' && specHandshaking()));
 }
 async function _netPollOnce(){
-    if(_netPollBusy || !_netOk() || !_netPollDue()) return;
+    if(_netPollBusy || _netSyncBusy || !_netOk() || !_netPollDue()) return;   // a clock sweep is exclusive: no re-arm until its last sample is back
     // The tournament screens are matchmaking screens like the rest, and hold like them:
     // between matches EVERY signal that moves the evening on -- a lobby join, the next
     // roles sheet, the offer for a match this client is about to answer -- arrives here,
@@ -1408,9 +1413,10 @@ if(_netTimers){
     (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, NET_HELLO_MS); })();
     setTimeout(_netHello, 3000);
     setTimeout(()=>{ if(_netOk()) _netFrRefresh(true); }, 3500);   // contract: reconcile the local friend list vs the server at startup
-    // Sync the clock DURING the coin-drop splash (bounded) so menu music can start already
-    // aligned to the shared server time. Soft: offline / no-fetch just skips it.
-    setTimeout(()=>{ if(_netOk() && _netSync.ofs == null) _netTimeSync(true, 1800); }, 0);
+    // Sync the clock DURING the coin-drop splash so menu music can start already aligned to
+    // the shared server time: the first sample anchors at once, the rest refine. Soft:
+    // offline / no-fetch just skips it.
+    setTimeout(()=>{ if(_netOk() && _netSync.ofs == null) _netTimeSync(true); }, 0);
     // Daily automatic cloud backup (opt-in). One check a few seconds after boot, then hourly;
     // the once-a-day throttle lives in _maybeAutoCloudBackup so these fire freely.
     setTimeout(()=>{ if(typeof _maybeAutoCloudBackup === 'function') _maybeAutoCloudBackup(); }, 6000);

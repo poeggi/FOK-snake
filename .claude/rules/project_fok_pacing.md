@@ -74,13 +74,24 @@ requests per client - and each half is useless without the other.
 
 ## Clock anchor
 
-- CONNECT FIRST, MEASURE SECOND: _netTimeSync runs from _netRequestStart after
-  dc.onopen, never in parallel with the ICE handshake. A sample taken with our
-  own requests in flight or a non-trivial q_ms is UNCLEAN: adoptable as an
-  anchor if nothing better exists, never REPORTED as latency (start.php works
-  the pair's lead out of that figure; an inflated one widens the start for the
-  opponent too). Several samples, min-RTT kept. `resync:true` buys the NEXT
-  start one full sweep, never latched.
+- REFRESHED BY AGE, never by event: one sweep shape, 3-5 samples a FIXED
+  NET_GAP_MS (100 ms) apart, min-RTT kept, exclusive on the wire (the probe
+  is counted, a running sweep holds every lane and the mailbox re-arm). Sites:
+  boot (set), the multiplayer door - MULTIPLAYER entry, netLobbyEnter,
+  tourneyEnter - (nudge, only when the anchor is older than
+  NET_ANCHOR_MAX_AGE_MS = 10 min), foreground (set: performance.now() FREEZES
+  while suspended, so the error is the sleep itself), a "future pts" refusal
+  (set), a first start and a spectator boot (3 samples, nudge, by age or on
+  `resync:true`). A rematch NEVER sweeps; nothing sweeps on a heartbeat.
+  nudge = move the anchor half the delta, no cap. A sample taken with our own
+  requests in flight or a non-trivial q_ms is UNCLEAN: adoptable if nothing
+  better exists, never REPORTED as latency (the report is OPTIONAL since
+  server 1.4.15 - display only, the start lead is a flat 1000 ms).
+  `resync:true` forces the NEXT start's sweep regardless of age, never latched.
+- The server sync and the P2P burst write the SAME `_netSync.ofs` at
+  different targets (the server's clock vs the pair's midpoint). They never
+  overlap in time - the sync refuses during play - but do not add a sync site
+  that can run mid-match.
 - ALREADY SAFE, do not "fix": the clock SOURCE is the server's static t.txt
   stamped by mod_headers, so the stamp never queues for an FPM worker. The
   residual risk is only the RTT sample around it.

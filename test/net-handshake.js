@@ -241,13 +241,13 @@ const HOOKS = (myId) => `
   globalThis.__spDrop   = (peer)=>{ _spDrop(_spIn, peer); };
   // The 4.4 clock gates, probed on the REAL _netRequestStart. rtt starts absurd so any
   // sample would be an improvement: whatever blocks the adoption is then the gate, not
-  // the min-RTT rule. __syncArgs records the budget the next start asks _netTimeSync for
-  // (undefined = the full sweep a resync buys).
+  // the min-RTT rule. __syncArgs records whether the start asked _netTimeSync for a sweep
+  // at all; stale ages the anchor past NET_ANCHOR_MAX_AGE_MS first.
   globalThis.__syncArgs = [];
   globalThis.__order = [];
-  globalThis.__startWith = async (extra)=>{
-    _netSync = { ofs:0, rtt:99999, at:Date.now() };
-    _netTimeSync = async (f, b)=>{ __syncArgs.push(b === undefined ? 'full' : b|0); };
+  globalThis.__startWith = async (extra, reason, stale)=>{
+    _netSync = { ofs:0, rtt:99999, at: stale ? 0 : Date.now() };
+    _netTimeSync = async ()=>{ __syncArgs.push('sweep'); };
     // The pacing gate this request passes, and the order it passes it in. The server caught
     // start.php and a tournament.php leaving in the SAME millisecond and both paying a 128ms
     // wait for a worker on an idle host, so this one is gated like every other round trip --
@@ -262,10 +262,9 @@ const HOOKS = (myId) => `
     const realST = setTimeout, realPing = _netBurstPing;
     globalThis.setTimeout = (fn)=>{ fn(); return -1; };
     _netBurstPing = (s)=>{ realPing(s); _netHandleMsg(JSON.stringify({ t:'bs', pts:netPts(), rts:netRawPts(), sq:1, mr:0, mn:NET_BURST_MIN })); };
-    // 'rematch': a level routes P2P and never asks the server at all, so the only
-    // reasons that reach start.php are the identity ones -- and a rematch is the
-    // bounded-sweep one, which is what the resync hint has to be able to widen.
-    try { await _realReqStart(_netSess, 'rematch'); }
+    // 'rematch' by default: a level routes P2P and never asks the server at all, so the
+    // only reasons that reach start.php are the identity ones.
+    try { await _realReqStart(_netSess, reason || 'rematch'); }
     finally { globalThis.setTimeout = realST; _netBurstPing = realPing; _netGate = _oGate; }
     return { rtt:_netSync.rtt, sync:__syncArgs.splice(0), order:__order.splice(0) };
   };
@@ -631,20 +630,24 @@ try {
       throw new Error('start.php must take the paced lane first, then read a fresh pts: ' + r.order.join(' '));
   });
 
-  // The pair cross-check: only the server sees BOTH clients' clocks proved against the
-  // same start. `resync` is a hint, never a rejection -- this start is fine, the NEXT one
-  // pays for a full sweep instead of the bounded between-levels one.
-  await acheck('4.4: resync buys the next start a full sync sweep, once', async () => {
+  // The anchor is refreshed by AGE, never by the start itself: a pts is computed at send
+  // time from whatever anchor is held. A first start sweeps only on a stale anchor -- or
+  // on the server's resync hint, the pair cross-check only the server can make (it sees
+  // BOTH clients' clocks proved against the same start). A rematch never sweeps.
+  await acheck('4.4: a start sweeps on a stale anchor or a resync hint, once; a rematch never', async () => {
     const A = mk(A_ID);
     A.__gameSess(B_ID, 'host');
-    await A.__startWith({});                       // the ordinary case, for contrast
-    const plain = await A.__startWith({});
-    if(plain.sync.join(',') === 'full') throw new Error('an ordinary between-levels start must be budgeted, got ' + plain.sync.join(','));
-    await A.__startWith({ resync: true });
-    const after = await A.__startWith({});
-    if(after.sync.join(',') !== 'full') throw new Error('the start after a resync must sweep fully, got ' + after.sync.join(','));
-    const later = await A.__startWith({});
-    if(later.sync.join(',') === 'full') throw new Error('resync must be spent once, not latched');
+    const fresh = await A.__startWith({}, 'first');
+    if(fresh.sync.length) throw new Error('a first start on a fresh anchor must not sweep, got ' + fresh.sync.join(','));
+    const stale = await A.__startWith({}, 'first', true);
+    if(stale.sync.join(',') !== 'sweep') throw new Error('a first start on a stale anchor must sweep, got ' + stale.sync.join(','));
+    await A.__startWith({ resync: true }, 'first');
+    const after = await A.__startWith({}, 'first');
+    if(after.sync.join(',') !== 'sweep') throw new Error('the start after a resync must sweep regardless of age, got ' + after.sync.join(','));
+    const later = await A.__startWith({}, 'first');
+    if(later.sync.length) throw new Error('resync must be spent once, not latched');
+    const again = await A.__startWith({}, 'rematch', true);
+    if(again.sync.length) throw new Error('a rematch never sweeps, even on a stale anchor, got ' + again.sync.join(','));
   });
 
   // The REAL test: a structural desync (which the per-owner 'st' can never heal -- it carries no

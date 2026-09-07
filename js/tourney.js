@@ -688,6 +688,8 @@ function tourneyEnter(){
         const h = _netHello();   // picks up the tourneys list
         if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
     }
+    // A tournament link is a multiplayer door too: the same age-gated anchor refresh as the 1:1 one.
+    if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });
     if(_tt) _ttSync(true); else _ttProbe();
     _uiDirty = true;
 }

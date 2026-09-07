@@ -235,7 +235,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
                 case 'SOLO PLAY':    beginGame(); break;
-                case 'MULTIPLAYER':  phase='duelMenu'; duelSel=0; break;
+                case 'MULTIPLAYER':  phase='duelMenu'; duelSel=0; if(typeof _netAnchorRefresh==='function') _netAnchorRefresh({ nudge:true }); break;   // the multiplayer door: refresh the clock anchor by age
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;
