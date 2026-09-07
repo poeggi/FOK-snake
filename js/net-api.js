@@ -1023,6 +1023,7 @@ function _netHsTick(){
     _netSignal(_netHs.offerTo, 'offer', _netHs.offerPayload);
 }
 let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
+let _netPollDown = false;   // the last poll failed: the next success is the mailbox coming BACK
 // Is a HELD poll open right now? Not a debug readout: the idle tier waits on this (see
 // NET_BG_IDLE). An unheld poll is a request like any other and is counted by _netFlight.
 let _netPollHeld = false;
@@ -1086,6 +1087,12 @@ async function _netPollOnce(){
                             _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
+    // The mailbox was down and is back. A push may have died in between (the server drops an
+    // undelivered signal after 30s), and only the whole picture recovers one: hand a held
+    // tournament the doubt -- AFTER the drain above, so what this answer carried is already
+    // in. Edge-triggered: once per outage, never per failure.
+    if(!r) _netPollDown = true;
+    else if(_netPollDown){ _netPollDown = false; if(typeof tourneyMailboxLost === 'function') tourneyMailboxLost(); }
     // Straight back in, no gap. Only on a SUCCESSFUL reply: a failure (or an abort
     // from backgrounding) falls through to the 1s tick, which is the backoff that
     // stops a broken server from spinning this into a hot loop.

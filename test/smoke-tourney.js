@@ -43,9 +43,22 @@ const HOOKS = `
   globalThis.__take = ()=>__posts.splice(0);
   globalThis.__states = ()=>__posts.filter(p => p.action === 'state');
   globalThis.__tick = ()=>_ttTick();
+  globalThis.__doubt = ()=>tourneyMailboxLost();
+  // The poll edge, run inside the game scope: a failing poll marks the mailbox DOWN, the next
+  // success is it coming BACK, and that hands the tournament its doubt -- once per outage.
+  globalThis.__pollEdge = async ()=>{
+      let fired = 0; const oTml = tourneyMailboxLost; tourneyMailboxLost = ()=>{ fired++; };
+      const oGet = _netGet, oHold = _netPace.hold, oPhase = phase;
+      _netPace.hold = false; _netPollTick = 0; _netPollBusy = false; _netPollDown = false; phase = 'lobby';
+      const seq = [];
+      _netGet = async ()=>null;                      await _netPollOnce(); await _netPollOnce(); seq.push(fired);
+      _netGet = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); await _netPollOnce(); seq.push(fired);
+      _netGet = async ()=>null;                      await _netPollOnce(); seq.push(fired);
+      _netGet = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); seq.push(fired);
+      _netGet = oGet; _netPace.hold = oHold; tourneyMailboxLost = oTml; _netPollDown = false; phase = oPhase;
+      return seq;
+  };
   globalThis.__sig = (d)=>_ttOnSignal(d);
-  globalThis.__floor = TT_STATE_MS;
-  globalThis.__stateAt = (v)=>{ if(v !== undefined) _ttStateAt = v; return _ttStateAt; };
   globalThis.__cursor = ()=>_tt && _tt.cursor;
   globalThis.__want = ()=>_ttWant;
   globalThis.__phase = ()=>phase;
@@ -56,9 +69,6 @@ const HOOKS = `
   globalThis.__reset = ()=>{
       _tt = null; _ttNid = ''; _ttRolesAt = 0; _ttEngAt = 0; _ttDone = ''; _ttWant = null;
       _ttAfter = 0; _ttPlayNid = ''; _ttWatchNid = ''; _ttOverAt = 0;
-      // The safety-net read starts out DUE, so the only thing that can silence the next tick
-      // is the sheet's own stamp -- a client that never stamps is not quietly passed here.
-      _ttStateAt = -(TT_STATE_MS + 1);
       _ttRep = null; _ttRepBusy = false;
       if(_ttAfterT){ clearTimeout(_ttAfterT); _ttAfterT = null; }
       inGame = false; phase = 'tourneyBracket';
@@ -90,37 +100,41 @@ try {
         await settle();
         eq(S.__states().length, 0, 'the sheet itself must ask the server for nothing');
         eq(S.__cursor(), 'n1', 'and it must have been adopted whole');
-        // The housekeeping tick is the safety net under the signal stream, and it is what
-        // used to repeat the question -- at the one moment the client is busiest, beside the
-        // start.php the very same sheet provokes.
-        S.__tick();
+        // The housekeeping tick reads nothing, ever: the server keeps its own deadlines on the
+        // poll every participant sends, so a tick has no reason left to ask.
+        S.__tick(); S.__tick(); S.__tick();
         await settle();
         eq(S.__states().length, 0, 'the tick must not ask the server to repeat the sheet');
-        // ...and it is the SHEET that bought that silence, not a dead tick: age the floor out
-        // and the same tick asks again, exactly as it must when no sheet has landed.
-        S.__stateAt(S.__stateAt() - S.__floor - 1);
-        S.__tick();
+        // ...and it is not a dead client: the mailbox coming back after an outage is the one
+        // moment a push may have been lost, and that reads the whole picture once.
+        S.__doubt();
         await settle();
-        eq(S.__states().length, 1, 'past the floor the safety net still reads state back');
+        eq(S.__states().length, 1, 'a mailbox that was down and is back must read state once');
     });
 
-    await check('a doubtful sheet is read back anyway: the floor is not a gag', async () => {
+    await check('a mailbox outage hands the tournament ONE doubt read, when it comes back', async () => {
+        S.__reset();
+        const seq = await S.__pollEdge();
+        eq(seq.join(','), '0,1,1,2', 'fired after [down,down] [back,back] [down] [back]');
+    });
+
+    await check('a doubtful sheet is read back anyway', async () => {
         S.__reset();
         S.__sig(S.__sheet());
         await settle();
         S.__take();
-        // An offer from a peer we hold no sheet for, one millisecond after a sheet that put
-        // the floor down. A match must never start undressed, so this one asks regardless.
+        // An offer from a peer we hold no sheet for, one millisecond after a sheet. A match
+        // must never start undressed, so this one asks regardless.
         eq(S.tourneyOfferOk('feedface'), false, 'an offer no sheet authorises is not answered');
         await settle();
-        eq(S.__states().length, 1, 'and it forces the read the floor would otherwise hold back');
+        eq(S.__states().length, 1, 'and it forces a read');
     });
 
     // ---- the lane --------------------------------------------------------------------
     await check('every tournament round trip asks for the paced lane', async () => {
         S.__reset();
         S.__owe();                      // a result still owed: the other tournament.php caller
-        S.__tick();
+        S.__tick(); S.__doubt();        // the report, and a mailbox-back read
         await settle();
         const posts = S.__take();
         eq(posts.some(p => p.action === 'result'), true, 'the result report went out');

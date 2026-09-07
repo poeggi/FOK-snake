@@ -20,7 +20,7 @@
 //
 // Run: node test/tourney-e2e.js
 const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
-        TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS } = require('./tourney-world');
+        TT_OVER_MS, TT_CONNECT_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
 // clnt-CI-<the four hex that tell these ids apart>: the shape the live probes register
@@ -87,17 +87,16 @@ async function lobby(){
         A(t && t.stakes === true, '1: client ' + NAMES[i] + ' lost the stakes flag the host set');
     }
     // Nothing but an adopted players list ever SHRINKS the roster, and a lobby event can go
-    // missing -- this scripted leave publishes none, exactly like the server's. So the open
-    // lobby has to re-read state on its own, or a player who walked out sits in the room for
-    // good and the screen shows a name nobody can play.
-    const gone = srv.T.players.pop();
-    clock(TT_STATE_MS + 1000);
-    await pump(1);
+    // missing -- this scripted leave publishes none. Nothing reads state on a timer any more;
+    // what recovers a lost push is the mailbox coming back, so that is what is driven here.
+    srv.mute(IDS[0], true); await pump(1);       // the mailbox goes down...
+    const gone = srv.T.players.pop();             // ...a player walks out meanwhile...
+    srv.mute(IDS[0], false); await pump(1);      // ...and it comes back: the one read that recovers it
     A(C[0].tt().players.length === N - 1,
-      '1: an open lobby never re-read state, so a departed player stayed on the roster');
+      '1: a lobby whose mailbox came back never re-read state, so a departed player stayed on the roster');
+    srv.mute(IDS[0], true); await pump(1);
     srv.T.players.push(gone);
-    clock(TT_STATE_MS + 1000);
-    await pump(1);
+    srv.mute(IDS[0], false); await pump(1);
     A(C[0].tt().players.length === N, '1: the roster grew back on the read-back but did not');
 
     // A guest sees the host's START row too, dark, saying whose press the room is waiting
@@ -267,10 +266,13 @@ async function finish(m, plan){
     clearAll();
     clock(TT_OVER_MS + 1000);      // the duelOver banner has had its moment
     await pump(2);
-    // A settled match is off the board and nobody is still standing on the ceremony.
-    for(let i = 0; i < N; i++)
+    // A settled match is off the board and nobody is still standing on the ceremony -- except
+    // a client whose mailbox is down, which learns of it when the mailbox returns.
+    for(let i = 0; i < N; i++){
+        if(plan.miss === i) continue;
         A(C[i].phase() !== 'tourneyCeremony' || srv.T.cursor,
           '2 ' + m.nid + ': ' + NAMES[i] + ' is still waiting on a ceremony for a finished tournament');
+    }
     A(C[m.ia].spOut() === 0,
       '2 ' + m.nid + ': the match ended and ' + NAMES[m.ia] + ' still serves '
       + C[m.ia].spOut() + ' link(s) out of it');
@@ -290,8 +292,10 @@ async function passBreak(opts){
     const hi = idx(b0.host), nextNid = srv.T.brkNext, nd = srv.T.nodes[nextNid];
     A(hi >= 0 && b0.host === srv.T.host, 'B: the board names ' + b0.host + ' as the host');
 
-    // -- the same board reached everyone, and everyone can draw it --
+    // -- the same board reached everyone, and everyone can draw it (a client whose mailbox is
+    //    down sees it when the mailbox returns, asserted below) --
     for(let i = 0; i < N; i++){
+        if(opts.missed === i) continue;
         const b = C[i].brk(), t = C[i].tt();
         A(!!b && b.done === b0.done && b.next === b0.next,
           'B: ' + NAMES[i] + ' holds ' + JSON.stringify(b && [b.done, b.next]) + ' instead of the board everyone else has');
@@ -333,13 +337,13 @@ async function passBreak(opts){
         A(C[i].phase() === 'tourneyRound',
           'B: ' + NAMES[i] + ' left its match onto ' + C[i].phase() + ' instead of the tournament');
 
-    // -- a client with no signals at all found the board anyway --
+    // -- a client whose mailbox is down sees nothing of this: no result, no board --
     if(opts.missed != null){
         const mi = opts.missed, t = C[mi].tt();
         A(!t.last || t.last.nid !== opts.node,
           'B: the muted client got a result signal after all -- there is nothing left to test');
-        A(!!C[mi].brk() && C[mi].phase() === 'tourneyRound',
-          'B: a client with a dead signal stream never found the scoreboard in the state read-back');
+        A(C[mi].brk() === null,
+          'B: a client with a dead mailbox got the scoreboard from nowhere');
     }
 
     if(opts.first){
@@ -394,17 +398,16 @@ async function passBreak(opts){
         A(C[i].phase() !== 'tourneyRound', 'B: ' + NAMES[i] + ' is still sitting on a cleared board');
     }
     if(opts.missed != null){
-        // The other direction, and the one that would otherwise strand a player on a
-        // scoreboard for the rest of the evening: the sheet that ends a break can be missed
-        // too, and the read-back has to take the board down as surely as it put it up.
+        // A client whose mailbox was down through the whole break: the one read its return
+        // provokes must land it on the next match, without it ever having seen the sheet
+        // that ended the break -- or the board that opened it.
         const mi = opts.missed;
-        clock(TT_STATE_MS + 1000);
+        srv.mute(IDS[mi], false);                 // the mailbox comes back: one read recovers the board
         await pump(1);
         A(C[mi].brk() === null, 'B: the muted client is still holding a cleared board');
         A(C[mi].tt().cursor === srv.T.cursor, 'B: the muted client never picked the next match up');
-        srv.mute(IDS[mi], false);
-        rows.push('B deaf client: with its signal stream muted, one client put the scoreboard up and '
-                  + 'took it down again off the state read-back alone');
+        rows.push('B deaf client: with its mailbox down through the break, one client saw no board at '
+                  + 'all and picked the next match up from the one read its return provoked');
     }
     rows.push('B break ' + b0.done + '->' + b0.next + ': ' + b0.rows.length + ' rows cut at ' + b0.of
               + ' through, ' + b0.matches + ' match(es) at level ' + b0.lvl + '/' + b0.hm + ' hearts, '
@@ -488,7 +491,20 @@ async function passBreak(opts){
             // when the server's timer runs out -- no client invented the outcome.
             await finish(m, { mode:'silent', win:0, score:[6, 1] });
             A(srv.T.cursor === m.nid, '7: a lone win settled the node instantly instead of being held');
-            clock(RESULT_MS + 1000);
+            // The WATCHERS of this node meanwhile -- feedless in this world, where a watch is
+            // asked for but never served -- ask for their feed again while the win is held: the
+            // one rule re-engages a sheet that has not become a match every TT_CONNECT_MS, and
+            // the node is not finished on their side. Ticks only: a drain would settle the hold
+            // first, and what they ask for is THIS node's feed, not something new.
+            clock(TT_CONNECT_MS + 1000);
+            for(const c of C) c.tick();
+            await settleAsync();
+            for(let i = 0; i < N; i++){
+                if(i === m.ia || i === m.ib) continue;
+                const w = C[i].rec().watches;
+                A(w.length >= 1 && w.every(x => x.nid === m.nid && x.tid === srv.T.tid),
+                  '7: ' + NAMES[i] + ' asked ' + JSON.stringify(w) + ' while the lone win was held');
+            }
             await pump(2);
             A(srv.T.nodes[m.nid].state === 'done' && srv.T.nodes[m.nid].winner === m.pa,
               '7: the held win never stood (' + srv.T.nodes[m.nid].state + ')');
@@ -497,16 +513,6 @@ async function passBreak(opts){
             // the tournament picks the returning client back up.
             C[m.ib].inGame(false);
             await pump(1);
-            // The WATCHERS of this node meanwhile -- feedless in this world, where a watch is
-            // asked for but never served -- asked for their feed again while the win was held.
-            // The rule does not know a result is pending, only that the node is not finished
-            // on their side; and what they asked for was THIS node's feed, not something new.
-            for(let i = 0; i < N; i++){
-                if(i === m.ia || i === m.ib) continue;
-                const w = C[i].rec().watches;
-                A(w.length >= 1 && w.every(x => x.nid === m.nid && x.tid === srv.T.tid),
-                  '7: ' + NAMES[i] + ' asked ' + JSON.stringify(w) + ' while the lone win was held');
-            }
             clearAll();
             rows.push('7 no-show: the peer never reported, the lone win was held for ' + (RESULT_MS / 1000)
                       + 's and then stood; the feedless watchers asked for the feed again meanwhile');
@@ -904,9 +910,10 @@ async function passBreak(opts){
         A(H.phase() === 'tourneyQuit' && H.from() === 'tourneyCeremony',
           '20: the ending was not asked about (' + H.phase() + ' from ' + H.from() + ')');
 
-        // The poll. This is the one that did it: _ttSync runs off a timer, so the dialog was
-        // overwritten within one cadence of opening it.
-        W.clock(TT_STATE_MS + 1000); H.tick(); await W.settleAsync();
+        // The housekeeping tick. It used to read state on a timer, and the dialog was
+        // overwritten within one cadence of opening it; a tick reads nothing now and must
+        // move nothing.
+        W.clock(6000); H.tick(); await W.settleAsync();
         A(H.phase() === 'tourneyQuit', '20: a state poll answered the question by itself (now ' + H.phase() + ')');
         // ...and a signal, which arrives on nobody's schedule at all.
         H.sigTo({ event:'standings', tid:tid2, rows:[], advancers:[] });

@@ -15,7 +15,7 @@
 // The world -- the scripted server and the ten harness clients -- is test/tourney-world.js,
 // the same one tourney-e2e.js drives. The clients are the shipping client.
 const { mkWorld, MAX_LEVEL, BREAK_MS, BREAK_TTL_MS,
-        TT_OVER_MS, TT_STATE_MS } = require('./tourney-world');
+        TT_OVER_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005',
                'aaaa0006', 'aaaa0007', 'aaaa0008', 'aaaa0009', 'aaaa0010'];
@@ -186,8 +186,11 @@ async function passBreak(mode){
         await settleAsync();
         A(C[li].tt() === null, 'break ' + done + ': ' + NAMES[li] + ' left but still holds a tournament');
         A(srv.T.players.length === N - 1, 'break ' + done + ': the roster did not shrink on the leave');
-        clock(TT_STATE_MS + 1000);
-        await pump(1);
+        // This world's leave pushes nothing (the server's walks the leaver's pending nodes over
+        // and pushes those results), so the field learns it the way a lost push is recovered:
+        // the mailbox goes down and comes back.
+        srv.mute(IDS[hi], true); await pump(1);
+        srv.mute(IDS[hi], false); await pump(1);
         const seen2 = C[hi].brk().rows.filter(r => r.id === out.id)[0];
         A(seen2 && seen2.gone === true,
           'break ' + done + ': the field never saw ' + NAMES[li] + ' go');

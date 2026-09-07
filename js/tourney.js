@@ -18,7 +18,6 @@ const TT_MAX        = 8;       // hard player cap (mirrors tournament_max_player
 const TT_TICK_MS    = 1000;    // housekeeping cadence while a tournament is held
 const TT_REPORT_MS  = 2500;    // result-report retry spacing (the POST is idempotent)
 const TT_REPORT_MAX = 24;      // ~1 minute of retries, well inside the 3-min walkover ladder
-const TT_STATE_MS   = 5000;    // floor between unforced state() read-backs
 // A pushed event may name a delay the server wants before the requests that event provokes
 // (`after_ms`, API 4.4). A broadcast reaches the whole field in the same instant, so every
 // recipient reacts in the same instant too, and their read-backs arrive as one burst -- on
@@ -57,7 +56,7 @@ var _ttWant = null;    // the match parameters an inbound answer must be dressed
 // reported against, whether walking out still owes one -- hangs off this one.
 var _ttPlayNid = '', _ttWatchNid = '';
 var _ttOverAt = 0;
-var _ttStateAt = 0, _ttT = null;
+var _ttT = null;
 var _ttAfter = 0, _ttAfterT = null;   // when the server's stagger lets us ask again, and the one-shot that does
 
 // tourneyQuit is one of them: the leave dialog is a tournament screen like any other, so
@@ -300,19 +299,21 @@ function _ttAfterDo(nid, fn){
     const n = String(nid || '');
     setTimeout(()=>{ if(_tt && _ttNid === n && _ttDone !== n) fn(); }, Math.min(w, TT_AFTER_MAX));
 }
-async function _ttSync(force){
+// The full read-back. Every call has a reason -- a screen entered, a transition made, an
+// event that changed the shape, a sheet in doubt, a mailbox that was down and is back --
+// and nothing calls it on a timer: the server evaluates its own deadlines on the poll every
+// participant already sends, so `state` is for a reload, a rejoin and doubt, exactly as the
+// contract says, never for keeping time.
+async function _ttSync(){
     if(!_tt) return;
     const now = _msgNow();
-    // Wait the server's stagger out rather than adding to the burst. `force` says the caller
-    // needs the answer, not that it needs it in this millisecond -- so a forced read is
-    // deferred and then made, never dropped.
+    // Wait the server's stagger out rather than adding to the burst: the caller needs the
+    // answer, not this millisecond -- so the read is deferred and then made, never dropped.
     if(_ttAfter > now){
         if(typeof setTimeout === 'function' && !_ttAfterT)
-            _ttAfterT = setTimeout(()=>{ _ttAfterT = null; _ttAfter = 0; _ttSync(true); }, _ttAfter - now);
+            _ttAfterT = setTimeout(()=>{ _ttAfterT = null; _ttAfter = 0; _ttSync(); }, _ttAfter - now);
         return;
     }
-    if(!force && now - _ttStateAt < TT_STATE_MS) return;
-    _ttStateAt = now;
     const tid = _tt.tid;
     const r = await _ttPost('state', { tid });
     if(!_tt || _tt.tid !== tid) return;            // we left while it was in flight
@@ -382,7 +383,7 @@ function _ttOnSignal(d){
             // A break may already be up: the two events describe the same moment from
             // different distances, and whichever lands second must not undo the other.
             if(_TT_PHASES[_ttFace()] && _ttFace() !== 'tourneyPodium' && _ttFace() !== 'tourneyRound') _ttGo('tourneyBracket');
-            _ttSync(true);
+            _ttSync();
             break;
         case 'round':
             // A round ended and the next one waits on the host. The rows arrive one per
@@ -399,12 +400,12 @@ function _ttOnSignal(d){
             if(_ttRep && _ttRep.body.nid === String(d.nid || '')) _ttRep = null;
             if(String(d.nid || '') === _ttNid) _ttDone = _ttNid;   // ...and it is not played again
             _tt.last = { nid:String(d.nid || ''), winner:d.winner || null, draw:!!d.draw, score:d.score || null };
-            _ttSync(true);
+            _ttSync();
             break;
         case 'freeze':
             _tt.frozen = String(d.nid || '');
             _ttMsg('MATCH FROZEN - RESULTS DISAGREED', true);
-            _ttSync(true);
+            _ttSync();
             break;
         case 'over':
             _tt.state = 'done'; _tt.podium = d.podium || [];
@@ -412,7 +413,7 @@ function _ttOnSignal(d){
             if(!inGame) phase = 'tourneyPodium';
             _uiDirty = true;
             break;
-        default: _ttSync(true);   // an event a newer server knows and we do not
+        default: _ttSync();   // an event a newer server knows and we do not
     }
 }
 
@@ -437,12 +438,9 @@ function _ttRoles(d){
     if(typeof specNode === 'function') specNode(_tt.tid, nid);
     // ONE EVENT, ONE CALL. The sheet carries everything a match needs -- nid, hm, lvl,
     // stakes, players, feeder, primaries, secondaries, names and `you` -- so it IS a state
-    // read, and the safety-net read below owes nothing for a full floor after it. Without
-    // this the housekeeping tick asked the server to repeat what had just been pushed, and
-    // it asked at the one moment the client is busiest: beside the start.php the same sheet
-    // provokes. What the floor does NOT cover is a doubtful sheet -- an offer we hold no
-    // sheet for still forces a read (tourneyOfferOk).
-    _ttStateAt = _msgNow();
+    // read: nothing asks the server to repeat what it just pushed, least of all beside the
+    // start.php the same sheet provokes. A doubtful sheet is the exception -- an offer we
+    // hold no sheet for still forces a read (tourneyOfferOk).
     _uiDirty = true;
     if(_ttNid === nid) return;   // the same node again (a state re-read, a repeat delivery)
     _ttNid = nid; _ttRolesAt = _msgNow(); _ttEngAt = 0; _tt.frozen = '';
@@ -519,7 +517,7 @@ function _ttEngage(d){
 function tourneyOfferOk(from){
     if(!_tt) return true;
     if(_ttWant && _ttWant.peer === String(from)) return true;
-    _ttSync(true);
+    _ttSync();
     return false;
 }
 function _ttFail(msg){
@@ -665,12 +663,14 @@ function _ttTick(){
         _ttGo('tourneyRound');
     }
     _ttDrive(now);
-    // The state read-back is the safety net under the signal stream, and the roster needs one
-    // as much as the bracket does: nothing but an adopted `players` list ever SHRINKS the
-    // lobby, so a single `lobby` event that never arrived left a departed player on screen for
-    // good. Poll while the bracket runs (a roles sheet must not be missed) and whenever a
-    // tournament screen is actually being looked at; TT_STATE_MS is what keeps that cheap.
-    if(!inGame && (_tt.state === 'running' || _TT_PHASES[phase])) _ttSync();
+}
+// The mailbox was down and is back (net-api.js _netPollOnce: a poll failed, then one
+// succeeded -- a backgrounded tab, a zombie hold cut loose, a network blip). A push may have
+// died in between: the server drops an undelivered signal after 30s, and nothing but the
+// adopted picture ever SHRINKS a roster or takes a cleared board down. One whole read, then.
+function tourneyMailboxLost(){
+    if(!_tt) return;
+    _ttSync();
 }
 
 // ---- lobby actions -------------------------------------------------------------------
@@ -690,7 +690,7 @@ function tourneyEnter(){
     }
     // A tournament link is a multiplayer door too: the same age-gated anchor refresh as the 1:1 one.
     if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });
-    if(_tt) _ttSync(true); else _ttProbe();
+    if(_tt) _ttSync(); else _ttProbe();
     _uiDirty = true;
 }
 function tourneyLobbyList(){ return (typeof _netTourneys !== 'undefined' && _netTourneys) ? _netTourneys : []; }
@@ -719,7 +719,7 @@ function tourneyRejoin(){
     _ttAdopt(back);
     _ttUi.sel = -1; _ttMsg('BACK IN');
     Snd.sfxPlay('select', cfg.music);
-    _ttSync(true);
+    _ttSync();
 }
 async function tourneyCreate(stakes){
     if(_tt || _ttUi.busy) return;
@@ -736,7 +736,7 @@ async function tourneyCreate(stakes){
     _ttAdopt(Object.assign({ host:getPlayerId(), state:'open' }, r.json));
     _ttUi.sel = -1;
     _ttMsg('CODE ' + (_tt ? _tt.code : ''));
-    _ttSync(true);
+    _ttSync();
 }
 async function tourneyJoin(arg){
     if(_tt || _ttUi.busy) return;
@@ -753,7 +753,7 @@ async function tourneyJoin(arg){
     }
     _ttAdopt(r.json);
     _ttUi.sel = -1; _ttMsg('JOINED');
-    _ttSync(true);
+    _ttSync();
 }
 async function tourneyStart(){
     if(!_tt || _ttUi.busy || _tt.host !== getPlayerId()) return;
@@ -765,7 +765,7 @@ async function tourneyStart(){
         else _ttMsg('COULD NOT START', true);
         return;
     }
-    _ttSync(true);
+    _ttSync();
 }
 // The break between rounds ends when the HOST says so, and only then: everybody else reads
 // the board until a roles sheet or the server's own deadline takes it away. That is why a
@@ -791,7 +791,7 @@ async function tourneyContinue(){
     }
     _ttSetBreak(null);   // what happens now is an ordinary roles sheet
     Snd.sfxPlay('select', cfg.music);
-    _ttSync(true);
+    _ttSync();
 }
 // Leaving mid-tournament drops back to the lobby list, where there is something else to do;
 // leaving the lobby ITSELF has nothing to stay for, so that caller names where it goes.

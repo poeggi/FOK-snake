@@ -36,8 +36,11 @@ requests per client - and each half is useless without the other.
   and time.php in _netClockMs (a gate wait would land inside the measured RTT,
   hence in the clock offset).
 - ONE EVENT, ONE CALL: a roles sheet carries the whole match, so it IS a state
-  read (_ttStateAt stamped in _ttRoles) - the housekeeping tick must never ask
-  the server to repeat a pushed sheet. after_ms is honoured on the CALL, never
+  read, and NOTHING reads state on a timer: the server runs its own deadlines on
+  the poll every participant sends (server 1.4.16+), so `state` is only ever a
+  screen entry, a transition, a shape-changing event, a doubtful sheet, or a
+  mailbox that was down and is back (tourneyMailboxLost, off the poll's
+  fail-then-succeed edge in _netPollOnce). after_ms is honoured on the CALL, never
   the render (client bound TT_AFTER_MAX 1 s as a wrong-number guard; the server
   serves 400 ms). Entering the 1:1 screen is one event too: hello and the
   friend list go first, then _netTimeSync - ONE hello, and the sweep measures

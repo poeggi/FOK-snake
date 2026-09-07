@@ -36,7 +36,7 @@
 // winner to walk up the bracket -- so the two pilots that routinely end 0:0 fly only in the
 // round-robin, where a draw is worth half a point to each; a knockout that still draws is
 // REPLAYED on a fresh seed, which is what the real server does with one too.
-const { mkWorld, MAX_DIRECT, BREAK_MS, TT_OVER_MS, TT_STATE_MS } = require('./tourney-world');
+const { mkWorld, MAX_DIRECT, BREAK_MS, TT_OVER_MS } = require('./tourney-world');
 const { runSpec } = require('./spec-driver');
 const { autopilot, jouster, collider } = require('./duel-driver');
 const DIRS = { auto:autopilot, joust:jouster, kill:collider };
@@ -321,11 +321,10 @@ async function passBreak(seen){
     await pump(1);
     A(srv.T.brk === null, 'break: the board is still up after the host cleared it');
     A(C[deaf].brk() !== null, 'break: the deaf client saw a signal it should never have received');
-    clock(TT_STATE_MS + 1000);
+    srv.mute(IDS[deaf], false);                  // the mailbox comes back: one read recovers the board
     await pump(1);
     A(C[deaf].brk() === null, 'break: the deaf client is still holding a cleared board');
     A(C[deaf].tt().cursor === srv.T.cursor, 'break: the deaf client never picked the next match up');
-    srv.mute(IDS[deaf], false);
     seen.breaks.push(b0.done);
     rows.push('3 break ' + b0.done + '->' + b0.next + ': ' + b0.of + ' of ' + N + ' through at level '
               + b0.lvl + '/' + b0.hm + ' hearts; ' + NAMES[deaf]

@@ -25,7 +25,6 @@ const MAX_LEVEL    = 10;       // MAX_LEVELS: the ladder cannot go deeper than t
 // Client-side timings the run has to step over.
 const TT_OVER_MS   = 4000;     // tourney.js: how long a settled match holds the screen
 const TT_CONNECT_MS = 20000;   // tourney.js: a sheet that has not become a match by now is engaged again
-const TT_STATE_MS  = 5000;     // tourney.js: the floor between unforced state() read-backs
 
 // ============================================================================
 // THE SCRIPTED SERVER
@@ -284,7 +283,15 @@ function mkServer(opts){
         adminClear(nid, winner){ const nd = T.nodes[nid]; nd.state = 'live'; settle(nid, winner, false, nd.score || [0, 0]); },
         post(url, body){
             if(/hello\.php$/.test(url)){
-                const id = String(body.id || ''), sigs = muted[id] ? [] : (out[id] || []);
+                const id = String(body.id || '');
+                // The drain carries the deadlines, exactly like the server's pulse (1.4.16).
+                deadlines();
+                // Muted = the mailbox is DOWN: the drain fails outright, as a dead poll does,
+                // and what was queued meanwhile is gone (the server drops an undelivered
+                // signal after 30s). Everything this client learns after coming back, it
+                // learns from the one state read the return provokes.
+                if(muted[id]){ out[id] = []; return bad(503, 'mailbox down'); }
+                const sigs = out[id] || [];
                 out[id] = [];
                 const r = { ok:true, api:'4.3', now:Date.now(), online:Math.max(1, T.players.length),
                             playing:0, friends_playing:{}, signals:sigs };
@@ -389,6 +396,7 @@ function mkServer(opts){
 function driverSrc(id){
     return '\n;(function(){\n'
         + '  var REC = globalThis.__REC = { offers:[], answers:[], watches:[], sigs:[], posts:[], exits:0 };\n'
+        + '  var down = false;\n'
         + '  var clock = 100000;\n'
         + '  performance.now = function(){ return clock; };\n'
         + '  cfg.offline = false; cfg.music = 0; cfg.sfx = 0;\n'
@@ -396,6 +404,10 @@ function driverSrc(id){
         + '  globalThis.fetch = function(url, opt){\n'
         + '      var b = JSON.parse(opt.body); REC.posts.push(b);\n'
         + '      var r = globalThis.__srv(String(url), b);\n'
+        + '      if(String(url).indexOf(\"hello.php\") >= 0){\n'
+        + '          if(r.status !== 200) down = true;\n'
+        + '          else if(down){ down = false; Promise.resolve().then(function(){ tourneyMailboxLost(); }); }\n'
+        + '      }\n'
         + '      return Promise.resolve({ status:r.status, json:function(){ return Promise.resolve(r.json); } });\n'
         + '  };\n'
         // The four seams a headless client cannot run for real.
@@ -579,4 +591,4 @@ function mkWorld(ids, names, opts){
 
 module.exports = { mkServer, driverSrc, mkWorld,
                    RESULT_MS, BREAK_MS, BREAK_TTL_MS, MAX_DIRECT, MAX_LEVEL,
-                   TT_OVER_MS, TT_STATE_MS, TT_CONNECT_MS };
+                   TT_OVER_MS, TT_CONNECT_MS };
