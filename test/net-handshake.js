@@ -270,9 +270,9 @@ const HOOKS = (myId) => `
   };
   // The cleanliness rule of the real clock sweep (4.4). A sample taken while our own
   // requests are in flight measured our own burst, so it may not be REPORTED as latency:
-  // start.php works this pair's lead time out of that figure, and an inflated one widens
-  // the start for the opponent too. Being anchored is not optional though, so a sweep with
-  // nothing clean in it still adopts the least bad sample.
+  // the figure is display-only now (friends and the admin UI), and a wrong one is worse
+  // than none because a friend reads it as the state of the line. Being anchored is not
+  // optional though, so a sweep with nothing clean in it still adopts the least bad sample.
   globalThis.__syncRough = async (flight)=>{
     _netSync = { ofs:null, rtt:-1, at:0 };
     _netLat = { value:0, at:0, pending:false };

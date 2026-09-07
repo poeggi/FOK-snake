@@ -339,11 +339,11 @@ runTest('SMOKE-NET', `
     if(_netSyncBusy) throw 'the anchor must never be re-measured while a duel is being played';
     phase='duelPaused';  _netTimeSync(true);
     if(_netSyncBusy) throw 'a paused duel is still a duel: no re-anchor';
-    phase='duelReady';   _netTimeSync(true);   // a break: new level / rematch
-    if(!_netSyncBusy) throw 'a break (READY/GO) must re-anchor';
+    phase='duelReady';   _netTimeSync(true);   // outside play: the gate lets a forced sweep through
+    if(!_netSyncBusy) throw 'outside play (READY/GO) a forced sweep must run';
     _netSyncBusy=false;   // the async remainder is not under test; do not leave it latched
     _netGet=_oGet; globalThis.fetch=_oFetch; _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
-    log('anchor discipline ok: re-anchored at breaks, never mid-game');
+    log('anchor discipline ok: a sweep runs outside play, never mid-game');
 
     // ---- remote DEBUG flag (api v3): report what is true, honour what is asked ----
     // The two bits are deliberately independent, and the admin view names the
@@ -994,7 +994,7 @@ runTest('SMOKE-NET', `
     inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; _netTeardown();
     log('pts layer ok: sync required to start, whole-ms stamping, future drops, tolerance honoured');
 
-    // ---- mandated latency measurement: >=3 samples, extreme first discarded ----
+    // ---- latency figure (optional, display-only): >=3 samples, extreme first discarded ----
     if(_netLatFromSamples([20,22])!==null) throw 'fewer than 3 samples must not report';
     if(_netLatFromSamples([200,20,22,21,19])!==Math.round((20+22+21+19)/4)) throw 'extreme first sample must be discarded';
     if(_netLatFromSamples([25,20,22])!==Math.round((25+20+22)/3)) throw 'normal first sample must be kept';
@@ -1006,7 +1006,7 @@ runTest('SMOKE-NET', `
     _netFriendsOnline={'00ff00aa':true}; phase='lobby'; drawLobby();   // renders with the ms figure
     localStorage.removeItem('fok-snake-friends');
     _netLat={value:null, at:0, pending:false}; _netFriendsLat={}; phase='menu';
-    log('latency mandate ok: sampling rule, e2e estimate, lobby render');
+    log('latency figure ok: sampling rule, e2e estimate, lobby render');
 
     // ---- API version gate: a newer server contract disables online cleanly ----
     _netApiNewer=true;

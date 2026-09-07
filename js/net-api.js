@@ -110,7 +110,7 @@ const NET_BURST_MIN = 5;          // accept-gate per direction: 5 of 6 delivered
 const NET_BURST_SLEW_MS = 200;    // cap on the per-boundary clock nudge: damage control against ONE bad verdict, never reached by a realistic residual (<150ms = a 75ms nudge); ~12 ticks, well inside the rollback ring
 const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
 const NET_BURST_TRIES = 10;       // starved-burst retries before the boundary opens anyway on the PRIOR clock (itself
-                                  // burst-verified at the last boundary). 10 x ~340ms (probe span + WAIT window) stays
+                                  // burst-verified at the last boundary). 10 x ~290ms (probe span + WAIT window) stays
                                   // inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer ends the
                                   // match through the liveness path, never through the clock sync.
 // How long a pending invite (sent, received, or accepting) lingers before it goes stale.

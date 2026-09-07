@@ -140,7 +140,7 @@ const HOOKS = (id) => `
   // on; the SIM side (simTick->0, _gAt->0, ring reset) is the REAL code.
   globalThis.__levelUp = (startPts, epoch, lvl)=>{
     if(!_netSess) return;
-    _netSync = { ofs:0, rtt:1, at:Date.now() };   // a fresh sync always precedes a new start (re-anchor)
+    _netSync = { ofs:0, rtt:1, at:Date.now() };   // the boundary's P2P burst re-anchors the clock; the driver stands in for it
     _netSess.epoch = epoch|0; _netSess.startPts = startPts;
     beginOnlineDuelLevel(_netSess.role === 'host', lvl|0);
   };
