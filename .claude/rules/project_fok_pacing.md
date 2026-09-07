@@ -40,7 +40,9 @@ requests per client - and each half is useless without the other.
   the poll every participant sends (server 1.4.16+), so `state` is only ever a
   screen entry, a transition, a shape-changing event, a doubtful sheet, or a
   mailbox that was down and is back (tourneyMailboxLost, off the poll's
-  fail-then-succeed edge in _netPollOnce). after_ms is honoured on the CALL, never
+  fail-then-succeed edge in _netPollOnce). A `result` is applied to the node
+  held and its `rows` (server 1.4.17+) are the standings - no read; only a
+  result WITHOUT rows (an older server) is still read back. after_ms is honoured on the CALL, never
   the render (client bound TT_AFTER_MAX 1 s as a wrong-number guard; the server
   serves 400 ms). Entering the 1:1 screen is one event too: hello and the
   friend list go first, then _netTimeSync - ONE hello, and the sweep measures

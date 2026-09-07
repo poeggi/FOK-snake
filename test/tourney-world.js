@@ -204,7 +204,10 @@ function mkServer(opts){
         nd.state = 'done'; nd.winner = winner; nd.draw = !!draw; nd.score = score;
         const feed = T.feeds[nid];              // the winner walks into the node above
         if(feed && winner) T.nodes[feed.to].players[feed.slot] = winner;
-        all({ event:'result', tid:T.tid, nid, winner, draw:!!draw, score });
+        // The server (1.4.17) ranks on every settle and sends the rows with the result, so a
+        // client applies it and reads nothing; this world does the same.
+        standings();
+        all({ event:'result', tid:T.tid, nid, winner, draw:!!draw, score, rows:T.standings.map(r => ({ seat:r.seat, id:r.id, pts:r.pts, diff:r.diff, rank:r.rank })) });
         advance();
     }
     function advance(){

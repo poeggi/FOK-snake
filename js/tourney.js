@@ -400,7 +400,14 @@ function _ttOnSignal(d){
             if(_ttRep && _ttRep.body.nid === String(d.nid || '')) _ttRep = null;
             if(String(d.nid || '') === _ttNid) _ttDone = _ttNid;   // ...and it is not played again
             _tt.last = { nid:String(d.nid || ''), winner:d.winner || null, draw:!!d.draw, score:d.score || null };
-            _ttSync();
+            // The event IS the change. The node it names is settled in the picture we hold,
+            // and a server that sends the standings with it (rows, 1.4.17) has said everything
+            // the bracket screen draws -- eight clients re-reading 5 KB each on every settle was
+            // the fattest part of a tournament's one traffic peak. Only an older server, whose
+            // result carries no rows, still makes this a read.
+            _ttNodeSettle(_tt.last);
+            if(Array.isArray(d.rows)){ _tt.standings = d.rows; _uiDirty = true; }
+            else _ttSync();
             break;
         case 'freeze':
             _tt.frozen = String(d.nid || '');
@@ -414,6 +421,18 @@ function _ttOnSignal(d){
             _uiDirty = true;
             break;
         default: _ttSync();   // an event a newer server knows and we do not
+    }
+}
+
+// A result applied to the node we hold -- the fields state() would carry for it -- so the
+// picture stays the server's without asking for it again. A node we do not hold (a knockout
+// node before the read that draws the bracket) is simply not here; NOW PLAYING falls back to
+// the roles sheet for that.
+function _ttNodeSettle(r){
+    if(!_tt) return;
+    for(const nd of [].concat(_tt.schedule || [], _tt.bracket || [])){
+        if(!nd || String(nd.nid) !== r.nid) continue;
+        nd.state = 'settled'; nd.winner = r.winner; nd.draw = r.draw; nd.score = r.score;
     }
 }
 
