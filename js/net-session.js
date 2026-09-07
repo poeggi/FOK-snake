@@ -41,9 +41,11 @@ function netLobbyEnter(){
     _netReapDead();                       // only debris (no game, no handshake)
     _netLb.sel = 0; _netLb.msg = ''; _netLb.err = false;
     if(_netOk()){
-        _netTimeSync(true).then(()=>_netHello());   // mandate: measure on entering the multiplayer screen, report right away
-        _netHello();                                // and refresh presence/friends immediately
+        _netHello();                                // presence/friends right away
         _netFrRefresh(false);                       // notice peer-side removals here too
+        // Last of the three: every sample waits for our own wire to go quiet, so the
+        // two above clear it first. The figure rides the next hello (_netLat.pending).
+        _netTimeSync(true);
     }
 }
 function netLobbyLeave(){
