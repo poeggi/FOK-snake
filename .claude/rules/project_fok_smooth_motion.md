@@ -1,7 +1,7 @@
-# SMOOTH MOTION - a render-side ramp between cells (settings, default OFF)
+# SMOOTH SNAKE - a render-side ramp between cells (settings, default OFF)
 
-cfg.smoothMotion: 0 OFF (default) / 1 LOW LATENCY (50 ms) / 2 HIGH LATENCY
-(100 ms). All of it lives in js/render.js (_smFrac, _smSub, _smTrack,
+The GRAPHICS row SMOOTH SNAKE = cfg.smoothMotion: 0 OFF (default) / 1 LOW
+LATENCY (50 ms) / 2 HIGH LATENCY (100 ms). REDUCE MOTION heads that group. All of it lives in js/render.js (_smFrac, _smSub, _smTrack,
 _smSegs, _smDuelSegs) and is called from drawSnake and the duel board draw.
 
 INVARIANT: renderer only, the scrape's discipline. It reads sim state, judges
