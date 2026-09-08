@@ -20,6 +20,39 @@ runTest('SMOKE-GAME', `
     if(cfg.diff!==1 || cfg.music!==true) throw 'garbage save did not fall back to defaults';
     log('config load tolerance ok');
 
+    // SMOOTH MOTION, the render-side ramp between cells: off by default, the fraction read
+    // off the sim's counters, linear where the ramp spans the period and an S where the cap
+    // binds, segments part-way between their cells on whole pixels, no slide across a wrap.
+    if(cfg.smoothMotion!==0) throw 'smooth motion must default to OFF';
+    localStorage.setItem(CFG_KEY, JSON.stringify({ smoothMotion:7 })); loadCfg();
+    if(cfg.smoothMotion!==0) throw 'an out-of-range smooth motion value must fall back to OFF';
+    if(_smFrac(6, 0, 1, 6, 0.5, 0)!==1) throw 'cap 0 (OFF) must hand the cells back as they are';
+    if(_smFrac(6, 0, 1, 6, 0, 3)!==0) throw 'right after a step the ramp must be at 0';
+    // Level 10 boosting on the 3-tick cap: the ramp spans the whole period, so it stays linear.
+    const lin=[_smFrac(3,0,2,3,0,3), _smFrac(2,0,2,3,0,3), _smFrac(1,0,2,3,0,3)];
+    if(Math.abs(lin[0])>1e-9 || Math.abs(lin[1]-1/3)>1e-9 || Math.abs(lin[2]-2/3)>1e-9) throw 'the full-speed ramp must be linear thirds, got '+JSON.stringify(lin);
+    // Level 4 (gPer 5, a step every 10 ticks) on the 3-tick cap: an S over the ramp, then a hold at 1.
+    const s1=_smFrac(4,0,1,5,0,3), s2=_smFrac(3,0,1,5,0,3), s3=_smFrac(2,0,1,5,0,3), hold=_smFrac(5,1,1,5,0,3);
+    if(!(s1>0.2&&s1<0.3) || !(s2>0.7&&s2<0.8) || s3!==1 || hold!==1) throw 'a capped ramp must be an S (0.26, 0.74, 1) and then hold, got '+[s1,s2,s3,hold].join(',');
+    const mid=_smFrac(4,0,1,5,0.5,3);
+    if(mid<=s1 || mid>=s2) throw 'the sub-tick remainder must move the ramp between two ticks, got '+mid;
+    // Segments: nothing slides before a step; half-way after one; a jump of more than a cell does not slide.
+    const c0=[{x:5,y:5},{x:4,y:5},{x:3,y:5}];
+    let g=_smSegs('t', c0, 0.5);
+    if(g[0].x!==5||g[2].x!==3) throw 'with no previous cells the segments must sit on their cells';
+    const c1=[{x:6,y:5},{x:5,y:5},{x:4,y:5}];
+    g=_smSegs('t', c1, 0.5);
+    if(g[0].x!==5.5||g[1].x!==4.5||g[2].x!==3.5) throw 'half-way through the ramp every segment must sit between its two cells, got '+JSON.stringify(g);
+    g=_smSegs('t', c1, 0.26);
+    if(Math.abs(g[0].x-5.25)>1e-9) throw 'positions must snap to whole pixels, got '+g[0].x;
+    g=_smSegs('t', c1, 1);
+    if(g!==c1) throw 'a finished ramp must hand the cells back untouched';
+    const c2=[{x:0,y:5},{x:6,y:5},{x:5,y:5}];
+    g=_smSegs('t', c2, 0.5);
+    if(g[0].x!==0) throw 'a head that wrapped must not slide across the board, got '+g[0].x;
+    if(g[1].x!==5.5) throw 'the segments behind a wrap still slide, got '+g[1].x;
+    log('smooth motion ok: default off, fraction off the counters, linear at full speed, S under the cap, half-way segments on whole pixels, no slide across a wrap');
+
     // Gameplay smoke: start a game, run the fixed-timestep sim through levelReady into
     // playing so step() actually executes, then render the board.
     simTick=0; simNow=0;

@@ -405,10 +405,11 @@ function _netWire(dc){
         _netSeekStop();
         s.game = true; _netMarkRecv(s);
         _netLiveStart();
-        // The session IS the DataChannel from here, and the mailbox poll is one more thing
-        // of ours parked on the wire while _netRequestStart takes the match's anchor. Let
-        // it go; the 1 Hz tick re-arms the slow in-match cadence within five seconds.
-        _netPollAbortNow();
+        // The session IS the DataChannel from here. The mailbox poll parked on the wire is
+        // left to run out: an abort would close our socket and nothing else -- the server
+        // keeps its worker until the poll's own deadline -- while the next poll took a
+        // second one. It returns by itself and the 1 Hz tick then re-arms the slow in-match
+        // cadence. A parked poll does not count against the match's anchor (_netGapFlight).
         _netRequestStart(s);
         // the shared start (seed + start_pts) arrives via this request; no state frames
     };
@@ -780,7 +781,9 @@ function _netReconnect(s){
     if(typeof netSpectating === 'function' && netSpectating()) return;
     s.reconnectAt = Date.now();   // wall clock: the timeout must survive a suspend too
     s.reconnecting = true;             // _netPollDue() polls again so the re-handshake signals flow
-    _netPollAbortNow();                // start a fresh poll immediately, don't wait out a held one
+    // The poll in flight is not aborted: an in-match poll is unheld and back within a round
+    // trip, and a held one wakes on the first re-handshake signal anyway -- while an abort
+    // would leave the server's worker parked and put the fresh poll on a second one.
     _duelMsg = 'RECONNECTING...'; _duelMsgAt = _msgNow(); _uiDirty = true;
     _netSigLog('~ reconnect');
     if(s.role === 'host') _netRtcReoffer(s);   // the host re-offers; the peer answers when its own silence trips

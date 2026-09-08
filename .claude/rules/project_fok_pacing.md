@@ -32,6 +32,14 @@ requests per client - and each half is useless without the other.
   held poll, priority low (items.php); NET_BG_SOLO = never beside another
   request of ours, NO spacing (signal.php, an unheld poll - what a player is
   actively waiting for).
+- An ABORTED held poll is still parked on its server worker until its own
+  deadline (PHP learns of a gone client only when it writes; the hold loop
+  writes nothing). So the client never arms a held poll while the last one
+  it aborted may still be parked (_netPollHoldEnd / _netPollNotBefore, set
+  on foreground by _netPollResume), and neither the DataChannel opening nor
+  a reconnect aborts the poll in flight any more: it returns by itself, and
+  a held one wakes on the first re-handshake signal. Two workers for one
+  client was the shape a 27 ms queue wait on an empty server had.
 - Ungated on purpose: the HELD poll (it IS the parked slot the contract allows)
   and time.php in _netClockMs (a gate wait would land inside the measured RTT,
   hence in the clock offset).

@@ -515,6 +515,21 @@ runTest('SMOKE-NET', `
         if(!_dbg.pace || _dbg.pace.hold!==true || !_dbg.pace.roster) throw 'the debug export must carry the pace in force, got ' + JSON.stringify(_dbg.pace);
         _netQ={ms:0,at:0};
         _netPace={hold:true};
+        // An aborted hold is still parked on the server until its own deadline: after a
+        // foreground no HELD poll goes out before that moment, an unheld one may, and past
+        // it the held poll goes out again.
+        _netPace={hold:true}; _netPollNotBefore=0; _netPollHoldEnd=0;
+        poll();
+        if(!(_netPollHoldEnd>Date.now()+8000)) throw 'a held poll must note when the server lets its worker go, got ' + _netPollHoldEnd;
+        _netPollResume();
+        poll();
+        if(_url) throw 'a held poll must not be re-armed while the aborted one is still parked, sent ' + _url;
+        _netPace={hold:false}; _netPollTick=0; poll();
+        if(!/poll[.]php/.test(_url||'') || /wait=/.test(_url||'')) throw 'an unheld poll may still go out while the old hold is parked, got ' + _url;
+        _netPace={hold:true}; _netPollHoldEnd=Date.now()-1; _netPollResume();
+        poll();
+        if(!/wait=9/.test(_url||'')) throw 'past the old deadline the held poll goes out again, got ' + _url;
+        _netPollNotBefore=0; _netPollHoldEnd=0;
         _netGet=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
     }
     log('pacing ok: hold alone drives the poll, a retired interval field moves nothing, an unheld poll costs the contract cadence and not 1 Hz (a handshake excepted), q_ms flags a busy host and expires');

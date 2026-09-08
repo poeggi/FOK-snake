@@ -1046,6 +1046,82 @@ function drawPacHead(x, y, facing) {
 // the belt/shoes/gown used to live in drawSnake() alone, which meant an online
 // opponent silently lost half their cosmetics. shimmer = draw the gown's travelling
 // sparkle (single player: beating the record; duel: leading -- both clients agree).
+// ---- SMOOTH MOTION (cfg.smoothMotion): a render-side ramp between cells ----
+// The sim steps a whole cell at a time; this draws each segment part-way from the cell it
+// left to the cell it is in, so a step reads as a short move instead of a jump. Renderer
+// only, the same discipline as the scrape: it reads sim state, judges nothing, is never
+// hashed and puts nothing on the wire, so a rollback cannot disturb it and the two clients
+// of a duel owe each other nothing here. The ramp is LATENCY-CAPPED: it completes a fixed
+// number of ticks after the step whatever the level's period (3 ticks = 50 ms, 6 = 100 ms)
+// and the segment then holds on its cell, so the picture is never further behind the sim
+// than that. Where the ramp is shorter than the period it is an S (smoothstep): gentle out
+// of the cell, fastest mid-way, gentle into place. Where it spans the whole period (level 10
+// boosting on the 3-tick cap) it stays linear: the motion is one cell per period already
+// and an S there would only delay its start. Positions snap to whole pixels so the rounded
+// edges do not shimmer between frames.
+const SM_CAP = [0, 3, 6];   // ramp length in ticks per cfg.smoothMotion: OFF / LOW LATENCY / HIGH LATENCY
+function _smCap(){ return SM_CAP[cfg.smoothMotion|0] || 0; }
+// The fraction of the ramp done, read off the counters the sim schedules its step with:
+// gDue ticks to the next game tick, acc the movement accrued so far (a step spends 2), rate
+// what one game tick adds (1, 2 boosting, halved under a duel slow), plus the sub-tick
+// remainder of the frame clock. Continuous between steps, and back at 0 exactly when the
+// step lands, because the step and this fraction come from the same counters.
+function _smFrac(gDue, acc, rate, gPer, sub, cap){
+    if(!(cap > 0) || !(gPer > 0) || !(rate > 0)) return 1;
+    const need = Math.max(1, Math.ceil((2 - acc) / rate));   // game ticks until the step
+    const per = Math.ceil(2 / rate) * gPer;                    // ticks from one step to the next at this rate
+    const left = gDue + (need - 1) * gPer - sub;               // ticks until the step, sub-tick included
+    let f = (per - left) / cap;                                // ticks since the last step, over the cap
+    f = f > 0 ? (f < 1 ? f : 1) : 0;
+    if(per > cap) f = f * f * (3 - 2 * f);                     // the S only where the cap binds
+    return f;
+}
+// The sub-tick remainder of the frame clock, 0..1: how far the presentation is into the tick
+// the sim last ran. In-process it is the accumulator's remainder; with the sim in the worker
+// it is the time since its last frame arrived, frames being one tick apart.
+function _smSub(){
+    const s = (typeof _useWorker === 'function' && _useWorker())
+        ? (performance.now() - _lastWorkerFrameAt) / TICK_MS
+        : _fbAcc / TICK_MS;
+    return s > 0 ? (s < 1 ? s : 1) : 0;
+}
+// One record per snake (classic -1, duel 0 and 1): the cells as they stand and the cells
+// before the step that last moved them. A step is noticed by the head cell moving; a sim
+// tick running backwards is a new level or match, which forgets the old cells.
+const _smPrev = {};
+function _smTrack(key, cells){
+    const h = cells[0];
+    let r = _smPrev[key];
+    if(!r || simTick < r.tick){ r = _smPrev[key] = { cur:cells.map(c => ({ x:c.x, y:c.y })), prev:null, hx:h.x, hy:h.y, tick:simTick }; return r; }
+    if(h.x !== r.hx || h.y !== r.hy || cells.length !== r.cur.length){
+        r.prev = r.cur; r.cur = cells.map(c => ({ x:c.x, y:c.y })); r.hx = h.x; r.hy = h.y; r.tick = simTick;
+    }
+    return r;
+}
+// The segments to draw: each one f of the way from its previous cell to its current one,
+// snapped to whole pixels. A segment with no previous cell, or one whose cells are more
+// than a cell apart (a wrap across the board, a level's fresh snake), sits where it is.
+function _smSegs(key, cells, f){
+    if(!(f < 1)){ _smTrack(key, cells); return cells; }
+    const r = _smTrack(key, cells), out = new Array(cells.length);
+    for(let i = 0; i < cells.length; i++){
+        const b = cells[i];
+        let a = r.prev ? r.prev[i] : null;
+        if(!a || Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1) a = b;
+        out[i] = { x: Math.round((a.x + (b.x - a.x) * f) * CS) / CS, y: Math.round((a.y + (b.y - a.y) * f) * CS) / CS };
+    }
+    return out;
+}
+// A duel snake's segments for this frame: the ramp runs only while the match is being
+// played and the snake is alive; a dead one and every other phase draw the cells as they are.
+function _smDuelSegs(i, now){
+    const P = players[i];
+    const f = (phase === 'duel' && P.alive)
+        ? _smFrac(_gDue, P.stepAccum, (P.boosting ? 2 : 1) * (now < P.slowUntil ? 0.5 : 1), gPer, _smSub(), _smCap())
+        : 1;
+    return _smSegs(i, P.snake, f);
+}
+
 function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt, pi) {
     const sc=SNAKE_COLORS[colorIdx||0];
     const cols = flash ? null : _bodyCols(segs.length, sc.h);
@@ -1139,7 +1215,8 @@ function drawSnakeG(segs, sdir, squeue, colorIdx, si, flash, shimmer, jolt, pi) 
 }
 // Classic single-player wrapper: the globals, and the record-chase gown condition.
 function drawSnake(flash, now) {
-    drawSnakeG(snake, dir, dirQueue, cfg.snakeColor||0, cfg.wornItems||{}, flash,
+    const f = phase === 'playing' ? _smFrac(_gDue, _stepAccum, boosting ? 2 : 1, gPer, _smSub(), _smCap()) : 1;
+    drawSnakeG(_smSegs(-1, snake, f), dir, dirQueue, cfg.snakeColor||0, cfg.wornItems||{}, flash,
                phase==='playing' && score>=_shimmerThreshold,
                now===undefined?null:_crashJolt(-1, now), -1);
 }

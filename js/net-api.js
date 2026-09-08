@@ -1082,6 +1082,14 @@ let _netPollDown = false;   // the last poll failed: the next success is the mai
 // Is a HELD poll open right now? Not a debug readout: the idle tier waits on this (see
 // NET_BG_IDLE). An unheld poll is a request like any other and is counted by _netFlight.
 let _netPollHeld = false;
+// When the server lets the worker of the last HELD poll go, and before when no held poll
+// may be armed. An abort closes the socket on our side and nothing else: PHP learns of a
+// gone client only when it writes, and the hold loop writes nothing until it answers, so
+// an aborted hold stays parked on its worker until its own deadline. Arming another one
+// before then puts this client on two workers, which on a small pool is the next request
+// of ours queueing. The foreground hello drains the mailbox meanwhile.
+let _netPollHoldEnd = 0, _netPollNotBefore = 0;
+function _netPollResume(){ _netPollAbortNow(); _netPollNotBefore = _netPollHoldEnd; }
 // Hold the connection OPEN on every matchmaking screen (1:1 menu, lobby, friends,
 // MY ID) and during a handshake: a long-poll -- the server HOLDS the request and
 // re-checks the mailbox every ~20ms (a server-side poll, NOT a push), answering as
@@ -1130,9 +1138,11 @@ async function _netPollOnce(){
     const _idle = !_netSess && !netForming()
                && !(typeof tourneyActive === 'function' && tourneyActive());
     if(_held && !held && _idle && (_netPollTick % NET_UNHELD_EVERY)) return;
+    if(held && Date.now() < _netPollNotBefore) return;   // the aborted hold is still parked on its worker
     _netPollBusy = true; _netPollBusyAt = Date.now();
     _netDbg.pollAt = performance.now(); _netDbg.pollHeld = held;   // debug overlay: is a connection open right now?
     _netPollHeld = held;
+    _netPollHoldEnd = held ? Date.now() + NET_POLL_S * 1000 + 500 : 0;
     _netPollAbort = (typeof AbortController === 'function') ? new AbortController() : null;
     // A HELD poll goes out ungated: it is the parked slot the contract allows beside one
     // other request, and holding it back would only park the mailbox itself. An UNHELD one
@@ -1144,6 +1154,7 @@ async function _netPollOnce(){
     const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : '') + fs,
                             _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
+    if(r) _netPollHoldEnd = 0;   // answered: the worker is free. An abort or a failure leaves the deadline standing.
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
     if(r){ _netPaceOf(r); _netFrApply(r); }
     // The mailbox was down and is back. A push may have died in between (the server drops an
@@ -1190,7 +1201,7 @@ if(typeof document !== 'undefined' && document.addEventListener){
         if(document.hidden){ _netHiddenAt = Date.now(); _netPollAbortNow(); return; }   // backgrounded: note when, to measure how long
         // Foregrounded: nothing from before is trustworthy -- start over.
         const awayMs = _netHiddenAt ? Date.now() - _netHiddenAt : 0; _netHiddenAt = 0;
-        _netPollAbortNow();
+        _netPollResume();   // drop the latch, and no held poll before the aborted one's worker is free
         _netHelloBusy = false;
         // SEQUENCED, not fanned out. This used to fire a clock sync, a heartbeat and a
         // roster read into the same instant -- and the clock sample was then taken against

@@ -85,7 +85,7 @@ function _prefersReducedMotion() {
 }
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, reduceMotion:_prefersReducedMotion(),
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, smoothMotion:0, reduceMotion:_prefersReducedMotion(),
              autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3,
              itemReg:{}, mintQ:[], claimQ:[], itemsSeeded:0 };
 }
@@ -112,6 +112,7 @@ function _sanitizeCfg() {
     cfg.deferDraw   = !!cfg.deferDraw;
     cfg.singleThreaded  = !!cfg.singleThreaded;
     cfg.gfxMode     = idx(cfg.gfxMode, 3, 1);   // 0 SIMPLE / 1 STANDARD (default) / 2 FABULOUS (not yet implemented)
+    cfg.smoothMotion = idx(cfg.smoothMotion, 3, 0);   // 0 OFF (default) / 1 LOW LATENCY (the ramp is done 3 ticks after a step, 50 ms) / 2 HIGH LATENCY (6 ticks, 100 ms) -- see _smSegs in render.js
     cfg.reduceMotion = !!cfg.reduceMotion;   // absent -> defaultCfg() already seeded it from the OS pref
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)

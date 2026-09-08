@@ -385,6 +385,9 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.gfxMode=cfg.gfxMode===0?1:0;} },
         { lbl:()=>'GRAPHICS MODE: FABULOUS', dis:()=>true,   // greyed: not yet implemented
           act:()=>{Snd.sfxPlay('fail',cfg.music);} },
+        { lbl:()=>'SMOOTH MOTION: '+(['OFF','LOW LATENCY (50MS)','HIGH LATENCY (100MS)'][cfg.smoothMotion|0]||'OFF'),   // a render-side ramp between cells, never further behind the sim than 3 or 6 ticks (_smSegs in render.js)
+          act:()=>{cfg.smoothMotion=((cfg.smoothMotion|0)+1)%3;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.smoothMotion=((cfg.smoothMotion|0)+(r?1:-1)+3)%3;} },
         _tog('REDUCE MOTION','reduceMotion'),   // suppress decorative motion (near-miss shake, future FX)
         _tog('LIMIT 30 FPS','fps30'),
         _tog('DISABLE GLOW','disableGlow'),
@@ -1038,8 +1041,8 @@ function drawWorld(now) {
         // The gown reveals on whoever LEADS -- a duel has no record to chase, and the local
         // best score is device-local, so it is the one condition both clients can agree on.
         const _sh0=players[0].score>players[1].score, _sh1=players[1].score>players[0].score;
-        drawSnakeG(players[0].snake, players[0].dir, players[0].dirQueue, lk.c0, lk.i0, !players[0].alive, _sh0, _crashJolt(0, now), 0);
-        drawSnakeG(players[1].snake, players[1].dir, players[1].dirQueue, lk.c1, lk.i1, !players[1].alive, _sh1, _crashJolt(1, now), 1);
+        drawSnakeG(_smDuelSegs(0, now), players[0].dir, players[0].dirQueue, lk.c0, lk.i0, !players[0].alive, _sh0, _crashJolt(0, now), 0);
+        drawSnakeG(_smDuelSegs(1, now), players[1].dir, players[1].dirQueue, lk.c1, lk.i1, !players[1].alive, _sh1, _crashJolt(1, now), 1);
         ctx.globalAlpha=1;
         _duelScrapeFx(now);   // judged and drawn per frame; sparks belong on TOP of the two flanks making them
         _drawWsBlowFx(now);   // the shock ring names its victim, so it goes on top of that snake's head
