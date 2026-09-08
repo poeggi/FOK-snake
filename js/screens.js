@@ -344,7 +344,7 @@ const SETTINGS_CATS = [
     { label:'USER', items:[
         { lbl:()=>'NAME: '+(getPlayerName()||'---'),
           act:()=>{ Snd.sfxPlay('select',cfg.music); _entryOpen('user', getPlayerName()); } },
-        { lbl:()=>'SHOW MY ID', act:()=>{ Snd.sfxPlay('select',cfg.music); _friendIdBack='settings'; phase='friendId'; } },
+        { lbl:()=>'SHOW MY ID', act:()=>{ Snd.sfxPlay('select',cfg.music); _friendIdBack='settings'; phase='friendId'; netMyIdEnter(); } },
     ]},
     { label:'AUDIO', items:[
         { lbl:()=>'AUDIO: '+(cfg.music?'ON':'OFF'),

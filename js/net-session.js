@@ -40,6 +40,7 @@ function netLobbyEnter(){
     // in-flight invite/accept was a prime cause of dropped connections.
     _netReapDead();                       // only debris (no game, no handshake)
     _netLb.sel = 0; _netLb.msg = ''; _netLb.err = false;
+    netPresenceOpen();
     if(_netOk()){
         _netHello();                                // presence/friends right away
         _netFrRefresh(false);                       // notice peer-side removals here too

@@ -376,21 +376,18 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _netSrvMin=-1;
-    if(_netHelloMs()!==NET_HELLO_LEGACY_MS) throw 'before the first answer the beat must be the shorter one';
-    _applyHello({api:'4.5'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.5: the same version must read as up to date';
+    _applyHello({api:'4.6'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.6: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
     // without it _netOk() is false and both halves of the assertion pass vacuously.
     const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==5 || !netTourneyOk()) throw 'a same-major 4.5 server must open the tournament gate';
-    // The beat is the one contract constant keyed on the minor: 60 s against a 4.5 server
-    // (its online window is 120 s), 30 s against 4.4 and older (60 s window).
-    if(_netHelloMs()!==NET_HELLO_MS || NET_HELLO_MS!==60000) throw 'a 4.5 server must get the 60 s beat';
+    if(netSrvMinor()!==6 || !netTourneyOk()) throw 'a same-major 4.6 server must open the tournament gate';
+    // The beat is a contract constant: 60 s, half the 120 s online window.
+    if(NET_HELLO_MS!==60000) throw 'the contract beat is 60 s';
     _applyHello({api:'4.4'});
     if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.4) must read as up to date';
-    if(netSrvMinor()!==4 || _netHelloMs()!==NET_HELLO_LEGACY_MS || NET_HELLO_LEGACY_MS!==30000) throw 'a 4.4 server, whose window is 60 s, must keep the 30 s beat';
+    if(netSrvMinor()!==4) throw 'a 4.4 server must report minor 4';
     // 4.4 is also what the batched-ICE and pacing features gate on, so the minor a hello
     // reports has to survive an older server rolling back under us.
     _applyHello({api:'4.3'});
@@ -408,13 +405,11 @@ runTest('SMOKE-NET', `
     _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
     if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
     globalThis.fetch=_oFetchT;
-    _applyHello({api:'4.6'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:'4.7'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
-    if(_netHelloMs()!==NET_HELLO_MS) throw 'a newer minor keeps the 60 s beat';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible
     if(!_netApiNewer || netUpdateNotice()!=='UPDATE REQUIRED - PLEASE RELOAD') throw 'a newer major must flag UPDATE REQUIRED and gate online off';
-    if(_netHelloMs()!==NET_HELLO_LEGACY_MS) throw 'a newer MAJOR has no usable minor: the shorter beat';
     _netApiNewer=false; _netApiOutdated=false;
     log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
     cfg.debug=0;
@@ -434,8 +429,16 @@ runTest('SMOKE-NET', `
         // the previous call has not run yet.
         const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='lobby'; _netPollOnce(); };
         _netPace={hold:true};
-        poll();
-        if(!/[?&]wait=9$/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
+        _netFrSince=0; poll();
+        if(!/[?&]wait=9(&|$)/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
+        // Presence rides the poll on a presence screen (4.6): the cursor goes as fs, 0 = read
+        // it whole. Elsewhere nothing is asked for.
+        if(!/[?&]fs=0(&|$)/.test(_url||'')) throw 'a lobby poll must carry the presence cursor, got ' + _url;
+        _netFrSince=777; poll();
+        if(!/[?&]fs=777(&|$)/.test(_url||'')) throw 'the poll must carry the cursor the server gave, got ' + _url;
+        _url=null; _netPollBusy=false; phase='friendId'; _netPollOnce();
+        if(/fs=/.test(_url||'')) throw 'MY ID shows no friend state and must not ask for it, got ' + _url;
+        _netFrSince=0;
         // ...and a HELD poll waits on nothing: it IS the parked slot the gate lets one other
         // request stand beside, so gating it would park the client behind itself for 9s.
         if(_bgP !== undefined) throw 'a held poll must not be sent through the gate, got ' + String(_bgP);
@@ -444,7 +447,7 @@ runTest('SMOKE-NET', `
         // a served one moving anything here would be a second source for a settled number.
         _netPaceOf({pace:{hello_ms:45000, poll_ms:3000, gap_ms:400}});
         poll();
-        if(!/[?&]wait=9$/.test(_url||'')) throw 'a served poll_ms must not move the poll wait, got ' + _url;
+        if(!/[?&]wait=9(&|$)/.test(_url||'')) throw 'a served poll_ms must not move the poll wait, got ' + _url;
         _netPaceOf({pace:{hold:false}});
         poll();
         if(/wait=/.test(_url||'') || _heldArg) throw 'hold:false must withdraw the held poll, got ' + _url;
@@ -590,10 +593,16 @@ runTest('SMOKE-NET', `
         const _oPostG=_netPost, _oPhaseG=phase, _oBusyG=_netHelloBusy;
         let _hb=null;
         _netPost=async (p,b)=>{ if(p.indexOf('hello')>=0) _hb=b; return null; };
-        phase='friends'; _netHelloBusy=false; _netHello();
+        phase='friends'; _netHelloBusy=false; _netFrSince=42; _netHello();
         if(!_hb || _hb.friends_list!==true) throw 'the friends screen must ask for the roster on the hello it already sends';
+        // ...and presence by CURSOR, never by id list (4.6): the server knows the roster.
+        if(_hb.friends_since!==42 || 'friends' in _hb) throw 'the friends screen must ask for the presence delta by cursor, no ids: ' + JSON.stringify(_hb);
         _hb=null; phase='lobby'; _netHelloBusy=false; _netHello();
         if(_hb && _hb.friends_list) throw 'the roster must not be asked for where it is not shown';
+        if(!_hb || _hb.friends_since!==42) throw 'the lobby must ask for the presence delta too';
+        _hb=null; phase='menu'; _netHelloBusy=false; _netHello();
+        if(!_hb || 'friends_since' in _hb || 'friends' in _hb) throw 'the main menu shows no friend state and must ask for none: ' + JSON.stringify(_hb);
+        _netFrSince=0;
         _netPost=_oPostG; phase=_oPhaseG; _netHelloBusy=_oBusyG;
         // (e) ONE adoption path, whichever request paid for the list: names learned, accepted
         // friendships marked, and a screen that never has to know which route it came by.
@@ -935,6 +944,51 @@ runTest('SMOKE-NET', `
     if(_netLb.invite) throw 'larger ID must not open a dialog either';
     if(_netHs.sent!=='00ff00aa') throw 'larger ID keeps waiting for the accept';
     log('mutual invite ok: tie-broken auto-accept');
+
+    // ---- presence deltas (4.6): one landing place, a cursor, a cap that continues at once ----
+    {
+        const _oGetD=_netGet; let _urls=[], _bgD=[];
+        _netGet=async (p,sig,held,bg)=>{ _urls.push(p); _bgD.push(bg); return null; };
+        _netFriendsOnline={}; _netFriendsLat={}; _netFriendsPlaying={}; _netFrSince=0; _netFrPages=0;
+        _netFr.list=[{id:'00ff00aa', state:'accepted', online:false, latency:null}];
+        // A delta entry is the friend's whole state: online, latency, playing and name land
+        // in the maps AND on the roster row the friends screen draws; counters ride along.
+        _netFrApply({ok:true, online:5, playing:2, friends_at:1000,
+                     friends_delta:{'00ff00aa':{online:true, playing:true, latency:31, name:'KAI'},
+                                    '00ff00bb':{online:false, playing:false, latency:null, name:'BOB'}}});
+        if(_netFriendsOnline['00ff00aa']!==true || _netFriendsLat['00ff00aa']!==31 || !netFriendPlaying('00ff00aa')) throw 'an online delta must land whole in the maps';
+        if(_netFriendsOnline['00ff00bb']!==false || _netFriendsLat['00ff00bb']!==null || netFriendPlaying('00ff00bb')) throw 'an offline delta must land whole in the maps';
+        if(_netFr.list[0].online!==true || _netFr.list[0].latency!==31) throw 'the roster row must carry the delta too';
+        if(netFriendName('00ff00aa')!=='KAI') throw 'a delta name must be learned';
+        if(_netCounts.online!==5 || _netCounts.playing!==2) throw 'the counters must ride the same answer';
+        if(_netFrSince!==1000) throw 'the cursor must be the server friends_at, got ' + _netFrSince;
+        if(_urls.length) throw 'friends_more false must not ask for more';
+        // A 204 (or a poll with no delta) changes nothing: the cursor stands.
+        _netFrApply({ok:true, signals:[]}); _netFrApply(null);
+        if(_netFrSince!==1000 || _netFriendsOnline['00ff00aa']!==true) throw 'an empty answer must leave the cursor and the maps alone';
+        // A later delta for the same friend overrides blind: offline wins over the stale online.
+        _netFrApply({ok:true, friends_at:2000, friends_delta:{'00ff00aa':{online:false, playing:true, latency:5, name:'KAI'}}});
+        if(_netFriendsOnline['00ff00aa']!==false || _netFriendsLat['00ff00aa']!==null || netFriendPlaying('00ff00aa')) throw 'a newer delta must override the older state whole';
+        if(_netFrSince!==2000) throw 'the cursor must advance';
+        // friends_more: the cap cut the page. The continuation goes out AT ONCE with the new
+        // cursor, unheld, on the solo lane -- never beside another request of ours.
+        _netFrApply({ok:true, friends_at:3000, friends_more:true, friends_delta:{}});
+        if(_urls.length!==1 || !/poll[.]php[?]id=[0-9a-f]{8}&fs=3000$/.test(_urls[0])) throw 'friends_more must continue at once from the new cursor, got ' + JSON.stringify(_urls);
+        if(_bgD[0]!==NET_BG_SOLO) throw 'the continuation must take the solo lane, got ' + String(_bgD[0]);
+        // ...bounded: a server that never stops saying more gets the next tick, not a hot loop.
+        _urls=[]; _netFrPages=0;
+        for(let i=0;i<20;i++) _netFrApply({ok:true, friends_at:4000+i, friends_more:true, friends_delta:{}});
+        if(_urls.length!==NET_FR_PAGES) throw 'the continuation must be bounded at ' + NET_FR_PAGES + ' pages, sent ' + _urls.length;
+        _netFrApply({ok:true, friends_at:9000, friends_more:false, friends_delta:{}});
+        if(_netFrPages!==0) throw 'a page that fits must reset the continuation budget';
+        // A presence screen opening forgets the cursor: the first read is the whole roster.
+        netPresenceOpen();
+        if(_netFrSince!==0) throw 'opening a presence screen must reset the cursor to 0';
+        _netFrSince=5; netOfflineClear();
+        if(_netFrSince!==0) throw 'going offline must reset the cursor';
+        _netGet=_oGetD; _netFr.list=null; _netFriendsOnline={}; _netFriendsLat={}; _netFriendsPlaying={}; _netFrSince=0; _netFrPages=0;
+        log('presence deltas ok: whole-state entries land in the maps and the roster, cursor follows friends_at, more continues at once on the solo lane, bounded');
+    }
 
     // ---- a stale invite: delivered after its sender gave up, refused on arrival ----
     // The server keeps a signal for its whole online window (120 s from 4.5); the inviter

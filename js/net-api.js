@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 5;   // built against 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it; a 4.4 server keeps the 30 s beat, see _netHelloMs); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 6;   // built against 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -114,10 +114,10 @@ const NET_BURST_TRIES = 10;       // starved-burst retries before the boundary o
                                   // inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer ends the
                                   // match through the liveness path, never through the clock sync.
 // How long a pending invite (sent, received, or accepting) lingers before it goes stale.
-// The server keeps an undelivered signal for its signal TTL (30 s on a 4.4 server, the
-// 120 s online window from 4.5); we give up well before that so the UI resolves to
-// NO ANSWER / clears the dialog. A signal the server still delivers after this window is
-// dead on arrival, and refused by its stamp (_netSigStale).
+// The server keeps an undelivered signal for its signal TTL, the 120 s online window; we
+// give up well before that so the UI resolves to NO ANSWER / clears the dialog. A signal the
+// server still delivers after this window is dead on arrival, and refused by its stamp
+// (_netSigStale).
 const NET_INVITE_STALE_MS = 24000;
 // A signal older than the staleness window when it arrives. `created` is the server's stamp
 // in whole seconds, read against the server clock where we have one and against the wall
@@ -216,12 +216,7 @@ var _netResync = false;
 // same for every client, so they live here as constants. An earlier 4.4 server also sent
 // them in `pace`; they never carried anything but these numbers, and reading them back off
 // the wire only bought a second place for the same value to be wrong.
-const NET_HELLO_MS = 60000;   // between heartbeats: half the 120 s online window of a 4.5 server, so one missed beat never reads as offline
-const NET_HELLO_LEGACY_MS = 30000;   // ...and against a 4.4 server, whose window is 60 s
-// The one contract constant the contract itself keys on the server's minor: 60 s from 4.5,
-// 30 s before it. Read at every re-arm of the beat, so the first answer of a session (minor
-// still unknown = -1, the shorter beat) sets the cadence for the rest of it.
-function _netHelloMs(){ return netSrvMinor() >= 5 ? NET_HELLO_MS : NET_HELLO_LEGACY_MS; }
+const NET_HELLO_MS = 60000;   // between heartbeats: half the 120 s online window, so one missed beat never reads as offline
 const NET_POLL_S   = 9;       // the longest hold poll.php serves, in whole seconds (`wait=`)
 // One thing does depend on the moment, and it is the biggest lever there is: a held poll
 // owns a PHP worker for its whole duration, so a server under pressure withdraws `hold`
@@ -877,8 +872,8 @@ function netDebugInfo(){
 let _netCounts = { online:0, playing:0 };
 let _netFriendsOnline = {};
 let _netFriendsLat = {};
-// Accepted friends currently IN a 1:1, from the same authorization-gated hello block as
-// friends_online. It is the entire discovery surface for spectating: a friend you can
+// Accepted friends currently IN a 1:1, from the same authorization-gated presence delta
+// as the online map. It is the entire discovery surface for spectating: a friend you can
 // watch is a friend the server says is playing right now.
 let _netFriendsPlaying = {};
 // Open tournament lobbies the server announces to us: hosts whose address reaches it the
@@ -889,11 +884,56 @@ let _netTourneys = [];
 // server than 4.0 gate on this rather than on a failed POST.
 let _netSrvMin = -1;
 function netSrvMinor(){ return _netSrvMin; }
+// ---- presence, as the server serves it (4.6): a cursor and deltas ----
+// The cursor is the server's `friends_at`, never our clock. 0 = "I know nothing": every
+// presence screen opens on it, so its first answer carries every accepted friend. A delta
+// entry is a friend's WHOLE current state, so applying one blind is always right and a
+// repeated row costs nothing. No ids go over the wire: the server knows the roster.
+let _netFrSince = 0;
+let _netFrSub = false;      // on a presence screen at the last tick: the edge is a screen opening
+let _netFrPages = 0;        // continuation pages chained off one answer's friends_more
+const NET_FR_PAGES = 8;     // ...bounded: a server that never stops saying "more" gets the next tick
+// The screens with a friend's state on them. MY ID and the tournament lobby show none.
+function _netFrScreen(){ return phase === 'lobby' || phase === 'friends'; }
+// A presence screen opened: read it whole.
+function netPresenceOpen(){ _netFrSince = 0; _netFrSub = true; }
+// THE one place presence lands, whichever request brought it -- a poll's 200 or a hello.
+// A 204 brings nothing and changes nothing: the cursor stands, the next read spans the
+// longer interval.
+function _netFrApply(r){
+    if(!r || typeof r !== 'object') return;
+    if(typeof r.online === 'number') _netCounts = { online:r.online|0, playing:r.playing|0 };
+    const d = r.friends_delta;
+    if(!d || typeof d !== 'object'){ _uiDirty = true; return; }
+    for(const id in d){
+        const e = d[id];
+        if(!e || typeof e !== 'object') continue;
+        const on = e.online === true;
+        _netFriendsOnline[id] = on;
+        _netFriendsLat[id] = (on && typeof e.latency === 'number') ? e.latency : null;
+        _netFriendsPlaying[id] = e.playing === true;
+        if(e.name) _netNameSeen(id, e.name);
+        // The roster row the friends screen draws carries the same two fields.
+        if(_netFr.list) for(const f of _netFr.list) if(f.id === id){ f.online = on; f.latency = _netFriendsLat[id]; }
+    }
+    if(typeof r.friends_at === 'number' && r.friends_at > 0) _netFrSince = r.friends_at;
+    _uiDirty = true;
+    // friends_more: the cap cut the answer short. Continue AT ONCE with the cursor just given,
+    // never at the next tick -- a friend on the page not yet read is a friend shown wrong.
+    if(r.friends_more === true){ if(_netFrPages < NET_FR_PAGES){ _netFrPages++; _netFrMore(); } }
+    else _netFrPages = 0;
+}
+// One unheld poll on the solo lane: second in line behind whatever is out, never beside it.
+async function _netFrMore(){
+    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + '&fs=' + _netFrSince, undefined, false, NET_BG_SOLO);
+    if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
+    _netFrApply(r);
+}
 // Enabling STRICTLY OFFLINE stops the heartbeat, so presence stops being refreshed and
 // would otherwise FREEZE at its last-known values -- friends left showing "online", a live-
 // looking player count. Drop it all now so offline reads as offline, not as a stale snapshot.
 function netOfflineClear(){
-    _netCounts = { online:0, playing:0 };
+    _netCounts = { online:0, playing:0 }; _netFrSince = 0;
     _netFriendsOnline = {}; _netFriendsLat = {}; _netFriendsPlaying = {}; _netTourneys = []; _netSrvMin = -1;
     if(_netFr.list) for(const f of _netFr.list){ f.online = false; f.latency = null; }
     _uiDirty = true;
@@ -915,7 +955,9 @@ async function _netHello(){
     { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }
     if(_netLat.pending && _netLat.value != null) body.latency = _netLat.value;   // the mandated report
     if(_netSess && _netSess.game) body.duel_with = _netSess.peer;
-    if(phase === 'lobby' || phase === 'friends') body.friends = getFriends().slice(0,64);
+    // Presence rides a CURSOR (4.6): no ids, the server serves the caller's accepted friends
+    // whose state changed after it. Asked for only where a friend's state is on screen.
+    if(_netFrScreen()) body.friends_since = _netFrSince;
     // The ROSTER, which the friends_* maps above are not: they answer for ids we already
     // named, this is who our friends ARE -- pending rows, outgoing rows, names for ids this
     // device has never seen. Asked for only on the screen that shows it, and only so that
@@ -982,17 +1024,13 @@ async function _netHello(){
         _netDbgSrv = r.debug;
     }
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
-    _netCounts = { online:r.online|0, playing:r.playing|0 };
-    if(r.friends_online) _netFriendsOnline = r.friends_online;
-    _netFriendsPlaying = r.friends_playing || {};   // absent on a pre-4.1 server: nobody is watchable
+    _netFrApply(r);   // the counters, and the presence delta where one was asked for
     if(body.tourneys) _netTourneys = Array.isArray(r.tourneys) ? r.tourneys : [];
     // FEATURE-DETECTED, never version-gated: the roster on hello is a re-release of 4.4,
     // so a server answering "4.4" may or may not carry it. It answered once = it answers,
     // and the periodic friend.php list stands down. It never answered = that call stays,
     // which is the whole reason this is a fallback and not a minor check.
     if(body.friends_list && Array.isArray(r.friends)){ _netFrHello = true; _netFrAdopt(r.friends, false); }
-    if(r.friends_latency) _netFriendsLat = r.friends_latency;
-    if(r.friends_name) for(const k in r.friends_name) _netNameSeen(k, r.friends_name[k]);   // authorization-gated: accepted friends only
     _netFrFlushRemovals();
     (r.signals||[]).forEach(_netOnSignal);
     _uiDirty = true;
@@ -1100,10 +1138,14 @@ async function _netPollOnce(){
     // other request, and holding it back would only park the mailbox itself. An UNHELD one
     // is an ordinary request and takes the solo lane like any other -- second in line rather
     // than beside, which is the whole rule.
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : ''),
+    // fs: on a presence screen the poll's return carries the friend delta, the counters and
+    // the hold decision (4.6), so those screens send no hello of their own.
+    const fs = _netFrScreen() ? '&fs=' + _netFrSince : '';
+    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : '') + fs,
                             _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
+    if(r){ _netPaceOf(r); _netFrApply(r); }
     // The mailbox was down and is back. A push may have died in between (the server drops an
     // undelivered signal at its TTL), and only the whole picture recovers one: hand a held
     // tournament the doubt -- AFTER the drain above, so what this answer carried is already
@@ -1122,16 +1164,16 @@ if(_netTimers) setInterval(()=>{
     // A held poll answers within 8s; anything past 15s is a zombie (frozen tab,
     // dead socket). Cut it loose so the loop can breathe again.
     if(_netPollBusy && Date.now() - _netPollBusyAt > 15000) _netPollAbortNow();
-    // The lobby's friend dots + counters live in the hello response: refresh
-    // them every 5s while the screen is open (single-flight via _netHelloBusy).
-    // The tournament lobby belongs in this set for the same reason: its announce list
-    // rides on hello and NOTHING else, so on the heartbeat alone a tournament
-    // somebody just created stayed invisible for half a minute.
-    if((phase === 'lobby' || phase === 'friends' || phase === 'friendId' || phase === 'tourneyLobby') && _netPollTick % 5 === 0) _netHello();   // keep auto_accept fresh on the QR screen
-    // The roster rides that heartbeat wherever the server serves it (friends_list above).
-    // Where it does not, the list is still a second request -- but on its OWN tick, never
-    // the heartbeat's: two requests leaving in one tick is the collision this pays for.
-    if(phase === 'friends' && !_netFrHello && _netPollTick % 5 === 2) _netFrRefresh(false);
+    // A presence screen just opened by whatever route: read it whole (cursor 0).
+    const sub = _netFrScreen();
+    if(sub && !_netFrSub) _netFrSince = 0;
+    _netFrSub = sub;
+    // The lobby and friends screens refresh out of the poll they hold (fs, 4.6): friend
+    // state, counters and hold ride its return, and the 60 s beat is their only hello. The
+    // tournament lobby is the one screen still on a hello tick: its announce list rides
+    // hello and NOTHING else, and on the heartbeat alone a tournament somebody just created
+    // stayed invisible for a minute.
+    if(phase === 'tourneyLobby' && _netPollTick % 5 === 0) _netHello();
     _netPollOnce();
 }, 1000);
 
@@ -1157,6 +1199,7 @@ if(typeof document !== 'undefined' && document.addEventListener){
         // in the offset the whole lockstep timeline hangs from. Heartbeat first (it is what
         // tells the server we are back), the anchor second, once the wire is our own again;
         // the roster comes with the heartbeat or on its own tick above.
+        _netFrSince = 0;   // whatever presence we held is as old as the sleep: read it whole
         if(_netOk()) _netHello().then(()=>_netTimeSync(true), ()=>_netTimeSync(true));
         // A screen-off/background almost always kills the p2p transport (ICE times out while
         // suspended), but performance.now() and the timers freeze -- so the silence timer can
@@ -1306,8 +1349,17 @@ function netFriendVerify(id){
         return { ok:true, state:st };
     }, () => ({ offline:true }));
 }
+// The MY ID screen opened: one hello now, so the server arms auto-accept for the QR about
+// to be shown instead of waiting for the beat (up to a minute). The screen's own poll
+// carries the request itself the moment it lands; the client-side accept is what answers
+// it, this only lets the server accept on our behalf meanwhile.
+function netMyIdEnter(){
+    _netMyIdAt = Date.now();
+    if(_netOk()) _netHello();
+}
 function netFriendsEnter(){
     _netFr.sel = 0; _netFr.confirm = null; _netFr.msg = '';
+    netPresenceOpen();
     // The screen wants the roster NOW, not up to 5s from now, so something is sent either
     // way -- but where the server serves the roster on the heartbeat, that something is the
     // heartbeat, which brings the presence maps with it for the same one request. friend.php
@@ -1426,7 +1478,7 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
     });
 }
 
-// ---- boot: the heartbeat (_netHelloMs), always-on while online is allowed. First one after
+// ---- boot: the NET_HELLO_MS heartbeat, always-on while online is allowed. First one after
 // a short delay so boot itself never touches the network path. All soft-fail. ----
 // The beat's PHASE is load time and nothing else: each one re-arms off the previous, never
 // off Date.now() and never off the shared server clock, so two clients sit on the same
@@ -1434,7 +1486,7 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
 // of that; it bought nothing, because what separates a roomful of clients is the gate they
 // all queue at (NET_GAP_MS), which spaces the calls rather than the sessions making them.
 if(_netTimers){
-    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, _netHelloMs()); })();
+    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, NET_HELLO_MS); })();
     setTimeout(_netHello, 3000);
     setTimeout(()=>{ if(_netOk()) _netFrRefresh(true); }, 3500);   // contract: reconcile the local friend list vs the server at startup
     // Sync the clock DURING the coin-drop splash so menu music can start already aligned to

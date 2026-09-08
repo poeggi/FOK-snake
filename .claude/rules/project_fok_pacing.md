@@ -48,6 +48,15 @@ requests per client - and each half is useless without the other.
   friend list go first, then _netTimeSync - ONE hello, and the sweep measures
   on a wire those two have cleared instead of racing a sample against a hello
   about to dirty it. The latency figure rides the next hello (_netLat.pending).
+- PRESENCE is a cursor and deltas (server 4.6): no friend ids on the wire,
+  `friends_since` on hello / `fs` on the poll, the answer's `friends_delta` is
+  each changed friend's WHOLE state, `friends_at` the next cursor (never our
+  clock), `friends_more` = continue at once (unheld, solo lane, bounded by
+  NET_FR_PAGES). ONE landing place, _netFrApply, for both endpoints; it also
+  takes the counters. Cursor 0 on every presence-screen opening
+  (netPresenceOpen + the tick's edge), on foreground and on offline. A 204
+  leaves the cursor alone. The lobby and friends screens send no hello of
+  their own any more; MY ID shows no friend state and asks for none.
 - Self-check: q_ms is stored with the in-flight count at the time of the
   reading, so netSelfStacked() separates the host's load from our own overlap.
 - The item queue stands aside ONCE while a duel forms, never in a loop - a
@@ -103,19 +112,17 @@ requests per client - and each half is useless without the other.
 
 ## The beat is a contract constant
 
-- pace on hello is {hold} ONLY. The beat - heartbeat 60 s against a 4.5 server
-  (half its 120 s online window; 30 s against 4.4, whose window is 60 s - the
-  one number the contract itself keys on the minor, read by _netHelloMs() at
-  every re-arm), poll wait 9 s, gap 100 ms between a client's own requests - is
+- pace on hello is {hold} ONLY. The beat - heartbeat 60 s (half the 120 s
+  online window), poll wait 9 s, gap 100 ms between a client's own requests - is
   a CONTRACT CONSTANT (docs/API.md Pacing on the server side): never on the wire,
   never a setting. Nothing about the beat follows load; interval-stretching
   under load was removed (its ceiling exceeded the online window and made
   presence flicker).
 - Client side: _netPace is {hold:true} and nothing else; the three intervals are
-  NET_HELLO_MS (NET_HELLO_LEGACY_MS against 4.4) / NET_POLL_S / NET_GAP_MS. A
-  signal the server still delivers after NET_INVITE_STALE_MS (its TTL is the
-  120 s window from 4.5) is refused on arrival by its created stamp
-  (_netSigStale). hello_ms / poll_ms / gap_ms from an
+  NET_HELLO_MS / NET_POLL_S / NET_GAP_MS. No 30 s fallback for a 4.4 server:
+  the client beats 60 s, full stop (decided 2026-09-08). A signal the server
+  still delivers after NET_INVITE_STALE_MS (its TTL is the 120 s window) is
+  refused on arrival by its created stamp (_netSigStale). hello_ms / poll_ms / gap_ms from an
   older 4.4 server are IGNORED - never adopted, never compensated for locally.
 - The heartbeat's PHASE is page load time and nothing else - each beat re-arms
   off the previous, never off Date.now() and never off the server clock;
@@ -158,5 +165,7 @@ carrying one do not stand something local in its place.
   Content-Type). The preflight no longer costs an FPM worker: Apache answers
   OPTIONS on /api/ without starting PHP (server 1.4.12), so what is left to win
   is one round trip on a cold start, not a slice.
-- The 5 s screen tick on lobby/friends/tourney-lobby screens is not in the
-  contract.
+- The tournament lobby still sends a hello every 5 s for the ANNOUNCE LIST
+  (`tourneys`), which the 4.6 poll does not carry. Putting `tourneys` on the
+  poll's `fs` return would retire the last screen tick; server-side, needs an
+  ask.

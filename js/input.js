@@ -253,7 +253,7 @@ const UI_INPUT = {
                 if(typeof netTourneyOk!=='function' || !netTourneyOk()){ Snd.sfxPlay('fail',cfg.music); _duelMsg=netOffline()?'OFFLINE MODE (SETTINGS > NETWORK)':'TOURNAMENTS UNAVAILABLE'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='tourneyLobby'; tourneyEnter(); }
             }
-            else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; }
+            else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; netMyIdEnter(); }
             else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
             else if(duelSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
             else this.back();   // BACK row (like drawSettings)
