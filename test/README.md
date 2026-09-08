@@ -27,7 +27,9 @@ full regression coverage still gates every deploy:
                                  and the API 4.0 item registry (test/items-live.js).
                                  Needs the network and writes to the real database under
                                  the project's fixed test ids, so it gates nothing -- run
-                                 it by hand after a server deploy.
+                                 it by hand after a server deploy. Beside it, on
+                                 demand and in no tier, node test/hello-live.js
+                                 measures what one hello round trip costs there.
 
 RUN `--full` LOCALLY after any significant netcode or sim rework (and before a release).
 The fast tier proves each netcode PATH still works; the regression tier plays many long,
