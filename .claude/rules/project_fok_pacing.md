@@ -65,6 +65,9 @@ requests per client - and each half is useless without the other.
   (netPresenceOpen + the tick's edge), on foreground and on offline. A 204
   leaves the cursor alone. The lobby and friends screens send no hello of
   their own any more; MY ID shows no friend state and asks for none.
+- index.html preconnects the API origin (crossorigin = the credential-less pool
+  fetch() draws from), so the TLS + h2 handshake runs while the scripts load and
+  the boot hello finds the connection open. Once per page load, nothing after.
 - Self-check: q_ms is stored with the in-flight count at the time of the
   reading, so netSelfStacked() separates the host's load from our own overlap.
 - The item queue stands aside ONCE while a duel forms, never in a loop - a

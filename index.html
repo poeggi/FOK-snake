@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FOK - Snake</title>
     <link rel="manifest" href="manifest.json">
+    <!-- The API origin (NET_BASE in js/net-api.js). The TLS + HTTP/2 handshake runs while the
+         scripts load, so the boot hello finds the connection open. crossorigin: fetch() sends
+         no credentials to this origin, and that is the connection pool it draws from. -->
+    <link rel="preconnect" href="https://fok-server.poggensee.it" crossorigin>
     <meta name="theme-color" content="#07070e">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
