@@ -13,7 +13,7 @@ requests per client - and each half is useless without the other.
   byte. Coalescing N requests into one saves (N-1) slices; a bytes argument was
   never the case.
 - The host serves ~20-21 concurrent PHP requests; a HELD long poll owns a worker
-  for its whole wait (one 8-player lobby holds ~8). The steady 30 s heartbeat is
+  for its whole wait (one 8-player lobby holds ~8). The steady heartbeat is
   not the problem; bursts on top of it are (a round board wakes 8 clients in the
   same ms).
 - Being PAST the gate is not the same as going out together: two exempt calls in
@@ -103,14 +103,19 @@ requests per client - and each half is useless without the other.
 
 ## The beat is a contract constant
 
-- pace on hello is {hold} ONLY. The beat - heartbeat 30 s (half the 60 s online
-  window), poll wait 9 s, gap 100 ms between a client's own requests - is a
-  CONTRACT CONSTANT (docs/API.md Pacing on the server side): never on the wire,
+- pace on hello is {hold} ONLY. The beat - heartbeat 60 s against a 4.5 server
+  (half its 120 s online window; 30 s against 4.4, whose window is 60 s - the
+  one number the contract itself keys on the minor, read by _netHelloMs() at
+  every re-arm), poll wait 9 s, gap 100 ms between a client's own requests - is
+  a CONTRACT CONSTANT (docs/API.md Pacing on the server side): never on the wire,
   never a setting. Nothing about the beat follows load; interval-stretching
   under load was removed (its ceiling exceeded the online window and made
   presence flicker).
 - Client side: _netPace is {hold:true} and nothing else; the three intervals are
-  NET_HELLO_MS / NET_POLL_S / NET_GAP_MS. hello_ms / poll_ms / gap_ms from an
+  NET_HELLO_MS (NET_HELLO_LEGACY_MS against 4.4) / NET_POLL_S / NET_GAP_MS. A
+  signal the server still delivers after NET_INVITE_STALE_MS (its TTL is the
+  120 s window from 4.5) is refused on arrival by its created stamp
+  (_netSigStale). hello_ms / poll_ms / gap_ms from an
   older 4.4 server are IGNORED - never adopted, never compensated for locally.
 - The heartbeat's PHASE is page load time and nothing else - each beat re-arms
   off the previous, never off Date.now() and never off the server clock;

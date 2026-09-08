@@ -224,6 +224,8 @@ async function finish(m, plan){
     // From here this client hears nothing: no result, no scoreboard, no sheet. Whatever it
     // ends up knowing, it learned from the state read-back.
     if(plan.miss != null) srv.mute(IDS[plan.miss], true);
+    // ...and this one hears all of it LATE: nothing until it is back, then everything at once.
+    if(plan.hold != null) srv.mute(IDS[plan.hold], 'hold');
     const sc = plan.score || [7, 4];
     if(plan.mode === 'walkout'){
         // ESC over the match, then YES: the way a person leaves. It owes a forfeit at
@@ -269,7 +271,7 @@ async function finish(m, plan){
     // A settled match is off the board and nobody is still standing on the ceremony -- except
     // a client whose mailbox is down, which learns of it when the mailbox returns.
     for(let i = 0; i < N; i++){
-        if(plan.miss === i) continue;
+        if(plan.miss === i || plan.hold === i) continue;
         A(C[i].phase() !== 'tourneyCeremony' || srv.T.cursor,
           '2 ' + m.nid + ': ' + NAMES[i] + ' is still waiting on a ceremony for a finished tournament');
     }
@@ -295,7 +297,7 @@ async function passBreak(opts){
     // -- the same board reached everyone, and everyone can draw it (a client whose mailbox is
     //    down sees it when the mailbox returns, asserted below) --
     for(let i = 0; i < N; i++){
-        if(opts.missed === i) continue;
+        if(opts.missed === i || opts.held === i) continue;
         const b = C[i].brk(), t = C[i].tt();
         A(!!b && b.done === b0.done && b.next === b0.next,
           'B: ' + NAMES[i] + ' holds ' + JSON.stringify(b && [b.done, b.next]) + ' instead of the board everyone else has');
@@ -338,8 +340,9 @@ async function passBreak(opts){
           'B: ' + NAMES[i] + ' left its match onto ' + C[i].phase() + ' instead of the tournament');
 
     // -- a client whose mailbox is down sees nothing of this: no result, no board --
-    if(opts.missed != null){
-        const mi = opts.missed, t = C[mi].tt();
+    for(const mi of [opts.missed, opts.held]){
+        if(mi == null) continue;
+        const t = C[mi].tt();
         A(!t.last || t.last.nid !== opts.node,
           'B: the muted client got a result signal after all -- there is nothing left to test');
         A(C[mi].brk() === null,
@@ -393,7 +396,7 @@ async function passBreak(opts){
     A(!srv.T.brk, 'B: the board is still up after the host cleared it');
     A(srv.T.cursor === nextNid, 'B: clearing the board dealt ' + srv.T.cursor + ' instead of ' + nextNid);
     for(let i = 0; i < N; i++){
-        if(opts.missed === i) continue;              // deaf by design, see below
+        if(opts.missed === i || opts.held === i) continue;   // deaf by design, see below
         A(C[i].brk() === null, 'B: ' + NAMES[i] + ' is still holding a board the host cleared');
         A(C[i].phase() !== 'tourneyRound', 'B: ' + NAMES[i] + ' is still sitting on a cleared board');
     }
@@ -408,6 +411,21 @@ async function passBreak(opts){
         A(C[mi].tt().cursor === srv.T.cursor, 'B: the muted client never picked the next match up');
         rows.push('B deaf client: with its mailbox down through the break, one client saw no board at '
                   + 'all and picked the next match up from the one read its return provoked');
+    }
+    if(opts.held != null){
+        // A client whose mailbox held everything through the break: the result, the board,
+        // the sheet that ended it, delivered in one drain on the return, ahead of the read
+        // that return provokes. Replayed in order they must land it where the field is: on
+        // the next match, holding no board, with the server's standings.
+        const hd = opts.held;
+        srv.mute(IDS[hd], false);
+        await pump(1);
+        A(C[hd].brk() === null, 'B: the held client is still holding a board the host cleared');
+        A(C[hd].tt().cursor === srv.T.cursor, 'B: the held client never picked the next match up');
+        A(JSON.stringify(C[hd].tt().standings.map(x => x.id)) === JSON.stringify(srv.T.standings.map(x => x.id)),
+          'B: the held client ranks the table differently from the server after the late drain');
+        rows.push('B held client: with its mailbox holding everything through the break, one client got '
+                  + 'the result, the board and the sheet in one late drain and still landed on the next match');
     }
     rows.push('B break ' + b0.done + '->' + b0.next + ': ' + b0.rows.length + ' rows cut at ' + b0.of
               + ' through, ' + b0.matches + ' match(es) at level ' + b0.lvl + '/' + b0.hm + ' hearts, '
@@ -546,8 +564,12 @@ async function passBreak(opts){
     // Somebody who is not playing this one loses their signal stream for the whole of it.
     let deaf = 0;
     while(deaf === ko.ia || deaf === ko.ib || IDS[deaf] === srv.T.host) deaf++;
-    await finish(ko, { win:0, score:[9, 3], miss:deaf });
-    await passBreak({ missed:deaf, node:ko.nid, played:[ko.ia, ko.ib] });
+    // ...and somebody else hears all of it late, in one drain, when their mailbox returns.
+    let held = deaf + 1;
+    while(held === ko.ia || held === ko.ib || IDS[held] === srv.T.host) held++;
+    A(held < N, '9: no client left to hold a mailbox for');
+    await finish(ko, { win:0, score:[9, 3], miss:deaf, hold:held });
+    await passBreak({ missed:deaf, held, node:ko.nid, played:[ko.ia, ko.ib] });
     const fin = await node({});
     A(fin.nid === 'final', '9: the bracket reached ' + fin.nid + ' instead of a final');
     A(srv.T.nodes.final.hm === 3, '9: the final is at ' + srv.T.nodes.final.hm + ' hearts, not 3');

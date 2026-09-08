@@ -376,13 +376,21 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _applyHello({api:'4.4'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.4: the same version must read as up to date';
+    _netSrvMin=-1;
+    if(_netHelloMs()!==NET_HELLO_LEGACY_MS) throw 'before the first answer the beat must be the shorter one';
+    _applyHello({api:'4.5'});   // the version this client is built against
+    if(_netApiNewer||_netApiOutdated) throw 'built against 4.5: the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
     // without it _netOk() is false and both halves of the assertion pass vacuously.
     const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==4 || !netTourneyOk()) throw 'a same-major 4.4 server must open the tournament gate';
+    if(netSrvMinor()!==5 || !netTourneyOk()) throw 'a same-major 4.5 server must open the tournament gate';
+    // The beat is the one contract constant keyed on the minor: 60 s against a 4.5 server
+    // (its online window is 120 s), 30 s against 4.4 and older (60 s window).
+    if(_netHelloMs()!==NET_HELLO_MS || NET_HELLO_MS!==60000) throw 'a 4.5 server must get the 60 s beat';
+    _applyHello({api:'4.4'});
+    if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.4) must read as up to date';
+    if(netSrvMinor()!==4 || _netHelloMs()!==NET_HELLO_LEGACY_MS || NET_HELLO_LEGACY_MS!==30000) throw 'a 4.4 server, whose window is 60 s, must keep the 30 s beat';
     // 4.4 is also what the batched-ICE and pacing features gate on, so the minor a hello
     // reports has to survive an older server rolling back under us.
     _applyHello({api:'4.3'});
@@ -400,11 +408,13 @@ runTest('SMOKE-NET', `
     _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
     if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
     globalThis.fetch=_oFetchT;
-    _applyHello({api:'4.5'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:'4.6'});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
+    if(_netHelloMs()!==NET_HELLO_MS) throw 'a newer minor keeps the 60 s beat';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible
     if(!_netApiNewer || netUpdateNotice()!=='UPDATE REQUIRED - PLEASE RELOAD') throw 'a newer major must flag UPDATE REQUIRED and gate online off';
+    if(_netHelloMs()!==NET_HELLO_LEGACY_MS) throw 'a newer MAJOR has no usable minor: the shorter beat';
     _netApiNewer=false; _netApiOutdated=false;
     log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
     cfg.debug=0;
@@ -925,6 +935,25 @@ runTest('SMOKE-NET', `
     if(_netLb.invite) throw 'larger ID must not open a dialog either';
     if(_netHs.sent!=='00ff00aa') throw 'larger ID keeps waiting for the accept';
     log('mutual invite ok: tie-broken auto-accept');
+
+    // ---- a stale invite: delivered after its sender gave up, refused on arrival ----
+    // The server keeps a signal for its whole online window (120 s from 4.5); the inviter
+    // stops waiting at NET_INVITE_STALE_MS. What arrives after that is answered by nobody:
+    // no dialog, and no decline either -- the sender stopped listening long ago.
+    phase='lobby'; _netHsClear(); _netLb.invite=null; _netLb.msg='';
+    _netSync={ofs:null, rtt:-1, at:0}; _netDbg.srvOfs=0;   // no server clock: the wall clock reads the stamp
+    const _nowS=Math.floor(Date.now()/1000);
+    if(!_netSigStale({created:_nowS-1000})) throw 'a signal stamped 1000 s ago must read as stale';
+    if(_netSigStale({created:_nowS}) || _netSigStale({}) || _netSigStale({created:0})) throw 'a fresh, unstamped or zero-stamped signal must never read as stale';
+    const _oSigS=_netSignal; let _declined=0;
+    _netSignal=(to,type)=>{ if(type==='decline') _declined++; return Promise.resolve({json:null}); };
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS-1000});
+    if(_netLb.invite) throw 'a stale invite must not open a dialog';
+    if(_declined) throw 'a stale invite must not be declined either';
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS});
+    if(!_netLb.invite) throw 'a fresh stamped invite must still open the dialog';
+    _netLb.invite=null; _netSignal=_oSigS;
+    log('stale invite ok: refused on arrival by its stamp, fresh and unstamped ones unaffected');
 
     // ---- undelivered receipt: an attempt the peer never collected fails FAST ----
     phase='lobby'; _netHsClear(); _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netLb.msg='';

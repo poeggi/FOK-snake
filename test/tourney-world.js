@@ -280,7 +280,10 @@ function mkServer(opts){
         name(id, n){ names[id] = n; },
         // A client whose signals stop arriving -- a dropped poll, a backgrounded tab, a
         // reload. Everything it learns after this it has to learn from the state read-back.
-        mute(id, on){ if(on) muted[id] = 1; else delete muted[id]; },
+        // on = true drops what the mailbox holds while it is down (a server whose signal TTL
+        // is shorter than the outage); 'hold' keeps it and delivers all of it on the return
+        // (a server whose TTL outlasts the outage: the 120 s online window from 4.5).
+        mute(id, on){ if(on) muted[id] = on === 'hold' ? 'hold' : 1; else delete muted[id]; },
         deadlines, board,
         // An operator clearing a frozen node from the admin surface.
         adminClear(nid, winner){ const nd = T.nodes[nid]; nd.state = 'live'; settle(nid, winner, false, nd.score || [0, 0]); },
@@ -289,11 +292,12 @@ function mkServer(opts){
                 const id = String(body.id || '');
                 // The drain carries the deadlines, exactly like the server's pulse (1.4.16).
                 deadlines();
-                // Muted = the mailbox is DOWN: the drain fails outright, as a dead poll does,
-                // and what was queued meanwhile is gone (the server drops an undelivered
-                // signal after 30s). Everything this client learns after coming back, it
-                // learns from the one state read the return provokes.
-                if(muted[id]){ out[id] = []; return bad(503, 'mailbox down'); }
+                // Muted = the mailbox is DOWN: the drain fails outright, as a dead poll does.
+                // What was queued meanwhile is gone (the server drops an undelivered signal at
+                // its TTL) or, with 'hold', kept and handed over in one drain on the return
+                // (a TTL that outlasts the outage). Either way the return provokes one state
+                // read, and a held backlog lands in the same drain, ahead of it.
+                if(muted[id]){ if(muted[id] !== 'hold') out[id] = []; return bad(503, 'mailbox down'); }
                 const sigs = out[id] || [];
                 out[id] = [];
                 const r = { ok:true, api:'4.3', now:Date.now(), online:Math.max(1, T.players.length),

@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 4;   // built against 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 5;   // built against 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it; a 4.4 server keeps the 30 s beat, see _netHelloMs); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -114,9 +114,21 @@ const NET_BURST_TRIES = 10;       // starved-burst retries before the boundary o
                                   // inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer ends the
                                   // match through the liveness path, never through the clock sync.
 // How long a pending invite (sent, received, or accepting) lingers before it goes stale.
-// The server drops undelivered signals at 30s; we give up a touch sooner so the UI resolves
-// to NO ANSWER / clears the dialog while the peer could, in theory, still collect it.
+// The server keeps an undelivered signal for its signal TTL (30 s on a 4.4 server, the
+// 120 s online window from 4.5); we give up well before that so the UI resolves to
+// NO ANSWER / clears the dialog. A signal the server still delivers after this window is
+// dead on arrival, and refused by its stamp (_netSigStale).
 const NET_INVITE_STALE_MS = 24000;
+// A signal older than the staleness window when it arrives. `created` is the server's stamp
+// in whole seconds, read against the server clock where we have one and against the wall
+// clock plus the offset the last hello measured where we do not. No stamp = never stale.
+function _netSigStale(sig){
+    const c = sig && sig.created;
+    if(typeof c !== 'number' || !(c > 0)) return false;
+    const p = typeof netPts === 'function' ? netPts() : null;
+    const srv = p != null ? p : Date.now() + (_netDbg.srvOfs || 0);
+    return srv - c * 1000 > NET_INVITE_STALE_MS;
+}
 // Silence ladder (wall-clock ms, derived from the 16-tick heartbeat -- something should
 // arrive every ~267ms). Wall-clock, NOT ticks: a suspended tab freezes simTick too, so only
 // real elapsed time reveals the gap on the side that was asleep.
@@ -204,7 +216,12 @@ var _netResync = false;
 // same for every client, so they live here as constants. An earlier 4.4 server also sent
 // them in `pace`; they never carried anything but these numbers, and reading them back off
 // the wire only bought a second place for the same value to be wrong.
-const NET_HELLO_MS = 30000;   // between heartbeats: half the 60s online window, so one missed beat never reads as offline
+const NET_HELLO_MS = 60000;   // between heartbeats: half the 120 s online window of a 4.5 server, so one missed beat never reads as offline
+const NET_HELLO_LEGACY_MS = 30000;   // ...and against a 4.4 server, whose window is 60 s
+// The one contract constant the contract itself keys on the server's minor: 60 s from 4.5,
+// 30 s before it. Read at every re-arm of the beat, so the first answer of a session (minor
+// still unknown = -1, the shorter beat) sets the cadence for the rest of it.
+function _netHelloMs(){ return netSrvMinor() >= 5 ? NET_HELLO_MS : NET_HELLO_LEGACY_MS; }
 const NET_POLL_S   = 9;       // the longest hold poll.php serves, in whole seconds (`wait=`)
 // One thing does depend on the moment, and it is the biggest lever there is: a held poll
 // owns a PHP worker for its whole duration, so a server under pressure withdraws `hold`
@@ -381,7 +398,7 @@ async function netBgFetch(path, opt){
 // Every caller ignored the result of this, so the server REFUSING a signal was
 // indistinguishable from success: a 403 (no accepted friendship), a 400 (our clock
 // drifted ahead of the server's), a 503 (relay full) or a plain blip all vanished
-// while the UI sat on "INVITED - WAITING" until the 30s timeout. Failures are now
+// while the UI sat on "INVITED - WAITING" until the staleness timeout. Failures are now
 // logged in the debug overlay, and the invite path reports them to the user.
 async function _netSignal(to, type, payload){
     _netSigLog('> '+type+' '+String(to).slice(0,4));   // debug overlay
@@ -856,7 +873,7 @@ function netDebugInfo(){
              counts:_netCounts };
 }
 
-// ---- heartbeat: the one periodic request (presence + signal mailbox, ~30s) ----
+// ---- heartbeat: the one periodic request (presence + signal mailbox, ~60 s) ----
 let _netCounts = { online:0, playing:0 };
 let _netFriendsOnline = {};
 let _netFriendsLat = {};
@@ -932,7 +949,7 @@ async function _netHello(){
     const r = await _netPost('/api/hello.php', body, true);
     _netHelloBusy = false;
     if(r){ _netDbg.rtt = performance.now() - t0; if(r.now) _netDbg.srvOfs = r.now + _netDbg.rtt/2 - Date.now(); }   // now = server PTS in ms
-    // Undelivered signals expire server-side after 30s; we bail a bit sooner
+    // Undelivered signals expire server-side at the signal TTL; we bail well before that
     // (NET_INVITE_STALE_MS): a sent invite -> NO ANSWER, a received dialog clears.
     if(_netHs.sent && Date.now() - _netHs.sentAt > NET_INVITE_STALE_MS){ _netHs.sent = null; _netLb.msg = 'NO ANSWER'; _uiDirty = true; }
     if(_netLb.invite && Date.now() - (_netLb.invite.at||0) > NET_INVITE_STALE_MS){ _netLb.invite = null; _uiDirty = true; }
@@ -989,7 +1006,7 @@ let _netPollTick = 0;
 function _netPollDue(){
     // A match still needs the mailbox, at a fifth of the rate. A tournament one has to have
     // it -- roles sheets, patches and the result of OUR OWN node all arrive as signals, and
-    // an undelivered one expires in 30s -- and ANY of them can be asked to be watched, which
+    // an undelivered one expires at the server's signal TTL -- and ANY of them can be asked to be watched, which
     // is the same mailbox and the one leg of the watch handshake that has nowhere else to
     // arrive. A duel that never polls is a duel nobody can ever start watching.
     if(_netSess && _netSess.game && !_netSess.reconnecting){
@@ -1066,7 +1083,7 @@ async function _netPollOnce(){
     // request, nine times as many of them, and the count in flight is the thing the whole
     // pacing contract is about. So when we wanted to hold and were not allowed to, read the
     // mailbox where the hold's answer would have landed instead -- "poll without waiting and
-    // lean on the heartbeat", still well inside an undelivered signal's 30s life.
+    // lean on the heartbeat", still well inside an undelivered signal's life.
     //
     // ONLY while merely browsing, which is also the only tier the server withdraws the hold
     // from first. Anything with a handshake in flight keeps the 1s tick: the offer ladder
@@ -1088,7 +1105,7 @@ async function _netPollOnce(){
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
     // The mailbox was down and is back. A push may have died in between (the server drops an
-    // undelivered signal after 30s), and only the whole picture recovers one: hand a held
+    // undelivered signal at its TTL), and only the whole picture recovers one: hand a held
     // tournament the doubt -- AFTER the drain above, so what this answer carried is already
     // in. Edge-triggered: once per outage, never per failure.
     if(!r) _netPollDown = true;
@@ -1108,7 +1125,7 @@ if(_netTimers) setInterval(()=>{
     // The lobby's friend dots + counters live in the hello response: refresh
     // them every 5s while the screen is open (single-flight via _netHelloBusy).
     // The tournament lobby belongs in this set for the same reason: its announce list
-    // rides on hello and NOTHING else, so on the 30s heartbeat alone a tournament
+    // rides on hello and NOTHING else, so on the heartbeat alone a tournament
     // somebody just created stayed invisible for half a minute.
     if((phase === 'lobby' || phase === 'friends' || phase === 'friendId' || phase === 'tourneyLobby') && _netPollTick % 5 === 0) _netHello();   // keep auto_accept fresh on the QR screen
     // The roster rides that heartbeat wherever the server serves it (friends_list above).
@@ -1158,7 +1175,7 @@ if(typeof addEventListener === 'function') addEventListener('online', ()=>{ if(t
 
 // ---- Unload: reload / tab close / browser quit. Every timeout we have is a JS
 // timer that dies with the page, so a leaving client can only be polite on the
-// way out -- otherwise the peer waits for ITS timeout (3s in-game, 30s mid-
+// way out -- otherwise the peer waits for ITS timeout (3s in-game, the staleness window mid-
 // handshake). A normal fetch() is cancelled the instant the page goes away;
 // sendBeacon is the one send the browser still delivers after teardown.
 //
@@ -1409,7 +1426,7 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
     });
 }
 
-// ---- boot: the NET_HELLO_MS heartbeat, always-on while online is allowed. First one after
+// ---- boot: the heartbeat (_netHelloMs), always-on while online is allowed. First one after
 // a short delay so boot itself never touches the network path. All soft-fail. ----
 // The beat's PHASE is load time and nothing else: each one re-arms off the previous, never
 // off Date.now() and never off the shared server clock, so two clients sit on the same
@@ -1417,7 +1434,7 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
 // of that; it bought nothing, because what separates a roomful of clients is the gate they
 // all queue at (NET_GAP_MS), which spaces the calls rather than the sessions making them.
 if(_netTimers){
-    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, NET_HELLO_MS); })();
+    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, _netHelloMs()); })();
     setTimeout(_netHello, 3000);
     setTimeout(()=>{ if(_netOk()) _netFrRefresh(true); }, 3500);   // contract: reconcile the local friend list vs the server at startup
     // Sync the clock DURING the coin-drop splash so menu music can start already aligned to

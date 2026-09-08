@@ -92,7 +92,7 @@ async function _netInviteSend(to){
     const res = await _netSignal(to, relay ? 'invite-relay' : 'invite', JSON.stringify({ profile:_netProfile() }));
     if(_netHs.sent !== to) return;   // superseded or aborted while the request was in flight
     if(res.json) return;             // the server took it: now we wait for a real answer
-    // Refused. Say so now instead of showing WAITING for 30s over an invite that
+    // Refused. Say so now instead of showing WAITING out the staleness window over an invite that
     // was never delivered.
     _netHs.sent = null; _uiDirty = true;
     if(res.status === 403){
@@ -190,6 +190,11 @@ function _netOnSignal(sig){
         switch(sig.type){
             case 'invite':
             case 'invite-relay': {   // DEPRECATED(relay) signal type
+                // An invite that sat in the mailbox longer than its sender waits for an answer
+                // is dead: the server keeps a signal for its whole online window (120 s from
+                // 4.5), the inviter gave up at NET_INVITE_STALE_MS. Answering it would put a
+                // CONNECTING on this screen for nobody, and a decline would tell nobody anything.
+                if(_netSigStale(sig)){ _netSigLog('< ' + sig.type + ' STALE'); return; }
                 if(_netSess || _netLb.invite){ _netSignal(from, 'decline', ''); return; }   // busy: tell them right away
                 if(_netHs.sent === from){
                     // MUTUAL invite: both pressed INVITE -- both already said yes, so no
@@ -206,7 +211,7 @@ function _netOnSignal(sig){
                 // The ACCEPT? dialog lives on the lobby screen: an invite arriving on
                 // a 1:1/social screen jumps there. Anywhere else (main menu, games,
                 // settings, ...) the player is UNAVAILABLE -- decline immediately so
-                // the inviter is not left waiting for the 30s staleness.
+                // the inviter is not left waiting out the staleness window.
                 if(phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId'){ netLobbyEnter(); phase = 'lobby'; }
                 else if(phase !== 'lobby'){ _netSignal(from, 'decline', ''); return; }
                 _netLb.invite = { from, profile:_netClampProfile(_netJson(pl).profile), relay: sig.type === 'invite-relay', at: Date.now() };
@@ -343,7 +348,7 @@ function _netOnSignal(sig){
             }
             case 'undelivered': {
                 // FAILURE RECEIPT (server-only): our invite/accept to `from` expired in
-                // the mailbox uncollected (30s TTL) -- the peer never came to get it. Stop
+                // the mailbox uncollected (the signal TTL) -- the peer never came to get it. Stop
                 // waiting NOW and say so, instead of sitting on "INVITED - WAITING" for the
                 // full staleness timeout. The reverse does not hold: no receipt is NOT a
                 // delivery confirmation (the contract only promises the expiry, not the pickup).
