@@ -934,7 +934,15 @@ document.addEventListener('touchstart',e=>{
     // symptoms are that one line, so bail before either: no arm, no preventDefault, real clicks.
     if(!t || _ringEl || _inControlMask(t.clientX,t.clientY)) return;
     e.preventDefault();
-    if(phase==='nameEntry' && !(_scanFor() && _scanTapAt(t.clientX, t.clientY))) nameInp.focus();
+    // The on-screen keyboard belongs to the FIELD, not to the whole screen. A finger that
+    // lands on the character slots focuses the hidden input and the tablet raises its
+    // keyboard; a finger anywhere else -- the dial, a swipe, the viewfinder, the SUBMIT
+    // pill -- puts it away again. Focusing on every touch made the dial unreachable on a
+    // tablet: the keyboard came up over it at the first contact and never left.
+    if(phase==='nameEntry'){
+        const onVf = _scanFor() && _scanTapAt(t.clientX, t.clientY);   // a viewfinder tap cycles the camera
+        if(!onVf && _entryInField(t.clientX, t.clientY)) nameInp.focus(); else nameInp.blur();
+    }
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
 },{passive:false});
 document.addEventListener('touchmove',e=>{
@@ -1208,6 +1216,16 @@ function scanTick(){
     if(!_scanCv){ _scanCv=document.createElement('canvas'); _scanCv.width=464; _scanCv.height=464; _scanCtx=_scanCv.getContext('2d',{willReadFrequently:true}); }
     _scanCtx.drawImage(_scanVideo,(vw-s)/2,(vh-s)/2,s,s,0,0,464,464);
     try{ const hit=qrDecodeImage(_scanCtx.getImageData(0,0,464,464)); if(hit) _scanHit(hit); }catch(e){}
+}
+// Is this pointer on the entry field's character slots? Same client-to-canvas mapping as
+// _scanInVF, against the one geometry in _entryFieldBox. A little slop, because a finger
+// aiming at a 30x40 slot on a phone lands wherever it lands.
+function _entryInField(cx,cy){
+    const r=canvas.getBoundingClientRect();
+    if(!r.width||!r.height) return false;
+    const x=(cx-r.left)*CW/r.width, y=(cy-r.top)*CH/r.height;
+    const f=_entryFieldBox();
+    return !(x<f.x-6||x>f.x+f.w+6||y<f.y-6||y>f.y+f.h+6);
 }
 // Is this pointer inside the viewfinder rect (a small margin of slop)? Pure hit-test, no
 // side effect -- the pointerdown handler uses it to NOT add a character when the camera is

@@ -538,6 +538,81 @@ runTest('SMOKE-NET', `
     }
     log('pacing ok: hold alone drives the poll, a retired interval field moves nothing, an unheld poll costs the contract cadence and not 1 Hz (a handshake excepted), q_ms flags a busy host and expires');
 
+    // 4.9: a poll is a COMPLETE beat, so a screen holding one sends nothing beside it. What
+    // used to travel alongside -- the 60 s hello, the friends screen's roster read and the
+    // tournament lobby's 5 s hello -- rides the poll's own query string, because a request
+    // sent beside a parked poll can be the one that pays the pool's fork.
+    {
+        const _oGet49=_netGet, _oFetch49=globalThis.fetch, _oPost49=_netPost, _oMin=_netSrvMin;
+        const _oDbg=cfg.debug, _oEnd=_netDuelEnd, _oHold=_netPollHoldEnd, _oSrv=_netDbgSrv;
+        globalThis.fetch=()=>({});
+        let _u=null, _posts=0;
+        _netGet=async (p)=>{ _u=p; return null; };
+        _netPost=async ()=>{ _posts++; return null; };
+        const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); };
+        _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now();
+
+        // aa, de and db cannot be seen in a 204, so they are the ones gated on the version.
+        _netSrvMin=8; _netDuelEnd='aabbccdd'; poll('friends');
+        if(/[?&](db|aa|de)=/.test(_u||'')) throw 'a pre-4.9 server must get none of the gated flags, got ' + _u;
+        _netSrvMin=9; cfg.debug=0; poll('friends');
+        if(!/[?&]db=0(&|$)/.test(_u||'')) throw 'every 4.9 poll must report our own debug state, got ' + _u;
+        if(!/[?&]aa=1(&|$)/.test(_u||'')) throw 'the friends screen is consent: it must arm auto-accept on its own poll, got ' + _u;
+        if(!/[?&]de=aabbccdd(&|$)/.test(_u||'')) throw 'the end of a duel must ride the poll, got ' + _u;
+        cfg.debug=2; poll('friends');
+        if(!/[?&]db=1(&|$)/.test(_u||'')) throw 'db REPORTS what is true, never what was asked, got ' + _u;
+        cfg.debug=0; _netDuelEnd='';
+        poll('duelLobby');
+        if(/[?&]aa=/.test(_u||'')) throw 'the lobby is not consent: nothing to arm there, got ' + _u;
+
+        // fl and tl make the server answer AT ONCE, so tl rides a tick of its own: on every
+        // poll it would cut every hold short and spin the tournament lobby into a hot loop.
+        poll('tourneyLobby');
+        if(/[?&]tl=/.test(_u||'')) throw 'the announce must not ride every poll, got ' + _u;
+        _netTlAt=Date.now()-NET_TOURNEYS_MS-1; poll('tourneyLobby');
+        if(!/[?&]tl=1(&|$)/.test(_u||'')) throw 'the announce tick must ask on the poll, got ' + _u;
+        _netFlWant=true; poll('friends');
+        if(!/[?&]fl=1(&|$)/.test(_u||'')) throw 'the roster ask must ride the poll, got ' + _u;
+
+        // The three stand-downs, each held back until the poll has actually served the answer
+        // once: a re-released minor may report 4.9 without one, so these are feature-detected.
+        _posts=0; _netTtPoll=false; _netHelloBusy=false; _netPollTick=4; phase='tourneyLobby'; _netTick();
+        if(!_posts) throw 'with the announce unproven the 5 s hello must stand';
+        _posts=0; _netTtPoll=true; _netHelloBusy=false; _netPollTick=4; _netTick();
+        if(_posts) throw 'the tournament lobby must stop beating beside its poll once tl is served';
+        _posts=0; _netHelloBusy=false; _netFrPoll=true; _netFrHello=true; netFriendsEnter();
+        if(_posts) throw 'the friends screen must ask on its poll, not beside it';
+        if(!_netFlWant) throw 'the friends screen did not arm the roster ask';
+        _posts=0; _netHelloBusy=false; _netFrPoll=false; netFriendsEnter();
+        if(!_posts) throw 'with the roster unproven the old route must stand';
+        _posts=0; _netHelloBusy=false; netMyIdEnter();
+        if(_posts) throw 'MY ID arms auto-accept with aa on its own poll, not with a hello';
+        _netSrvMin=8; _posts=0; _netHelloBusy=false; netMyIdEnter();
+        if(!_posts) throw 'against an older server MY ID still needs its hello';
+
+        // ...and the beat itself, the last of the pairs: a hold standing IS the beat.
+        _netSrvMin=9; _netPollHoldEnd=Date.now()+5000;
+        if(_netBeatDue()) throw 'a 4.9 client holding a poll owes no hello';
+        _netPollHoldEnd=0;
+        if(!_netBeatDue()) throw 'with no hold standing the beat is due as ever';
+        _netPollHoldEnd=Date.now()+5000; _netSrvMin=8;
+        if(!_netBeatDue()) throw 'against an older server a poll is only most of a beat: keep beating';
+
+        // api and the debug instruction land in ONE place, off a hello or a poll alike -- and
+        // a 204 is a body we synthesise, so its missing api must not read as a rollback.
+        _netSrvMin=-1; _netDbgSrv=null; cfg.debug=0;
+        _netSrvSays({ok:true, api:'4.9', debug:true, signals:[]});
+        if(netSrvMinor()!==9) throw 'the poll body did not un-latch the server minor';
+        if(!(cfg.debug|0)) throw 'the debug instruction on a poll body was ignored';
+        _netSrvSays({ok:true, signals:[]});
+        if(netSrvMinor()!==9) throw 'a 204 has no api and must leave the latch alone';
+
+        _netGet=_oGet49; _netPost=_oPost49; globalThis.fetch=_oFetch49; _netSrvMin=_oMin;
+        cfg.debug=_oDbg; _netDuelEnd=_oEnd; _netPollHoldEnd=_oHold; _netDbgSrv=_oSrv;
+        _netFlWant=false; _netTtPoll=false; _netFrPoll=false; _netPollBusy=false; phase='menu';
+    }
+    log('4.9 pacing ok: the poll is the beat -- flags gated or feature-detected, the three requests beside it stood down');
+
     // ---- ONE gate for our own background traffic + the roster on hello (4.4 re-release) ----
     // What the live host charges is a scheduling slice paid PER REQUEST IN FLIGHT, not per
     // byte: two of OUR OWN requests in the same instant pay it twice. Batching the ICE burst

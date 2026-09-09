@@ -869,6 +869,20 @@ function drawCredits() {
     ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 
+// The entry field: the row of character slots, and after a fixed-length code the SUBMIT
+// pill beside it. The layout lives here ONCE because the touch layer hit-tests it -- the
+// on-screen keyboard is raised only by a finger that lands on the slots themselves, never
+// by one on the dial (see _entryInField). The returned box is the SLOTS only: the pill is
+// a control to press, not somewhere to type.
+const ENTRY_SLOT={ w:30, h:40, gap:5, y:122, dash:18, okW:46, okGap:22 };
+function _entryFieldBox(){
+    const max=_entryMax(), isFixed=_entryFixed();
+    const dashW=entryMode==='friend'?ENTRY_SLOT.dash:0;
+    const okW=isFixed?ENTRY_SLOT.okW:0, okGap=isFixed?ENTRY_SLOT.okGap:0;
+    const w=max*(ENTRY_SLOT.w+ENTRY_SLOT.gap)-ENTRY_SLOT.gap+dashW;
+    const totalW=w+okGap+okW;
+    return { x:Math.floor(CW/2-totalW/2), y:ENTRY_SLOT.y, w, h:ENTRY_SLOT.h, dashW, okW, okGap, totalW };
+}
 function drawNameEntry(now) {
     const chars=_entryChars(), max=_entryMax();
     if(entryMode==='score'){
@@ -896,12 +910,13 @@ function drawNameEntry(now) {
     // and a FIXED code of known length, which ends by itself and so earns a SUBMIT pill the
     // cursor walks onto. The friend id adds its own quad dash and camera panel on top.
     const isFriend=entryMode==='friend', isFixed=_entryFixed();
-    const sw=30,sh=40,gap=5,dashW=isFriend?18:0;                 // friend id shows as XXXX-XXXX
     // ...and ends in a SUBMIT button (_entryOnOk). Deliberately not a ninth slot: shorter,
     // wider, a pill rather than a box, and a clear step of its own away from the field, so it
     // reads as a control to press instead of somewhere else to type.
-    const okW=isFixed?46:0,okH=34,okGap=isFixed?22:0;
-    const totalW=max*(sw+gap)-gap+dashW+(isFixed?okGap+okW:0),sx0=Math.floor(CW/2-totalW/2),sy=122;
+    const F=_entryFieldBox();
+    const sw=ENTRY_SLOT.w,sh=ENTRY_SLOT.h,gap=ENTRY_SLOT.gap,dashW=F.dashW;   // friend id shows as XXXX-XXXX
+    const okW=F.okW,okH=34,okGap=F.okGap;
+    const totalW=F.totalW,sx0=F.x,sy=F.y;
     if(isFriend){   // dash between the two 4-digit quads so the mask matches fmtFriendId / SHOW MY ID
         ct('-',sx0+3*(sw+gap)+sw+(gap+dashW)/2,sy+sh/2,'#4a7a4a',FONT.MENU);
     }

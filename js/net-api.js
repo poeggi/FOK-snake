@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 8;   // built against 4.8 = a host may REPLACE the tournament it holds: a create answered 409 (already hosting) is re-sent with replace:true after the player confirms, ending the old one exactly as their own leave would and opening the new one in the same call, so a client never ends up holding neither (the old lobby is told 'host opened a new one'); 4.7 = a duel is ANNOUNCED as it begins: start.php records it (both peers call it at the match-identity moments), the heartbeat's duel_with refreshes it and hello's duel_end clears it at teardown, with duel_private marking a duel that counts everywhere but is never attributed to a person; 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 9;   // built against 4.9 = the poll is a COMPLETE beat: it carries `api` and the server's `debug` instruction on every body it sends (the two things a client cannot know are due, so it can never be its job to ask), and takes `aa` / `fl` / `tl` / `de` / `db` -- the hello answers a screen holding a poll used to send a second request for. A client on such a screen sends nothing beside its poll at all, not even the 60 s beat, because the poll is one; what stays hello's is what the CLIENT knows is due and the server cannot (a rename, a latency reading, its nets, and duel_with during a game, where nothing holds a poll anyway). Why it is worth a minor: a request sent beside a parked poll can be the one that takes the host to a concurrency its PHP-FPM pool has not served before, and pays ~130 ms for the fork; 4.8 = a host may REPLACE the tournament it holds: a create answered 409 (already hosting) is re-sent with replace:true after the player confirms, ending the old one exactly as their own leave would and opening the new one in the same call, so a client never ends up holding neither (the old lobby is told 'host opened a new one'); 4.7 = a duel is ANNOUNCED as it begins: start.php records it (both peers call it at the match-identity moments), the heartbeat's duel_with refreshes it and hello's duel_end clears it at teardown, with duel_private marking a duel that counts everywhere but is never attributed to a person; 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -969,6 +969,36 @@ function _netNameSeen(id, name){
     try{ localStorage.setItem('fok-snake-friend-names', JSON.stringify(_netFriendNames)); }catch(e){}
 }
 function netFriendName(id){ return _netFriendNames[id] || null; }
+// THE one landing place for what the server tells us unasked: the contract version and
+// the operator's debug instruction. Both travel server-to-client ONLY -- a client cannot
+// know either is due, so it can never be its job to ask -- which is why from 4.9 they ride
+// EVERY poll answer with a body as well as every hello, and why a client on a screen
+// holding a poll can stop beating without going deaf to them.
+// A 204 is a body-less answer we synthesise as {ok,signals} (see _netGet), so `api` is
+// absent there: leave the latch alone rather than reading its absence as a rollback.
+function _netSrvSays(r){
+    if(!r || typeof r !== 'object') return;
+    if(typeof r.api === 'string'){
+        const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated on every answer: un-latches after a server rollback
+        _netSrvMin = (_srvMaj === NET_API_BUILT && _srvMin !== null) ? _srvMin : -1;   // only a same-MAJOR minor means anything to us
+        _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // newer MAJOR gates online off
+        _netApiOutdated = (_srvMaj === NET_API_BUILT && _srvMin > NET_API_BUILT_MINOR);   // newer MINOR: still works, but flag an update
+    }
+    // HONOUR the server's debug instruction: an operator flips it per player to
+    // diagnose a client in the field without asking its user to do anything. Acted on
+    // when the instruction CHANGES, not every answer -- a steady `false` must not
+    // fight a developer who turned debug on locally, which is the 'self' state the
+    // admin view exists to show. A change is the operator actually asking.
+    if(typeof r.debug === 'boolean'){
+        if(_netDbgSrv !== null && r.debug !== _netDbgSrv){
+            cfg.debug = r.debug ? Math.max(1, cfg.debug|0) : 0;
+            saveCfg(); _uiDirty = true;
+        } else if(_netDbgSrv === null && r.debug && !(cfg.debug|0)){
+            cfg.debug = 1; saveCfg(); _uiDirty = true;   // the first answer already carries an instruction
+        }
+        _netDbgSrv = r.debug;
+    }
+}
 let _netHelloBusy = false, _netHelloSeen = false;
 async function _netHello(){
     if(_netHelloBusy || netOffline() || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
@@ -1037,24 +1067,7 @@ async function _netHello(){
     // came back is the one moment we know for certain nothing else of ours is out. It also
     // arrives with the pace the server just named already applied.
     if(!_netHelloSeen){ _netHelloSeen = true; if(typeof itemKick === 'function') itemKick(); }
-    const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated every heartbeat: un-latches after a server rollback
-    _netSrvMin = (_srvMaj === NET_API_BUILT && _srvMin !== null) ? _srvMin : -1;   // only a same-MAJOR minor means anything to us
-    _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // newer MAJOR gates online off
-    _netApiOutdated = (_srvMaj === NET_API_BUILT && _srvMin > NET_API_BUILT_MINOR);   // newer MINOR: still works, but flag an update
-    // HONOUR the server's debug instruction: an operator flips it per player to
-    // diagnose a client in the field without asking its user to do anything. Acted on
-    // when the instruction CHANGES, not every heartbeat -- a steady `false` must not
-    // fight a developer who turned debug on locally, which is the 'self' state the
-    // admin view exists to show. A change is the operator actually asking.
-    if(typeof r.debug === 'boolean'){
-        if(_netDbgSrv !== null && r.debug !== _netDbgSrv){
-            cfg.debug = r.debug ? Math.max(1, cfg.debug|0) : 0;
-            saveCfg(); _uiDirty = true;
-        } else if(_netDbgSrv === null && r.debug && !(cfg.debug|0)){
-            cfg.debug = 1; saveCfg(); _uiDirty = true;   // first hello already carries an instruction
-        }
-        _netDbgSrv = r.debug;
-    }
+    _netSrvSays(r);
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
     _netFrApply(r);   // the counters, and the presence delta where one was asked for
     if(body.tourneys) _netTourneys = Array.isArray(r.tourneys) ? r.tourneys : [];
@@ -1073,6 +1086,25 @@ async function _netHello(){
 // still surface there, silent everywhere else (incl. during games: the
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
 let _netPollTick = 0;
+// 4.9: what a screen HOLDING a poll used to send a second request for now rides the poll.
+// Two of the answers are FEATURE-DETECTED, never version-gated (a minor is re-released, so a
+// server may answer "4.9" without them): the old route stands until the poll has served the
+// answer once, exactly as _netFrHello does for the roster on hello.
+let _netFrPoll = false;    // the poll serves `friends`: netFriendsEnter sends nothing beside it
+let _netTtPoll = false;    // the poll serves `tourneys`: the tournament lobby's 5 s hello stands down
+let _netFlWant = false;    // ask for the roster on the next poll (one-shot, armed by netFriendsEnter)
+let _netTlAt = 0;          // when the announce last came back: tl makes the server answer AT ONCE, so it rides a tick of its own
+const NET_TOURNEYS_MS = 5000;   // the announce tick the tournament lobby used to spend a hello on
+// aa, de and db cannot be seen in a 204, so a client only stops beating for them against a
+// server that states 4.9. fl and tl are read off the answer instead (see the latches above).
+function _netPoll49(){ return netSrvMinor() >= 9; }
+// Is a held poll parked on a worker right now? While one is, a hello beside it is the
+// request that can pay the pool's ~130 ms fork, and from 4.9 it buys nothing.
+function _netHolding(){ return _netPollHoldEnd > 0 && Date.now() < _netPollHoldEnd; }
+// THE beat rule: a hello is due unless a poll is already being one for us. Against a server
+// older than 4.9 a poll is only most of a beat (no `api`, no debug instruction, no arming),
+// so the hello stands whatever else is in flight.
+function _netBeatDue(){ return !(_netPoll49() && _netHolding()); }
 function _netPollDue(){
     // A match still needs the mailbox, at a fifth of the rate. A tournament one has to have
     // it -- roles sheets, patches and the result of OUR OWN node all arrive as signals, and
@@ -1183,12 +1215,35 @@ async function _netPollOnce(){
     // fs: on a presence screen the poll's return carries the friend delta, the counters and
     // the hold decision (4.6), so those screens send no hello of their own.
     const fs = _netFrScreen() ? '&fs=' + _netFrSince : '';
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : '') + fs,
+    // ...and with it (4.9) the rest of what a holding screen used to send a hello for.
+    // fl and tl make the server ANSWER AT ONCE -- a screen that just opened is not waiting
+    // for a signal that is not coming -- so tl rides a 5 s tick of its own rather than every
+    // poll, or the tournament lobby's hold would never stand. aa only ARMS; clearing
+    // auto-accept early stays hello's, and the window lapses on its own either way.
+    const de = (_netPoll49() && _netDuelEnd) ? _netDuelEnd : '';
+    const fl = _netFlWant;
+    const tl = phase === 'tourneyLobby' && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
+    const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
+    const q = fs + (de ? '&de=' + de : '')
+                 + (_netPoll49() ? '&db=' + ((cfg.debug|0) > 0 ? 1 : 0) : '')   // REPORT what is true: a poll that never says is never woken with an instruction
+                 + (aa ? '&aa=1' : '') + (fl ? '&fl=1' : '') + (tl ? '&tl=1' : '');
+    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : '') + q,
                             _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r) _netPollHoldEnd = 0;   // answered: the worker is free. An abort or a failure leaves the deadline standing.
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
-    if(r){ _netPaceOf(r); _netFrApply(r); }
+    if(r){
+        _netSrvSays(r);   // api + the operator's debug instruction: on every body, so a client that has stopped beating still hears both
+        _netPaceOf(r); _netFrApply(r);
+        // The end is applied server-side BEFORE the hold, so a 204 records it too -- and a
+        // 204 is the answer we synthesise, which is why any answer at all clears it.
+        if(de && _netDuelEnd === de) _netDuelEnd = '';
+        // Re-derived from the answer, never latched once: a server that stops serving one of
+        // these -- a rollback, a re-released minor -- puts its fallback back, the same way
+        // _netSrvSays un-latches the minor rather than trusting what it saw before.
+        if(fl){ _netFlWant = false; _netFrPoll = Array.isArray(r.friends); if(_netFrPoll) _netFrAdopt(r.friends, false); }
+        if(tl){ _netTlAt = Date.now(); _netTtPoll = Array.isArray(r.tourneys); if(_netTtPoll) _netTourneys = r.tourneys; }
+    }
     // The mailbox was down and is back. A push may have died in between (the server drops an
     // undelivered signal at its TTL), and only the whole picture recovers one: hand a held
     // tournament the doubt -- AFTER the drain above, so what this answer carried is already
@@ -1200,7 +1255,9 @@ async function _netPollOnce(){
     // stops a broken server from spinning this into a hot loop.
     if(held && r && _netOk() && !(typeof document !== 'undefined' && document.hidden)) _netPollOnce();
 }
-if(_netTimers) setInterval(()=>{
+if(_netTimers) setInterval(()=>_netTick(), 1000);
+// The 1 Hz housekeeping tick, named so the rules inside it can be driven by a test.
+function _netTick(){
     _netPollTick++;
     if(!_netOk()) return;
     _netHsTick();
@@ -1212,13 +1269,14 @@ if(_netTimers) setInterval(()=>{
     if(sub && !_netFrSub) _netFrSince = 0;
     _netFrSub = sub;
     // The lobby and friends screens refresh out of the poll they hold (fs, 4.6): friend
-    // state, counters and hold ride its return, and the 60 s beat is their only hello. The
-    // tournament lobby is the one screen still on a hello tick: its announce list rides
-    // hello and NOTHING else, and on the heartbeat alone a tournament somebody just created
-    // stayed invisible for a minute.
-    if(phase === 'tourneyLobby' && _netPollTick % 5 === 0) _netHello();
+    // state, counters and hold ride its return. From 4.9 the tournament lobby joins them --
+    // `tl` puts the announce on the same poll -- and this 5 s hello, which was 2-wide every
+    // five seconds and the most expensive of the three, stands down the moment the poll has
+    // served the list once. It stays as the fallback for a server that does not, because a
+    // re-released minor may answer 4.9 without it.
+    if(phase === 'tourneyLobby' && !_netTtPoll && _netPollTick % 5 === 0) _netHello();
     _netPollOnce();
-}, 1000);
+}
 
 // ---- Connection lifecycle across focus loss. A backgrounded tab has its held
 // long-poll frozen or killed by the OS: the fetch may never settle, leaving
@@ -1413,16 +1471,19 @@ function netFriendVerify(id){
 // it, this only lets the server accept on our behalf meanwhile.
 function netMyIdEnter(){
     _netMyIdAt = Date.now();
-    if(_netOk()) _netHello();
+    // From 4.9 the screen's own poll arms it with `aa`, on the request it was making anyway.
+    if(_netOk() && !_netPoll49()) _netHello();
 }
 function netFriendsEnter(){
     _netFr.sel = 0; _netFr.confirm = null; _netFr.msg = '';
     netPresenceOpen();
-    // The screen wants the roster NOW, not up to 5s from now, so something is sent either
-    // way -- but where the server serves the roster on the heartbeat, that something is the
-    // heartbeat, which brings the presence maps with it for the same one request. friend.php
-    // stays the route until we know the flag is answered; the migration it runs has already
-    // happened once at startup regardless of which route this screen takes.
+    // The roster rides the poll this screen is about to hold anyway (`fl`, 4.9), so nothing
+    // travels beside it -- the ask costs the request we were making regardless. Until the
+    // poll has served it once, the old route stands: the heartbeat where the server puts the
+    // roster on hello, friend.php where it does not. The migration friend.php runs has
+    // already happened once at startup, whichever route this screen takes.
+    _netFlWant = true;
+    if(_netFrPoll) return;
     if(_netFrHello) _netHello();
     else _netFrRefresh(true);
 }
@@ -1561,7 +1622,14 @@ function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, singl
 // of that; it bought nothing, because what separates a roomful of clients is the gate they
 // all queue at (NET_GAP_MS), which spaces the calls rather than the sessions making them.
 if(_netTimers){
-    (function _netBeat(){ setTimeout(()=>{ _netHello(); _netBeat(); }, NET_HELLO_MS); })();
+    // 4.9: a poll is a COMPLETE beat -- presence, `api`, the debug instruction and (with
+    // `aa`) auto-accept all ride it -- so a client holding one owes no hello at all, and the
+    // beat beside it was the last of the three standing pairs. What only a hello carries is
+    // what the client itself knows is due: a rename (typed on a screen that holds nothing),
+    // its nets (refreshed at the multiplayer door), a latency reading (display only) and
+    // duel_with during a game, where no poll is held either. The beat resumes the moment the
+    // hold does not stand.
+    (function _netBeat(){ setTimeout(()=>{ if(_netBeatDue()) _netHello(); _netBeat(); }, NET_HELLO_MS); })();
     setTimeout(_netHello, 3000);
     setTimeout(()=>{ if(_netOk()) _netFrRefresh(true); }, 3500);   // contract: reconcile the local friend list vs the server at startup
     // Sync the clock DURING the coin-drop splash so menu music can start already aligned to

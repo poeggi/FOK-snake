@@ -288,6 +288,29 @@ runTest('SMOKE-INPUT', `
     phase='menu'; entryMode='score'; nameCharIdx=0; _swipeBase=null; _swipeLastDir=null;
     log('entry dial follows the finger (swipe up = next character); keyboard keeps list steps');
 
+    // The tablet keyboard belongs to the FIELD. It used to be raised by ANY touch on the
+    // entry screen, so on an iPad it covered the dial the moment a finger went down and the
+    // dial could not be turned at all. Only a finger on the character slots focuses now;
+    // everything else -- the dial, the SUBMIT pill, a swipe -- puts the keyboard away.
+    let kbOn=0, kbOff=0;
+    const _realFocus=nameInp.focus, _realBlur=nameInp.blur;
+    nameInp.focus=()=>{ kbOn++; }; nameInp.blur=()=>{ kbOff++; };
+    const down=(x,y)=>{ document.__emit('touchstart', touch(x,y)); document.__emit('touchend', touch(x,y)); };
+    try {
+        phase='nameEntry'; entryMode='user'; nameStr=''; nameCursorPos=0;
+        down(300,140);                                   // on the slots (y 122..162)
+        if(kbOn!==1||kbOff!==0) throw 'a touch on the field must raise the keyboard';
+        down(300,300);                                   // on the dial, well below the field
+        if(kbOn!==1||kbOff!==1) throw 'a touch on the dial must not raise the keyboard';
+        entryMode='friend'; nameStr=''; nameCursorPos=0;
+        down(300,140);
+        if(kbOn!==2) throw 'the friend-id field must raise the keyboard too';
+        down(450,140);                                   // the SUBMIT pill sits beside the slots
+        if(kbOn!==2||kbOff!==2) throw 'the SUBMIT pill is a control, not somewhere to type';
+    } finally { nameInp.focus=_realFocus; nameInp.blur=_realBlur; }
+    phase='menu'; entryMode='score'; _swipeBase=null; _swipeLastDir=null;
+    log('the tablet keyboard is raised by the field alone, and dismissed by everything else');
+
     // THE CEREMONY SCREEN'S ESCAPE IS FOR THE PEOPLE IT IS ASKING TO WAIT. A player it
     // names is about to be put into a duel and must not walk off to the board while the
     // link comes up -- but a match that never comes up must not hold them either, least
