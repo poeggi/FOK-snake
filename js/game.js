@@ -786,6 +786,7 @@ const CONTROLS = {
     myId:     ['esc','ok','dpad'],
     tourneyCode:  ['esc','ok'],
     duelInvite:       ['esc','ok','dpad'],
+    tourneySetup:    ['esc','ok','dpad'],
     tourneyLobby:    ['esc','ok','dpad'],
     tourneyBracket:  ['esc','ok','dpad'],
     tourneyRound:    ['esc','ok','dpad'],
@@ -864,6 +865,7 @@ const SCREENS = {
     // freeze like every other menu -- except that all four waiting screens animate their
     // waiting dots (_ttDots) and the bracket also counts the host's CONTINUE row down, so
     // those redraw every frame.
+    tourneySetup:    { d:()=>drawTourneySetup(),    hud:false, freeze:true },
     tourneyLobby:    { d:()=>drawTourneyLobby(),    hud:false, freeze:true, anim:()=> true },
     tourneyBracket:  { d:()=>drawTourneyBracket(),  hud:false, freeze:true, anim:()=> true },
     tourneyRound:    { d:()=>drawTourneyRound(),    hud:false, freeze:true, anim:()=> true },

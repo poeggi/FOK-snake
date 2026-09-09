@@ -60,7 +60,7 @@ const HOOKS = `
   };
   globalThis.__sig = (d)=>_ttOnSignal(d);
   // CREATE while already hosting: the hooks the replace flow is driven through.
-  globalThis.__off = ()=>{ _tt = null; _ttHold(''); _ttUi.busy = false; _ttUi.ask = null; _ttUi.msg = ''; _netSrvMin = 8; phase = 'tourneyLobby'; };
+  globalThis.__off = ()=>{ _tt = null; _ttHold(''); _ttUi.busy = false; _ttUi.ask = null; _ttUi.msg = ''; _netSrvMin = 8; phase = 'tourneySetup'; };   // where CREATE is actually pressed
   globalThis.__setBack = (o)=>{ _ttBack = o; };
   globalThis.__back = ()=>_ttBack;
   globalThis.__tt = ()=>_tt;
@@ -161,7 +161,7 @@ try {
         eq(S.__take().filter(p => p.action === 'create').map(p => p.replace).join(','), 'false', 'one plain create went out, no replace yet');
         S.__answer(false);
         await settle();
-        eq(S.__phase(), 'tourneyLobby', 'NO is the lobby again');
+        eq(S.__phase(), 'tourneySetup', 'NO is the settings it was asked from');
         eq(S.__ui().ask, null, 'the question is gone');
         eq(S.__take().length, 0, 'and nothing was sent');
         eq(!!S.__tt(), false, 'nothing was created');
@@ -192,7 +192,7 @@ try {
         S.__answer(true);
         await settle(5);
         eq(S.__ui().msg, 'YOU ALREADY HOST ONE', 'the message that was there before');
-        eq(S.__phase(), 'tourneyLobby', 'no second question');
+        eq(S.__phase(), 'tourneySetup', 'no second question');
         eq(!!S.__tt(), false, 'nothing adopted');
         eq(S.__back() && S.__back().code, 'ABCDEF', 'the old one still stands, and is still the way back');
     });
@@ -217,7 +217,7 @@ try {
         eq(S.__ui().ask.code, '', 'no code to name');
         eq(S.__ui().ask.running, null, 'running cannot be ruled out');
         S.__esc();
-        eq(S.__phase(), 'tourneyLobby', 'ESC is NO');
+        eq(S.__phase(), 'tourneySetup', 'ESC is NO');
         eq(S.__ui().ask, null, 'the question is gone');
     });
 

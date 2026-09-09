@@ -1340,9 +1340,17 @@ function _drawModalYesNo(sel){
     ctx.restore();
 }
 function drawQuitConfirm() {
+    // Where YES lands, said in the dialog: a tournament match is walked out of onto the
+    // tournament's own board (tourneyExitPhase), never the menu, and a watcher goes there
+    // too. The note is the price of leaving, and it is read off the very predicate
+    // tourneyMatchLeft gates its loss report on -- a warning nobody can leave behind.
+    const tt = typeof tourneyExitPhase==='function' && !!tourneyExitPhase();
+    const lose = tt && typeof tourneyMatchAtStake==='function' && tourneyMatchAtStake();
     // LIVE board behind the dialog -- the game keeps running while the player decides
     // (an online duel cannot freeze the opponent; local matches the same semantics).
-    drawConfirm({ title:'QUIT TO MENU?', sel:quitConfirmSel, behind:()=>{
+    drawConfirm({ title: tt?'QUIT TO TOURNAMENT?':'QUIT TO MENU?',
+                  note: lose?'LEAVING NOW COUNTS AS A LOSS':null,
+                  sel:quitConfirmSel, behind:()=>{
         if(players) drawDuelBoard(simNow);
         else if(snake) drawGameBoard(simNow);
         else drawGrid();
@@ -1693,6 +1701,21 @@ function _ttDrawRows(startY, rowH){
         if(r.note && !last) ct(r.note, CW/2 + 176, y, sel === i ? '#ffd700' : '#666', FONT.HINT);
     });
 }
+// What a tournament is played FOR, asked before it exists. It is the multiplayer menu's own
+// skeleton -- headline, one grey line of context, rows from MENU_TOP -- because it is the same
+// KIND of screen: a short list of choices with nothing behind it yet. The lobby that follows
+// is the picture of a room; this is the form that opens one.
+function drawTourneySetup(){
+    drawGrid(); drawOvBg(0.92);
+    ctg('NEW TOURNAMENT', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    ct('SET BEFORE THE ROOM OPENS - PLAYERS JOIN AFTERWARDS', CW/2, 50, '#4a7a4a', FONT.HINT);
+    _ttDrawRows(MENU_TOP, MENU_ROW);
+    // What the settings AMOUNT TO, on the line the lobby puts its own summary on: the level
+    // in the row above is round 1, and this is the ladder the whole tournament climbs from it.
+    ct(_ttLvlLine(), CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
+    if(tourneyUi().msg) drawStatus(tourneyUi().msg);
+    ct('UP/DN:nav  L/R:change  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
 function drawTourneyLobby(){
     drawGrid(); drawOvBg(0.92);
     ctg('TOURNAMENT', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
@@ -1702,7 +1725,7 @@ function drawTourneyLobby(){
         if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
         else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
         else ct('2-' + tourneyMax() + ' PLAYERS - ONE 1vs1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
-        _ttDrawRows(84, MENU_ROW);
+        _ttDrawRows(MENU_TOP, MENU_ROW);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
         // real message -- both at that band would overdraw each other.
         if(ui.msg) drawStatus(ui.msg);
@@ -1728,7 +1751,7 @@ function drawTourneyLobby(){
     // It FILLS FROM THE TOP at a fixed pitch: the row a person is on is theirs for as long as
     // they are in the room, and a newcomer lands underneath everybody instead of pushing the
     // whole list -- and the host with it -- up the screen. The pitch is the one that lets a
-    // full room of ten reach the last row while still clearing the status line.
+    // full room of eight reach the last row while still clearing the status line.
     const TT_TOP = 110, TT_ROW = 22;
     ps.forEach((p, i) => {
         const y = TT_TOP + i * TT_ROW, nm = String((p && p.name) || '').toUpperCase();

@@ -37,9 +37,13 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, busy:false, contAt:0, from:'', to:'', ask:null };
+var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, busy:false, contAt:0, from:'', to:'', ask:null };
+// stakes and lvl are what the CREATE screen collects before there is a tournament to put
+// them on. They live here rather than in cfg because they describe one tournament, not
+// this device: the next one is configured from its own screen.
 // ask: the question the quit dialog is asking when it is not the leave/end one. Today one
-// shape -- { kind:'replace', stakes, code, running } -- CREATE while already hosting.
+// shape -- { kind:'replace', stakes, lvl, code, running } -- CREATE while already hosting.
+// It carries the WHOLE setup the refused call was made with, because YES re-sends that call.
 // The read-back of a tournament this device is still in but is not currently looking at --
 // what the REJOIN row is made of. Null until _ttProbe finds one.
 var _ttBack = null;
@@ -115,6 +119,16 @@ function tourneyMax(){ return _tt && _tt.max ? (_tt.max|0) : TT_MAX; }
 // offsets, which is 2N matches. The lobby quotes this so nobody starts an eight-player
 // tournament expecting 28 games.
 function _ttMatches(n){ n = n|0; return n < 2 ? 0 : (n <= 4 ? n * (n - 1) / 2 : 2 * n); }
+// What picking a START LEVEL actually buys, on the line every screen keeps for what it
+// AMOUNTS TO. The number in the label is only round 1: the ladder climbs one level per round
+// and stops at the last board the game has, so from the top there is nowhere left to climb.
+// It is a sentence rather than a note beside the row because a note is drawn at a fixed x
+// and this row, selected, already reaches it.
+function _ttLvlLine(){
+    const l = _duelLvl(_ttUi.lvl);
+    return l >= MAX_LEVELS ? 'EVERY ROUND AT LEVEL ' + MAX_LEVELS + ' - THERE IS NO DEEPER BOARD'
+                           : 'ROUND 1 AT LEVEL ' + l + ' - ONE DEEPER EACH ROUND, UP TO ' + MAX_LEVELS;
+}
 // How many rounds this tournament HAS, so a board can say where in it you are rather than
 // only which round is up. Round 1 is the group stage; the knockout halves the field every
 // round after it. Same standing as _ttMatches: the client works out what the field SHAPE
@@ -606,11 +620,18 @@ function tourneyMatchOver(){
     const w  = (typeof duelWinner !== 'undefined') ? duelWinner : -1;
     _ttReport(_ttPlayNid, w === 2 ? 'draw' : (w === my ? 'win' : 'loss'), sc);
 }
+// True while walking out would cost us the match: a node of ours is on the board and no
+// result has gone in for it yet. The quit dialog warns off this same predicate, so what the
+// warning promises and what leaving does cannot drift apart. A watcher owes no result, so
+// it is never at stake for one.
+function tourneyMatchAtStake(){
+    return !!(_tt && inGame && _ttPlayNid && _ttDone !== _ttPlayNid);
+}
 // Called when a player walks out of a tournament match before it ended. Leaving is losing,
 // and a reported loss settles at once -- far kinder to the eight people waiting than the
 // three-minute walkover ladder. Nobody lies to lose.
 function tourneyMatchLeft(){
-    if(!_tt || !inGame || !_ttPlayNid || _ttDone === _ttPlayNid) return;
+    if(!tourneyMatchAtStake()) return;
     _ttDone = _ttPlayNid;
     const my = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
     const ps = (typeof players !== 'undefined' && players) ? players : null;
@@ -748,11 +769,20 @@ function tourneyRejoin(){
 // up holding neither. Feature-detected by behaviour, never by version: replace goes out
 // only after a 409, and a 409 to THAT is an older server, which gets the plain message.
 // The player is asked first (_ttAskReplace): a running tournament ends for everyone.
-async function tourneyCreate(stakes, replace){
+// CREATE is two presses, not one: the screen that collects what a tournament is played FOR
+// comes first, and the row on it that says CREATE is the one that talks to the server. The
+// settings are read off _ttUi there, so nothing is passed in and nothing can be half-passed.
+function tourneySetupOpen(){
+    _ttUi.sel = 0;   // an ordinary list, top row armed: nothing on this screen costs anybody anything
+    phase = 'tourneySetup';
+    Snd.sfxPlay('select', cfg.music);
+    _uiDirty = true;
+}
+async function tourneyCreate(stakes, lvl, replace){
     if(_tt || _ttUi.busy) return;
     if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
     _ttUi.busy = true; _ttMsg('CREATING...');
-    const body = { stakes: !!stakes };
+    const body = { stakes: !!stakes, lvl: _duelLvl(lvl) };
     if(replace) body.replace = true;
     const r = await _ttPost('create', body);
     _ttUi.busy = false;
@@ -760,7 +790,7 @@ async function tourneyCreate(stakes, replace){
         // The cooldown is charged BEFORE anything is ended, so on a 429 the tournament we
         // host is still standing: show the wait, never report it as ended.
         if(r.status === 429) _ttMsg('TOO SOON - WAIT ' + Math.max(1, Math.ceil(+((r.body && r.body.retry_after) || 60))) + 'S', true);
-        else if(r.status === 409 && !replace) _ttAskReplace(stakes);
+        else if(r.status === 409 && !replace) _ttAskReplace(stakes, lvl);
         else if(r.status === 409) _ttMsg('YOU ALREADY HOST ONE', true);
         else _ttMsg('COULD NOT CREATE', true);
         return;
@@ -768,6 +798,8 @@ async function tourneyCreate(stakes, replace){
     _ttBack = null;   // the one we could have gone back to is the one this replaced
     _ttAdopt(Object.assign({ host:getPlayerId(), state:'open' }, r.json));
     _ttUi.sel = -1;
+    phase = 'tourneyLobby';   // the setup screen is spent the moment the room it describes exists
+    _uiDirty = true;
     _ttMsg('CODE ' + (_tt ? _tt.code : ''));
     _ttSync();
 }
@@ -775,13 +807,13 @@ async function tourneyCreate(stakes, replace){
 // about the tournament we host is what this device still knows of it: the way back
 // (_ttBack) names it when this is the device that hosted it. Elsewhere the question is
 // asked in the general form, with the running case spelled out since it cannot be excluded.
-function _ttAskReplace(stakes){
+function _ttAskReplace(stakes, lvl){
     const b = _ttBack;
     const mine = !!(b && String(b.host || '') === getPlayerId());
-    _ttUi.ask = { kind:'replace', stakes:!!stakes,
+    _ttUi.ask = { kind:'replace', stakes:!!stakes, lvl:_duelLvl(lvl),
                   code:mine ? String(b.code || '') : '',
                   running:mine ? String(b.state || '') === 'running' : null };
-    _ttUi.from = 'tourneyLobby'; _ttUi.to = '';
+    _ttUi.from = 'tourneySetup'; _ttUi.to = '';   // NO returns to the settings the question was asked from
     quitConfirmSel = 1;                                // NO: the safe answer is the offered one
     phase = 'tourneyQuit';
     Snd.sfxPlay('nav', cfg.music);
@@ -791,7 +823,7 @@ function _ttAskReplace(stakes){
 function tourneyAskAnswer(yes){
     const a = _ttUi.ask; _ttUi.ask = null;
     phase = _ttUi.from || 'tourneyLobby'; _uiDirty = true;
-    if(yes && a && a.kind === 'replace') tourneyCreate(a.stakes, true);
+    if(yes && a && a.kind === 'replace') tourneyCreate(a.stakes, a.lvl, true);
 }
 // Why a tournament we were in is gone, in the words of the reason the server gave (the
 // lobby event carries it; the read-back does too). The server's vocabulary: the host left
@@ -892,6 +924,24 @@ function tourneyAsk(to){
 // it, so a row can never be drawn in one place and acted on in another.
 function tourneyRows(){
     const rows = [];
+    if(phase === 'tourneySetup'){
+        // What a tournament is played FOR, before there is one. Both rows are two-way (LEFT/
+        // RIGHT as well as A), because both are a value being dialled rather than a command --
+        // and the command is the row underneath them, so nothing here is pressed by accident.
+        // The label names what the toggle does, so this row takes no note: a note is drawn
+        // at a fixed x and a row this long runs straight through that column.
+        rows.push({ t:'ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'), en:true, lr:true,
+                    act:() => { _ttUi.stakes = !_ttUi.stakes; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        // The level round 1 is played at. Every round after it is one deeper, so this is the
+        // floor of the whole ladder, not just of the first match -- which is what the summary
+        // band under the rows spells out.
+        rows.push({ t:'START LEVEL: ' + _duelLvl(_ttUi.lvl), en:true, lr:true,
+                    act:() => { _ttUi.lvl = _duelLvl(_ttUi.lvl) % MAX_LEVELS + 1; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        rows.push({ t:'CREATE TOURNAMENT', en:netTourneyOk() && !_ttUi.busy,
+                    act:() => tourneyCreate(_ttUi.stakes, _ttUi.lvl) });
+        rows.push({ t:'BACK', en:true, act:() => { phase = 'tourneyLobby'; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        return rows;
+    }
     if(!_tt){
         const ok = netTourneyOk();
         // The way back is the FIRST row when there is one: a player who dropped out of a
@@ -899,11 +949,7 @@ function tourneyRows(){
         // waiting on a walkover clock while they read the list.
         if(_ttBack) rows.push({ t:'REJOIN TOURNAMENT', en:ok,
                                 note:String(_ttBack.code || ''), act:tourneyRejoin });
-        rows.push({ t:'CREATE TOURNAMENT', en:ok, act:() => tourneyCreate(_ttUi.stakes) });
-        // The label names what the toggle does, so this row takes no note: a note is drawn
-        // at a fixed x and a row this long runs straight through that column.
-        rows.push({ t:'ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'), en:ok, lr:true,
-                    act:() => { _ttUi.stakes = !_ttUi.stakes; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        rows.push({ t:'CREATE TOURNAMENT', en:ok, act:tourneySetupOpen });
         // scanStart() rides the keypress/tap: a camera permission prompt is only allowed to
         // appear inside a user gesture, exactly as ADD FRIEND opens its own.
         rows.push({ t:'JOIN BY CODE', en:ok, act:() => { _entryOpen('tcode'); scanStart(); } });

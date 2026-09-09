@@ -43,22 +43,43 @@ async function lobby(){
     for(const c of C) c.setPhase('tourneyLobby');
     for(const c of C) c.enter();
     await settleAsync();
-    // Nothing held yet: the rows are the three offers plus BACK, and the announce is empty
-    // because no lobby exists to announce.
+    // Nothing held yet: the rows are the two offers plus BACK, and the announce is empty
+    // because no lobby exists to announce. What a tournament is played FOR is not asked on
+    // this screen -- CREATE opens one for that.
     const r0 = C[1].rows();
-    A(r0.length === 4 && r0[0].t === 'CREATE TOURNAMENT' && r0[1].t === 'ITEM STAKES (WINDSWEPPING): OFF'
-      && r0[2].t === 'JOIN BY CODE' && r0[3].t === 'BACK',
+    A(r0.length === 3 && r0[0].t === 'CREATE TOURNAMENT'
+      && r0[1].t === 'JOIN BY CODE' && r0[2].t === 'BACK',
       '1: an empty lobby offers ' + r0.map(x => x.t).join('/'));
     A(r0.every(x => x.en), '1: the tournament rows are greyed against a 4.3 server');
     C[1].draw();
 
+    // CREATE is a screen, not a call: the settings are collected first and the row on THAT
+    // screen is the one that talks to the server. Opening it creates nothing.
+    C[0].pick('CREATE TOURNAMENT');
+    A(C[0].phase() === 'tourneySetup', '1: CREATE did not open the settings (' + C[0].phase() + ')');
+    A(!C[0].tt(), '1: opening the settings created a tournament');
+    const rs = C[0].rows();
+    A(rs.length === 4 && rs[0].t === 'ITEM STAKES (WINDSWEPPING): OFF' && rs[1].t === 'START LEVEL: 1'
+      && rs[2].t === 'CREATE TOURNAMENT' && rs[3].t === 'BACK',
+      '1: the settings screen offers ' + rs.map(x => x.t).join('/'));
+    C[0].draw();
+
     C[0].pick('ITEM STAKES');                  // stakes are the host's call, off by default
-    A(C[0].rows()[1].t === 'ITEM STAKES (WINDSWEPPING): ON', '1: the stakes row did not toggle');
+    A(C[0].rows()[0].t === 'ITEM STAKES (WINDSWEPPING): ON', '1: the stakes row did not toggle');
+    C[0].pick('START LEVEL');                  // and so is the level round 1 is played at
+    A(C[0].rows()[1].t === 'START LEVEL: 2', '1: the level row did not step');
+    C[0].clear();
     await C[0].pick('CREATE TOURNAMENT');
     await settleAsync();
+    A(C[0].phase() === 'tourneyLobby', '1: the settings screen outlived the room it opened');
     const t0 = C[0].tt();
     A(t0 && t0.code === 'K7MZ4Q' && t0.stakes === true && t0.state === 'open',
       '1: the host does not hold the lobby it just created');
+    // Both settings ride the create call itself: it is the one action that opens a
+    // tournament, and there is no second call to set them with afterwards.
+    const cr = C[0].rec().posts.filter(x => x.action === 'create').pop();
+    A(cr && cr.stakes === true && cr.lvl === 2,
+      '1: the create call does not carry the settings (' + JSON.stringify(cr) + ')');
     // The host's own rows: START first, because it is the press the host is waiting to make
     // and sel starts on it -- greyed until somebody else is in the room -- then the code,
     // which is what you hand out WHILE waiting.
@@ -893,7 +914,8 @@ async function passBreak(opts){
         const [H, G, R] = W.C;                         // host, guest, and the one who reloads
         for(const c of W.C){ c.setPhase('tourneyLobby'); c.enter(); }
         await W.settleAsync();
-        await H.pick('CREATE TOURNAMENT');
+        H.pick('CREATE TOURNAMENT');               // the settings screen
+        await H.pick('CREATE TOURNAMENT');         // the row on it that opens the room
         await W.settleAsync();
         const code2 = H.tt().code;
         for(const c of [G, R]){ await c.join(code2); await W.settleAsync(); }

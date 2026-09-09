@@ -439,7 +439,7 @@ function driverSrc(id){
         + '    rec: function(){ return JSON.parse(JSON.stringify(REC)); },\n'
         + '    clear: function(){ REC.offers = []; REC.answers = []; REC.watches = []; REC.sigs = []; REC.posts = []; REC.exits = 0; },\n'
         + '    enter: function(){ return tourneyEnter(); },\n'
-        + '    create: function(s){ return tourneyCreate(s); },\n'
+        + '    create: function(s, l){ return tourneyCreate(s, l); },\n'
         + '    join: function(c){ return tourneyJoin(c); },\n'
         + '    start: function(){ return tourneyStart(); },\n'
         // The break: the board as the client holds it, the button it is offered, and the

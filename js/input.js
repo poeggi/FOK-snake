@@ -345,6 +345,9 @@ const UI_INPUT = {
     // The three tournament screens that offer a choice share ONE handler, because they
     // share one row model (tourneyRows): whatever the picture above them is, the rows at
     // the bottom are drawn and dispatched from the same list, so they can never disagree.
+    // ESC off the settings goes back to the list CREATE was pressed on, never past it to
+    // the multiplayer menu: nothing has been created yet, so there is nothing to leave.
+    tourneySetup: _ttUiInput('tourneyLobby'),
     tourneyLobby: _ttUiInput('multiplayer'),
     tourneyCode: {
         // Nothing to choose: the screen is one number and the link that carries it.
