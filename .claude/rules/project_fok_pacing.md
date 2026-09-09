@@ -1,6 +1,6 @@
 # Request pacing (client half; server half in FOK-server)
 
-Everything here is shipped on both sides (server 1.4.11 / API 4.4, client 4.0.15).
+Everything here is shipped on both sides.
 Nothing is open. The whole family of fixes is one idea - fewer simultaneous
 requests per client - and each half is useless without the other.
 
@@ -65,9 +65,13 @@ requests per client - and each half is useless without the other.
   (netPresenceOpen + the tick's edge), on foreground and on offline. A 204
   leaves the cursor alone. The lobby and friends screens send no hello of
   their own any more; MY ID shows no friend state and asks for none.
-- index.html preconnects the API origin (crossorigin = the credential-less pool
-  fetch() draws from), so the TLS + h2 handshake runs while the scripts load and
-  the boot hello finds the connection open. Once per page load, nothing after.
+- index.html DNS-prefetches the API origin, so the name is resolved while the
+  scripts load and the boot clock sweep does not pay the lookup -- its FIRST
+  sample is adopted as the anchor outright. Once per page load, nothing after.
+  DNS only, deliberately: a preconnect opens a TLS connection that the OFFLINE
+  setting cannot refuse, and no static tag can read that setting -- gating one
+  would take an inline script, which the game does not have
+  (project_fok_csp.md). The TCP+TLS saving is given up on purpose.
 - Self-check: q_ms is stored with the in-flight count at the time of the
   reading, so netSelfStacked() separates the host's load from our own overlap.
 - The item queue stands aside ONCE while a duel forms, never in a loop - a
@@ -152,6 +156,23 @@ literal number. Rule: accept an optional leading v, and pin version tests to
 the FORMAT of APP_VERSION (force its major), never to a version NUMBER - the
 hook rewrites the number only AFTER checks run. See feedback_fok_version_tag.md.
 
+## NET_API_BUILT_MINOR is a DECLARATION -- bump it with the feature
+
+Implementing a contract minor means bumping `NET_API_BUILT_MINOR` in the same
+commit. Shipping the 4.7 fields while the constant still said 6 put a permanent
+"UPDATE AVAILABLE - PLEASE RELOAD" in front of every player the moment the 4.7
+server went live -- and reloading could not clear it, because they already had
+the newest build.
+
+Nothing can catch this for you. The client cannot know what the server offers,
+so the constant is a statement of intent, not a derived value. What CAN be
+caught is a test that goes stale with it: the gate lane in smoke-net.js now
+builds its "built against" and "newer minor" inputs from
+`NET_API_BUILT + '.' + NET_API_BUILT_MINOR`, because the old literal `'4.7'`
+silently stopped testing anything the moment the constant reached 7. Same
+family as the version-string gotcha above: pin a version test to the FORMAT or
+derive it, never to a NUMBER.
+
 ## How to apply
 
 Feature-detect every optional field (a MINOR is re-released, so a server
@@ -169,14 +190,3 @@ carrying one do not stand something local in its place.
 - Handing the beat over the wire, or stretching ANY interval under load.
 - screen_ms or ANY new or adaptive pace field. The standing direction is LESS
   mechanism, not more.
-
-## Open offers (flagged only - need an explicit go)
-
-- POST as text/plain to drop the CORS preflight (server jsonBody() never checks
-  Content-Type). The preflight no longer costs an FPM worker: Apache answers
-  OPTIONS on /api/ without starting PHP (server 1.4.12), so what is left to win
-  is one round trip on a cold start, not a slice.
-- The tournament lobby still sends a hello every 5 s for the ANNOUNCE LIST
-  (`tourneys`), which the 4.6 poll does not carry. Putting `tourneys` on the
-  poll's `fs` return would retire the last screen tick; server-side, needs an
-  ask.

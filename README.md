@@ -99,7 +99,11 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to bo
   held a little behind the live edge, so what it shows is the match itself and
   not a re-telling of it. A feed that has not started yet says which leg it is
   waiting on -- nobody to ask, an unanswered ask, a link still opening, or the
-  shared clock -- rather than a bare CONNECTING
+  shared clock -- rather than a bare CONNECTING. A friend's match shows up as
+  watchable the moment it begins, and stops offering itself once it is over
+- MAKE DUELS PRIVATE (SETTINGS > NETWORK): your online duels still count
+  everywhere, but no friend is offered a link to watch them. A tournament match
+  is never hidden -- a bracket nobody may watch is a broken bracket
 - TOURNAMENT mode: create a tournament, everyone on the same network sees it
   announced (or joins with the 6-character code), from 2 players up to a cap the
   server sets (8 by default). The server deals the schedule -- a sparse

@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 6;   // built against 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 7;   // built against 4.7 = a duel is ANNOUNCED as it begins: start.php records it (both peers call it at the match-identity moments), the heartbeat's duel_with refreshes it and hello's duel_end clears it at teardown, with duel_private marking a duel that counts everywhere but is never attributed to a person; 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -1302,6 +1302,19 @@ var _netMyIdAt = 0;   // last moment the MY ID screen (our QR) was on display
 // Friendships that reached ACCEPTED at least once: an accepted id vanishing from
 // the authoritative server list means the PEER removed it -- mirror that locally.
 let _netFrOk = (function(){ try{ return JSON.parse(localStorage.getItem('fok-snake-friend-ok')||'{}')||{}; }catch(e){ return {}; } })();
+// TWO different facts, deliberately kept apart. _netFrOk = the server called this
+// friendship ACCEPTED. _netFrSent = the server merely HAS our request. Only the second
+// one decides whether to ask again: a pending row is stored (a,b)-keyed and never expires
+// server-side, so re-asking every launch until the peer happens to accept is pure noise --
+// and it never converged, because the answer to a delivered request is 'pending', which
+// the acceptance marker refuses to record.
+let _netFrSent = (function(){ try{ return JSON.parse(localStorage.getItem('fok-snake-friend-sent')||'{}')||{}; }catch(e){ return {}; } })();
+function _netFrSentSave(){ try{ localStorage.setItem('fok-snake-friend-sent', JSON.stringify(_netFrSent)); }catch(e){} }
+function _netFrSentMark(id){ if(!_netFrSent[id]){ _netFrSent[id]=1; _netFrSentSave(); } }
+// A RESTORE re-asserts the player id out of the backup, so every marker we hold was
+// recorded against a DIFFERENT identity. Keeping them would silently suppress exactly the
+// requests the restored save needs. Cleared from _applyRestoredConfig (storage.js).
+function netFriendMarkersReset(){ _netFrOk = {}; _netFrSent = {}; _netFrOkSave(); _netFrSentSave(); }
 function _netFrOkSave(){ try{ localStorage.setItem('fok-snake-friend-ok', JSON.stringify(_netFrOk)); }catch(e){} }
 function _netFrOkMark(id){ if(!_netFrOk[id]){ _netFrOk[id]=1; _netFrOkSave(); } }
 function _netFrOkClear(id){ if(_netFrOk[id]){ delete _netFrOk[id]; _netFrOkSave(); } }
@@ -1342,12 +1355,14 @@ function _netFrCelebrate(text){
 function netFriendRequest(id){
     // Retry after 30s: a request lost to a blip must not block the friendship
     // (and therefore every future invite, which is friendship-gated) forever.
-    if(!_netOk() || _netFrOk[id] || netFriendBanned()) return null;
+    if(!_netOk() || _netFrOk[id] || _netFrSent[id] || netFriendBanned()) return null;
     if(_netFrRequested[id] && Date.now() - _netFrRequested[id] < 30000) return null;
     _netFrRequested[id] = Date.now();
     const p = _netFriendApi('request', id);
     if(!p || !p.then) return null;
     return p.then(r => {
+        // Delivered: the server holds the row from here, whatever the peer does about it.
+        if(r) _netFrSentMark(id);
         // 'accepted' = server auto-match (crossing requests, race-proof since
         // v0.14.1). React now instead of waiting for the async 'friend' signal.
         if(r && r.state === 'accepted' && !_netFrOk[id]){
@@ -1413,6 +1428,23 @@ function _netFrRefresh(migrate){
 // THE one place a roster is read, whichever request brought it. hello's friends_list and
 // friend.php's list answer byte for byte, and a roster that meant different things by the
 // route it arrived on would be a roster nothing could trust.
+// The migrate pass fires only for ids the server does not list AND we have never sent --
+// a restored backup or friends added offline -- so it is silent on a synced client and a
+// one-time trickle otherwise. It is SPACED because the server admits one friend.php call
+// per second per caller: a bare loop got one through, left the rest unsent, and repeated
+// the identical burst next launch -- never converging, while looking like an abuser.
+const NET_FR_MIG_MS = 1000;
+var _netFrMigQ = [], _netFrMigT = 0;
+function _netFrMigPush(id){ if(_netFrMigQ.indexOf(id) < 0) _netFrMigQ.push(id); _netFrMigArm(); }
+function _netFrMigArm(){
+    if(_netFrMigT || !_netFrMigQ.length || typeof setTimeout !== 'function') return;
+    _netFrMigT = setTimeout(function(){
+        _netFrMigT = 0;
+        const id = _netFrMigQ.shift();
+        if(id) netFriendRequest(id);
+        _netFrMigArm();
+    }, NET_FR_MIG_MS);
+}
 function _netFrAdopt(list, migrate){
     _netFr.list = list; _netFr.at = Date.now();
     const seen = {};
@@ -1432,7 +1464,7 @@ function _netFrAdopt(list, migrate){
             const gnm = netFriendName(id) || fmtFriendId(id);
             _netFr.msg = gnm + ' REMOVED THE FRIENDSHIP';
             _netLb.msg = _netFr.msg; _duelMsg = _netFr.msg; _duelMsgAt = _msgNow();
-        } else if(migrate) netFriendRequest(id);   // never synced: run the handshake
+        } else if(migrate) _netFrMigPush(id);   // never synced: run the handshake, one per second
     }
     _uiDirty = true;
 }

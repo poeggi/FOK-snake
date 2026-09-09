@@ -488,8 +488,8 @@ function _netMyEpoch(){ return (typeof _rbEpoch === 'number') ? _rbEpoch|0 : (_n
 async function _netRequestStart(s, reason){
     // A boundary in an ONGOING match is pure P2P now: the DataChannel is live and the joiner's
     // clock is aligned to the host each boundary, so the host authors the next start PTS locally
-    // and ships it on the retried-until-echoed 'go' -- no /api/start.php round trip, no stale
-    // epoch-line 409, and it keeps working even with the sign-in server unreachable. The server
+    // and ships it on the retried-until-echoed 'go' -- no /api/start.php round trip, and it
+    // keeps working even with the sign-in server unreachable. The server
     // path below stays for the match-IDENTITY moments (first start, rematch), which register and
     // verify the pair's epoch line.
     if(reason === 'level'){ _netOpenBoundary(s, reason); return; }
@@ -522,18 +522,6 @@ async function _netRequestStart(s, reason){
     const _rtt = performance.now() - _t0;
     if(_netSess !== s || !s.game) return;
     if(!r.json){
-        // 409 = the pair's epoch line is ahead of us. On a FIRST start that does not
-        // mean we lost count -- it means the line OUTLIVED our last match: the server
-        // keeps it ~5 min and only a bye clears it (signal.php -> Starts::forget), and
-        // a fresh session always opens at 0. Ending silently made that permanent: the
-        // line stayed stale, so every retry 409'd for the full five minutes, and the
-        // peer -- told nothing -- sat on CONNECTION LOST. The bye IS the documented
-        // reset, so send it: it clears the line, the next attempt is clean, and the
-        // peer learns why instead of guessing.
-        if(r.status === 409){
-            _netSessionEnd((s.epoch|0) === 0 ? 'STALE MATCH - TRY AGAIN' : 'OUT OF SYNC - MATCH ENDED');
-            return;
-        }
         if(r.status === 400 && /pts/.test(r.err)){ _netSessionEnd('CLOCK SYNC FAILED - CANNOT START'); return; }
         _netSessionEnd('NO START TIME - CANNOT START'); return;
     }
@@ -1008,7 +996,7 @@ function _netMaybeRestart(){
     s.epoch = (s.epoch|0) + 1;
     // A rematch is a server-registered start (a new epoch on the pair's line) but never a
     // clock sweep: its pts is computed at send time from the anchor already held.
-    // _netRequestStart owns that whole sequence -- epoch, reason, the 409/400 handling and
+    // _netRequestStart owns that whole sequence -- epoch, reason, the failure handling and
     // the `now` re-check. Reuse it rather than re-implement a second, subtly different
     // start path here.
     _netRequestStart(s, 'rematch');
@@ -1100,11 +1088,9 @@ function netEndSession(){
 }
 // Remote/failed end: back to the 1vs1 menu with a message (never a crash, never a freeze).
 // remoteBye = the peer already told us it is gone, so saying it back is noise.
-// Every OTHER ending must say goodbye: not just courtesy, it is what clears the
-// pair's epoch line server-side (signal.php -> Starts::forget). Dying silently left
-// that line stale for ~5 minutes, so the pair's NEXT match opened at epoch 0 against
-// a server that had moved on and 409'd -- a match that could not be started again
-// until the line aged out.
+// Every OTHER ending says goodbye so the peer learns at once instead of waiting out
+// its own silence timer. The pair's epoch line is not this message's business: the
+// server resets it on the invite or offer that OPENS the next pairing.
 function _netSessionEnd(msg, remoteBye){
     const s = _netSess; if(!s) return;
     const wasGame = s.game;
@@ -1133,12 +1119,9 @@ function _netTeardown(){
     // The duel is over: state the end rather than leaving it to lapse. Only for a duel that
     // actually RAN (s.game) and had a peer -- a spectator's session has neither in the sense
     // that matters, and a handshake that never reached play was never announced.
-    // The NEXT beat carries it, deliberately: sending a hello from here fires
-    // netNetsRefresh() too, whose "not while netGameActive()" guard is already void because
-    // _netSess is null by now -- so it opens a throwaway RTCPeerConnection and gathers ICE at
-    // the exact moment the next match's handshake forms. In a tournament that costs the
-    // spectator its feed (test/tourney-e2e r1.9). One beat of lag is well inside the server's
-    // offer window; a stray gather at a boundary is not worth buying it out.
+    // Recorded here, carried by the next beat. Teardown sends nothing of its own: a watch ask
+    // travels on the solo lane, which refuses to go out beside another request of ours, and
+    // teardown is exactly when the next match's spectator is asking.
     if(s.game && s.peer && !(typeof netSpectating === 'function' && netSpectating())) _netDuelEnd = s.peer;
     if(s.peer) delete _netPeerNet[s.peer];   // the IP hint was for THIS match's path; a new match (or a network switch) gets a fresh one
     s.game = false; s.relay = false;

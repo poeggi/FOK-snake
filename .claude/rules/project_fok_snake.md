@@ -78,7 +78,7 @@ guards the house edge.
   (duelHalt -> host go{respawn}; the dying hold re-announces every _HALT_RE=6
   ticks until answered); an outage recovery ends in a resume boundary
   (adopt-only clock re-anchor, no rebuild - see
-  project_fok_connection_lost_open.md). bsync/sched/rst/reship/epq are DELETED
+  adopt-only clock re-anchor, no rebuild). bsync/sched/rst/reship/epq are DELETED
   vocabulary. Guards: smoke-recovery-resume, smoke-respawn-halt,
   smoke-level-wire, net-handshake protocol lanes.
 - x10 CONTRACT: a duel NEVER honors x10 - like difficulty, a duel always runs
@@ -165,17 +165,6 @@ guards the house edge.
   reintroduce sprite/text blitting.
 - Main ctx uses getContext('2d',{alpha:false}) (kept). Dip levers if needed:
   reduce blur radii / disable glow during events.
-
-## Open items (do not start unprompted)
-
-- Platform badge - DEFERRED, discuss before building. Two halves: (a) DUEL
-  badge = client-only (add platform to the handshake profile payload, each
-  player renders it); (b) GLOBAL highscore platform = needs an additive field
-  on the FOK-server score submit/return + API bump - a SEPARATE PRODUCTION
-  repo, never touch it without an explicit ask. Tentative taxonomy: 3 buckets
-  MOBILE/DESKTOP/TV (touch + UA + screen).
-- Server side (needs an explicit ask): FOK-server Tournament::project() does
-  not put podium in the state read-back although its docs/API.md says it does.
 
 ## Key constraints
 

@@ -1,6 +1,7 @@
 # Duel netcode housekeeping invariants
 
-All in js/duel-core.js. See project_fok_snake.md for repo layout, project_fok_connection_lost_open.md for the recovery dossier these serve.
+All in js/duel-core.js. See project_fok_snake.md for the repo layout and
+project_fok_duel_recovery.md for the recovery invariants these serve.
 
 ## Tick schedule (a staircase, not a spike)
 

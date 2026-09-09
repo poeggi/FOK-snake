@@ -17,4 +17,4 @@ one line and let the user decide. Feature-detecting an optional FIELD stays
 right (project_fok_pacing.md asks for it); standing a local value in for one
 the contract states, or keeping a whole legacy BEHAVIOUR, does not.
 
-Related: project_fok_pacing.md, project_fok_server_pairing.md.
+Related: project_fok_pacing.md.

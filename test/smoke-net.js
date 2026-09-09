@@ -376,13 +376,17 @@ runTest('SMOKE-NET', `
     // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
     // disables online. An older server MAJOR (one without the item registry) stays usable:
     // online play is unaffected, item registration simply has nowhere to land.
-    _applyHello({api:'4.6'});   // the version this client is built against
-    if(_netApiNewer||_netApiOutdated) throw 'built against 4.6: the same version must read as up to date';
+    // DERIVED, never a literal: a hard-coded "the version we are built against" goes stale the
+    // moment the constant moves, and it goes stale SILENTLY -- it just stops testing anything.
+    const _BUILT = NET_API_BUILT + '.' + NET_API_BUILT_MINOR;
+    const _NEWER_MINOR = NET_API_BUILT + '.' + (NET_API_BUILT_MINOR + 1);
+    _applyHello({api:_BUILT});
+    if(_netApiNewer||_netApiOutdated) throw 'built against ' + _BUILT + ': the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
     // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
     // without it _netOk() is false and both halves of the assertion pass vacuously.
     const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==6 || !netTourneyOk()) throw 'a same-major 4.6 server must open the tournament gate';
+    if(netSrvMinor()!==NET_API_BUILT_MINOR || !netTourneyOk()) throw 'a same-major ' + _BUILT + ' server must open the tournament gate';
     // The beat is a contract constant: 60 s, half the 120 s online window.
     if(NET_HELLO_MS!==60000) throw 'the contract beat is 60 s';
     _applyHello({api:'4.4'});
@@ -405,7 +409,7 @@ runTest('SMOKE-NET', `
     _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
     if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
     globalThis.fetch=_oFetchT;
-    _applyHello({api:'4.7'});   // newer MINOR: still compatible, but an update exists
+    _applyHello({api:_NEWER_MINOR});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
     _applyHello({api:'5.0'});   // newer MAJOR: incompatible
@@ -674,7 +678,7 @@ runTest('SMOKE-NET', `
         _netSess={ peer:'', game:true }; _hp=null; _netHelloBusy=false; _netHello();
         if(!_hp || 'duel_with' in _hp) throw 'a spectator has no duel to announce: ' + JSON.stringify(_hp);
         _netSess=null; _netDuelEnd=''; _netPost=_oPostP; _netHelloBusy=_oBusyP;
-        log('private duels ok: the flag rides the beat and the start, the end is stated at teardown, a spectator announces none, an ordinary ask is refused bare, a roles-sheet spectator is not');
+        log('private duels ok: the flag rides the beat and the start, the end is recorded at teardown and rides the next beat, a spectator announces none, an ordinary ask is refused bare, a roles-sheet spectator is not');
         // (e) ONE adoption path, whichever request paid for the list: names learned, accepted
         // friendships marked, and a screen that never has to know which route it came by.
         localStorage.removeItem('fok-snake-friends');
@@ -1271,6 +1275,45 @@ runTest('SMOKE-NET', `
     _netFr.list=null; localStorage.removeItem('fok-snake-friends'); localStorage.removeItem('fok-snake-friend-rm');
     phase='menu';
     log('friends screen ok: merge, remove confirm, states, nav');
+
+    // ---- friendship markers: ASK ONCE, and forget everything on a restore ----
+    // Two different facts. _netFrOk = the server called it accepted. _netFrSent = the server
+    // merely HAS our request. Only the second decides whether to ask again -- a delivered
+    // request answers 'pending', which the acceptance marker refuses to record, so gating on
+    // it alone re-asked on every launch for as long as the peer sat on it.
+    const _oOkM=_netFrOk, _oSentM=_netFrSent, _oMigQ=_netFrMigQ;
+    const _clrReq=()=>{ for(const k in _netFrRequested) delete _netFrRequested[k]; };   // const object: mutate, never rebind
+    _netFrOk={}; _netFrSent={}; _clrReq(); _netFrMigQ=[];
+    let _sent=0; const _oFrApi=_netFriendApi, _oFetchM=globalThis.fetch;
+    globalThis.fetch=()=>({});   // _netOk() needs one; an earlier block left it undefined
+    _netFriendApi=(a1,p1)=>{ _sent++; return Promise.resolve({ ok:true, state:'pending' }); };
+    _netFrSentMark('aaaa1111');
+    if(netFriendRequest('aaaa1111')!==null) throw 'a request the server already holds must not be sent again';
+    if(_sent!==0) throw 'the delivery marker did not gate the ask';
+    _netFrOk={}; _netFrSent={}; _clrReq();
+    if(netFriendRequest('bbbb2222')===null) throw 'an unsent friendship must still be asked for';
+    if(_sent!==1) throw 'exactly one request for an unsent friendship, got ' + _sent;
+    // A RESTORE re-asserts the player id, so markers recorded against the old identity must go
+    // -- keeping them would suppress exactly the requests the restored save needs.
+    // Through the REAL restore path, not the helper: the wiring is the thing that can be
+    // dropped. {v:1} carries no keys, so set() skips every one and this is a no-op apart
+    // from the reset and a cfg reload.
+    _netFrOk={x:1}; _netFrSent={y:1};
+    if(_applyRestoredConfig({ v:1 })!==true) throw 'the minimal restore should have applied';
+    if(Object.keys(_netFrOk).length || Object.keys(_netFrSent).length) throw 'a restore must clear BOTH friendship markers';
+    if(localStorage.getItem('fok-snake-friend-sent')!=='{}') throw 'the cleared delivery marker must reach storage';
+    // The migrate pass QUEUES rather than firing a burst: the server admits one friend.php
+    // call per second per caller, so a bare loop got one through and left the rest unsent.
+    _netFrOk={}; _netFrSent={}; _clrReq(); _netFrMigQ=[]; _sent=0;
+    const _oFriends=getFriends();
+    try{ localStorage.setItem('fok-snake-friends', JSON.stringify(['cccc3333','dddd4444','eeee5555'])); }catch(e){}
+    _netFrAdopt([], true);
+    if(_sent!==0) throw 'the migrate pass must not fire a burst on the spot, got ' + _sent;
+    if(_netFrMigQ.length!==3) throw 'every unsent id must be queued, got ' + JSON.stringify(_netFrMigQ);
+    if(NET_FR_MIG_MS!==1000) throw 'the migrate spacing must match the server interval gate';
+    try{ localStorage.setItem('fok-snake-friends', JSON.stringify(_oFriends)); }catch(e){}
+    globalThis.fetch=_oFetchM; _netFriendApi=_oFrApi; _netFrOk=_oOkM; _netFrSent=_oSentM; _clrReq(); _netFrMigQ=_oMigQ;
+    log('friendship markers ok: asked once and remembered, both markers cleared by a restore, the migrate pass queued at the server interval');
 
     // ---- API compliance: auto_accept flag, friend expired event ----
     // (a) auto_accept present in the hello body only on the QR / add-friend surfaces

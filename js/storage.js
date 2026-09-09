@@ -347,6 +347,11 @@ function _applyRestoredConfig(d){
     const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
     set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name'); set(PID_KEY,'pid'); set(FRIENDS_KEY,'friends');
     if(/^[0-9a-f]{8}$/.test(d.pid||'')) _pidCookieSet(d.pid);   // identity into the cookie (master) too
+    // The restore just re-asserted the player id out of the backup, so every friendship
+    // marker we hold was recorded against a DIFFERENT identity. Keeping them would suppress
+    // exactly the requests this save now needs, and the restored player would silently have
+    // no friendships on the server at all.
+    if(typeof netFriendMarkersReset === 'function') netFriendMarkersReset();
     if(d.tok) setCloudToken(d.tok);                            // and the cloud-restore credential
     _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
     if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }

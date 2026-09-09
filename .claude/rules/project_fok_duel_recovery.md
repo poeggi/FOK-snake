@@ -1,6 +1,8 @@
-# CONNECTION LOST / OUT OF SYNC dossier -- nothing open
+# Duel recovery invariants (desync, outage, epoch split)
 
-1vs1 online duel recovery. Everything below is settled behavior plus a DO-NOT-RETRY list. Do not reopen any of it without a NEW field report.
+How a 1vs1 recovers when the pair falls out of step, and what must not be
+changed while doing it. Every line here was paid for by a field report or a
+measurement. Do not relitigate any of it without a NEW field report.
 
 ## Epoch mirror invariant (worker-hosted runtime)
 
@@ -60,10 +62,11 @@ THE RULE: netTickPre runs drain + both settles BEFORE _rbEnsureSnap(t) + the log
 
 ## Wedged peer sim is the SECOND CONNECTION LOST trigger
 
-CONNECTION LOST is not a pure silence detector, and could never have been a complete one. The wall-clock keepalives (the radio-warm `warmT` interval and the 250ms liveness ping) are TIMERS, not sim work -- they exist to chirp when the sim is NOT ticking -- so a peer whose sim wedged (see project_fok_sim_stall.md) keeps `lastRecvWall` fresh ~15x/s forever while its world stands still. In the worker home its beat is a bare `pi` with no tick, so nothing reacts at all; in the other home it is an `in` with a FROZEN tk, which feeds `_rbNoteBehindPeer` and arms an unbounded resync burst at a corpse.
+CONNECTION LOST is not a pure silence detector, and could never have been a complete one. The wall-clock keepalives (the radio-warm `warmT` interval and the 250ms liveness ping) are TIMERS, not sim work -- they exist to chirp when the sim is NOT ticking -- so a peer whose sim wedged (the sim-worker hardening in js/sim-worker.js) keeps `lastRecvWall` fresh ~15x/s forever while its world stands still. In the worker home its beat is a bare `pi` with no tick, so nothing reacts at all; in the other home it is an `in` with a FROZEN tk, which feeds `_rbNoteBehindPeer` and arms an unbounded resync burst at a corpse.
 
 INVARIANT: the proof of a live peer sim is the `tk` every packet stamps MOVING -- movement, not increase, because a boundary rebases to 0 and a rebase is a sim doing something. `_netNotePeerSim` takes it ONLY in `_netHandleMsg` (the real-wire path); a spectator's forwarded packets reach `_netHandleParsed` directly and must never vouch for a peer they did not come from. `_netSimStalled(s, ms)` suppresses wherever a sim is entitled to sit still -- `s.tx`, `s.lvlPending`, reconnecting, relay, spectating, or no baseline yet -- and `_netLiveCheck` pushes `s.simSeenWall` forward through those windows so the deadline starts at the END of a legitimate pause. RB_SIM_STALL_MS = RB_PERSIST_KILL_MS (banner), RB_SIM_KILL_MS = 2x (match ends). The ladder has NO reconnect rung: the transport is healthy, so rebuilding it repairs nothing.
 
 Discriminator worth keeping: a BACKGROUNDED peer freezes its timers too, so it takes the ordinary silence path. "Timers alive, sim dead" is the only shape this trigger claims. Regression: `test/duel-warn.js` cases 10-14 (two fault shapes + three controls); reverting the predicate fails exactly the fault checks, dropping the `tx || lvlPending` guard fails exactly that control.
 
-Related: project_fok_snake.md, project_fok_headroom_shortcut.md, project_fok_duel_resync_ownership.md, feedback_same_code_path.md.
+Related: project_fok_duel_resync_ownership.md, project_fok_netcode_housekeeping.md,
+project_fok_headroom_shortcut.md, project_fok_clock_drift_fix.md.

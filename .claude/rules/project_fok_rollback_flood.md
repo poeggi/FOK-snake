@@ -58,7 +58,7 @@ by test/duel-touch.js reverse-slide + brake lanes (flood bound, no
 over-suppression, brake still authors and stops the boost). A doze-sweep
 control run proved the gate does NOT cause the deep-doze residual (that was
 the netTickPre repair-order bug, fixed in the same commit - see
-project_fok_connection_lost_open.md). Nothing open here.
+Nothing open here.
 
 ## Harness invariant: a faked duel start MUST arm through _netArmBegin
 

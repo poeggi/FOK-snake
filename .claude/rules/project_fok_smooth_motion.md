@@ -34,14 +34,3 @@ A/B bench against the game's own drawing code):
 
 Tests: test/smoke-game.js (default, validation, the fraction at full speed
 and under the cap, the sub-tick, segment placement, pixel snap, wrap).
-
-## Open (parked by the user 2026-09-08, do not start unprompted)
-
-- CORNERS: while a corner cell is straddled, the segment entering it (old
-  axis) and the one leaving it (new axis) are ~0.8 cells apart across the
-  corner, so their squares overlap and the corner draws as a diagonal blob
-  for the ramp's frames, read as a "jump" at turns. Options weighed: an extra
-  bead resting on the corner cell while it is straddled (a one-bead bulge),
-  drawing the smooth snake as one round-joined tube (a look change), or
-  freezing the straddling pair (opens a hole - worse). To be judged on the
-  A/B bench first when picked up.

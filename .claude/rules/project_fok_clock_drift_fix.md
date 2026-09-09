@@ -10,4 +10,4 @@ WHY (do not relitigate): on a real iOS-vs-PC LAN match the phone's NTP daemon sl
 
 HARNESS MODEL (test/duel-driver.js), kept split on purpose: `performance.timeOrigin = __NET_BASE + err0` carries the real inter-device anchor error (the offset the burst must correct AND the lead that opens one-sided rollback), drift-free; `Date.now` keeps err0 + drift for wall-only uses. So a large `clock.drift` and a mid-match `__clkStep(ms)` are Date.now-only changes the timeline must ignore.
 
-Related: project_fok_connection_lost_open.md, project_fok_headroom_shortcut.md.
+Related: project_fok_headroom_shortcut.md, project_fok_duel_recovery.md.
