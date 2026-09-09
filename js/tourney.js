@@ -37,7 +37,9 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, busy:false, contAt:0, from:'', to:'' };
+var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, busy:false, contAt:0, from:'', to:'', ask:null };
+// ask: the question the quit dialog is asking when it is not the leave/end one. Today one
+// shape -- { kind:'replace', stakes, code, running } -- CREATE while already hosting.
 // The read-back of a tournament this device is still in but is not currently looking at --
 // what the REJOIN row is made of. Null until _ttProbe finds one.
 var _ttBack = null;
@@ -325,7 +327,7 @@ async function _ttSync(){
     // A tournament can end without us: the host walks out and every client is dropped. The
     // event says so, but a client that missed it would otherwise poll a dead tournament for
     // ever, so the read-back is allowed to deliver the same verdict.
-    if(_tt.state === 'abandoned'){ _ttDrop('TOURNAMENT ABANDONED'); return; }
+    if(_tt.state === 'abandoned'){ _ttDrop(_ttGoneWhy()); return; }
     if(r.json.roles){
         const sheet = r.json.roles;
         if(!sheet.tid) sheet.tid = tid;
@@ -371,9 +373,9 @@ function _ttOnSignal(d){
     if(!_tt || _tt.tid !== tid) return;
     _ttAfterNote(d);
     switch(ev){
-        case 'duelLobby':
+        case 'lobby':
             _ttAdopt(d);
-            if(_tt.state === 'abandoned') _ttDrop('TOURNAMENT ABANDONED');
+            if(_tt.state === 'abandoned') _ttDrop(_ttGoneWhy());
             break;
         case 'roles':       _ttRoles(d); break;
         case 'roles-patch': _ttPatch(d); break;
@@ -740,22 +742,69 @@ function tourneyRejoin(){
     Snd.sfxPlay('select', cfg.music);
     _ttSync();
 }
-async function tourneyCreate(stakes){
+// A host holds one tournament at a time: a create while hosting is answered 409. Since
+// server 4.8 the same create sent again with replace:true ends the one we host -- exactly
+// as our own leave would -- and opens the new one in the same call, so we can never end
+// up holding neither. Feature-detected by behaviour, never by version: replace goes out
+// only after a 409, and a 409 to THAT is an older server, which gets the plain message.
+// The player is asked first (_ttAskReplace): a running tournament ends for everyone.
+async function tourneyCreate(stakes, replace){
     if(_tt || _ttUi.busy) return;
     if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
     _ttUi.busy = true; _ttMsg('CREATING...');
-    const r = await _ttPost('create', { stakes: !!stakes });
+    const body = { stakes: !!stakes };
+    if(replace) body.replace = true;
+    const r = await _ttPost('create', body);
     _ttUi.busy = false;
     if(!r.json){
+        // The cooldown is charged BEFORE anything is ended, so on a 429 the tournament we
+        // host is still standing: show the wait, never report it as ended.
         if(r.status === 429) _ttMsg('TOO SOON - WAIT ' + Math.max(1, Math.ceil(+((r.body && r.body.retry_after) || 60))) + 'S', true);
+        else if(r.status === 409 && !replace) _ttAskReplace(stakes);
         else if(r.status === 409) _ttMsg('YOU ALREADY HOST ONE', true);
         else _ttMsg('COULD NOT CREATE', true);
         return;
     }
+    _ttBack = null;   // the one we could have gone back to is the one this replaced
     _ttAdopt(Object.assign({ host:getPlayerId(), state:'open' }, r.json));
     _ttUi.sel = -1;
     _ttMsg('CODE ' + (_tt ? _tt.code : ''));
     _ttSync();
+}
+// The question behind a 409 on create. The 409 names nothing, so what the dialog can say
+// about the tournament we host is what this device still knows of it: the way back
+// (_ttBack) names it when this is the device that hosted it. Elsewhere the question is
+// asked in the general form, with the running case spelled out since it cannot be excluded.
+function _ttAskReplace(stakes){
+    const b = _ttBack;
+    const mine = !!(b && String(b.host || '') === getPlayerId());
+    _ttUi.ask = { kind:'replace', stakes:!!stakes,
+                  code:mine ? String(b.code || '') : '',
+                  running:mine ? String(b.state || '') === 'running' : null };
+    _ttUi.from = 'tourneyLobby'; _ttUi.to = '';
+    quitConfirmSel = 1;                                // NO: the safe answer is the offered one
+    phase = 'tourneyQuit';
+    Snd.sfxPlay('nav', cfg.music);
+    _uiDirty = true;
+}
+// The dialog's answer. YES re-sends the create with replace:true; NO is the lobby again.
+function tourneyAskAnswer(yes){
+    const a = _ttUi.ask; _ttUi.ask = null;
+    phase = _ttUi.from || 'tourneyLobby'; _uiDirty = true;
+    if(yes && a && a.kind === 'replace') tourneyCreate(a.stakes, true);
+}
+// Why a tournament we were in is gone, in the words of the reason the server gave (the
+// lobby event carries it; the read-back does too). The server's vocabulary: the host left
+// the lobby, ended a running one, or opened a new one over it; everyone stopped beating;
+// an operator pulled it. Anything else reads as the plain abandon.
+function _ttGoneWhy(){
+    const why = _tt ? String(_tt.reason || '').toLowerCase() : '';
+    if(why.indexOf('opened a new one') >= 0) return 'HOST STARTED A NEW TOURNAMENT';
+    if(why.indexOf('host left') >= 0)        return 'THE HOST LEFT';
+    if(why.indexOf('host ended') >= 0)       return 'THE HOST ENDED IT';
+    if(why.indexOf('everyone left') >= 0)    return 'EVERYONE LEFT';
+    if(why.indexOf('operator') >= 0)         return 'ENDED BY THE OPERATOR';
+    return 'TOURNAMENT ABANDONED';
 }
 async function tourneyJoin(arg){
     if(_tt || _ttUi.busy) return;

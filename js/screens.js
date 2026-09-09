@@ -2054,12 +2054,20 @@ function drawTourneyPodium(){
 // The one exit that costs other people something, so it is asked rather than taken. The
 // board stays behind the glass because what is at stake is exactly what is drawn on it.
 function drawTourneyQuit(){
-    const t = tourneyView(), from = tourneyUi().from;
+    const t = tourneyView(), from = tourneyUi().from, ask = tourneyUi().ask;
     const host = !!t && String(t.host) === getPlayerId();
+    // CREATE while already hosting: end that one and open the new one? A running one ends
+    // for every player in it, and the note says so wherever that cannot be ruled out.
+    let title = host ? 'END IT FOR EVERYONE?' : 'LEAVE AND FORFEIT?';
+    let note  = host ? 'EVERY PLAYER IS DROPPED OUT OF THIS TOURNAMENT'
+                     : 'YOUR REMAINING MATCHES ARE HANDED TO YOUR OPPONENTS';
+    if(ask && ask.kind === 'replace'){
+        title = ask.code ? 'END ' + ask.code + ', START A NEW ONE?' : 'END YOUR TOURNAMENT, START A NEW ONE?';
+        note  = ask.running === false ? 'ITS LOBBY IS CLOSED AND EVERYONE IN IT IS SENT AWAY'
+                                      : 'IT IS RUNNING - IT ENDS FOR EVERY PLAYER, NOT JUST YOU';
+    }
     drawConfirm({
-        title: host ? 'END IT FOR EVERYONE?' : 'LEAVE AND FORFEIT?',
-        note:  host ? 'EVERY PLAYER IS DROPPED OUT OF THIS TOURNAMENT'
-                    : 'YOUR REMAINING MATCHES ARE HANDED TO YOUR OPPONENTS',
+        title, note,
         sel: quitConfirmSel, danger: true,
         behind: () => {
             if(from === 'tourneyRound')          drawTourneyRound();

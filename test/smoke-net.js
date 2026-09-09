@@ -62,7 +62,7 @@ runTest('SMOKE-NET', `
     press('Enter');   // BACK
     if(phase!=='duelMenu') throw 'lobby BACK did not return';
     phase='duelLobby'; netLobbyEnter();
-    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'PEER<XSS>',color:99}})});
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER<XSS>',color:99}})});
     if(!_netLb.invite) throw 'incoming invite not surfaced in the lobby';
     if(_netLb.invite.profile.color>=SNAKE_COLORS.length) throw 'peer profile color not clamped';
     drawDuelLobby();                                   // invite dialog renders
@@ -1009,13 +1009,13 @@ runTest('SMOKE-NET', `
     // ---- mutual invites: deterministic auto-accept, no dialog ----
     localStorage.setItem('fok-snake-pid','00000001');   // our ID < the peer's
     phase='duelLobby'; _netLb.invite=null; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now();
-    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}'});
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}'});
     if(_netLb.invite) throw 'mutual invite must not open a dialog';
     if(_netHs.sent!==null) throw 'smaller ID must auto-accept (sent cleared)';
     if(_netLb.msg.indexOf('MUTUAL')!==0) throw 'missing mutual-invite feedback';
     localStorage.setItem('fok-snake-pid','ffffffff');   // our ID > the peer's
     _netHs.sent='00ff00aa'; _netLb.msg='';
-    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}'});
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}'});
     if(_netLb.invite) throw 'larger ID must not open a dialog either';
     if(_netHs.sent!=='00ff00aa') throw 'larger ID keeps waiting for the accept';
     log('mutual invite ok: tie-broken auto-accept');
@@ -1076,24 +1076,24 @@ runTest('SMOKE-NET', `
     if(_netSigStale({created:_nowS}) || _netSigStale({}) || _netSigStale({created:0})) throw 'a fresh, unstamped or zero-stamped signal must never read as stale';
     const _oSigS=_netSignal; let _declined=0;
     _netSignal=(to,type)=>{ if(type==='decline') _declined++; return Promise.resolve({json:null}); };
-    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}', created:_nowS-1000});
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS-1000});
     if(_netLb.invite) throw 'a stale invite must not open a dialog';
     if(_declined) throw 'a stale invite must not be declined either';
-    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}', created:_nowS});
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS});
     if(!_netLb.invite) throw 'a fresh stamped invite must still open the dialog';
     _netLb.invite=null; _netSignal=_oSigS;
     log('stale invite ok: refused on arrival by its stamp, fresh and unstamped ones unaffected');
 
     // ---- undelivered receipt: an attempt the peer never collected fails FAST ----
     phase='duelLobby'; _netHsClear(); _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netLb.msg='';
-    _netOnSignal({from:'00ff00aa', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00aa', type:'duelInvite'})});
+    _netOnSignal({from:'00ff00aa', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00aa', type:'invite'})});
     if(_netHs.sent!==null) throw 'undelivered must stop waiting on the sent invite';
     if(_netLb.msg.indexOf('OFFLINE')<0) throw 'undelivered must tell the user the peer is unreachable';
     _netHsClear(); _netHs.accepting='00ff00bb'; _netHs.acceptingAt=Date.now(); _netLb.msg='';
     _netOnSignal({from:'00ff00bb', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00bb', type:'accept'})});
     if(_netHs.accepting!==null) throw 'undelivered must clear a pending accept';
     _netHsClear(); _netLb.msg='KEEP';
-    _netOnSignal({from:'00ff00cc', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00cc', type:'duelInvite'})});
+    _netOnSignal({from:'00ff00cc', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00cc', type:'invite'})});
     if(_netLb.msg!=='KEEP') throw 'undelivered for an unrelated peer must not touch the UI';
     log('undelivered receipt ok: sent invite/accept fail fast, unrelated ignored');
 
@@ -1185,7 +1185,7 @@ runTest('SMOKE-NET', `
     // ---- friend names: learned from every received profile, shown in the lobby ----
     localStorage.removeItem('fok-snake-friend-names'); _netFriendNames={};
     phase='duelLobby'; _netLb.invite=null; _netHsClear();
-    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'BUDDY',color:1}})});
+    _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'BUDDY',color:1}})});
     if(netFriendName('00ff00aa')!=='BUDDY') throw 'invite profile did not teach the name';
     if(JSON.parse(localStorage.getItem('fok-snake-friend-names'))['00ff00aa']!=='BUDDY') throw 'name not persisted';
     _netLb.invite=null;
@@ -1396,13 +1396,13 @@ runTest('SMOKE-NET', `
     // ---- invites surface on 1vs1/social screens; elsewhere they auto-decline ----
     for(const ph of ['multiplayer','duelMenu','friends','myId']){
         phase=ph; _netLb.invite=null; _netSess=null;
-        _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'PEER'}})});
+        _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER'}})});
         if(phase!=='duelLobby'||!_netLb.invite) throw 'invite must surface from '+ph;
         _netLb.invite=null;
     }
     for(const ph of ['menu','settings','playing']){
         phase=ph;
-        _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'PEER'}})});
+        _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER'}})});
         if(_netLb.invite) throw 'invite must auto-decline in '+ph;
     }
     phase='menu';

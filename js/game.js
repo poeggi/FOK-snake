@@ -1250,8 +1250,10 @@ function _initWorker(){
         const m = e.data;
         if(m.t==='wire'){ if(netWorkerDuelOn() && typeof _netSend==='function') _netSend(m.o); return; }   // duel-core's outbound packet
         if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
-        // The worker-hosted spectator's one outbound: ask the feed for a fresh state. Not a
-        // wire packet -- nothing ever goes toward the two players -- so it has its own message.
+        // A checkpoint minted off the worker's ring for a spectator we serve (net-spec.js asked
+        // for it). Not a wire packet -- it goes down the spectator tree, never toward the two
+        // players -- so it has its own message.
+        if(m.t==='spCkpt'){ if(typeof _spCkptLand==='function') _spCkptLand(m.rs); return; }
         // An item handover the worker's duel-core attested and released. Only MAIN can post
         // it (the registry client owns cfg and the fetch), so it comes out as a message the
         // same way the wire packets do.

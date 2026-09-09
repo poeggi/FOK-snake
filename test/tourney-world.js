@@ -328,7 +328,7 @@ function mkServer(opts){
                     if(T.players.length >= T.max) return note(bad(409, 'tournament is full'));
                     const p = { id, name:names[id] || '?', seat:T.players.length };
                     T.players.push(p); T.seen.push(p);
-                    all({ event:'duelLobby', tid:T.tid, code:T.code, host:T.host, state:T.state, stakes:T.stakes,
+                    all({ event:'lobby', tid:T.tid, code:T.code, host:T.host, state:T.state, stakes:T.stakes,
                           max:T.max, players:T.players.map(x => ({ id:x.id, name:x.name })) });
                     return note(ok({ tid:T.tid, code:T.code, stakes:T.stakes, max:T.max, host:T.host, state:T.state,
                                      players:T.players.map(x => ({ id:x.id, name:x.name })) }));

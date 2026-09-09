@@ -90,7 +90,7 @@ async function _netInviteSend(to){
         if(_netHs.sent !== to) return;   // aborted while we waited
         _netLb.msg = '';
     }
-    const res = await _netSignal(to, relay ? 'invite-relay' : 'duelInvite', JSON.stringify({ profile:_netProfile() }));
+    const res = await _netSignal(to, relay ? 'invite-relay' : 'invite', JSON.stringify({ profile:_netProfile() }));
     if(_netHs.sent !== to) return;   // superseded or aborted while the request was in flight
     if(res.json) return;             // the server took it: now we wait for a real answer
     // Refused. Say so now instead of showing WAITING out the staleness window over an invite that
@@ -189,7 +189,7 @@ function _netOnSignal(sig){
             }
         }
         switch(sig.type){
-            case 'duelInvite':
+            case 'invite':
             case 'invite-relay': {   // DEPRECATED(relay) signal type
                 // An invite that sat in the mailbox longer than its sender waits for an answer
                 // is dead: the server keeps a signal for its whole online window (120 s from

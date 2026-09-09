@@ -323,7 +323,7 @@ try {
     A.__setRelay(false); B.__setRelay(false);
     A.__invite(B_ID);
     const t1 = pump(A, B);
-    if(!t1.includes('duelInvite')) throw new Error('expected a plain invite, got ' + t1);
+    if(!t1.includes('invite')) throw new Error('expected a plain invite, got ' + t1);
     if(t1.includes('invite-relay')) throw new Error('p2p mode must not declare the relay bit');
     if(B.__dialog() !== A_ID) throw new Error('B did not surface the p2p invite');
     B.__answer(true);
@@ -990,7 +990,7 @@ try {
     const A = mk(A_ID);
     for(const ofs of [1.800048828125, -0.5, 21.8, 1234.4999, -7777.123]){
       A.__setOfs(ofs);
-      const body = await A.__realSignalBody(B_ID, 'duelInvite');
+      const body = await A.__realSignalBody(B_ID, 'invite');
       if(body.pts === undefined) throw new Error('no pts stamped at all');
       if(!Number.isInteger(body.pts))
         throw new Error('fractional pts (PHP is_int() rejects this with 400): ' + JSON.stringify(body.pts) + ' from offset ' + ofs);

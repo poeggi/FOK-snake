@@ -361,10 +361,11 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             // NO is not "stay on this dialog": it is "carry on with the tournament", which
             // means the screen the question was asked from.
+            if(tourneyUi().ask){ tourneyAskAnswer(quitConfirmSel===0); return; }
             if(quitConfirmSel===0) tourneyLeave(tourneyUi().to);
             else phase = tourneyUi().from || 'tourneyLobby';
         },
-        back(){ phase = tourneyUi().from || 'tourneyLobby'; },
+        back(){ if(tourneyUi().ask){ tourneyAskAnswer(false); return; } phase = tourneyUi().from || 'tourneyLobby'; },
         other(key){ if(key==='y'||key==='Y'){ this.confirm(); return true; } return false; },
     },
     tourneyCeremony: {
@@ -372,11 +373,14 @@ const UI_INPUT = {
         // is the game itself. ESC steps back to the board without cancelling anything --
         // but only for the people this screen is asking to WAIT. For the player it names,
         // the next screen is their duel, and walking off to read the standings while the
-        // link to their opponent is coming up is the one thing they must not do here.
+        // link to their opponent is coming up would leave the offer unanswered -- so ESC
+        // asks the one question that IS theirs to answer here: leave the tournament (the
+        // host: end it for everyone). A match that never comes up must not hold anyone,
+        // least of all the host, and NO puts them straight back on this screen.
         nav(){},
         confirm(){ Snd.sfxPlay('fail',cfg.music); },
         back(){
-            if(tourneyUp()){ Snd.sfxPlay('fail',cfg.music); return; }
+            if(tourneyUp()){ tourneyAsk(); return; }
             phase='tourneyBracket'; Snd.sfxPlay('nav',cfg.music);
         },
     },

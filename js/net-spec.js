@@ -69,6 +69,7 @@ const SPEC_FEED_SILENCE_MS = 2000; // the FEEDER is quiet: primaries pull the ba
 // checkpoint at this rate costs ~2%: cheap enough that pushing it unconditionally to
 // everybody, forever, beats any scheme where the watcher has to notice and speak up.
 const SPEC_CKPT_MS = 2000;
+const SPEC_CKPT_WAIT_MS = 1000;    // a checkpoint asked of the worker and unanswered by then is given up on
 const SPEC_BUF_MAX = 900;          // envelopes held since the checkpoint (~45s of duel traffic)
 const SPEC_GRANT_MS = 30000;       // how long a granted watch request stays good
 // A watch that arrives BEFORE the match it names is the ORDINARY case, not an error: a
@@ -116,6 +117,7 @@ var _spSrc = '';        // peer id of the link currently feeding me
 var _spLostAt = 0;
 var _spOrphanG = -1;    // generation the server was last told we had run out of sources in      // when the feed first fell silent (the terminal deadline runs off this)
 var _spCkptAt = 0;
+var _spCkptReq = null;  // the checkpoint the worker is minting: {n, at} -- the stream is HELD behind it (_spCkpt)
 var _spFeedAt = 0;      // wall time of the last envelope that reached me
 var _spDbg = { rx:0, tx:0, dup:0, over:0, fail:0, gen:0, boot:0 };
 
@@ -443,7 +445,7 @@ function _spOnWatch(from, d){
         _spDbg.gen++;
         _spGrant[from] = _spNow();
         _spRole = 'feeder';
-        _spRs = null; _spBuf = []; _spCkptAt = 0;   // the new generation starts on a fresh checkpoint
+        _spRs = null; _spBuf = []; _spCkptAt = 0; _spCkptReq = null;   // the new generation starts on a fresh checkpoint
         _spWatchSig(from, 'ok');
         _spArm();
     }
@@ -482,8 +484,11 @@ function specWatch(peer, tid, nid){
 function _spCtxBuild(){
     // A RELAYING PRIMARY re-states the LIVE tick base, and does not hand on the one it booted
     // on. Everything in this context is a match CONSTANT -- seed, players, hearts, names --
-    // except the two fields that describe WHERE THE TIMELINE IS, and those move at every
-    // boundary. Re-sent as first captured they describe a match that has since moved on: the
+    // except what describes WHERE THE TIMELINE IS: the epoch, the tick base and the level
+    // being played, and those move at every boundary. The level is read off the SIM, never
+    // off a session: only the host's session learns a level boundary (s.lvl is authored in
+    // _netStartNextLevel), so a joiner or a relay quoting its session would name the level
+    // the match OPENED on. Re-sent as first captured they describe a match that has since moved on: the
     // newcomer boots on a dead epoch, and the gate in _netHandleParsed then drops every
     // 'in'/'h'/'st'/'rs' that follows -- the checkpoint included, which is the one packet
     // that could have repaired it.
@@ -501,7 +506,7 @@ function _spCtxBuild(){
         if(!_spCtx) return null;
         const ls = (typeof _netSess !== 'undefined') ? _netSess : null;
         const live = (ls && ls.game) ? { ep:_netMyEpoch(), startPts:(ls.startPts || 0) - netSpecBias() } : {};
-        return Object.assign({}, _spCtx, { hops:(_spCtx.hops | 0) + 1, g:_spGen | 0 }, live);
+        return Object.assign({}, _spCtx, { hops:(_spCtx.hops | 0) + 1, g:_spGen | 0, lvl:_duelLvl(level) }, live);
     }
     const s = (typeof _netSess !== 'undefined') ? _netSess : null;
     if(!s || !s.game || !inGame) return null;
@@ -512,7 +517,7 @@ function _spCtxBuild(){
     const me = getPlayerId();
     return { t:'sctx', g:_spGen | 0, hops:1, pids:(host ? [me, s.peer] : [s.peer, me]),
              seed:s.seed >>> 0, startPts:s.startPts || 0, ep:_netMyEpoch(),
-             hm:s.hearts, stakes:!!s.stakes, lvl:_duelLvl(s.lvl),
+             hm:s.hearts, stakes:!!s.stakes, lvl:_duelLvl(level),
              ws:_duelWsLists(host), names:netPlayerNames(), look:netDuelLook() };
 }
 // One envelope. `p` is the AUTHOR's player index -- explicit, because a spectator
@@ -538,7 +543,7 @@ function _spWrap(m, p){ return { t:'sp', g:_spGen | 0, n:_spSeq++, p:p | 0, m };
 function _spPush(env){
     _spBuf.push(env);
     if(_spBuf.length > SPEC_BUF_MAX) _spBuf.shift();
-    _spFan(env);
+    if(!_spCkptReq) _spFan(env);   // held behind the checkpoint being minted (_spCkpt)
 }
 // The two taps a feeder puts on its own duel. OUTBOUND: our packets, forwarded from
 // the point where _netSend has finished stamping them -- so a spectator receives the
@@ -561,7 +566,7 @@ function _spRelay(env){
     if(!_spOut.length) return;
     _spBuf.push(env);
     if(_spBuf.length > SPEC_BUF_MAX) _spBuf.shift();
-    _spFan(env);
+    if(!_spCkptReq) _spFan(env);   // held behind the checkpoint being minted (_spCkpt)
 }
 // A fresh link asks for the stream; we answer with the whole bootstrap in order.
 // A warm STANDBY unsubscribes right after (ssub 0): a secondary's second
@@ -571,7 +576,7 @@ function _spServeOpen(l){
     if(!ctx){ _spSend(l, { t:'sno' }); return; }
     _spSend(l, ctx);
     _spServeTail(l);
-    l.sub = true;
+    if(!l.tail) l.sub = true;   // a tail still being minted subscribes the link itself, on landing
     _spArm();
 }
 // Serve one link the whole bootstrap tail: a FRESH checkpoint, then every envelope
@@ -589,7 +594,16 @@ function _spServeOpen(l){
 // it is adopted on the spot. A spectator owns neither snake, so both branches take the
 // sender's frontier whole (duel-core: "A SPECTATOR owns NEITHER snake") and a boot is
 // clean whichever side of the tick the checkpoint falls on.
+//
+// In the WORKER home the ring holding that state is the worker's, so the mint is a round
+// trip: main reserves the checkpoint's number and clears the tail buffer the moment it asks,
+// holds the stream while the worker answers, and on landing fans out the checkpoint and then
+// everything held behind it -- the same [rs, tail] order the in-process mint produces in one
+// call. Main's own ring is EMPTY in that home (netTickPre never runs there), and reading it
+// was the bug: every checkpoint came back null, silently, so a late joiner booted a fresh sim
+// from the seed and was never told where the match actually was.
 function _spServeTail(l){
+    if(_spWorker()){ l.sub = false; l.tail = true; _spCkpt(true); return; }
     const was = l.sub; l.sub = false;   // the checkpoint's own fan-out must not double-send here
     _spCkpt(true);
     l.sub = was;
@@ -599,7 +613,7 @@ function _spServeTail(l){
 function _spOnServeMsg(l, txt){
     let d; try{ d = JSON.parse(txt); }catch(e){ return; }
     if(!d || typeof d !== 'object') return;
-    if(d.t === 'ssub'){ const on = d.on !== 0; if(on) _spServeTail(l); l.sub = on; return; }
+    if(d.t === 'ssub'){ const on = d.on !== 0; if(on) _spServeTail(l); else l.tail = false; l.sub = on && !l.tail; return; }
 }
 // The checkpoint: a full 'rs' of our own sim, enveloped like any other packet, so a
 // late joiner needs only [sctx, this, the tail since] rather than the whole match.
@@ -610,20 +624,52 @@ function _spOnServeMsg(l, txt){
 // that space. It carries _spSeen: the number of the newest envelope already folded into
 // the state, which is precisely what the checkpoint asserts. A fresh subscriber (seen
 // -1) takes it and every later relay outranks it; a dual-connected one still dedups.
+function _spWorker(){ return typeof netWorkerDuelOn === 'function' && netWorkerDuelOn(); }
+// A checkpoint also NAMES the line it belongs to. A relaying primary is minting into
+// somebody else's numbering on purpose (see above), so it says whose; a player is
+// minting its own and says so.
+function _spCkptEnv(rs, n){
+    return _spOn ? { t:'sp', g:_spGen | 0, n, o:_spLine, p:0, m:rs }
+                 : { t:'sp', g:_spGen | 0, n, p:netMyIndex() | 0, m:rs, o:getPlayerId() };
+}
 function _spCkpt(force){
     if(!_spOut.length || !inGame) return;
     const now = _spNow();
+    if(_spCkptReq){
+        if(now - _spCkptReq.at < SPEC_CKPT_WAIT_MS) return;   // one in flight is enough
+        _spCkptLand(null);                                     // a lost answer: release the hold
+    }
     if(!force && now - _spCkptAt < SPEC_CKPT_MS) return;
+    if(_spWorker()){
+        // Number reserved NOW, buffer cleared NOW: everything pushed from here on is the tail
+        // behind this checkpoint and outranks it, whenever the worker's answer lands.
+        _spCkptReq = { n:(_spOn ? (_spSeen | 0) : _spSeq++), at:now };
+        _spBuf = [];
+        _wDuelSend({ t:'spCkpt' });
+        return;
+    }
     const rs = _rbSpecSnapshot();
     if(!rs) return;
     _spCkptAt = now;
-    // A checkpoint also NAMES the line it belongs to. A relaying primary is minting into
-    // somebody else's numbering on purpose (see above), so it says whose; a player is
-    // minting its own and says so.
-    const env = _spOn ? { t:'sp', g:_spGen | 0, n:_spSeen | 0, o:_spLine, p:0, m:rs }
-                      : Object.assign(_spWrap(rs, netMyIndex()), { o:getPlayerId() });
-    _spRs = env; _spBuf = [];
-    _spFan(env);
+    _spRs = _spCkptEnv(rs, _spOn ? (_spSeen | 0) : _spSeq++); _spBuf = [];
+    _spFan(_spRs);
+}
+// The worker's answer (game.js routes it here). The checkpoint leads, the tail held behind
+// it follows, and a link that was waiting for its bootstrap subscribes in between -- so it
+// receives exactly the sequence a subscribed link does. An empty answer (the ring was just
+// cleared by a boundary) releases the hold and leaves the waiting links waiting: _spTick
+// asks again.
+function _spCkptLand(rs){
+    const req = _spCkptReq;
+    if(!req) return;                     // nothing asked: a stale answer after a stop
+    _spCkptReq = null;
+    if(rs && rs.t === 'rs'){
+        _spCkptAt = _spNow();
+        _spRs = _spCkptEnv(rs, req.n);
+        for(const l of _spOut) if(l.tail){ l.tail = false; l.sub = true; }
+        _spFan(_spRs);
+    } else { _spRs = null; _spCkptAt = 0; }
+    for(const env of _spBuf) _spFan(env);
 }
 
 // ---- consuming (spectator) ----------------------------------------------
@@ -674,7 +720,11 @@ function _spOnFeedMsg(l, txt){
     if((d.n | 0) <= _spSeen){ _spDbg.dup++; return; }
     _spSeen = d.n | 0;
     // Keep serving what we consume (a primary is a spectator that also feeds).
-    if(d.m && d.m.t === 'rs'){ _spRs = d; _spBuf = []; _spFan(d); }
+    if(d.m && d.m.t === 'rs'){
+        _spRs = d; _spBuf = []; _spCkptReq = null;   // outranks whatever the worker is still minting
+        for(const l of _spOut) if(l.tail){ l.tail = false; l.sub = true; }
+        _spFan(d);
+    }
     else _spRelay(d);
     if(_spBootT != null){ _spQ.push(d); if(_spQ.length > SPEC_BUF_MAX) _spQ.shift(); return; }
     if(!_spOn) return;                          // context refused / not booted: nothing to drive
@@ -690,7 +740,7 @@ function _spOnCtx(l, ctx){
         _spGen = ctx.g | 0;
         _spCtx = ctx;
         _spSeen = -1; _spLine = '';              // the new generation restarts the sequence line
-        _spRs = null; _spBuf = [];               // and so does anything we hold for our own watchers
+        _spRs = null; _spBuf = []; _spCkptReq = null;   // and so does anything we hold for our own watchers
         _spSrc = l ? l.peer : _spSrc;
         _spFeedAt = _spNow(); _spLostAt = 0;
         if(l) for(const o of _spIn) o.sub = (o === l);
@@ -800,7 +850,7 @@ function specStop(msg){
     for(const l of _spIn) _spKill(l);
     for(const l of _spOut) _spKill(l);
     _spIn = []; _spOut = [];
-    _spWant = []; _spAsk = []; _spQ = []; _spRs = null; _spBuf = [];
+    _spWant = []; _spAsk = []; _spQ = []; _spRs = null; _spBuf = []; _spCkptReq = null;
     if(_spBootT != null){ clearTimeout(_spBootT); _spBootT = null; }
     const was = _spOn;
     _spOn = false; _spCtx = null; _spRole = ''; _spSeen = -1; _spLine = ''; _spFeedAt = 0; _spLostAt = 0; _spSrc = ''; _spOrphanG = -1;
@@ -883,6 +933,11 @@ function _spTick(){
     // on the over screen, a peer's bye and a lost connection all end a match without it.
     if(!_spOn && _spOut.length && !_spServable()) _spServeEnd();
     if(!_spOn && _spOut.length) _spCkpt(false);
+    // A link still waiting for its bootstrap with nothing being minted for it (the last
+    // answer was empty, or lost): ask again. A relay mints only on demand, so this is the
+    // one place that keeps asking on a waiting link's behalf.
+    if(_spCkptReq && now - _spCkptReq.at > SPEC_CKPT_WAIT_MS) _spCkptLand(null);
+    if(!_spCkptReq && _spOut.some(l => l.tail)) _spCkpt(true);
     _spAskPump(now);
     _spWantPump(now);
     if(_spOn && _spCtx && _spFeedAt && now - _spFeedAt > SPEC_SILENCE_MS){
@@ -927,7 +982,7 @@ function _spTick(){
 // which is precisely the boundary this runs on. They have their own TTL and their own pump.
 function _spServeEnd(){
     for(const l of _spOut) _spKill(l);
-    _spOut = []; _spRs = null; _spBuf = [];
+    _spOut = []; _spRs = null; _spBuf = []; _spCkptReq = null;
     _spCkptAt = 0;
 }
 // Proactive stand-down: a backgrounded primary cannot forward, and the server can

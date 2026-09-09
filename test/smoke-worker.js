@@ -13,6 +13,7 @@ const JS = p => fs.readFileSync(path.join(__dirname, '..', 'js', p), 'utf8');
 let now = 0;                       // mocked clock, ms (the driver advances it)
 const posts = [];
 let crashed = null;
+let ckpt = null;                   // the worker's answer to a spectator checkpoint ask
 
 const sandbox = {
     console,
@@ -66,6 +67,11 @@ try {
     send({ t:'duelResync' });
     step(20);
 
+    // A spectator checkpoint asked by main (net-spec.js _spCkpt) comes off THIS ring, stamped
+    // with this base epoch; with no duel on there is nothing to mint and the answer says so.
+    send({ t:'spCkpt' });
+    ckpt = posts.find(p => p.t === 'spCkpt');
+
     // A resync from the peer must be REFUSED by a host (only the joiner adopts).
     const fixBefore = g('_rbDbg.fix');
     send({ t:'peerPkt', m:{ t:'rs', tk:g('simTick'), p0:{ s:[1,1] }, p1:{ s:[2,2] } } });
@@ -113,6 +119,8 @@ const checks = [
     ['a host resync was sent', count('rs') >= 1],
     ['local input reached the wire', count('in') >= 1],
     ['the arming stage authored real bs + be transitions', inLogs.some(s => s.includes('"k":"bs"')) && inLogs.some(s => s.includes('"k":"be"'))],
+    ['a spectator checkpoint asked of the worker is answered off its ring, stamped with its base epoch',
+        !!(ckpt && ckpt.rs && ckpt.rs.t === 'rs' && Array.isArray(ckpt.rs.bars) && (ckpt.rs.ep|0) === (vm.runInContext('_rbEpoch', ctx)|0) && (ckpt.rs.lv|0) === (vm.runInContext('level', ctx)|0))],
     ['a faulting tick posted exactly one throttled err naming the throw',
         posts.filter(p => p.t === 'err').length === 1 && /forced tick fault/.test((posts.find(p => p.t === 'err') || {}).msg)],
 ];

@@ -59,6 +59,15 @@ const HOOKS = `
       return seq;
   };
   globalThis.__sig = (d)=>_ttOnSignal(d);
+  // CREATE while already hosting: the hooks the replace flow is driven through.
+  globalThis.__off = ()=>{ _tt = null; _ttHold(''); _ttUi.busy = false; _ttUi.ask = null; _ttUi.msg = ''; _netSrvMin = 8; phase = 'tourneyLobby'; };
+  globalThis.__setBack = (o)=>{ _ttBack = o; };
+  globalThis.__back = ()=>_ttBack;
+  globalThis.__tt = ()=>_tt;
+  globalThis.__ui = ()=>_ttUi;
+  globalThis.__post = (fn)=>{ _netPostRes = fn; };
+  globalThis.__answer = (yes)=>{ quitConfirmSel = yes ? 0 : 1; UI_INPUT.tourneyQuit.confirm(); };
+  globalThis.__esc = ()=>{ UI_INPUT.tourneyQuit.back(); };
   globalThis.__cursor = ()=>_tt && _tt.cursor;
   globalThis.__want = ()=>_ttWant;
   globalThis.__phase = ()=>phase;
@@ -128,6 +137,104 @@ try {
         eq(S.tourneyOfferOk('feedface'), false, 'an offer no sheet authorises is not answered');
         await settle();
         eq(S.__states().length, 1, 'and it forces a read');
+    });
+
+    // ---- CREATE while already hosting (server 4.8: create + replace) ------------------
+    const createStub = (onReplace)=>async (path, body)=>{
+        __posts.push({ path, action:String((body||{}).action||''), replace:!!(body||{}).replace, bg:true });
+        if((body||{}).action !== 'create') return { status:200, json:{ ok:true }, body:{ ok:true }, err:'' };
+        if(!body.replace) return { status:409, json:null, body:{ ok:false, error:'already hosting' }, err:'already hosting' };
+        return onReplace();
+    };
+    const created = ()=>({ status:200, json:{ ok:true, tid:'t9', code:'NEWONE', stakes:false, max:8 }, body:{ ok:true }, err:'' });
+    let __posts;
+    await check('CREATE while already hosting asks first, and NO leaves everything as it was', async () => {
+        S.__off(); __posts = S.__posts;
+        S.__setBack({ tid:'t0', code:'ABCDEF', state:'running', host:S.__me, players:[] });
+        S.__post(createStub(created));
+        S.__take();
+        await S.tourneyCreate(false);
+        eq(S.__phase(), 'tourneyQuit', 'the 409 opens the question');
+        eq(S.__ui().ask && S.__ui().ask.kind, 'replace', 'and it is the replace question');
+        eq(S.__ui().ask.code, 'ABCDEF', 'naming the tournament this device hosts');
+        eq(S.__ui().ask.running, true, 'and that it is running');
+        eq(S.__take().filter(p => p.action === 'create').map(p => p.replace).join(','), 'false', 'one plain create went out, no replace yet');
+        S.__answer(false);
+        await settle();
+        eq(S.__phase(), 'tourneyLobby', 'NO is the lobby again');
+        eq(S.__ui().ask, null, 'the question is gone');
+        eq(S.__take().length, 0, 'and nothing was sent');
+        eq(!!S.__tt(), false, 'nothing was created');
+        eq(S.__back() && S.__back().code, 'ABCDEF', 'the way back to the old one stands');
+    });
+
+    await check('YES re-sends the create with replace:true, and the new one is adopted', async () => {
+        S.__off();
+        S.__setBack({ tid:'t0', code:'ABCDEF', state:'open', host:S.__me, players:[] });
+        S.__post(createStub(created));
+        await S.tourneyCreate(false);
+        eq(S.__ui().ask.running, false, 'an open lobby is not a running tournament');
+        S.__take();
+        S.__answer(true);
+        await settle(5);
+        const posts = S.__take().filter(p => p.action === 'create');
+        eq(posts.map(p => p.replace).join(','), 'true', 'exactly one create, with replace:true');
+        eq(S.__tt() && S.__tt().code, 'NEWONE', 'the new tournament is the one held');
+        eq(S.__back(), null, 'the old one is no longer a way back');
+        eq(S.__ui().ask, null, 'the question is gone');
+    });
+
+    await check('a 409 to the replace is an older server: the plain message, nothing ended', async () => {
+        S.__off();
+        S.__setBack({ tid:'t0', code:'ABCDEF', state:'running', host:S.__me, players:[] });
+        S.__post(createStub(()=>({ status:409, json:null, body:{ ok:false, error:'already hosting' }, err:'already hosting' })));
+        await S.tourneyCreate(false);
+        S.__answer(true);
+        await settle(5);
+        eq(S.__ui().msg, 'YOU ALREADY HOST ONE', 'the message that was there before');
+        eq(S.__phase(), 'tourneyLobby', 'no second question');
+        eq(!!S.__tt(), false, 'nothing adopted');
+        eq(S.__back() && S.__back().code, 'ABCDEF', 'the old one still stands, and is still the way back');
+    });
+
+    await check('a 429 to the replace shows the wait and reports nothing as ended', async () => {
+        S.__off();
+        S.__setBack({ tid:'t0', code:'ABCDEF', state:'running', host:S.__me, players:[] });
+        S.__post(createStub(()=>({ status:429, json:null, body:{ ok:false, error:'create cooldown', retry_after:7 }, err:'create cooldown' })));
+        await S.tourneyCreate(false);
+        S.__answer(true);
+        await settle(5);
+        eq(S.__ui().msg, 'TOO SOON - WAIT 7S', 'the cooldown, charged before anything is ended');
+        eq(!!S.__tt(), false, 'nothing adopted');
+        eq(S.__back() && S.__back().code, 'ABCDEF', 'the old one is intact');
+    });
+
+    await check('ESC on the question is NO, and a device that does not know the old one asks in general', async () => {
+        S.__off();
+        S.__setBack(null);
+        S.__post(createStub(created));
+        await S.tourneyCreate(false);
+        eq(S.__ui().ask.code, '', 'no code to name');
+        eq(S.__ui().ask.running, null, 'running cannot be ruled out');
+        S.__esc();
+        eq(S.__phase(), 'tourneyLobby', 'ESC is NO');
+        eq(S.__ui().ask, null, 'the question is gone');
+    });
+
+    await check('the players of the replaced tournament are told why it ended', async () => {
+        S.__reset();
+        S.__sig({ event:'lobby', tid:'t1', state:'abandoned', reason:'host opened a new one' });
+        eq(!!S.__tt(), false, 'dropped');
+        eq(S.__ui().msg, 'HOST STARTED A NEW TOURNAMENT', 'in the words of the reason given');
+        for(const [why, msg] of [['host left','THE HOST LEFT'], ['host ended it','THE HOST ENDED IT'], ['everyone left','EVERYONE LEFT'], ['ended by the operator','ENDED BY THE OPERATOR']]){
+            S.__reset();
+            S.__sig({ event:'lobby', tid:'t1', state:'abandoned', reason:why });
+            eq(S.__ui().msg, msg, 'reason ' + why);
+        }
+        S.__reset();
+        S.__sig({ event:'lobby', tid:'t1', state:'abandoned' });
+        eq(S.__ui().msg, 'TOURNAMENT ABANDONED', 'and the plain case reads as before');
+        S.__post(async (path, body)=>{ __posts.push({ path, action:String((body||{}).action||''), bg:true }); const j = { ok:true }; return { status:200, json:j, body:j, err:'' }; });
     });
 
     // ---- the lane --------------------------------------------------------------------

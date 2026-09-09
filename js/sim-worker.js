@@ -286,6 +286,9 @@ onmessage = (e) => {
         case 'duelResync':     // transport asks the host to ship the full state (reconnect)
             if (_dcOn) _rbArmFullResync();
             break;
+        case 'spCkpt':         // main serves a spectator: its checkpoint comes off THIS ring (net-spec.js _spCkpt)
+            postMessage({ t:'spCkpt', rs: _dcOn ? _rbSpecSnapshot() : null });
+            break;
         case 'duelEndNet':
             _dcOn = false; _dcSpec = false; self.inGame = false; _rbReset(); _dcEvents.length = 0; _dcRewTo = 0;
             break;

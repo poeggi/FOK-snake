@@ -239,6 +239,21 @@ clients on different bases the epoch gate drops the peer's hash one layer above 
 comparator, the link still carries packets so nothing reads as silent, and neither sim
 is frozen, so all three detectors go quiet at the same instant.
 
+### smoke-spec-worker.js  (FAST tier -- the spectator checkpoint in the worker home)
+
+A spectator's bootstrap is [sctx, checkpoint, tail], and the checkpoint is minted off the
+rollback ring. In the DEFAULT runtime that ring lives in sim-worker.js while the spectator
+wire (net-spec.js) lives on main, whose own ring is never written in that home -- so the mint
+is a round trip, and this suite pins its contract: the checkpoint's number is reserved and
+the tail buffer cleared when main asks, the stream is held while the worker answers, and on
+landing the checkpoint leads and the held tail follows, for a waiting link and a subscribed
+link alike; an empty answer releases the hold and the housekeeping tick asks again; a relay
+serves an upstream checkpoint that lands first. It also pins that the bootstrap context
+names the level being PLAYED, read off the sim -- only the host's session ever learns a
+level boundary. Every other spectator suite drives the in-process home (the harness has no
+Worker), which is why a feeder that minted nothing at all passed all of them. The worker's
+side of the round trip is checked in smoke-worker.js.
+
 ### smoke-epoch-mirror.js  (FAST tier -- the main-thread epoch-mirror guard)
 
 The wire stamps and gates epochs on MAIN (`_netSend` writes `o.ep` from `_rbEpoch`,

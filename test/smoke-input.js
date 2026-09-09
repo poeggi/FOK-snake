@@ -269,19 +269,28 @@ runTest('SMOKE-INPUT', `
     log('finger-up during dying still releases the boost arm (no respawn-boosting)');
 
     // THE CEREMONY SCREEN'S ESCAPE IS FOR THE PEOPLE IT IS ASKING TO WAIT. A player it
-    // names is about to be put into a duel, and walking off to read the standings while
-    // the link to their opponent comes up is the one thing they must not do from here.
+    // names is about to be put into a duel and must not walk off to the board while the
+    // link comes up -- but a match that never comes up must not hold them either, least
+    // of all the host: their ESC asks the leave/end question, and NO returns them here.
     const oTt = _tt;
-    _tt = { state:'running', round:2, players:['00000000','00000001'],
+    _tt = { state:'running', round:2, host:getPlayerId(), players:['00000000','00000001'],
             roles:{ round:2, players:['00000000','00000001'], you:'play' } };
     phase='tourneyCeremony'; press('Escape');
-    if(phase!=='tourneyCeremony') throw 'the player being called up walked off the ceremony: '+phase;
+    if(phase!=='tourneyQuit') throw 'the host being called up got no way to end the tournament: '+phase;
+    if(tourneyUi().from!=='tourneyCeremony') throw 'the end question does not know where it was asked from: '+tourneyUi().from;
+    if(quitConfirmSel!==1) throw 'the end question did not offer NO as the safe answer';
+    press('Escape');
+    if(phase!=='tourneyCeremony') throw 'NO did not return the host to the ceremony: '+phase;
+    _tt.host='00000001'; press('Escape');
+    if(phase!=='tourneyQuit') throw 'a guest being called up got no way to leave: '+phase;
+    press('Escape');
+    if(phase!=='tourneyCeremony') throw 'NO did not return the guest to the ceremony: '+phase;
     _tt.roles.you='spectate'; press('Escape');
     if(phase!=='tourneyBracket') throw 'a spectator could not reach the board: '+phase;
     _tt.roles.you='idle'; phase='tourneyCeremony'; press('Escape');
     if(phase!=='tourneyBracket') throw 'a player sitting the round out could not reach the board: '+phase;
     _tt = oTt; phase='menu';
-    log('the ceremony holds the player it names and lets everyone else read the board');
+    log('the ceremony asks the player it names before letting them go, and lets everyone else read the board');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
