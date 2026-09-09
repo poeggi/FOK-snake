@@ -383,7 +383,13 @@ async function _netGet(path, signal, held, bg){
 // must see it) and still paced (the gate must see it) -- the request a client sends least
 // often is the last one that should be invisible to both.
 async function netBgFetch(path, opt){
+    // Refused exactly like the two helpers above: status 0 is the "never completed" shape both
+    // callers already read as a failure, and a stub json() keeps them off a TypeError path.
+    if(!_netOk()) return { status:0, json:()=>Promise.resolve(null) };
     await _netGate(NET_BG_IDLE);   // the cloud backup is the idle tier by definition: nobody is waiting for it
+    // The gate is a wait, and offline can be switched on inside it -- a long wait here, since
+    // this tier also stands aside for a held poll.
+    if(!_netOk()) return { status:0, json:()=>Promise.resolve(null) };
     _netFlight++;
     _netSentAt = Date.now();
     if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
