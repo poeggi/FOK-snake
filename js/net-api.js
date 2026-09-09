@@ -263,6 +263,13 @@ const NET_BG_IDLE = 'idle';
 // second in line still costs a connection nothing, while a handshake held back a quarter of
 // a second per message costs one visibly.
 const NET_BG_SOLO = 'solo';
+// The peer of the duel we have just STOPPED playing, waiting for a beat to carry it out.
+// Absence clears nothing server-side (a client closed mid-match never sends again), so the
+// end has to be STATED -- and a bye that went over the DataChannel is the one end the server
+// cannot see for itself. Held until a hello is answered rather than dropped on the first
+// attempt: a stale end names a peer the server no longer has us playing and is ignored there,
+// so carrying it one beat too far is free, while losing it costs a WATCH row its whole window.
+var _netDuelEnd = '';
 var _netSentAt = 0;            // when the last request of ours -- either lane -- went out
 var _netGapQ = null;           // the tail of the background queue
 // How long a background request must still wait, or 0 for "go now". THE rule, kept apart
@@ -960,7 +967,11 @@ async function _netHello(){
     const body = { id: getPlayerId() };
     { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }
     if(_netLat.pending && _netLat.value != null) body.latency = _netLat.value;   // the mandated report
-    if(_netSess && _netSess.game){
+    if(_netDuelEnd) body.duel_end = _netDuelEnd;   // applied server-side BEFORE duel_with, so one beat may carry both
+    // s.peer, not just s.game: a SPECTATOR's synthetic session is game:true with a
+    // deliberately EMPTY peer (net-spec.js), and an empty duel_with is not an absent one --
+    // the server validates the id and refuses the whole heartbeat.
+    if(_netSess && _netSess.game && _netSess.peer){
         body.duel_with = _netSess.peer;
         // Sent on EVERY beat while it holds, never once: the server reads an absent
         // flag as public, so a bare beat would hand the duel back to the friends list.
@@ -1008,6 +1019,7 @@ async function _netHello(){
     if(_netLb.invite && Date.now() - (_netLb.invite.at||0) > NET_INVITE_STALE_MS){ _netLb.invite = null; _uiDirty = true; }
     if(_netHs.accepting && Date.now() - _netHs.acceptingAt > NET_INVITE_STALE_MS){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
     if(!r){ _netSrvErr = true; _uiDirty = true; return; }
+    if(body.duel_end && _netDuelEnd === body.duel_end) _netDuelEnd = '';   // answered: the end is on record
     _netSrvErr = false;
     _netPaceOf(r);   // whether we may still hold a worker while we wait
     // The session's FIRST item drain rides the first ANSWERED heartbeat rather than a

@@ -652,7 +652,25 @@ runTest('SMOKE-NET', `
         _wl=[]; _spOnWatch('feedfeed',{k:'req'});
         if(_bare()) throw 'without the setting an ordinary ask must never hit the privacy refusal';
         _spWatchSig=_oSigW; _spGrant=_oGrantW; _spAsk=_oAskW; _spWant=_oWantW; cfg.privateDuels=_oPrivP;
-        log('private duels ok: the flag rides the beat and the start, an ordinary ask is refused bare, a roles-sheet spectator is not');
+        // ...and the teardown edge. Absence clears NOTHING server-side -- a client closed
+        // mid-match never sends again -- so the end has to be STATED, and a bye that went over
+        // the DataChannel is the one end the server cannot see for itself.
+        _netDuelEnd=''; _hp=null; _netHelloBusy=false;
+        _netPost=async (p,b)=>{ if(p.indexOf('hello')>=0) _hp=b; return null; };
+        _netSess={ peer:'deadbeef', game:true };
+        _netTeardown();
+        if(_netDuelEnd!=='deadbeef') throw 'a finished duel must state its end, got ' + JSON.stringify(_netDuelEnd);
+        if(!_hp || _hp.duel_end!=='deadbeef') throw 'the end goes out AT teardown, not at the next beat: ' + JSON.stringify(_hp);
+        // A handshake that never reached play was never announced, so it has no end to state.
+        _netDuelEnd=''; _netSess={ peer:'deadbeef', game:false }; _netHelloBusy=false;
+        _netTeardown();
+        if(_netDuelEnd!=='') throw 'a duel that never began must not announce an end';
+        // A SPECTATOR is game:true with a deliberately EMPTY peer. An empty duel_with is not an
+        // absent one: the server validates the id and refuses the whole heartbeat over it.
+        _netSess={ peer:'', game:true }; _hp=null; _netHelloBusy=false; _netHello();
+        if(!_hp || 'duel_with' in _hp) throw 'a spectator has no duel to announce: ' + JSON.stringify(_hp);
+        _netSess=null; _netDuelEnd=''; _netPost=_oPostP; _netHelloBusy=_oBusyP;
+        log('private duels ok: the flag rides the beat and the start, the end is stated at teardown, a spectator announces none, an ordinary ask is refused bare, a roles-sheet spectator is not');
         // (e) ONE adoption path, whichever request paid for the list: names learned, accepted
         // friendships marked, and a screen that never has to know which route it came by.
         localStorage.removeItem('fok-snake-friends');
