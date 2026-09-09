@@ -5,7 +5,7 @@
 //   version.php      PHP that touches nothing: FPM + PHP start-up on top of that
 //   hello            the heartbeat ({id, name})
 //   hello +tourneys  the tournament lobby's 5 s shape (asks for the announce list)
-//   hello +held poll the same, while this id's own 9 s poll is parked server-side
+//   hello +held poll the same, while this id's own 5 s poll is parked server-side
 //
 // Everything rides ONE HTTP/2 session, the way a browser talks to this host: the parked
 // poll is a stream on it, not a connection of its own, so a hello beside it shares the wire
@@ -34,7 +34,7 @@ const BASE = process.argv[2] || 'https://fok-server.poggensee.it';
 const N = Math.max(3, Math.min(30, parseInt(process.argv[3] || '8', 10) || 8));
 const ROUNDS = Math.max(1, Math.min(20, parseInt(process.argv[4] || '4', 10) || 4));
 const GAP_MS = 300;                   // between samples: past the client's own 100 ms gap
-const POLL_S = 9;                     // the contract's longest hold
+const POLL_S = 5;                     // the contract's longest hold
 const ID = '11117e57';
 const NAME = 'clnt-CI-' + ID.slice(0, 4);   // the same name items-live.js records for this id
 

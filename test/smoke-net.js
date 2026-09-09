@@ -434,7 +434,8 @@ runTest('SMOKE-NET', `
         const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='duelLobby'; _netPollOnce(); };
         _netPace={hold:true};
         _netFrSince=0; poll();
-        if(!/[?&]wait=9(&|$)/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
+        const _waitRe=new RegExp('[?&]wait=' + NET_POLL_S + '(&|$)');   // derived, never a literal: the contract wait is one number
+        if(!_waitRe.test(_url||'') || !_heldArg) throw 'the default pace must hold a poll of the contract wait, got ' + _url;
         // Presence rides the poll on a presence screen (4.6): the cursor goes as fs, 0 = read
         // it whole. Elsewhere nothing is asked for.
         if(!/[?&]fs=0(&|$)/.test(_url||'')) throw 'a lobby poll must carry the presence cursor, got ' + _url;
@@ -444,14 +445,14 @@ runTest('SMOKE-NET', `
         if(/fs=/.test(_url||'')) throw 'MY ID shows no friend state and must not ask for it, got ' + _url;
         _netFrSince=0;
         // ...and a HELD poll waits on nothing: it IS the parked slot the gate lets one other
-        // request stand beside, so gating it would park the client behind itself for 9s.
+        // request stand beside, so gating it would park the client behind itself for a whole hold.
         if(_bgP !== undefined) throw 'a held poll must not be sent through the gate, got ' + String(_bgP);
         // FALSIFICATION: the interval fields an earlier 4.4 server still sends beside hold
         // are IGNORED, never adopted. They only ever carried the contract's own constants, so
         // a served one moving anything here would be a second source for a settled number.
         _netPaceOf({pace:{hello_ms:45000, poll_ms:3000, gap_ms:400}});
         poll();
-        if(!/[?&]wait=9(&|$)/.test(_url||'')) throw 'a served poll_ms must not move the poll wait, got ' + _url;
+        if(!_waitRe.test(_url||'')) throw 'a served poll_ms must not move the poll wait, got ' + _url;
         _netPaceOf({pace:{hold:false}});
         poll();
         if(/wait=/.test(_url||'') || _heldArg) throw 'hold:false must withdraw the held poll, got ' + _url;
@@ -461,15 +462,16 @@ runTest('SMOKE-NET', `
         // is something the player is waiting for and owes no background spacing.
         if(_bgP !== NET_BG_SOLO) throw 'an unheld poll must take the solo lane, got ' + String(_bgP);
         // ...and an unheld poll must not cost the server MORE requests than the held one it
-        // replaced. Nine unheld polls a second apart where one 9s hold used to sit is the
+        // replaced. Five unheld polls a second apart where one 5 s hold used to sit is the
         // opposite of what withdrawing the hold is for, so an idle browsing client reads the
         // mailbox where the hold's answer would have landed instead.
         _netPace={hold:false};
         const _oTick=_netPollTick, _oSess=_netSess, _oSent=_netHs.sent, _oAcc=_netHs.accepting;
         _netSess=null; _netHs.sent=null; _netHs.accepting=null;
         let _hits=0;
-        for(let i=0;i<27;i++){ _netPollTick=i; poll(); if(_url) _hits++; }
-        if(_hits!==3) throw 'an idle unheld poll must land on the served cadence (3 in 27s), got ' + _hits;
+        const _span=3*NET_UNHELD_EVERY;   // three cadences, derived: the wait is one number
+        for(let i=0;i<_span;i++){ _netPollTick=i; poll(); if(_url) _hits++; }
+        if(_hits!==3) throw 'an idle unheld poll must land on the served cadence (3 in ' + _span + 's), got ' + _hits;
         // But only while merely browsing. The offer ladder retries every 2s and gives up
         // after three, so a handshake in flight keeps the 1s tick whatever the pace says --
         // a mailbox read seconds late would answer an offer already abandoned at the far end.
@@ -524,7 +526,7 @@ runTest('SMOKE-NET', `
         // it the held poll goes out again.
         _netPace={hold:true}; _netPollNotBefore=0; _netPollHoldEnd=0;
         poll();
-        if(!(_netPollHoldEnd>Date.now()+8000)) throw 'a held poll must note when the server lets its worker go, got ' + _netPollHoldEnd;
+        if(!(_netPollHoldEnd>Date.now()+NET_POLL_S*1000-1000)) throw 'a held poll must note when the server lets its worker go, got ' + _netPollHoldEnd;
         _netPollResume();
         poll();
         if(_url) throw 'a held poll must not be re-armed while the aborted one is still parked, sent ' + _url;
@@ -532,7 +534,7 @@ runTest('SMOKE-NET', `
         if(!/poll[.]php/.test(_url||'') || /wait=/.test(_url||'')) throw 'an unheld poll may still go out while the old hold is parked, got ' + _url;
         _netPace={hold:true}; _netPollHoldEnd=Date.now()-1; _netPollResume();
         poll();
-        if(!/wait=9/.test(_url||'')) throw 'past the old deadline the held poll goes out again, got ' + _url;
+        if(!new RegExp('wait=' + NET_POLL_S).test(_url||'')) throw 'past the old deadline the held poll goes out again, got ' + _url;
         _netPollNotBefore=0; _netPollHoldEnd=0;
         _netGet=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
     }
@@ -642,7 +644,7 @@ runTest('SMOKE-NET', `
         // holds open by design. The transport decides that, so ask the transport.
         globalThis.fetch=()=>new Promise(()=>{});   // never settles: the flight counter IS the assertion
         _netFlight=0;
-        _netGet('/api/poll.php?wait=9', undefined, true);
+        _netGet('/api/poll.php?wait=' + NET_POLL_S, undefined, true);
         if(_netFlight!==0) throw 'a held poll must not make the wire busy, got ' + _netFlight;
         _netGet('/api/poll.php', undefined, false);
         if(_netFlight!==1) throw 'an unheld request must count as in flight, got ' + _netFlight;

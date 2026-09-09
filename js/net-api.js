@@ -217,14 +217,15 @@ var _netResync = false;
 // them in `pace`; they never carried anything but these numbers, and reading them back off
 // the wire only bought a second place for the same value to be wrong.
 const NET_HELLO_MS = 60000;   // between heartbeats: half the 120 s online window, so one missed beat never reads as offline
-const NET_POLL_S   = 9;       // the longest hold poll.php serves, in whole seconds (`wait=`)
+const NET_POLL_S   = 5;       // the longest hold poll.php serves, in whole seconds (`wait=`)
 // One thing does depend on the moment, and it is the biggest lever there is: a held poll
 // owns a PHP worker for its whole duration, so a server under pressure withdraws `hold`
 // first, by tier. A 4.3 server sends none of this and this default -- exactly what the
 // client did before -- stands.
 var _netPace = { hold:true };
 // How many 1s ticks apart an UNHELD mailbox read sits: where the held poll's answer would
-// have landed, so withdrawing the hold does not cost the server nine requests for one.
+// have landed, so withdrawing the hold does not cost the server a request per second
+// where one held poll used to sit.
 const NET_UNHELD_EVERY = NET_POLL_S;
 // ---- the background gate (the contract's 100ms request gap, 4.4) ----
 // What a request costs this host is not its bytes: it is the slice it waits for a PHP
@@ -1189,8 +1190,8 @@ async function _netPollOnce(){
     // which is slower per signal but costs the server a worker only while it answers.
     const held = _netPace.hold && _held;
     // Withdrawing the hold must not COST the server requests. Falling back to the 1s tick
-    // sends nine unheld polls where the 9s held one sent a single request: cheaper per
-    // request, nine times as many of them, and the count in flight is the thing the whole
+    // sends five unheld polls where the 5 s held one sent a single request: cheaper per
+    // request, five times as many of them, and the count in flight is the thing the whole
     // pacing contract is about. So when we wanted to hold and were not allowed to, read the
     // mailbox where the hold's answer would have landed instead -- "poll without waiting and
     // lean on the heartbeat", still well inside an undelivered signal's life.

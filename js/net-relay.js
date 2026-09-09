@@ -202,10 +202,10 @@ function _netRelayOnReply(s, r){
 async function _netRelayLoop(s){
     while(_netSess === s && s.game && s.relay){
         if(!_netOk()) return;
-        // Abortable: without this the held socket lingers up to 8s after a teardown
+        // Abortable: without this the held socket lingers up to a whole hold after a teardown
         // (leaving a match, or unload), long after we stopped caring about it.
         s.relayAbort = (typeof AbortController === 'function') ? new AbortController() : null;
-        const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=9',
+        const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=' + NET_POLL_S,
                                 s.relayAbort ? s.relayAbort.signal : undefined, true);   // held: parked server-side, so not traffic the clock sync has to wait out
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;

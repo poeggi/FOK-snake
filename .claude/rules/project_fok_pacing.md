@@ -128,7 +128,7 @@ requests per client - and each half is useless without the other.
 ## The beat is a contract constant
 
 - pace on hello is {hold} ONLY. The beat - heartbeat 60 s (half the 120 s
-  online window), poll wait 9 s, gap 100 ms between a client's own requests - is
+  online window), poll wait 5 s, gap 100 ms between a client's own requests - is
   a CONTRACT CONSTANT (docs/API.md Pacing on the server side): never on the wire,
   never a setting. Nothing about the beat follows load; interval-stretching
   under load was removed (its ceiling exceeded the online window and made
