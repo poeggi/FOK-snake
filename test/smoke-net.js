@@ -660,7 +660,11 @@ runTest('SMOKE-NET', `
         _netSess={ peer:'deadbeef', game:true };
         _netTeardown();
         if(_netDuelEnd!=='deadbeef') throw 'a finished duel must state its end, got ' + JSON.stringify(_netDuelEnd);
-        if(!_hp || _hp.duel_end!=='deadbeef') throw 'the end goes out AT teardown, not at the next beat: ' + JSON.stringify(_hp);
+        // ...on the NEXT beat, never from teardown itself: a hello from there gathers ICE at
+        // the moment the next match is forming, which costs a tournament spectator its feed.
+        if(_hp) throw 'teardown must send no request of its own: ' + JSON.stringify(_hp);
+        _netHelloBusy=false; _netHello();
+        if(!_hp || _hp.duel_end!=='deadbeef') throw 'the next beat must carry the end: ' + JSON.stringify(_hp);
         // A handshake that never reached play was never announced, so it has no end to state.
         _netDuelEnd=''; _netSess={ peer:'deadbeef', game:false }; _netHelloBusy=false;
         _netTeardown();

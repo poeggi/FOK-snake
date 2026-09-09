@@ -1132,13 +1132,14 @@ function _netTeardown(){
     if(!s) return;
     // The duel is over: state the end rather than leaving it to lapse. Only for a duel that
     // actually RAN (s.game) and had a peer -- a spectator's session has neither in the sense
-    // that matters, and a handshake that never reached play was never announced. The hello
-    // goes now: an in-app quit leaves the client alive, and it is the one end the server has
-    // no other way to see. An unload cannot send one and falls back to the offer window.
-    if(s.game && s.peer && !(typeof netSpectating === 'function' && netSpectating())){
-        _netDuelEnd = s.peer;
-        if(typeof _netHello === 'function' && _netOk()) _netHello();
-    }
+    // that matters, and a handshake that never reached play was never announced.
+    // The NEXT beat carries it, deliberately: sending a hello from here fires
+    // netNetsRefresh() too, whose "not while netGameActive()" guard is already void because
+    // _netSess is null by now -- so it opens a throwaway RTCPeerConnection and gathers ICE at
+    // the exact moment the next match's handshake forms. In a tournament that costs the
+    // spectator its feed (test/tourney-e2e r1.9). One beat of lag is well inside the server's
+    // offer window; a stray gather at a boundary is not worth buying it out.
+    if(s.game && s.peer && !(typeof netSpectating === 'function' && netSpectating())) _netDuelEnd = s.peer;
     if(s.peer) delete _netPeerNet[s.peer];   // the IP hint was for THIS match's path; a new match (or a network switch) gets a fresh one
     s.game = false; s.relay = false;
     if(s.connT) clearTimeout(s.connT);
