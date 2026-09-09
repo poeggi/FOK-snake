@@ -817,7 +817,7 @@ function drawGem(g,now) {
 }
 
 function triggerPurchaseAnim() {
-    purchaseAnimAt = simNow;
+    purchaseAnimAt = _msgNow();
     for(let i=0;i<50;i++){
         const angle=(i/50)*Math.PI*2, spd=1.5+Math.random()*3.5;
         purchaseParticles.push({

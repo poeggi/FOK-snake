@@ -102,6 +102,28 @@ runTest('SMOKE-GAME', `
     drawDuelBoard(simNow);   // the other victim draws too: tile + shock ring, no throw
     log('windswept steal renders (flight, landed tile, victim colour, shock ring) ok');
 
+    // HIDE REMOTE COSMETICS covers the WINDSWEPT half too. Zeroing the peer profile in the
+    // look is not enough on its own: _wsLook paints the SIM's worn list straight back on,
+    // and that list is the crowns and hats. The look names the hidden slot; the draw skips
+    // the overlay for it and for it only.
+    const _realDuelLook = netDuelLook;
+    const _stubLook = (hid) => ({ c0:0, c1:1, i0:{necktie:1}, i1:{shoes:1}, hid });   // necktie is not windswept: _wsLook keeps it
+    try {
+        netDuelLook = () => _stubLook(-1);
+        if(!_duelLook().i1.shades) throw 'nobody hidden: the peer windswept gear must still draw';
+        netDuelLook = () => _stubLook(1);
+        const hl = _duelLook();
+        if(Object.keys(hl.i1).length) throw 'the hidden peer still wears gear: ' + JSON.stringify(hl.i1);
+        if(!hl.i0.necktie) throw 'hiding the peer stripped our own cosmetics too';
+        netDuelLook = () => _stubLook(0);
+        const hl0 = _duelLook();
+        if(Object.keys(hl0.i0).length) throw 'the hidden peer at P0 still wears gear: ' + JSON.stringify(hl0.i0);
+        if(!hl0.i1.shades) throw 'hiding P0 took P1 windswept gear with it';
+        netDuelLook = () => ({ c0:0, c1:1, i0:{}, i1:{} });   // an older feeder ships no hid
+        if(!_duelLook().i1.shades) throw 'a look with no hid must hide nobody';
+    } finally { netDuelLook = _realDuelLook; }
+    log('hide remote cosmetics ok: the hidden slot loses its windswept gear too');
+
     // Side-by-side scrape: presentation only, so the whole rule lives here. Running the same
     // way one lane apart rubs (heads level OR one snake ahead, riding the other's body);
     // tailgating in the SAME lane and any other heading do not. It must keep sparking for as

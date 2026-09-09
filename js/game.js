@@ -341,8 +341,8 @@ function _debugState(){
     };
 }
 function exportDebugInfo(){
-    try { _downloadJSON('snake-debug-info.json', _debugState()); _dataMsg='DEBUG INFO SAVED'; _dataMsgAt=simNow; }
-    catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
+    try { _downloadJSON('snake-debug-info.json', _debugState()); _dataMsg='DEBUG INFO SAVED'; _dataMsgAt=_msgNow(); }
+    catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=_msgNow(); }
 }
 // Debug snapshot -> the cloud (POST /debug/submit.php): the full state plus a screenshot.
 // The debug overlays are HTML elements, so canvas.toDataURL() captures the game WITHOUT them.
@@ -375,10 +375,10 @@ function captureDebugSnapshot(){
             images.push(off.toDataURL('image/png'));
         } catch(_){}
         _dbgSnap = { app:_swVersion, id:getPlayerId(), when:Date.now(), state:_debugState(), images };
-        _dataMsg = images.length ? 'SNAPSHOT CAPTURED' : 'SNAPSHOT FAILED'; _dataMsgAt=simNow;
+        _dataMsg = images.length ? 'SNAPSHOT CAPTURED' : 'SNAPSHOT FAILED'; _dataMsgAt=_msgNow();
         if(typeof Snd !== 'undefined') Snd.sfxPlay('select', cfg.music);
         if(images.length) _flashDbgSnapBtn();   // clear on-button feedback that a shot was taken
-    } catch(e){ _dataMsg='SNAPSHOT FAILED'; _dataMsgAt=simNow; }
+    } catch(e){ _dataMsg='SNAPSHOT FAILED'; _dataMsgAt=_msgNow(); }
 }
 // Flash the overlay SNAP button green with a check when a snapshot is captured, then revert.
 let _dbgSnapBtnT = null;
@@ -394,8 +394,8 @@ function _flashDbgSnapBtn(){
 // The only ES2017 syntax in game.js. FIX (decide later, see storage.js cloudBackup): move this
 // debug-upload into the isolated online-tier file so game.js stays ES2015 and parses everywhere.
 async function sendDebugSnapshot(){
-    if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=simNow; return; }
-    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
+    if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=_msgNow(); return; }
+    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
     _dbgSending=true; _dbgPinShow=false; _dbgPinCopied=false; _dataMsg=''; _uiDirty=true;   // clear old PIN; the persistent UPLOADING indicator takes over
     try {
         const r=await fetch(NET_BASE+'/debug/submit.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_dbgSnap)});
@@ -409,7 +409,7 @@ async function sendDebugSnapshot(){
         else _dataMsg='SNAPSHOT SEND FAILED';
     } catch(e){ _dataMsg='SNAPSHOT SEND FAILED'; }
     finally { _dbgSending=false; }
-    _dataMsgAt=simNow; _uiDirty=true;
+    _dataMsgAt=_msgNow(); _uiDirty=true;
 }
 // Level-3 clickable SNAP button (top-centre, HTML so it is excluded from the screenshot).
 let _dbgSnapBtn = null;
@@ -562,8 +562,8 @@ function exportFpsLog(){
         _downloadJSON('snake-fps-log.json', { worstFrame:_fpsSnap,
             worstSustainedFps:(_fpsWorstAvg===Infinity?null:_fpsWorstAvg),
             maxSustainedFps:(_fpsMaxAvg||null), recording:_fpsRec, device:_canvasInfo() });
-        _dataMsg='FPS LOG SAVED'; _dataMsgAt=simNow;
-    } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=simNow; }
+        _dataMsg='FPS LOG SAVED'; _dataMsgAt=_msgNow();
+    } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=_msgNow(); }
 }
 
 // ================================================================
@@ -594,7 +594,7 @@ function _shopToggleWear(item){
     else {
         const other = _wornCatClash(item);
         if(other){
-            _shopMsg = 'REMOVE ' + other.name + ' FIRST'; _shopMsgAt = simNow;
+            _shopMsg = 'REMOVE ' + other.name + ' FIRST'; _shopMsgAt = _msgNow();
             Snd.sfxPlay('fail', cfg.music);
             return true;
         }
@@ -672,7 +672,9 @@ function _enterShop(){
     cfg.shopOpens = (cfg.shopOpens||0) + 1;
     _adminAvail = (cfg.shopOpens % (cfg.x10?Math.max(1,Math.round(ADMIN_BOX_EVERY/10)):ADMIN_BOX_EVERY) === 0);
     _adminConsumed = false;
-    phase='shop'; purchaseAnimAt=0;
+    // A shop entry starts with a clean screen: the box reveal and the purchase flash
+    // belong to the visit that triggered them, not to the next one.
+    phase='shop'; purchaseAnimAt=0; _boxOpenAt=0; _boxReward=null; _shopMsg=null; _shopMsgAt=0;
     shopPage = _adminAvail ? BOX_PAGE : 0;
     shopSel  = _adminAvail ? BOXES.length : 0;
     saveCfg();
@@ -685,7 +687,7 @@ function _openBox(box){
         _adminConsumed=true;
         if(si.admincrown){ const refund=Math.round(_boxItemValue('admincrown')*0.5); addFOKoins(refund); _boxReward={kind:'dupe',id:'admincrown',rarity:'legendary',refund}; }
         else { itemGrant('admincrown','box'); _boxReward={kind:'item',id:'admincrown',rarity:'legendary'}; }
-        saveCfg(); _boxOpenAt=simNow; Snd.sfxPlay('unbox',cfg.music); return;
+        saveCfg(); _boxOpenAt=_msgNow(); Snd.sfxPlay('unbox',cfg.music); return;
     }
     if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
     _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch (e){}
@@ -697,7 +699,7 @@ function _openBox(box){
         else { itemGrant(res.id,'box'); if(SHOP_ITEMS.filter(s=>!s.repeatable).every(s=>si[s.id])) unlockAch('shop_full'); _boxReward={kind:'item',id:res.id,rarity:res.rarity}; }
     }
     saveCfg();
-    _boxOpenAt=simNow;
+    _boxOpenAt=_msgNow();
     Snd.sfxPlay('unbox',cfg.music);
 }
 
@@ -840,7 +842,7 @@ const SCREENS = {
     splash:       { d:()=>drawSplash(simNow),    hud:false },
     menu:         { d:()=>drawMenu(simNow),      hud:false },
     news:         { d:()=>drawNews(simNow),      hud:false, freeze:true, anim:()=> simNow-_newsAt < 700 },
-    settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> _dbgSending || (!!_dataMsg && simNow-_dataMsgAt < 2600) },
+    settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> _dbgSending || (!!_dataMsg && _msgNow()-_dataMsgAt < 2600) },
     scores:       { d:()=>drawScores(),          hud:false, freeze:true },
     achievements: { d:()=>drawAchievements(),    hud:false, freeze:true },
     shop:         { d:()=>drawShop(),            hud:false },
@@ -857,7 +859,7 @@ const SCREENS = {
     tourneyCode:  { d:()=>drawTourneyCode(),    hud:false, freeze:true },
     duelLobby:        { d:()=>drawDuelLobby(),           hud:false },
     friends:      { d:()=>drawFriends(),         hud:false },
-    duelInvite:       { d:()=>drawDuelInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
+    duelInvite:       { d:()=>drawDuelInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && _msgNow()-_inviteMsgAt < 1600 },
     // The tournament screens are static pictures of what the server last said, so they
     // freeze like every other menu -- except that all four waiting screens animate their
     // waiting dots (_ttDots) and the bracket also counts the host's CONTINUE row down, so

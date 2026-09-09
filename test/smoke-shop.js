@@ -69,6 +69,30 @@ runTest('SMOKE-SHOP', `
     if(_it('halo').cat!=='divine'||_it('moustache').cat!=='masquerade'||_it('eyepatch').cat!=='eyes'||_it('bow').cat!=='neck'||_it('shoes').cat) throw 'wear-slot cats off';
     log('wear slots + windswept ok');
 
+    // Shop transients live on the WALL clock. startGame/startDuel restart simNow at 0, so
+    // an age measured against the sim clock turns negative after a game and every window
+    // reads as still open -- the reveal then covers the shop until simNow catches up.
+    // Entering the shop clears them too: a reveal belongs to the visit that opened it.
+    const _realMsgNow = _msgNow;
+    let painted = 0, wall = 500000;
+    const _realCt = ct;
+    ct = function(){ painted++; return _realCt.apply(null, arguments); };
+    _msgNow = function(){ return wall; };
+    const revealPaints = () => { painted = 0; _drawBoxReveal(); return painted; };
+    try {
+        simNow = 900000; shopPage=BOX_PAGE; shopSel=0; _cachedFOKoins=5000000;
+        _openBox(BOXES[0]);
+        if(!revealPaints()) throw 'a fresh box reveal does not draw';
+        simNow = 0; wall += 3000;                    // a duel restarts the sim clock; 3s pass
+        if(revealPaints()) throw 'the reveal survives a sim-clock reset (stale overlay over the shop)';
+        wall = 500000; _openBox(BOXES[0]);
+        if(!revealPaints()) throw 'a second box reveal does not draw';
+        _enterShop();
+        if(revealPaints()) throw 'a reveal from the last visit survives a shop entry';
+        if(_shopMsg || purchaseAnimAt) throw 'a shop entry left an old flash armed';
+    } finally { ct = _realCt; _msgNow = _realMsgNow; }
+    log('shop transients ok: wall-clocked, cleared on entry');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

@@ -104,7 +104,7 @@ runTest('SMOKE-UI', `
     _duelMsg='';
     phase='myId'; drawMyId();
     _inviteFid='00ff00aa'; phase='duelInvite';
-    inviteSel=0; drawDuelInvite(); inviteSel=1; _inviteMsg='COPIED!'; _inviteMsgAt=simNow; drawDuelInvite();
+    inviteSel=0; drawDuelInvite(); inviteSel=1; _inviteMsg='COPIED!'; _inviteMsgAt=_msgNow(); drawDuelInvite();
     _inviteFid=null; _inviteMsg='';
     phase='nameEntry';
     // The camera is a CODE feature, not an ADD FRIEND one: both fixed-length codes are handed

@@ -369,8 +369,8 @@ function backupStats() {
         snap.crc=_sumOf(snap);              // integrity checksum over the manifest fields (crc + tok excluded)
         snap.tok=getCloudToken()||undefined;   // FILE-only client extension: carries the cloud token so a file restore re-establishes cloud access
         _downloadJSON('snake-fok-backup.json', snap);
-        _dataMsg='CONFIG SAVED TO FILE'; _dataMsgAt=simNow;
-    } catch (e) { _dataMsg='FILE BACKUP FAILED'; _dataMsgAt=simNow; }
+        _dataMsg='CONFIG SAVED TO FILE'; _dataMsgAt=_msgNow();
+    } catch (e) { _dataMsg='FILE BACKUP FAILED'; _dataMsgAt=_msgNow(); }
 }
 // Cloud backup: POST the whole config to the vault. First time mints a token (store it in
 // both stores + cookie); later backups present it. Payload is opaque to the server.
@@ -383,8 +383,8 @@ function backupStats() {
 // verbatim move, no logic risk; OR rewrite to .then() chains (touches working, under-tested
 // network code). Until then, old engines cannot run the game at all.
 async function cloudBackup(silent) {
-    if(typeof _netOk!=='function' || !_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; } return false; }
-    if(!silent){ _dataMsg='CLOUD BACKUP...'; _dataMsgAt=simNow; }
+    if(typeof _netOk!=='function' || !_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); } return false; }
+    if(!silent){ _dataMsg='CLOUD BACKUP...'; _dataMsgAt=_msgNow(); }
     let ok=false;
     try {
         const snap=_saveSnapshot(); snap.crc=_sumOf(snap);
@@ -405,7 +405,7 @@ async function cloudBackup(silent) {
         else if(r.status===413){ if(!silent) _dataMsg='CLOUD: TOO LARGE'; }
         else { if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
     } catch(e){ if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
-    if(!silent) _dataMsgAt=simNow;
+    if(!silent) _dataMsgAt=_msgNow();
     return ok;
 }
 // Daily automatic cloud backup (opt-in via cfg.autoCloud). Called on a timer; the 24h throttle
@@ -422,10 +422,10 @@ async function _maybeAutoCloudBackup(){
 // localStorage, or a prior file restore) -- id alone cannot read someone else's backup.
 // TODO(compat): ES2017 async/await in a CORE file -- breaks old-engine parsing (see cloudBackup).
 async function cloudRestore() {
-    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=simNow; return; }
+    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
     const tok=getCloudToken();
-    if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=simNow; return; }
-    _dataMsg='CLOUD RESTORE...'; _dataMsgAt=simNow;
+    if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=_msgNow(); return; }
+    _dataMsg='CLOUD RESTORE...'; _dataMsgAt=_msgNow();
     try {
         const r=await netBgFetch('/api/backup.php?id='+getPlayerId()+'&token='+encodeURIComponent(tok));
         const j=await r.json().catch(()=>null);
@@ -436,7 +436,7 @@ async function cloudRestore() {
         else if(r.status===403) _dataMsg='CLOUD: WRONG TOKEN';
         else _dataMsg='CLOUD RESTORE FAILED';
     } catch(e){ _dataMsg='CLOUD RESTORE FAILED'; }
-    _dataMsgAt=simNow;
+    _dataMsgAt=_msgNow();
 }
 const _restoreInp=document.createElement('input');
 _restoreInp.type='file'; _restoreInp.accept='application/json,.json'; _restoreInp.className='util-hidden';
@@ -448,10 +448,10 @@ _restoreInp.addEventListener('change',()=>{
     rd.onload=()=>{
         try {
             const d=JSON.parse(rd.result);
-            _dataMsg=_applyRestoredConfig(d)?'CONFIG RESTORED':'INVALID FILE'; _dataMsgAt=simNow;
-        } catch (e) { _dataMsg='INVALID FILE'; _dataMsgAt=simNow; }
+            _dataMsg=_applyRestoredConfig(d)?'CONFIG RESTORED':'INVALID FILE'; _dataMsgAt=_msgNow();
+        } catch (e) { _dataMsg='INVALID FILE'; _dataMsgAt=_msgNow(); }
     };
-    rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=simNow; };
+    rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=_msgNow(); };
     rd.readAsText(f);
 });
 function restoreStats(){ try{ _restoreInp.click(); }catch (e){} }

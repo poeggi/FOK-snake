@@ -832,16 +832,25 @@ function netDuelLook(){
     const N = SNAKE_COLORS.length;
     const pp = _pp || {};
     const mine   = { c: (cfg.snakeColor|0) % N, i: cfg.wornItems || {} };
-    // NETWORK setting: render the peer as a plain default snake (no cosmetics, colour 0).
-    // Purely a local view choice -- it never crosses the wire and does not touch the sim.
-    const theirs = cfg.noRemoteCosmetics ? { c: 0, i: {} }
+    // NETWORK setting: render the peer as a plain default snake -- no cosmetics and no
+    // colour of its own. Purely a local view choice: it never crosses the wire and does
+    // not touch the sim. `hid` names the slot the hidden snake sits in, because the
+    // WINDSWEPT half of a look does not come from the profile at all (the sim owns it,
+    // see _wsLook) and has to be suppressed at the draw.
+    const hide = !!cfg.noRemoteCosmetics;
+    const theirs = hide ? { c: 0, i: {} }
                  : { c: Math.abs(pp.color|0) % N,
                      i: (pp.shopItems && typeof pp.shopItems === 'object') ? pp.shopItems : {} };
     const a = _host ? mine : theirs;          // P0 is always the host
     const b = _host ? theirs : mine;          // P1 is always the joiner
+    const hid = hide ? (_host ? 1 : 0) : -1;
     let c0 = a.c, c1 = b.c;
-    if(c0 === c1) c1 = (c1 + 1) % N;          // same pick: nudge P1 -- deterministic, so both agree
-    const val = { c0, c1, i0: a.i, i1: b.i };
+    // Same pick: one of the two has to move. Normally P1, by SLOT, so both clients agree
+    // on the picture. A hidden peer forced to colour 0 is a local view already -- and the
+    // slot rule would then recolour OUR OWN snake whenever we are the joiner, which is the
+    // one thing this setting must never do. So the hidden side is the side that moves.
+    if(c0 === c1){ if(hid === 0) c0 = (c0 + 1) % N; else c1 = (c1 + 1) % N; }
+    const val = { c0, c1, i0: a.i, i1: b.i, hid };
     _netLookC = { pp:_pp, host:_host, col:cfg.snakeColor|0, wi:cfg.wornItems, nrc:!!cfg.noRemoteCosmetics, val };
     return val;
 }

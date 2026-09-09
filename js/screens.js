@@ -431,7 +431,7 @@ const DEBUG_CAT = { label:'DEBUGGING', items:[
     _tog('X10 RARE EVENTS','x10'),   // persisted: the post-act saveCfg also resends the worker cfg
     { lbl:()=> _dbgSending ? 'SENDING SNAPSHOT...' : 'SEND DEBUG SNAPSHOT'+(_dbgSnap?'':' (CAPTURE FIRST)'),
       act:()=>{ if(_dbgSending) return; Snd.sfxPlay('select',cfg.music); sendDebugSnapshot(); } },
-    { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=simNow; } },
+    { lbl:()=>'MAKE ME RICH (+1BN FOK)', act:()=>{ addFOKoins(1000000000); Snd.sfxPlay('perfect',cfg.music); _dataMsg='+1,000,000,000 FK'; _dataMsgAt=_msgNow(); } },
     { lbl:()=>'LOW-FPS RECORD: '+(_fpsRec?'ON':'OFF'),
       act:()=>{ _fpsRec=!_fpsRec; if(_fpsRec) _fpsRecReset(); else { try{ fpsEl.style.color=''; }catch(e){} } Snd.sfxPlay('select',cfg.music); } },
     { lbl:()=>'WORST '+(_fpsSnap?(_fpsSnap.fps+'fps@'+_fpsSnap.phase):'--')+'  MAX '+(_fpsMaxAvg||'--'),
@@ -476,7 +476,7 @@ function drawSettings() {
         if(_cl==='DATA'||_cl==='DEBUGGING'){
             if(_dbgSending) drawStatus('UPLOADING SNAPSHOT'+'.'.repeat(1+Math.floor(simNow/400)%3));   // persistent while the upload is in flight
             else if(_dbgPinShow && _dbgPin) drawStatus('SNAPSHOT SENT - PIN '+_dbgPin+(_dbgPinCopied?' (COPIED)':''));   // held until the user moves (see settings nav)
-            else if(_dataMsg && simNow-_dataMsgAt<2500) drawStatus(_dataMsg);
+            else if(_dataMsg && _msgNow()-_dataMsgAt<2500) drawStatus(_dataMsg);
         }
     }
     const hint=inCat?'UP/DN:nav  L/R:change  A:select  ESC:back':'UP/DN:nav  A:open  ESC:back';
@@ -703,7 +703,7 @@ function _drawGearPage(){
 }
 // Buy + open a box: deduct, roll, grant (item / dupe-sell / coins), trigger reveal.
 function _drawBoxReveal(){
-    const age=simNow-_boxOpenAt;
+    const age=_msgNow()-_boxOpenAt;
     if(!(_boxOpenAt>0 && age<2400 && _boxReward)) return;
     if(age<220){ ctx.save(); ctx.globalAlpha=(1-age/220)*0.55; ctx.fillStyle='#ffe860'; ctx.fillRect(0,0,CW,CH); ctx.restore(); }
     const fade=age<150?age/150:age>2000?Math.max(0,1-(age-2000)/400):1;
@@ -786,8 +786,10 @@ function drawShop() {
     ct(shopPage===BOX_PAGE ? 'UP/DN:nav  L/R:tab  A:open  ESC:back'
        : shopPage===GEAR_PAGE ? 'UP/DN:nav  L/R:tab  A/||:wear  ESC:back'
        : 'UP/DN:nav  L/R:tab  A:buy  ||:wear  ESC:back',CW/2,HINT_Y,'#888',FONT.HINT);
-    // Purchase particles
-    const now=simNow;
+    // Purchase particles. The shop's transient flashes are stamped on the WALL clock
+    // (_msgNow), never the sim clock: startGame/startDuel restart simNow at 0, which
+    // leaves an age computed against it negative -- i.e. inside every window, forever.
+    const now=_msgNow();
     purchaseParticles=purchaseParticles.filter(p=>{
         p.life++;p.x+=p.vx;p.y+=p.vy;p.vy+=0.09;p.rot+=p.vrot;
         if(p.life>=p.maxLife||p.y>CH+20) return false;
@@ -1072,13 +1074,19 @@ function drawWorld(now) {
 }
 // Duel colours/cosmetics. Online: both clients derive the SAME pair from the exchanged
 // profiles. Local duel (one screen, one config): my colour + the next index.
+const _LOOK_BARE = {};   // shared: the item map of a snake drawn with no cosmetics at all
 function _duelLook(){
     const lk=(typeof netDuelLook==='function')?netDuelLook():null;
+    // HIDE REMOTE COSMETICS hides the WHOLE peer, windswept gear included. A profile the
+    // look zeroed is not enough on its own: _wsLook paints the sim's worn list back on top,
+    // and that list is the crowns and hats -- the most visible cosmetics in the game. An
+    // older feeder's spectator look carries no hid, which reads as -1: nobody hidden.
+    const hid = (lk && (lk.hid===0 || lk.hid===1)) ? lk.hid : -1;
     return {
         c0: lk?lk.c0:(cfg.snakeColor||0),
         c1: lk?lk.c1:((cfg.snakeColor||0)+1)%SNAKE_COLORS.length,
-        i0: _wsLook(lk?lk.i0:(cfg.wornItems||{}), 0),
-        i1: _wsLook(lk?lk.i1:{}, 1)
+        i0: hid===0 ? _LOOK_BARE : _wsLook(lk?lk.i0:(cfg.wornItems||{}), 0),
+        i1: hid===1 ? _LOOK_BARE : _wsLook(lk?lk.i1:{}, 1)
     };
 }
 // For the length of a duel the SIM owns which WINDSWEPT items a snake wears -- they come off
@@ -1507,7 +1515,7 @@ function drawDuelInvite() {
     ct('THE CODE TRAVELS ALONG AUTOMATICALLY', CW/2, 232, '#aaa', FONT.HINT);
     menuItem('COPY CODE', 272, inviteSel===0);
     menuItem('CONTINUE', 300, inviteSel===1);
-    if(_inviteMsg && simNow-_inviteMsgAt<1600) ct(_inviteMsg, CW/2, 330, '#ffd700', FONT.HINT);
+    if(_inviteMsg && _msgNow()-_inviteMsgAt<1600) ct(_inviteMsg, CW/2, 330, '#ffd700', FONT.HINT);
     ct('UP/DN:nav  A:ok', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // Two ways the board stops being a shared game, each its own colour. RED CONNECTION LOST:

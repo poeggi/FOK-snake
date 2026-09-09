@@ -268,6 +268,26 @@ runTest('SMOKE-INPUT', `
     players=null; phase='menu'; inGame=false; _armSlots=[];
     log('finger-up during dying still releases the boost arm (no respawn-boosting)');
 
+    // The name / friend-id / join-code DIAL is grabbed, not stepped. drawNameEntry lays the
+    // character set out downwards, so a finger dragged UP pulls the character BELOW into the
+    // window -- the reel follows the finger. Only the touch path works that way: a keyboard
+    // arrow, a d-pad press and the TV remote keep list semantics, ArrowDown for the next one.
+    phase='nameEntry'; entryMode='user'; nameStr=''; nameCursorPos=0; nameCharIdx=5;
+    document.__emit('touchstart', touch(300,200));
+    document.__emit('touchmove',  touch(300,120));   // 80px up, well past MENU_SWIPE_1
+    if(nameCharIdx!==6) throw 'a swipe UP must turn the dial to the NEXT character, got idx '+nameCharIdx;
+    document.__emit('touchend',   touch(300,120));
+    document.__emit('touchstart', touch(300,200));
+    document.__emit('touchmove',  touch(300,280));   // 80px down
+    if(nameCharIdx!==5) throw 'a swipe DOWN must turn the dial back, got idx '+nameCharIdx;
+    document.__emit('touchend',   touch(300,280));
+    handleKey('ArrowDown',null);
+    if(nameCharIdx!==6) throw 'the keyboard must keep list steps: ArrowDown is the next character';
+    handleKey('ArrowUp',null);
+    if(nameCharIdx!==5) throw 'the keyboard must keep list steps: ArrowUp is the previous character';
+    phase='menu'; entryMode='score'; nameCharIdx=0; _swipeBase=null; _swipeLastDir=null;
+    log('entry dial follows the finger (swipe up = next character); keyboard keeps list steps');
+
     // THE CEREMONY SCREEN'S ESCAPE IS FOR THE PEOPLE IT IS ASKING TO WAIT. A player it
     // names is about to be put into a duel and must not walk off to the board while the
     // link comes up -- but a match that never comes up must not hold them either, least

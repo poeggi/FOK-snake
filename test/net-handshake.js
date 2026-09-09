@@ -101,6 +101,7 @@ const HOOKS = (myId) => `
   globalThis.__setOffline= (on)=>{ cfg.offline = !!on; };
   globalThis.__setLook   = (col, items)=>{ cfg.snakeColor = col; cfg.wornItems = items||{}; };
   globalThis.__look      = ()=>  netDuelLook();
+  globalThis.__setHide   = (on)=>{ cfg.noRemoteCosmetics = !!on; };
   globalThis.__hsTick    = ()=>{ _netHsTick(); };
   // Duel driving, for the netcode tests. __duelStart mirrors beginOnlineDuel.
   globalThis.__wire = [];
@@ -854,6 +855,50 @@ try {
     if(la.c0 === la.c1) throw new Error('identical picks must be nudged apart');
     if(la.c0 !== lb.c0 || la.c1 !== lb.c1)
       throw new Error('the nudge must be identical on both clients: ' + JSON.stringify([la,lb]));
+  });
+
+  // HIDE REMOTE COSMETICS is a LOCAL view choice: it strips the peer down to a plain
+  // default snake and must leave OUR OWN snake exactly as we picked it. The trap is the
+  // same-pick nudge: it moves P1 by slot, and a joiner whose own colour is the default 0
+  // meets a peer forced to 0 -- the slot rule then recolours the joiner's own snake.
+  check('duel looks: hiding the peer never recolours our own snake', () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(true); B.__setRelay(true);
+    A.__setLook(0, { hat: 1 });          // host: the default colour, so the peer collides with it
+    B.__setLook(0, { glasses3d: 1 });    // joiner: same pick
+    B.__setHide(true);                   // ...and the joiner hides the peer
+    A.__invite(B_ID); pump(A, B);
+    B.__answer(true); pump(B, A);
+    pump(A, B); pump(B, A);
+    const la = A.__look(), lb = B.__look();
+    if(!la || !lb) throw new Error('no duel look on one side');
+    if(lb.hid !== 0) throw new Error('the joiner must mark P0 as the hidden peer: ' + JSON.stringify(lb));
+    if(lb.c1 !== 0) throw new Error('the joiner own snake lost its colour to the nudge: ' + JSON.stringify(lb));
+    if(lb.c0 === lb.c1) throw new Error('the two snakes must still be told apart: ' + JSON.stringify(lb));
+    if(Object.keys(lb.i0).length) throw new Error('the hidden peer still wears cosmetics: ' + JSON.stringify(lb.i0));
+    if(!lb.i1.glasses3d) throw new Error('hiding the peer took our own cosmetics too: ' + JSON.stringify(lb.i1));
+    // The other side did not opt in, so it still sees the pair in full and nudges by slot.
+    if(la.hid !== -1) throw new Error('the host marked a hidden peer it never asked for: ' + JSON.stringify(la));
+    if(la.c0 !== 0 || la.c1 === 0) throw new Error('the host pair is no longer the slot nudge: ' + JSON.stringify(la));
+    if(!la.i1.glasses3d) throw new Error('the host lost the peer cosmetics: ' + JSON.stringify(la));
+  });
+
+  // The host half of the same setting: there the peer IS P1, so the slot nudge already
+  // moves the right snake -- what this pins is that it keeps doing so.
+  check('duel looks: a hiding host keeps P0 and blanks P1', () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setRelay(true); B.__setRelay(true);
+    A.__setLook(0, { hat: 1 }); A.__setHide(true);
+    B.__setLook(0, { glasses3d: 1 });
+    A.__invite(B_ID); pump(A, B);
+    B.__answer(true); pump(B, A);
+    pump(A, B); pump(B, A);
+    const la = A.__look();
+    if(la.hid !== 1) throw new Error('the host must mark P1 as the hidden peer: ' + JSON.stringify(la));
+    if(la.c0 !== 0) throw new Error('the hiding host lost its own colour: ' + JSON.stringify(la));
+    if(la.c1 === la.c0) throw new Error('the two snakes must still be told apart: ' + JSON.stringify(la));
+    if(!la.i0.hat) throw new Error('the hiding host lost its own cosmetics: ' + JSON.stringify(la.i0));
+    if(Object.keys(la.i1).length) throw new Error('the hidden peer still wears cosmetics: ' + JSON.stringify(la.i1));
   });
 
   // ------------------------------------------------------------ leaving abruptly

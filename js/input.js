@@ -337,7 +337,7 @@ const UI_INPUT = {
             if(inviteSel===0){
                 let ok=false;
                 try{ navigator.clipboard.writeText(fmtFriendId(_inviteFid||'')).catch(()=>{}); ok=true; }catch(e){}
-                _inviteMsg=ok?'COPIED!':'COPY FAILED'; _inviteMsgAt=simNow; Snd.sfxPlay(ok?'select':'fail',cfg.music);
+                _inviteMsg=ok?'COPIED!':'COPY FAILED'; _inviteMsgAt=_msgNow(); Snd.sfxPlay(ok?'select':'fail',cfg.music);
             } else { _inviteFid=null; phase='menu'; Snd.sfxPlay('select',cfg.music); }
         },
         back(){ _inviteFid=null; phase='menu'; Snd.sfxPlay('nav',cfg.music); },
@@ -483,7 +483,7 @@ const UI_INPUT = {
                     // Auto-wear the purchase -- unless its wear slot is taken: then it stays
                     // owned-not-worn and the REMOVE-first notice queues behind PURCHASED!.
                     const other=_wornCatClash(item);
-                    if(other){ _shopMsg='REMOVE '+other.name+' FIRST'; _shopMsgAt=simNow+1200; }
+                    if(other){ _shopMsg='REMOVE '+other.name+' FIRST'; _shopMsgAt=_msgNow()+1200; }
                     else (cfg.wornItems||(cfg.wornItems={}))[item.id]=true;
                 }
                 saveCfg();
@@ -537,7 +537,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             if(quitConfirmSel===0){
                 if(_resetKind==='settings') resetSettings();
-                else if(_resetKind==='id'){ resetPlayerId(); _dataMsg='NEW ID '+fmtPlayerId(); _dataMsgAt=simNow; }
+                else if(_resetKind==='id'){ resetPlayerId(); _dataMsg='NEW ID '+fmtPlayerId(); _dataMsgAt=_msgNow(); }
                 else resetStats();
             }
             phase='settings'; quitConfirmSel=1;
@@ -832,6 +832,15 @@ const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50,
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=48;
+// The name / friend-id / join-code entry screen carries a DIAL, and a dial is grabbed, not
+// stepped: drawNameEntry lays the character set out downwards, so a finger dragged UP has to
+// pull the character BELOW into the window. A list steps the other way, which is why only the
+// touch path flips -- a keyboard arrow, a d-pad press and the TV remote all stay list-wise,
+// ArrowDown for the next character. Horizontal swipes are untouched.
+function _dialSwipe(key){
+    if(phase!=='nameEntry') return key;
+    return key==='ArrowUp' ? 'ArrowDown' : key==='ArrowDown' ? 'ArrowUp' : key;
+}
 // Touch steering sensitivity (settings > CONTROLS): scales every swipe distance, in-play and in
 // menus alike. A higher setting shortens the travel a swipe needs, so both steering and menu
 // scrolling get twitchier together.
@@ -975,7 +984,7 @@ document.addEventListener('touchmove',e=>{
     if(inMenu&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
     _swipedThisTouch=true;
     if(_inPlay()) _dbgTurnCtx={dist, run:_turnRun, thresh};   // DEBUG L3: hand this gesture's distance/run/guard to the shared steer logger (fires inside handleKey)
-    handleKey(key,null);
+    handleKey(_dialSwipe(key),null);
     if(_inPlay()){
         const d=GDIRS[key];
         if(d){
