@@ -15,7 +15,7 @@
 //                    {t:'pause'} / {t:'resume'}
 //   worker -> main : {t:'frame', snap, events}      one post per ticked frame
 //
-// Runs everything Worker-capable browsers play: classic, local 1:1, and (with
+// Runs everything Worker-capable browsers play: classic, local 1vs1, and (with
 // duel-core.js, below) the ONLINE duel's sim + rollback. game.js falls back to an
 // in-process sim only where Worker construction fails (file://, exotic browsers).
 // ============================================================================

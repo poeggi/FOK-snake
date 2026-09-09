@@ -36,7 +36,7 @@ function _drawHearts(cv, c2, n, color) {
 // player's snake colour. Cells keep their positions; only what they SHOW changes.
 function updateHUD() {
     // Duel content only while a game/duel session is actually live: the main-thread `players`
-    // MIRROR can linger after leaving a 1:1 (the worker may be paused and never post a clearing
+    // MIRROR can linger after leaving a 1vs1 (the worker may be paused and never post a clearing
     // frame), and a stale mirror must not paint duel names onto the menu HUD.
     const mode = (players && inGame) ? 'duel' : 'classic';
     // duelSideName already caps at MAX_NAME (not 10: a full-length name was losing its tail)

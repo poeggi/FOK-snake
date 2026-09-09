@@ -878,7 +878,7 @@ function netDebugInfo(){
 let _netCounts = { online:0, playing:0 };
 let _netFriendsOnline = {};
 let _netFriendsLat = {};
-// Accepted friends currently IN a 1:1, from the same authorization-gated presence delta
+// Accepted friends currently IN a 1vs1, from the same authorization-gated presence delta
 // as the online map. It is the entire discovery surface for spectating: a friend you can
 // watch is a friend the server says is playing right now.
 let _netFriendsPlaying = {};
@@ -900,7 +900,7 @@ let _netFrSub = false;      // on a presence screen at the last tick: the edge i
 let _netFrPages = 0;        // continuation pages chained off one answer's friends_more
 const NET_FR_PAGES = 8;     // ...bounded: a server that never stops saying "more" gets the next tick
 // The screens with a friend's state on them. MY ID and the tournament lobby show none.
-function _netFrScreen(){ return phase === 'lobby' || phase === 'friends'; }
+function _netFrScreen(){ return phase === 'duelLobby' || phase === 'friends'; }
 // A presence screen opened: read it whole.
 function netPresenceOpen(){ _netFrSince = 0; _netFrSub = true; }
 // THE one place presence lands, whichever request brought it -- a poll's 200 or a hello.
@@ -960,7 +960,12 @@ async function _netHello(){
     const body = { id: getPlayerId() };
     { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }
     if(_netLat.pending && _netLat.value != null) body.latency = _netLat.value;   // the mandated report
-    if(_netSess && _netSess.game) body.duel_with = _netSess.peer;
+    if(_netSess && _netSess.game){
+        body.duel_with = _netSess.peer;
+        // Sent on EVERY beat while it holds, never once: the server reads an absent
+        // flag as public, so a bare beat would hand the duel back to the friends list.
+        if(cfg.privateDuels) body.duel_private = true;
+    }
     // Presence rides a CURSOR (4.6): no ids, the server serves the caller's accepted friends
     // whose state changed after it. Asked for only where a friend's state is on screen.
     if(_netFrScreen()) body.friends_since = _netFrSince;
@@ -988,7 +993,7 @@ async function _netHello(){
     // auto_accept: presenting our QR / being on the add-friend screen IS the
     // consent, so the server accepts incoming friend requests immediately (the
     // contract mechanism; complements the client-side QR accept). Expires ~60s.
-    if(phase === 'friendId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000) body.auto_accept = true;
+    if(phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000) body.auto_accept = true;
     // REPORT what is true, never what was asked: the admin view tells an instruction
     // the client has not picked up yet ('pending') from a client that turned debug on
     // by itself ('self'), and deriving one from the other would erase that difference.
@@ -1042,7 +1047,7 @@ async function _netHello(){
     _uiDirty = true;
 }
 
-// ---- adaptive signal poll: 1 Hz wherever matchmaking is live (lobby, the 1:1
+// ---- adaptive signal poll: 1 Hz wherever matchmaking is live (lobby, the 1vs1
 // menu, or a connection being set up), every 10 s in the main menu so invites
 // still surface there, silent everywhere else (incl. during games: the
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
@@ -1063,7 +1068,7 @@ function _netPollDue(){
         if(typeof specHandshaking === 'function' && specHandshaking()) return true;
         return _netPollTick % 5 === 0;   // reconnecting: poll so the re-handshake signals flow
     }
-    if(phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId') return true;
+    if(phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId') return true;
     if(typeof tourneyActive === 'function' && tourneyActive()) return true;   // a held tournament reaches us wherever we are
     if(phase === 'tourneyLobby') return true;
     if(_netSess) return true;                        // offer/answer/ice in flight
@@ -1096,7 +1101,7 @@ let _netPollHeld = false;
 // of ours queueing. The foreground hello drains the mailbox meanwhile.
 let _netPollHoldEnd = 0, _netPollNotBefore = 0;
 function _netPollResume(){ _netPollAbortNow(); _netPollNotBefore = _netPollHoldEnd; }
-// Hold the connection OPEN on every matchmaking screen (1:1 menu, lobby, friends,
+// Hold the connection OPEN on every matchmaking screen (1vs1 menu, lobby, friends,
 // MY ID) and during a handshake: a long-poll -- the server HOLDS the request and
 // re-checks the mailbox every ~20ms (a server-side poll, NOT a push), answering as
 // soon as a signal lands or with 204 after `wait` seconds of real silence. The
@@ -1119,11 +1124,11 @@ async function _netPollOnce(){
     // The tournament screens are matchmaking screens like the rest, and hold like them:
     // between matches EVERY signal that moves the evening on -- a lobby join, the next
     // roles sheet, the offer for a match this client is about to answer -- arrives here,
-    // and a 1s short-poll put a second on each leg of a handshake the 1:1 path does in
+    // and a 1s short-poll put a second on each leg of a handshake the 1vs1 path does in
     // ~150ms. Not the podium: that tournament is over and nothing further is coming. Not
     // during a match either -- _netSess.game short-circuits above, so the eight people
     // watching hold nothing while they watch.
-    const _held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'lobby' || phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId'
+    const _held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId'
                || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyRound' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
     // ...and only while the server still lets us. `hold:false` withdraws holding outright
     // (a held poll owns a PHP worker for its whole duration -- the single biggest thing one

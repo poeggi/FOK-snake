@@ -1,4 +1,4 @@
-# 1:1 duel excitement: NOTHING IS QUEUED
+# 1vs1 duel excitement: NOTHING IS QUEUED
 
 The entire duel-excitement backlog was discarded. There is no approved, spec'd or parked duel feature. Do NOT start one, and do not treat anything below as a suggestion waiting for a go-ahead -- the list exists so the same ideas are not served up again.
 

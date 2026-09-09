@@ -2,7 +2,7 @@
 // being lethal: the head goes through and everything from the bitten segment back falls off.
 //
 // The reason this suite exists is the "one mechanic" rule rather than the rule itself: single
-// player, local 1:1 and online 1:1 must shorten the snake IDENTICALLY, so the two modes are
+// player, local 1vs1 and online 1vs1 must shorten the snake IDENTICALLY, so the two modes are
 // driven here side by side off the same fixture and checked against the same expectations. A
 // second implementation for the duel would pass a duel-only suite and still be a bug.
 //
@@ -51,7 +51,7 @@ const driver = `
     const CLASSIC_LEN = r.len, CLASSIC_LOST = r.was - r.len;
     R.steps.push('single player, pill up: head goes through, '+CLASSIC_LOST+' segments fall off ('+r.was+' -> '+r.len+')');
 
-    // ---- 1:1, the SAME fixture ----
+    // ---- 1vs1, the SAME fixture ----
     const duel = (powered, who)=>{
       simCommand({t:'startDuel', seed:99});
       phase='duel'; phaseAt=0; spawnAt=simNow-SPAWN_PROTECT*2;
@@ -71,7 +71,7 @@ const driver = `
     r = duel(false, 0);
     A(r.phase==='dying', 'an UNPOWERED self-bite stopped being lethal in a duel: '+r.phase);
     A(r.now===r.lives-1, 'the unpowered self-bite did not cost a heart');
-    R.steps.push('1:1, no pill: running into your own body still costs a heart');
+    R.steps.push('1vs1, no pill: running into your own body still costs a heart');
 
     for(const who of [0,1]){
       r = duel(true, who);
@@ -85,7 +85,7 @@ const driver = `
         'the duel shortened player '+who+' to '+r.len+' where single player gives '+CLASSIC_LEN+
         ' -- the two modes are running different code');
     }
-    R.steps.push('1:1, pill up: identical outcome to single player for BOTH players ('+CLASSIC_LEN+' left, '+CLASSIC_LOST+' lost)');
+    R.steps.push('1vs1, pill up: identical outcome to single player for BOTH players ('+CLASSIC_LEN+' left, '+CLASSIC_LOST+' lost)');
 
     // ---- a bite outlives the death that follows it ----
     // The shortening is permanent. A death restarts the level from the carried baseline

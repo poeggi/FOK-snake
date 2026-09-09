@@ -86,7 +86,7 @@ function _prefersReducedMotion() {
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, smoothMotion:0, reduceMotion:_prefersReducedMotion(),
-             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, cfgVer:3,
+             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, privateDuels:false, cfgVer:3,
              itemReg:{}, mintQ:[], claimQ:[], itemsSeeded:0 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
@@ -117,6 +117,7 @@ function _sanitizeCfg() {
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
     cfg.noP2P       = !!cfg.noP2P;   // DEPRECATED(relay): relay-only network toggle
+    cfg.privateDuels = !!cfg.privateDuels;   // duels still count, but no friend is offered a spectate link
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
     cfg.debug       = (Number.isInteger(cfg.debug) && cfg.debug>=0 && cfg.debug<=3) ? cfg.debug : 0;
@@ -206,7 +207,7 @@ function resetSettings() {
 // ---- Player ID: this client's stable identity. 64 bits crypto-random, generated
 // lazily on first read, persisted next to the save and carried in backups so identity
 // travels with them. Shown in SETTINGS > USER; later the key the server uses for
-// global scores and 1:1 matchmaking (an unguessable SECRET, if ever needed, would be
+// global scores and 1vs1 matchmaking (an unguessable SECRET, if ever needed, would be
 // a separate token -- this ID is the public identity).
 const PID_KEY = 'fok-snake-pid';
 // Mirror the ID into a long-lived first-party cookie as well as localStorage. Firefox clears
@@ -289,7 +290,7 @@ function friendUrl() { return GAME_URL + '#friend=' + getPlayerId(); }
 // opens the game already knowing which room it is walking into.
 function tourneyUrl(code) { return GAME_URL + '#tourney=' + String(code || '').toUpperCase(); }
 // ---- Friends: IDs collected from invite links (boot hash parse), the ADD FRIEND
-// entry and the QR scan (1:1 menu). A capped list of public player IDs -- the
+// entry and the QR scan (1vs1 menu). A capped list of public player IDs -- the
 // future matchmaking server reads it; until then it is display-only.
 const FRIENDS_KEY = 'fok-snake-friends';
 function getFriends() {

@@ -8,7 +8,7 @@ this file keeps only the load-bearing rules.
 
 index.html loads scripts in ONE shared global scope (no bundler), order
 matters: assets -> audio -> sim -> storage -> game -> text -> render ->
-screens -> input (+ net/duel code for online 1:1; sim-worker runs in the
+screens -> input (+ net/duel code for online 1vs1; sim-worker runs in the
 Worker). Roles:
 - js/assets.js ALL static data (SIM_HZ=60, LEVEL_CFG with per-level G,
   SHOP/BOX items, presentation tables)
@@ -66,7 +66,7 @@ guards the house edge.
 ## Duel protocol + contracts
 
 - Fixed 60 Hz engine tick; boost is a parity toggle - project_fok_tick_model.md.
-- Online 1:1 is deterministic lockstep, inputs-only, rollback - rules + wire
+- Online 1vs1 is deterministic lockstep, inputs-only, rollback - rules + wire
   in project_fok_multiplayer_netcode.md.
 - 2.6 protocol (no legacy compat kept): three wire transitions - go
   {why: match|rematch|level|respawn|resume} (ONE host-authored timeline
@@ -179,6 +179,6 @@ guards the house edge.
 
 ## Key constraints
 
-- Single-player, local 1:1 and online 1:1 share ONE sim code path - converge,
+- Single-player, local 1vs1 and online 1vs1 share ONE sim code path - converge,
   never duplicate (feedback_same_code_path.md, feedback_fok_harmonized_mechanics.md).
 - ASCII only in source/README; always run the full tier before a release.

@@ -10,7 +10,7 @@ invite can go out via Messages/AirDrop/Copy instead of only being scanned.
 
 ## Why it is easy
 
-- The QR encodes a URL, not an image: js/screens.js drawFriendId() does
+- The QR encodes a URL, not an image: js/screens.js drawMyId() does
   qrMatrix(friendUrl()), and friendUrl() (js/storage.js) is
   GAME_URL + '#friend=' + getPlayerId().
 - So the call is plain navigator.share({url: friendUrl(), ...}) - no
@@ -30,11 +30,11 @@ synchronously in the tap handler.
 ## Edit surface (verified)
 
 1. Hit-test the QR card, modelled on _scanTapAt / _scanInVF in js/input.js.
-   Card rect from drawFriendId(): card = (q.size + 8) * 8,
+   Card rect from drawMyId(): card = (q.size + 8) * 8,
    qx = (CW - card) / 2, qy = 64.
 2. Swallow the tap: today a tap anywhere on the MY ID screen falls through to
    handleKey('Enter') in the document touchend handler, which runs
-   friendId.confirm() and leaves the screen.
+   myId.confirm() and leaves the screen.
 3. Keep the established convention: AbortError from navigator.share() means
    the sheet was dismissed - a decision, not a failure.
 
@@ -55,5 +55,5 @@ reuses code paths already proven on device.
 
 ## Also worth knowing before touching that screen
 
-drawFriendId() sets _netMyIdAt = Date.now() on every draw, so an incoming
+drawMyId() sets _netMyIdAt = Date.now() on every draw, so an incoming
 friend request auto-accepts while the QR is showing (see net-session.js).

@@ -38,7 +38,7 @@ runTest('SMOKE-SHOP', `
     // Wear slots: cat groups headwear ('head'), eyewear ('eyes'), neckwear ('neck') and
     // face disguise ('masquerade'); only one item per slot wears at a time, a second
     // attempt is refused with a notice naming the blocker. windswept is a pure data tag
-    // (a 1:1 feature consumes it) and must sit on hats/crowns/eyewear/moustache but NOT
+    // (a 1vs1 feature consumes it) and must sit on hats/crowns/eyewear/moustache but NOT
     // on the halo or slot-free items.
     const _it=id=>SHOP_ITEMS.concat(BOX_ITEMS).find(s=>s.id===id);
     cfg.shopItems=Object.assign(cfg.shopItems||{},{cylinder:true,crown:true,shades:true,necktie:true,bow:true});

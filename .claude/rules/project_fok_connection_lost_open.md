@@ -1,6 +1,6 @@
 # CONNECTION LOST / OUT OF SYNC dossier -- nothing open
 
-1:1 online duel recovery. Everything below is settled behavior plus a DO-NOT-RETRY list. Do not reopen any of it without a NEW field report.
+1vs1 online duel recovery. Everything below is settled behavior plus a DO-NOT-RETRY list. Do not reopen any of it without a NEW field report.
 
 ## Epoch mirror invariant (worker-hosted runtime)
 
@@ -29,7 +29,7 @@ Guards: smoke-recovery-resume.js (8 lanes), smoke-respawn-halt.js, net-handshake
 
 ## Death-freeze wedges (why the halt re-announces)
 
-Two wedge mechanisms, both = the host missing the ONE-SHOT duelHalt edge: (1) a halt landing while a recovery-RESUME boundary holds lvlPending makes _netStartRespawn silently refuse, and a one-shot refusal is final (resume is adopt-only, no rebuild rescue; the joiner cannot ask -- req whys have no respawn); (2) a host healed by a full resync adopts a state already past the DEATH_DUR crossing, never runs the crossing tick, never emits; the joiner's halt is refused by the host-only gate. A one-shot hold also has NO deadline (the 4s unanswered-go kill only arms once a go ships). Principle: EVERY transition is retried until answered -- the hold re-announces duelHalt every _HALT_RE=6 engine ticks while it stands (sim.js dying hold); repeats are free (netDuelHalt host-gated, folded into the one open boundary via lvlPending) and local-only (no wire cost -- still exactly one go per death). Also: Escape routes in 'dying' (quit overlay; wasDuel uses the players marker so quit returns to the 1:1 menu). Emits are side effects, never hashed -- cannot desync. Guard: smoke-respawn-halt re-announce cadence + the halt-refused-under-pending-boundary regression.
+Two wedge mechanisms, both = the host missing the ONE-SHOT duelHalt edge: (1) a halt landing while a recovery-RESUME boundary holds lvlPending makes _netStartRespawn silently refuse, and a one-shot refusal is final (resume is adopt-only, no rebuild rescue; the joiner cannot ask -- req whys have no respawn); (2) a host healed by a full resync adopts a state already past the DEATH_DUR crossing, never runs the crossing tick, never emits; the joiner's halt is refused by the host-only gate. A one-shot hold also has NO deadline (the 4s unanswered-go kill only arms once a go ships). Principle: EVERY transition is retried until answered -- the hold re-announces duelHalt every _HALT_RE=6 engine ticks while it stands (sim.js dying hold); repeats are free (netDuelHalt host-gated, folded into the one open boundary via lvlPending) and local-only (no wire cost -- still exactly one go per death). Also: Escape routes in 'dying' (quit overlay; wasDuel uses the players marker so quit returns to the 1vs1 menu). Emits are side effects, never hashed -- cannot desync. Guard: smoke-respawn-halt re-announce cadence + the halt-refused-under-pending-boundary regression.
 
 ## Backgrounding / recovery band (product choice: leave as is)
 

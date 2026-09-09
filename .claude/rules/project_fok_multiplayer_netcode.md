@@ -1,6 +1,6 @@
-# 1:1 duel game rules + score-submission integrity
+# 1vs1 duel game rules + score-submission integrity
 
-1:1 online is built as deterministic lockstep: no host authority over the sim, inputs-only JSON on the wire (redundant input log + ~1/s state hash), rollback, WebRTC + HTTP relay fallback. `NET_PKT_MAX=1200` one-datagram cap. Tick model: project_fok_tick_model.md; pairing invariant: project_fok_headroom_shortcut.md; module layout: project_fok_snake.md.
+1vs1 online is built as deterministic lockstep: no host authority over the sim, inputs-only JSON on the wire (redundant input log + ~1/s state hash), rollback, WebRTC + HTTP relay fallback. `NET_PKT_MAX=1200` one-datagram cap. Tick model: project_fok_tick_model.md; pairing invariant: project_fok_headroom_shortcut.md; module layout: project_fok_snake.md.
 
 ## DUEL RULES (the actual game rules)
 

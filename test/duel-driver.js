@@ -82,7 +82,7 @@ const HOOKS = (id) => `
   // so a name in a log or on a production row traces back to the id that wore it.
   globalThis._ciName = (id)=> 'clnt-CI-' + String(id || '').slice(0, 4);
   // opt = { lvl, hearts }: the two parameters a TOURNAMENT round negotiates on its 'go' and
-  // that a 1:1 never touches. Omitted, a match opens exactly where a 1:1 opens -- level 1,
+  // that a 1vs1 never touches. Omitted, a match opens exactly where a 1vs1 opens -- level 1,
   // START_LIVES hearts -- so every existing lane, goldens included, boots the same match it
   // always did. Both go through the same untrusted-input clamps the wire path uses.
   globalThis.__p2pStart = (seed, role, mine, theirs, opt)=>{

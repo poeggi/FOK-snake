@@ -52,7 +52,7 @@ requests per client - and each half is useless without the other.
   held and its `rows` (server 1.4.17+) are the standings - no read; only a
   result WITHOUT rows (an older server) is still read back. after_ms is honoured on the CALL, never
   the render (client bound TT_AFTER_MAX 1 s as a wrong-number guard; the server
-  serves 400 ms). Entering the 1:1 screen is one event too: hello and the
+  serves 400 ms). Entering the 1vs1 screen is one event too: hello and the
   friend list go first, then _netTimeSync - ONE hello, and the sweep measures
   on a wire those two have cleared instead of racing a sample against a hello
   about to dirty it. The latency figure rides the next hello (_netLat.pending).

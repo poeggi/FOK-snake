@@ -54,24 +54,24 @@ runTest('SMOKE-INPUT', `
     // MULTIPLAYER menu: 5 rows + BACK with wrap; ADD FRIEND opens the hex entry (camera denied in
     // the harness -> manual path), hex-only filter, submit adds the friend.
     localStorage.removeItem('fok-snake-friends');
-    phase='duelMenu'; duelSel=0;
-    press('ArrowUp'); if(duelSel!==5) throw 'duel menu nav did not wrap up';   // 5 = BACK row
+    phase='multiplayer'; multiSel=0;
+    press('ArrowUp'); if(multiSel!==5) throw 'duel menu nav did not wrap up';   // 5 = BACK row
     press('Enter'); if(phase!=='menu') throw 'duel menu BACK did not return to main';
-    phase='duelMenu'; duelSel=0;
-    press('ArrowUp'); press('ArrowDown'); if(duelSel!==0) throw 'duel menu nav did not wrap down';
-    duelSel=2; press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID did not open';   // MULTIPLAYER order: 0 1:1 DUEL, 1 TOURNAMENT, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
-    press('Escape'); if(phase!=='duelMenu') throw 'friendId ESC did not return';
-    // 1:1 DUEL submenu: opens from row 0; TOURNAMENT (row 1) is greyed and stays put.
-    duelSel=0; press('Enter'); if(phase!=='duel11') throw '1:1 DUEL did not open its submenu';
-    press('ArrowUp'); if(duel11Sel!==2) throw 'duel11 nav did not wrap up';   // 2 = BACK row
-    press('Enter'); if(phase!=='duelMenu') throw 'duel11 BACK did not return';
-    duelSel=1; press('Enter'); if(phase!=='duelMenu') throw 'TOURNAMENT must stay put (coming soon)';
+    phase='multiplayer'; multiSel=0;
+    press('ArrowUp'); press('ArrowDown'); if(multiSel!==0) throw 'duel menu nav did not wrap down';
+    multiSel=2; press('Enter'); if(phase!=='myId') throw 'SHOW MY ID did not open';   // MULTIPLAYER order: 0 1vs1 DUEL, 1 TOURNAMENT, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
+    press('Escape'); if(phase!=='multiplayer') throw 'myId ESC did not return';
+    // 1vs1 DUEL submenu: opens from row 0; TOURNAMENT (row 1) is greyed and stays put.
+    multiSel=0; press('Enter'); if(phase!=='duelMenu') throw '1vs1 DUEL did not open its submenu';
+    press('ArrowUp'); if(duelSel!==2) throw 'duelMenu nav did not wrap up';   // 2 = BACK row
+    press('Enter'); if(phase!=='multiplayer') throw 'duelMenu BACK did not return';
+    multiSel=1; press('Enter'); if(phase!=='multiplayer') throw 'TOURNAMENT must stay put (coming soon)';
     // Same screen from SETTINGS > USER: returns to settings instead.
     phase='settings'; settingsCat=SETTINGS_CATS.findIndex(c=>c.label==='USER'); settingsSel=1;
-    press('Enter'); if(phase!=='friendId') throw 'SHOW MY ID from settings did not open';
-    press('Escape'); if(phase!=='settings') throw 'friendId ESC did not return to settings';
-    phase='duelMenu';
-    duelSel=3; press('Enter');
+    press('Enter'); if(phase!=='myId') throw 'SHOW MY ID from settings did not open';
+    press('Escape'); if(phase!=='settings') throw 'myId ESC did not return to settings';
+    phase='multiplayer';
+    multiSel=3; press('Enter');
     if(phase!=='nameEntry'||entryMode!=='friend') throw 'ADD FRIEND did not open the entry (phase='+phase+' mode='+entryMode+')';
     press('g'); if(nameStr!=='') throw 'non-hex char must be ignored in friend mode';
     for(const ch of '00ff00b') press(ch);
@@ -84,28 +84,28 @@ runTest('SMOKE-INPUT', `
     // the ID: on a TV or a gamepad there is no RETURN key to reach for.
     if(!_entryOnOk()) throw 'the last digit did not move the cursor onto the submit key (pos='+nameCursorPos+')';
     press('NameAdd');
-    if(phase!=='duelMenu') throw 'friend submit did not return to the 1:1 menu';
+    if(phase!=='multiplayer') throw 'friend submit did not return to the 1vs1 menu';
     if(entryMode!=='score') throw 'entryMode not reset after friend submit';
     if(!getFriends().includes('00ff00bb')) throw 'scanned/typed friend not stored';
     if(_duelMsg.indexOf('FRIEND ADDED')!==0) throw 'missing FRIEND ADDED confirmation';
     // Short/invalid code: submit refuses. Backspace deletes a digit; ESC is BACK --
     // one press leaves ADD FRIEND even with a digit still in the field.
-    duelSel=3; press('Enter'); press('a'); press('Enter');
+    multiSel=3; press('Enter'); press('a'); press('Enter');
     if(phase!=='nameEntry') throw 'short friend code must not submit';
     press('Backspace'); if(nameStr!=='') throw 'Backspace must delete a friend digit';
     press('a'); press('Escape');
-    if(phase!=='duelMenu'||entryMode!=='score') throw 'ESC must leave ADD FRIEND (back)';
+    if(phase!=='multiplayer'||entryMode!=='score') throw 'ESC must leave ADD FRIEND (back)';
     log('friend add flow ok (hex filter, submit gated on 8 digits, back)');
 
     // A verified scanner hit locks first (field filled, success shown), then submits.
-    duelSel=3; press('Enter');
+    multiSel=3; press('Enter');
     _scanHit('https://poeggi.github.io/FOK-snake/#friend=00ff00cc');
     if(phase!=='nameEntry'||nameStr!=='00FF00CC') throw 'scan hit did not fill the field';
     if(_scanOk!=='00FF-00CC') throw 'scan hit did not show the success message';
     _scanHit('https://poeggi.github.io/FOK-snake/#friend=00ff00dd');
     if(nameStr!=='00FF00CC') throw 'a second hit during the lock must be ignored';
     press('Enter');   // (the auto-submit timer does the same; harness confirms manually)
-    if(phase!=='duelMenu'||!getFriends().includes('00ff00cc')) throw 'locked scan did not add the friend';
+    if(phase!=='multiplayer'||!getFriends().includes('00ff00cc')) throw 'locked scan did not add the friend';
     if(_scanOk!=='') throw 'lock state must clear on leaving the entry';
     _scanHit('https://poeggi.github.io/FOK-snake/#friend=00ff00dd');
     if(getFriends().includes('00ff00dd')) throw 'scan hit outside the entry screen must be ignored';
@@ -118,7 +118,7 @@ runTest('SMOKE-INPUT', `
     const _oNetOk=_netOk, _oVerify=netFriendVerify;
     _netOk=()=>true; let _vRes=null; netFriendVerify=()=>({ then:f=>f(_vRes) });
     _vRes={ error:'unknown' };
-    phase='duelMenu'; duelSel=3; press('Enter');
+    phase='multiplayer'; multiSel=3; press('Enter');
     for(const ch of '00ff0099') press(ch);
     press('Enter');
     if(phase!=='nameEntry') throw 'an unknown friend id must not leave ADD FRIEND';
@@ -129,7 +129,7 @@ runTest('SMOKE-INPUT', `
     if(phase!=='nameEntry'||!/WAIT 60S/.test(_duelMsg)) throw 'throttled request must show the wait: '+_duelMsg;
     _vRes={ ok:true, state:'pending' };
     press('Enter');
-    if(phase!=='duelMenu'||!getFriends().includes('00ff0099')) throw 'a confirmed id must add and leave';
+    if(phase!=='multiplayer'||!getFriends().includes('00ff0099')) throw 'a confirmed id must add and leave';
     _netOk=_oNetOk; netFriendVerify=_oVerify;
     log('friend id check ok (unknown blocks, throttle reported, confirmed adds)');
 
@@ -139,11 +139,11 @@ runTest('SMOKE-INPUT', `
     phase='nameEntry'; entryMode='friend'; nameStr='00FF00BB'; nameCursorPos=7;
     press('Backspace'); if(nameStr!=='00FF00B') throw 'Backspace on a full field must take the last digit: '+nameStr;
     press('Backspace'); if(nameStr!=='00FF00') throw 'Backspace below full must keep deleting: '+nameStr;
-    press('Escape'); phase='duelMenu'; entryMode='score';
+    press('Escape'); phase='multiplayer'; entryMode='score';
     log('full-field backspace ok');
 
     // Viewfinder tap CYCLES the camera on-x1 -> on-x2 -> off -> on-x1; taps elsewhere do not touch it.
-    duelSel=3; press('Enter');
+    multiSel=3; press('Enter');
     _scanState='live'; _scanVideo=null; _scanZoom=1;   // pretend the camera runs at x1 (no stream in the harness)
     if(_scanTapAt(50,50)) throw 'tap outside the viewfinder must not cycle';
     if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'viewfinder tap not registered';
@@ -153,7 +153,7 @@ runTest('SMOKE-INPUT', `
     if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'third viewfinder tap not registered';
     if(_scanManualOff||_scanZoom!==1) throw 'third tap must switch the camera back on at x1';
     press('Escape');   // cancel out (empty field)
-    if(_scanManualOff!==false||phase!=='duelMenu') throw 'leave must reset the manual-off state';
+    if(_scanManualOff!==false||phase!=='multiplayer') throw 'leave must reset the manual-off state';
     log('viewfinder tap cycle ok (x1 -> x2 -> off -> x1)');
 
     // SETTINGS > USER: opens the shared dialog in user mode; submit persists the name.
@@ -169,7 +169,7 @@ runTest('SMOKE-INPUT', `
 
     // Invite screen: COPY reports (clipboard missing in the harness -> COPY FAILED),
     // CONTINUE and ESC leave to the menu and clear the pending invite.
-    _inviteFid='00ff00ee'; phase='invite'; inviteSel=0;
+    _inviteFid='00ff00ee'; phase='duelInvite'; inviteSel=0;
     press('Enter'); if(!_inviteMsg) throw 'invite COPY gave no feedback';
     press('ArrowDown'); if(inviteSel!==1) throw 'invite nav failed';
     press('Enter');
@@ -187,7 +187,7 @@ runTest('SMOKE-INPUT', `
       if(!_DPAD_GAME.has(ph)) throw 'dpad would auto-repeat steering in: '+ph;
     }
     // ...and a menu must stay a menu: swipes defer to touchend, taps press A.
-    for(const ph of ['menu','duelMenu','lobby','settings']){
+    for(const ph of ['menu','multiplayer','duelLobby','settings']){
       phase = ph;
       if(_inPlay()) throw 'menu treated as a live game: '+ph;
     }

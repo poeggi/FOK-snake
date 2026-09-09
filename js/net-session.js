@@ -1,5 +1,5 @@
 // ============================================================================
-// net-session.js -- ONLINE 1:1 session lifecycle: lobby + handshake state,
+// net-session.js -- ONLINE 1vs1 session lifecycle: lobby + handshake state,
 // invites, quick match, the signal dispatcher, transition control, in-duel
 // message handling and teardown. NETCODE (deterministic rollback): both
 // clients run the deterministic sim locally from the shared seed; own input
@@ -14,7 +14,7 @@
 // Server = matchmaking + signaling only. Loads LAST of the net files.
 // Offline-first contract: see net-api.js.
 // ============================================================================
-// ---- lobby state (read by drawLobby + the lobby input row) ----
+// ---- lobby state (read by drawDuelLobby + the lobby input row) ----
 // ---- HANDSHAKE STATE. Deliberately SEPARATE from the lobby UI state: a
 // handshake outlives navigation (an invite arriving on another screen, the user
 // stepping into/out of a menu). Only an explicit abort (BACK/quit) or a timeout
@@ -90,7 +90,7 @@ async function _netInviteSend(to){
         if(_netHs.sent !== to) return;   // aborted while we waited
         _netLb.msg = '';
     }
-    const res = await _netSignal(to, relay ? 'invite-relay' : 'invite', JSON.stringify({ profile:_netProfile() }));
+    const res = await _netSignal(to, relay ? 'invite-relay' : 'duelInvite', JSON.stringify({ profile:_netProfile() }));
     if(_netHs.sent !== to) return;   // superseded or aborted while the request was in flight
     if(res.json) return;             // the server took it: now we wait for a real answer
     // Refused. Say so now instead of showing WAITING out the staleness window over an invite that
@@ -189,7 +189,7 @@ function _netOnSignal(sig){
             }
         }
         switch(sig.type){
-            case 'invite':
+            case 'duelInvite':
             case 'invite-relay': {   // DEPRECATED(relay) signal type
                 // An invite that sat in the mailbox longer than its sender waits for an answer
                 // is dead: the server keeps a signal for its whole online window (120 s from
@@ -210,11 +210,11 @@ function _netOnSignal(sig){
                     return;
                 }
                 // The ACCEPT? dialog lives on the lobby screen: an invite arriving on
-                // a 1:1/social screen jumps there. Anywhere else (main menu, games,
+                // a 1vs1/social screen jumps there. Anywhere else (main menu, games,
                 // settings, ...) the player is UNAVAILABLE -- decline immediately so
                 // the inviter is not left waiting out the staleness window.
-                if(phase === 'duelMenu' || phase === 'duel11' || phase === 'friends' || phase === 'friendId'){ netLobbyEnter(); phase = 'lobby'; }
-                else if(phase !== 'lobby'){ _netSignal(from, 'decline', ''); return; }
+                if(phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId'){ netLobbyEnter(); phase = 'duelLobby'; }
+                else if(phase !== 'duelLobby'){ _netSignal(from, 'decline', ''); return; }
                 _netLb.invite = { from, profile:_netClampProfile(_netJson(pl).profile), relay: sig.type === 'invite-relay', at: Date.now() };
                 _netNameSeen(from, _netLb.invite.profile.name);
                 _netLb.inviteSel = 0; Snd.sfxPlay('nav', cfg.music); _uiDirty = true;
@@ -330,7 +330,7 @@ function _netOnSignal(sig){
                     addFriend(who);                       // mutual bookkeeping (idempotent)
                     if(fresh) _netFrCelebrate(nm + ' - YOU ARE FRIENDS!');   // else the request response already celebrated
                 } else if(d.event === 'request'){
-                    if(phase === 'friendId' || Date.now() - _netMyIdAt < 60000){
+                    if(phase === 'myId' || Date.now() - _netMyIdAt < 60000){
                         // We are (or were seconds ago) presenting our QR: showing it IS
                         // the consent, so the scan confirms the friendship automatically.
                         addFriend(who);
@@ -514,8 +514,11 @@ async function _netRequestStart(s, reason){
     await _netGate(true);
     if(_netSess !== s || !s.game) return;
     const _t0 = performance.now();
-    const r = await _netPostRes('/api/start.php', { id: getPlayerId(), peer: s.peer,
-        epoch: s.epoch|0, reason: reason || 'first', pts: netPts() });
+    const _sb = { id: getPlayerId(), peer: s.peer, epoch: s.epoch|0, reason: reason || 'first', pts: netPts() };
+    // This request is where the server learns the duel exists, so the privacy of the match
+    // has to travel with it -- the heartbeat that refreshes it comes up to a minute later.
+    if(cfg.privateDuels) _sb.duel_private = true;
+    const r = await _netPostRes('/api/start.php', _sb);
     const _rtt = performance.now() - _t0;
     if(_netSess !== s || !s.game) return;
     if(!r.json){
@@ -1095,7 +1098,7 @@ function netEndSession(){
     if(s){ try{ _netSend({ t:'bye' }); }catch(e){} _netSignal(s.peer, 'bye', ''); }
     _netTeardown();
 }
-// Remote/failed end: back to the 1:1 menu with a message (never a crash, never a freeze).
+// Remote/failed end: back to the 1vs1 menu with a message (never a crash, never a freeze).
 // remoteBye = the peer already told us it is gone, so saying it back is noise.
 // Every OTHER ending must say goodbye: not just courtesy, it is what clears the
 // pair's epoch line server-side (signal.php -> Starts::forget). Dying silently left
@@ -1113,11 +1116,11 @@ function _netSessionEnd(msg, remoteBye){
     _netTeardown();
     if(wasGame && inGame){   // only while the online duel is actually still on screen
         inGame = false; _wsend({ t:'phase', phase:'menu' });
-        phase = (typeof tourneyExitPhase === 'function' && tourneyExitPhase()) || 'duel11';
+        phase = (typeof tourneyExitPhase === 'function' && tourneyExitPhase()) || 'duelMenu';
         showHUD(false); Snd.musicStop();
         _duelMsg = msg; _duelMsgAt = _msgNow();
         Snd.sfxPlay('fail', cfg.music); _uiDirty = true;
-    } else if(phase === 'lobby'){ _netLb.msg = msg; _uiDirty = true; }
+    } else if(phase === 'duelLobby'){ _netLb.msg = msg; _uiDirty = true; }
 }
 function _netTeardown(){
     if(typeof _wDuelEnd === 'function') _wDuelEnd();   // worker-hosted core: deactivate + reset there too

@@ -49,7 +49,7 @@ const HOOKS = `
   globalThis.__pollEdge = async ()=>{
       let fired = 0; const oTml = tourneyMailboxLost; tourneyMailboxLost = ()=>{ fired++; };
       const oGet = _netGet, oHold = _netPace.hold, oPhase = phase;
-      _netPace.hold = false; _netPollTick = 0; _netPollBusy = false; _netPollDown = false; phase = 'lobby';
+      _netPace.hold = false; _netPollTick = 0; _netPollBusy = false; _netPollDown = false; phase = 'duelLobby';
       const seq = [];
       _netGet = async ()=>null;                      await _netPollOnce(); await _netPollOnce(); seq.push(fired);
       _netGet = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); await _netPollOnce(); seq.push(fired);

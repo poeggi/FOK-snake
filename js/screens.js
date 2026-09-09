@@ -2,7 +2,7 @@
 // screens.js -- every full-screen SCENE: splash, menu, news, settings (incl. the
 // settings/debug item tables that define that screen), scores, achievements,
 // shop + mystery-box pages, credits (incl. its text), name entry, the game
-// board, the 1:1 duel screens and the confirm dialogs -- plus the menu cache
+// board, the 1vs1 duel screens and the confirm dialogs -- plus the menu cache
 // and the menuItem widget they share. Draw-only: shop/box BEHAVIOUR lives in
 // game.js, entities/overlays/primitives in render.js, typography in text.js.
 // Loaded after render.js, before input.js. Shares the global scope.
@@ -291,7 +291,7 @@ function _menuSnakeStep(){
 function _drawMenuSnake(now){
     if(cfg.gfxMode!==1 || _reduceMotion()) return;
     // Step off the real frame clock (performance.now), NOT the passed simNow: startDuel resets
-    // simNow to 0 at tick zero, so after a 1:1 the menu clock is SMALLER than the value captured
+    // simNow to 0 at tick zero, so after a 1vs1 the menu clock is SMALLER than the value captured
     // before the match. now-_mSnakeAt then goes negative, the >2000 catch-up guard (positive gaps
     // only) never fires, and the step loop stalls until simNow crawls back -- the wanderer freezes.
     // Wall-clock is monotonic, so it keeps gliding across a duel (same fix as the splash tagline).
@@ -344,7 +344,7 @@ const SETTINGS_CATS = [
     { label:'USER', items:[
         { lbl:()=>'NAME: '+(getPlayerName()||'---'),
           act:()=>{ Snd.sfxPlay('select',cfg.music); _entryOpen('user', getPlayerName()); } },
-        { lbl:()=>'SHOW MY ID', act:()=>{ Snd.sfxPlay('select',cfg.music); _friendIdBack='settings'; phase='friendId'; netMyIdEnter(); } },
+        { lbl:()=>'SHOW MY ID', act:()=>{ Snd.sfxPlay('select',cfg.music); _myIdBack='settings'; phase='myId'; netMyIdEnter(); } },
     ]},
     { label:'AUDIO', items:[
         { lbl:()=>'AUDIO: '+(cfg.music?'ON':'OFF'),
@@ -402,6 +402,7 @@ const SETTINGS_CATS = [
           act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline&&typeof netOfflineClear==='function')netOfflineClear();} },
         _tog('RELAY ONLY (NO P2P)','noP2P'),
         _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
+        _tog('MAKE DUELS PRIVATE','privateDuels'),
     ]},
     { label:'DATA', items:[
         { lbl:()=>'BACKUP CONFIG TO FILE', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
@@ -1005,7 +1006,7 @@ function _drawScanPanel(){
     }
 }
 
-// The shared world layer for EVERY mode: single player, 1:1 local, 1:1 online. Background,
+// The shared world layer for EVERY mode: single player, 1vs1 local, 1vs1 online. Background,
 // collectibles, world FX and the snake(s) all draw here, so a duel and a solo game go through
 // the exact same code -- the split that used to let cosmetics/power/state diverge is gone.
 // A duel maintains only gem + powerPellet, so the other collectibles guard on globals it never
@@ -1099,7 +1100,7 @@ function _wsLook(items, idx){
     _wsLookC[idx]={ src:items, n, val };
     return val;
 }
-// The per-player controls line under the 1:1 DUEL title. Local 1:1 shows both schemes
+// The per-player controls line under the 1vs1 DUEL title. Local 1vs1 shows both schemes
 // (P1 arrows, P2 WASD, one keyboard). An ONLINE duel drives ONE snake from this device --
 // always arrows or the d-pad, whichever the device has (input.js swallows WASD, remaps arrows
 // to netMyIndex) -- so it shows only the local player's scheme, in that player's colour.
@@ -1116,7 +1117,7 @@ function _drawDuelControls(lk){
     ctx.restore();
 }
 // On the online duel ready splash, show each player's device category as a small badge
-// tinted to that snake's head colour, flanking a "VS". Local 1:1 (both snakes on one
+// tinted to that snake's head colour, flanking a "VS". Local 1vs1 (both snakes on one
 // device) has no platforms to compare, so it draws nothing. A peer on an older client
 // sends no platform -> that side is blank; you still see your own.
 function _drawDuelPlatforms(lk){
@@ -1327,41 +1328,41 @@ function drawQuitConfirm() {
 }
 
 // ================================================================
-// 1:1 DUEL SCREENS
+// 1vs1 DUEL SCREENS
 // ================================================================
 // The TOURNAMENT row needs a 4.1 server to mean anything, and until the first hello lands
 // we do not know what we are talking to -- so it greys out rather than promising something
 // the server may not have.
 function _ttMenuOk(){ return typeof netTourneyOk === 'function' && netTourneyOk(); }
-function drawDuelMenu() {
+function drawMultiplayer() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
     // at y=24 with glow 16, items from MENU_TOP in MENU_ROW steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
     ctg('MULTIPLAYER',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const items=[
-        {t:'1:1 DUEL',    en:true},
+        {t:'1vs1 DUEL',    en:true},
         {t:'TOURNAMENT',  en:_ttMenuOk(), note:_ttMenuOk()?null:(netStatusNotice()||'TOURNAMENTS NEED A CONNECTION')},
         {t:'MY ID',       en:true},
         {t:'ADD FRIEND',  en:true},
         {t:'FRIENDS',     en:true},
     ];
+    drawMenuRows(items, multiSel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// The 1vs1 DUEL submenu: ONLINE opens the lobby, LOCAL is two players on one keyboard
+// (beginDuel gates on _hasKeyboard, so the row greys out on touch-only devices).
+function drawDuelMenu() {
+    drawGrid(); drawOvBg(0.92);
+    ctg('1vs1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    const items=[
+        {t:'1vs1 ONLINE', en:!netOffline(), note:netOffline()?netStatusNotice():null},
+        {t:'1vs1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'PC + KEYBOARD ONLY'},
+    ];
     drawMenuRows(items, duelSel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
-// The 1:1 DUEL submenu: ONLINE opens the lobby, LOCAL is two players on one keyboard
-// (beginDuel gates on _hasKeyboard, so the row greys out on touch-only devices).
-function drawDuel11() {
-    drawGrid(); drawOvBg(0.92);
-    ctg('1:1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const items=[
-        {t:'1:1 ONLINE', en:!netOffline(), note:netOffline()?netStatusNotice():null},
-        {t:'1:1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'PC + KEYBOARD ONLY'},
-    ];
-    drawMenuRows(items, duel11Sel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
-    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
-}
 // MY ID: this player's identity + the friend-link QR (moved here from SETTINGS).
-function drawFriendId() {
+function drawMyId() {
     _netMyIdAt = Date.now();   // an incoming request while our QR shows auto-accepts (see net-session.js)
     drawGrid(); drawOvBg(0.92);
     ctg('MY ID',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
@@ -1379,16 +1380,16 @@ function drawFriendId() {
     else ct('SCAN TO ADD ME AS A FRIEND', CW/2, qy+card+12, '#4a7a4a', FONT.HINT);
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
-// ONLINE 1:1 lobby: quick match, friends with online status, incoming invites.
+// ONLINE 1vs1 lobby: quick match, friends with online status, incoming invites.
 // All state lives in the net files (_netLb / _netCounts / _netFriendsOnline).
-function drawLobby(){
+function drawDuelLobby(){
     drawGrid(); drawOvBg(0.92);
-    ctg('ONLINE 1:1',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    ctg('ONLINE 1vs1',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     let stat, statCol='#4a7a4a';
     const notice=(typeof netStatusNotice==='function')?netStatusNotice():null;
     if(notice){ stat=notice; statCol='#ff8888'; }
     else if(typeof RTCPeerConnection!=='function'){ stat='WEBRTC NOT SUPPORTED ON THIS DEVICE'; statCol='#ff8888'; }
-    else stat='ONLINE: '+_netCounts.online+'   IN 1:1: '+_netCounts.playing;
+    else stat='ONLINE: '+_netCounts.online+'   IN 1vs1: '+_netCounts.playing;
     ct(stat, CW/2, 50, statCol, FONT.HINT);
     const fr=getFriends();
     const rowH=26;
@@ -1407,7 +1408,7 @@ function drawLobby(){
         // A friend mid-duel cannot take an invite, so the row offers the other thing you
         // can do with them: watch. The status column IS the action label here.
         const busy=typeof netFriendPlaying==='function'&&netFriendPlaying(id);
-        if(busy) ct('IN 1:1 - WATCH', CW/2+170, y, '#ffd700', FONT.HINT);
+        if(busy) ct('IN 1vs1 - WATCH', CW/2+170, y, '#ffd700', FONT.HINT);
         else ct(on?('ONLINE'+(e2e!=null?' ~'+e2e+'ms':'')):'OFF', CW/2+170, y, on?'#7fff7f':'#555', FONT.HINT);
     });
     if(!fr.length) ct('NO FRIENDS YET - SEE ADD FRIEND', CW/2, startY, '#555', FONT.HINT);
@@ -1425,7 +1426,7 @@ function drawLobby(){
         drawGrid(); drawOvBg(0.92);
         ctg('INVITE',CW/2,CH/2-84,'#ffd700',FONT.TITLE, GLOW.TITLE);
         ct(_netLb.invite.profile.name+'  ('+fmtFriendId(_netLb.invite.from)+')', CW/2, CH/2-48, '#aaa', FONT.MENU);
-        ct('WANTS TO PLAY 1:1', CW/2, CH/2-22, '#7fff7f', FONT.HINT);
+        ct('WANTS TO PLAY 1vs1', CW/2, CH/2-22, '#7fff7f', FONT.HINT);
         _drawModalYesNo(_netLb.inviteSel);
         ct('L/R:choose  A:ok  ESC:decline', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
@@ -1494,13 +1495,13 @@ function drawFriends(){
 
 // Invite landing (iOS Safari only, see the boot hash parse): the scanned friend code
 // cannot reach an already-installed home-screen app, so hand it over manually.
-function drawInvite() {
+function drawDuelInvite() {
     drawGrid(); drawOvBg(0.92);
     ctg('FRIEND INVITE',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     ct("YOUR FRIEND'S CODE:", CW/2, 74, '#aaa', FONT.HINT);
     ctg(fmtFriendId(_inviteFid||''), CW/2, 102, '#ffd700', FONT.TITLE, GLOW.TEXT);
     ct('GOT THE GAME ON YOUR HOME SCREEN?', CW/2, 148, '#7fff7f', FONT.HINT);
-    ct('OPEN IT: 1:1 DUEL > ADD FRIEND', CW/2, 166, '#aaa', FONT.HINT);
+    ct('OPEN IT: 1vs1 DUEL > ADD FRIEND', CW/2, 166, '#aaa', FONT.HINT);
     ct('AND ENTER (OR SCAN) THIS CODE', CW/2, 184, '#aaa', FONT.HINT);
     ct('NO APP YET? SHARE > ADD TO HOME SCREEN', CW/2, 214, '#7fff7f', FONT.HINT);
     ct('THE CODE TRAVELS ALONG AUTOMATICALLY', CW/2, 232, '#aaa', FONT.HINT);
@@ -1542,7 +1543,7 @@ function drawDuelBoard(now) {
         ctx.restore();
     }
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
-    const _rTitle=(typeof netGameActive==='function'&&netGameActive())?'1:1 DUEL':'LOCAL 1:1';
+    const _rTitle=(typeof netGameActive==='function'&&netGameActive())?'1vs1 DUEL':'LOCAL 1vs1';
     const _rSub=()=>{ _drawDuelControls(lk); _drawDuelPlatforms(lk); };
     if(phase==='duelReady') drawReadyGo(now, _rTitle, _rSub);
     // Level-up cover: hold the pre-GO get-ready splash while start_pts is negotiated, so it never
@@ -1677,7 +1678,7 @@ function drawTourneyLobby(){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
         if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
         else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
-        else ct('2-' + tourneyMax() + ' PLAYERS - ONE 1:1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
+        else ct('2-' + tourneyMax() + ' PLAYERS - ONE 1vs1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
         _ttDrawRows(84, MENU_ROW);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
         // real message -- both at that band would overdraw each other.

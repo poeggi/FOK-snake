@@ -16,7 +16,7 @@ const HOOKS = (myId) => `
   globalThis.__out = [];
   localStorage.setItem('fok-snake-pid', ${JSON.stringify(myId)});
   localStorage.setItem('lastSName', ${JSON.stringify(myId.toUpperCase().slice(0,4))});
-  simNow=100000; simTick=6000; _splashLeftAt=-1e9; inGame=false; phase='lobby';
+  simNow=100000; simTick=6000; _splashLeftAt=-1e9; inGame=false; phase='duelLobby';
   cfg.offline=false;
   // Presence only: _netOk() must be true. Real HTTP is stubbed out below.
   globalThis.fetch = ()=>({ then:()=>({ catch:()=>{} }) });
@@ -323,7 +323,7 @@ try {
     A.__setRelay(false); B.__setRelay(false);
     A.__invite(B_ID);
     const t1 = pump(A, B);
-    if(!t1.includes('invite')) throw new Error('expected a plain invite, got ' + t1);
+    if(!t1.includes('duelInvite')) throw new Error('expected a plain invite, got ' + t1);
     if(t1.includes('invite-relay')) throw new Error('p2p mode must not declare the relay bit');
     if(B.__dialog() !== A_ID) throw new Error('B did not surface the p2p invite');
     B.__answer(true);
@@ -795,7 +795,7 @@ try {
     const A = mk(A_ID), B = mk(B_ID), C = mk('cccccccc');
     A.__setRelay(true); B.__setRelay(true);
     A.__invite(B_ID); pump(A, B);      // A is waiting on B
-    // ...meanwhile C invites A while A sits on the 1:1 menu
+    // ...meanwhile C invites A while A sits on the 1vs1 menu
     C.__setRelay(true); C.__invite(A_ID); pump(C, A);
     if(A.__state().hs.sent !== B_ID) throw new Error('C\s invite wiped A\s handshake with B');
     // B's accept must still be honoured
@@ -990,7 +990,7 @@ try {
     const A = mk(A_ID);
     for(const ofs of [1.800048828125, -0.5, 21.8, 1234.4999, -7777.123]){
       A.__setOfs(ofs);
-      const body = await A.__realSignalBody(B_ID, 'invite');
+      const body = await A.__realSignalBody(B_ID, 'duelInvite');
       if(body.pts === undefined) throw new Error('no pts stamped at all');
       if(!Number.isInteger(body.pts))
         throw new Error('fractional pts (PHP is_int() rejects this with 400): ' + JSON.stringify(body.pts) + ' from offset ' + ofs);

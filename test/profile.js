@@ -44,14 +44,14 @@ try {
     phase='shop'; try{ _enterShop(); }catch(e){}
     bench('shop', ()=>drawShop());
     phase='credits'; creditsScroll=CH-20; bench('credits', ()=>drawCredits());
-    phase='duelMenu'; duelSel=0; bench('duel menu', ()=>drawDuelMenu());
-    phase='duel11'; duel11Sel=0; bench('1:1 submenu', ()=>drawDuel11());
-    phase='lobby'; bench('online lobby', ()=>drawLobby());
+    phase='multiplayer'; multiSel=0; bench('duel menu', ()=>drawMultiplayer());
+    phase='duelMenu'; duelSel=0; bench('1vs1 submenu', ()=>drawDuelMenu());
+    phase='duelLobby'; bench('online lobby', ()=>drawDuelLobby());
     phase='friends'; bench('friends screen', ()=>drawFriends());
-    phase='friendId'; bench('MY ID (QR cached)', ()=>drawFriendId());
+    phase='myId'; bench('MY ID (QR cached)', ()=>drawMyId());
     bench('qrMatrix (cold, cache busted)', ()=>{ _qrCache=null; qrMatrix(friendUrl()); }, 2000);
-    _inviteFid='00ff00aa'; phase='invite'; inviteSel=0;
-    bench('invite', ()=>drawInvite()); _inviteFid=null;
+    _inviteFid='00ff00aa'; phase='duelInvite'; inviteSel=0;
+    bench('duelInvite', ()=>drawDuelInvite()); _inviteFid=null;
     phase='quitConfirm'; prevPhase='playing'; quitConfirmSel=1;
     bench('quit confirm', ()=>drawQuitConfirm());
     phase='resetConfirm'; bench('reset confirm', ()=>drawResetConfirm());
@@ -164,7 +164,7 @@ try {
     // Coverage: every SCREENS phase must be profiled here (directly or via the
     // game-board/duel-board draws) -- a new screen missing from this list warns.
     const covered=new Set(['splash','menu','news','settings','scores','achievements','shop',
-      'credits','duelMenu','duel11','lobby','friends','friendId','invite','quitConfirm','resetConfirm','nameEntry',
+      'credits','multiplayer','duelMenu','duelLobby','friends','myId','duelInvite','quitConfirm','resetConfirm','nameEntry',
       'playing','paused','dying','levelReady','levelDone',
       'duel','duelReady','duelPaused','duelOver',
       'tourneyCode','tourneyLobby','tourneyBracket','tourneyRound','tourneyCeremony',

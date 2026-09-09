@@ -52,26 +52,26 @@ runTest('SMOKE-NET', `
     inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
     log('classic play ok: unaffected, seed + tick-stamped input log recorded');
 
-    // ---- lobby: open from the 1:1 menu, render, navigate, invite dialog ----
+    // ---- lobby: open from the 1vs1 menu, render, navigate, invite dialog ----
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    phase='duel11'; duel11Sel=0; press('Enter');   // 1:1 DUEL submenu order: 0 1:1 ONLINE, 1 1:1 LOCAL
-    if(phase!=='lobby') throw '1:1 ONLINE did not open the lobby';
-    drawLobby();
+    phase='duelMenu'; duelSel=0; press('Enter');   // 1vs1 DUEL submenu order: 0 1vs1 ONLINE, 1 1vs1 LOCAL
+    if(phase!=='duelLobby') throw '1vs1 ONLINE did not open the lobby';
+    drawDuelLobby();
     press('ArrowDown'); press('ArrowDown'); press('ArrowDown');
     if(_netLb.sel!==3) throw 'lobby nav broken (sel='+_netLb.sel+')';
     press('Enter');   // BACK
-    if(phase!=='duel11') throw 'lobby BACK did not return';
-    phase='lobby'; netLobbyEnter();
-    _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER<XSS>',color:99}})});
+    if(phase!=='duelMenu') throw 'lobby BACK did not return';
+    phase='duelLobby'; netLobbyEnter();
+    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'PEER<XSS>',color:99}})});
     if(!_netLb.invite) throw 'incoming invite not surfaced in the lobby';
     if(_netLb.invite.profile.color>=SNAKE_COLORS.length) throw 'peer profile color not clamped';
-    drawLobby();                                   // invite dialog renders
+    drawDuelLobby();                                   // invite dialog renders
     press('n');                                    // decline (soft: no network to send on)
     if(_netLb.invite) throw 'decline did not clear the invite';
     // offline mode blocks the lobby entirely
-    cfg.offline=true; phase='duel11'; duel11Sel=0; press('Enter');
-    if(phase==='lobby') throw '1:1 ONLINE must be blocked in offline mode';
-    cfg.offline=false; drawDuel11();
+    cfg.offline=true; phase='duelMenu'; duelSel=0; press('Enter');
+    if(phase==='duelLobby') throw '1vs1 ONLINE must be blocked in offline mode';
+    cfg.offline=false; drawDuelMenu();
     log('lobby ok: open, nav, invite surface/clamp/decline, offline block');
 
     // ---- online duel netcode over a fake wire (host side) ----
@@ -427,7 +427,7 @@ runTest('SMOKE-NET', `
         // _netPollOnce is async, but everything up to the _netGet call is not: the URL is
         // captured by the time it returns. Clear the busy latch by hand since the tail of
         // the previous call has not run yet.
-        const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='lobby'; _netPollOnce(); };
+        const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='duelLobby'; _netPollOnce(); };
         _netPace={hold:true};
         _netFrSince=0; poll();
         if(!/[?&]wait=9(&|$)/.test(_url||'') || !_heldArg) throw 'the default pace must hold a 9s poll, got ' + _url;
@@ -436,7 +436,7 @@ runTest('SMOKE-NET', `
         if(!/[?&]fs=0(&|$)/.test(_url||'')) throw 'a lobby poll must carry the presence cursor, got ' + _url;
         _netFrSince=777; poll();
         if(!/[?&]fs=777(&|$)/.test(_url||'')) throw 'the poll must carry the cursor the server gave, got ' + _url;
-        _url=null; _netPollBusy=false; phase='friendId'; _netPollOnce();
+        _url=null; _netPollBusy=false; phase='myId'; _netPollOnce();
         if(/fs=/.test(_url||'')) throw 'MY ID shows no friend state and must not ask for it, got ' + _url;
         _netFrSince=0;
         // ...and a HELD poll waits on nothing: it IS the parked slot the gate lets one other
@@ -612,13 +612,47 @@ runTest('SMOKE-NET', `
         if(!_hb || _hb.friends_list!==true) throw 'the friends screen must ask for the roster on the hello it already sends';
         // ...and presence by CURSOR, never by id list (4.6): the server knows the roster.
         if(_hb.friends_since!==42 || 'friends' in _hb) throw 'the friends screen must ask for the presence delta by cursor, no ids: ' + JSON.stringify(_hb);
-        _hb=null; phase='lobby'; _netHelloBusy=false; _netHello();
+        _hb=null; phase='duelLobby'; _netHelloBusy=false; _netHello();
         if(_hb && _hb.friends_list) throw 'the roster must not be asked for where it is not shown';
         if(!_hb || _hb.friends_since!==42) throw 'the lobby must ask for the presence delta too';
         _hb=null; phase='menu'; _netHelloBusy=false; _netHello();
         if(!_hb || 'friends_since' in _hb || 'friends' in _hb) throw 'the main menu shows no friend state and must ask for none: ' + JSON.stringify(_hb);
         _netFrSince=0;
         _netPost=_oPostG; phase=_oPhaseG; _netHelloBusy=_oBusyG;
+        // (d2) MAKE DUELS PRIVATE. It rides BOTH requests that tell the server a duel
+        // exists, and is enforced locally too: privacy only the server applies is privacy
+        // one server bug wide.
+        const _oPostP=_netPost, _oBusyP=_netHelloBusy, _oSessP=_netSess, _oPrivP=cfg.privateDuels;
+        let _hp=null;
+        _netPost=async (p,b)=>{ if(p.indexOf('hello')>=0) _hp=b; return null; };
+        _netSess={ peer:'deadbeef', game:true };
+        cfg.privateDuels=false; _hp=null; _netHelloBusy=false; _netHello();
+        if(!_hp || _hp.duel_with!=='deadbeef') throw 'a running duel must be announced on the beat';
+        if('duel_private' in _hp) throw 'an ordinary duel must not claim privacy';
+        cfg.privateDuels=true; _hp=null; _netHelloBusy=false; _netHello();
+        if(!_hp || _hp.duel_private!==true) throw 'a private duel must say so on EVERY beat -- an absent flag reads as public';
+        _netSess=null; _hp=null; _netHelloBusy=false; _netHello();
+        if(_hp && ('duel_with' in _hp || 'duel_private' in _hp)) throw 'no duel, nothing to announce: ' + JSON.stringify(_hp);
+        _netPost=_oPostP; _netHelloBusy=_oBusyP; _netSess=_oSessP;
+        // ...and the ask itself. A BARE no: the alts of an ordinary refusal name the very
+        // nodes serving the match being hidden, which would route the asker right back in.
+        // ...including the ask lists: a fall-through PARKS the ask, and a parked ask reads as
+        // a duel forming, which is a state the later item-queue lane is entitled to find clean.
+        const _oSigW=_spWatchSig, _oGrantW=_spGrant, _oAskW=_spAsk.slice(), _oWantW=_spWant.slice();   // COPIES: _spOnWatch pushes into the live arrays
+        let _wl=[];
+        _spWatchSig=(to,k,d)=>{ _wl.push({to,k,d}); };
+        const _bare = () => _wl.length===1 && _wl[0].k==='no' && _wl[0].d===undefined;
+        _spGrant={}; cfg.privateDuels=true;
+        _wl=[]; _spOnWatch('feedfeed',{k:'req'});
+        if(!_bare()) throw 'a private duel must refuse a plain watch ask with a bare no: ' + JSON.stringify(_wl);
+        specGrant(['feedfeed']);   // the roles sheet introduced this one: a bracket must stay watchable
+        _wl=[]; _spOnWatch('feedfeed',{k:'req'});
+        if(_bare()) throw 'a granted tournament spectator must not be refused by the privacy setting';
+        _spGrant={}; cfg.privateDuels=false;
+        _wl=[]; _spOnWatch('feedfeed',{k:'req'});
+        if(_bare()) throw 'without the setting an ordinary ask must never hit the privacy refusal';
+        _spWatchSig=_oSigW; _spGrant=_oGrantW; _spAsk=_oAskW; _spWant=_oWantW; cfg.privateDuels=_oPrivP;
+        log('private duels ok: the flag rides the beat and the start, an ordinary ask is refused bare, a roles-sheet spectator is not');
         // (e) ONE adoption path, whichever request paid for the list: names learned, accepted
         // friendships marked, and a screen that never has to know which route it came by.
         localStorage.removeItem('fok-snake-friends');
@@ -871,7 +905,7 @@ runTest('SMOKE-NET', `
     fakeSess('peer'); inGame=true; prevPhase='duel'; phase='quitConfirm'; quitConfirmSel=0;
     press('Enter');   // quit YES
     if(_netSess!==null) throw 'quit-YES did not tear the online session down';
-    if(phase!=='duel11') throw 'quitting a 1:1 must land on the 1:1 menu, not main';
+    if(phase!=='duelMenu') throw 'quitting a 1vs1 must land on the 1vs1 menu, not main';
     if(netGameActive()) throw 'session queries stuck after quit';
     fakeSess('peer'); inGame=false; phase='menu';
     beginGame();      // starting any local game clears leftovers too
@@ -884,12 +918,12 @@ runTest('SMOKE-NET', `
     if(_netSess!==null) throw 'late bye must still tear down';
     log('session lifecycle ok: quit/new-game/late-bye all clean');
 
-    // ---- adaptive poll cadence: 1Hz in lobby/1:1 menu + while connecting,
+    // ---- adaptive poll cadence: 1Hz in lobby/1vs1 menu + while connecting,
     // every 10th tick in the main menu, never in-game / elsewhere ----
     _netSess=null;
-    phase='lobby';    if(!_netPollDue()) throw 'lobby must poll every tick';
-    phase='duelMenu'; if(!_netPollDue()) throw 'multiplayer menu must poll every tick';
-    phase='duel11';   if(!_netPollDue()) throw '1:1 submenu must poll every tick';
+    phase='duelLobby';    if(!_netPollDue()) throw 'lobby must poll every tick';
+    phase='multiplayer'; if(!_netPollDue()) throw 'multiplayer menu must poll every tick';
+    phase='duelMenu';   if(!_netPollDue()) throw '1vs1 submenu must poll every tick';
     phase='menu';     _netPollTick=10; if(!_netPollDue()) throw 'main menu must poll every 10th tick';
     _netPollTick=11;  if(_netPollDue()) throw 'main menu must skip between 10s ticks';
     phase='playing';  if(_netPollDue()) throw 'no polling during a classic game';
@@ -915,7 +949,7 @@ runTest('SMOKE-NET', `
     if(_netPollDue()) throw 'nothing outstanding: back to the slow tournament cadence';
     _tt=oTt;
     _spAsk.push({from:'00ff00aa', at:_spNow()});
-    if(!_netPollDue()) throw 'a watched 1:1 must poll for the handshake it owes';
+    if(!_netPollDue()) throw 'a watched 1vs1 must poll for the handshake it owes';
     _spAsk.length=0;
     // ...and an ORDINARY duel keeps the slow cadence for the same reason the tournament one
     // does: the ask that starts a watch has nowhere to arrive but this mailbox, so a match
@@ -924,7 +958,7 @@ runTest('SMOKE-NET', `
     _netPollTick=5;
     if(!_netPollDue()) throw 'a duel that never polls can never be asked to be watched';
     _netSess=null; phase='menu';
-    log('adaptive poll ok: 1Hz lobby/1:1 + connecting, 10s main menu, never in-game -- except while somebody is trying to watch');
+    log('adaptive poll ok: 1Hz lobby/1vs1 + connecting, 10s main menu, never in-game -- except while somebody is trying to watch');
 
     // ---- a spectator boot with no shared clock WAITS for one ----
     // The context is good while we wait: match constants, plus a tick base quoted on that
@@ -948,14 +982,14 @@ runTest('SMOKE-NET', `
 
     // ---- mutual invites: deterministic auto-accept, no dialog ----
     localStorage.setItem('fok-snake-pid','00000001');   // our ID < the peer's
-    phase='lobby'; _netLb.invite=null; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now();
-    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}'});
+    phase='duelLobby'; _netLb.invite=null; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now();
+    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}'});
     if(_netLb.invite) throw 'mutual invite must not open a dialog';
     if(_netHs.sent!==null) throw 'smaller ID must auto-accept (sent cleared)';
     if(_netLb.msg.indexOf('MUTUAL')!==0) throw 'missing mutual-invite feedback';
     localStorage.setItem('fok-snake-pid','ffffffff');   // our ID > the peer's
     _netHs.sent='00ff00aa'; _netLb.msg='';
-    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}'});
+    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}'});
     if(_netLb.invite) throw 'larger ID must not open a dialog either';
     if(_netHs.sent!=='00ff00aa') throw 'larger ID keeps waiting for the accept';
     log('mutual invite ok: tie-broken auto-accept');
@@ -1009,31 +1043,31 @@ runTest('SMOKE-NET', `
     // The server keeps a signal for its whole online window (120 s from 4.5); the inviter
     // stops waiting at NET_INVITE_STALE_MS. What arrives after that is answered by nobody:
     // no dialog, and no decline either -- the sender stopped listening long ago.
-    phase='lobby'; _netHsClear(); _netLb.invite=null; _netLb.msg='';
+    phase='duelLobby'; _netHsClear(); _netLb.invite=null; _netLb.msg='';
     _netSync={ofs:null, rtt:-1, at:0}; _netDbg.srvOfs=0;   // no server clock: the wall clock reads the stamp
     const _nowS=Math.floor(Date.now()/1000);
     if(!_netSigStale({created:_nowS-1000})) throw 'a signal stamped 1000 s ago must read as stale';
     if(_netSigStale({created:_nowS}) || _netSigStale({}) || _netSigStale({created:0})) throw 'a fresh, unstamped or zero-stamped signal must never read as stale';
     const _oSigS=_netSignal; let _declined=0;
     _netSignal=(to,type)=>{ if(type==='decline') _declined++; return Promise.resolve({json:null}); };
-    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS-1000});
+    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}', created:_nowS-1000});
     if(_netLb.invite) throw 'a stale invite must not open a dialog';
     if(_declined) throw 'a stale invite must not be declined either';
-    _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS});
+    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:'{}', created:_nowS});
     if(!_netLb.invite) throw 'a fresh stamped invite must still open the dialog';
     _netLb.invite=null; _netSignal=_oSigS;
     log('stale invite ok: refused on arrival by its stamp, fresh and unstamped ones unaffected');
 
     // ---- undelivered receipt: an attempt the peer never collected fails FAST ----
-    phase='lobby'; _netHsClear(); _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netLb.msg='';
-    _netOnSignal({from:'00ff00aa', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00aa', type:'invite'})});
+    phase='duelLobby'; _netHsClear(); _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netLb.msg='';
+    _netOnSignal({from:'00ff00aa', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00aa', type:'duelInvite'})});
     if(_netHs.sent!==null) throw 'undelivered must stop waiting on the sent invite';
     if(_netLb.msg.indexOf('OFFLINE')<0) throw 'undelivered must tell the user the peer is unreachable';
     _netHsClear(); _netHs.accepting='00ff00bb'; _netHs.acceptingAt=Date.now(); _netLb.msg='';
     _netOnSignal({from:'00ff00bb', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00bb', type:'accept'})});
     if(_netHs.accepting!==null) throw 'undelivered must clear a pending accept';
     _netHsClear(); _netLb.msg='KEEP';
-    _netOnSignal({from:'00ff00cc', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00cc', type:'invite'})});
+    _netOnSignal({from:'00ff00cc', type:'undelivered', payload:JSON.stringify({event:'undelivered', peer:'00ff00cc', type:'duelInvite'})});
     if(_netLb.msg!=='KEEP') throw 'undelivered for an unrelated peer must not touch the UI';
     log('undelivered receipt ok: sent invite/accept fail fast, unrelated ignored');
 
@@ -1101,7 +1135,7 @@ runTest('SMOKE-NET', `
     if(netFriendE2E('00ff00aa')!==40) throw 'e2e estimate wrong: '+netFriendE2E('00ff00aa');
     if(netFriendE2E('00ff00bb')!==null) throw 'no report -> no estimate';
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    _netFriendsOnline={'00ff00aa':true}; phase='lobby'; drawLobby();   // renders with the ms figure
+    _netFriendsOnline={'00ff00aa':true}; phase='duelLobby'; drawDuelLobby();   // renders with the ms figure
     localStorage.removeItem('fok-snake-friends');
     _netLat={value:null, at:0, pending:false}; _netFriendsLat={}; phase='menu';
     log('latency figure ok: sampling rule, e2e estimate, lobby render');
@@ -1110,12 +1144,12 @@ runTest('SMOKE-NET', `
     _netApiNewer=true;
     if(_netOk()) throw 'newer server contract must gate _netOk';
     netSubmitScore('X', 10, 1); netFetchScores();   // all soft no-ops
-    phase='lobby'; drawLobby();                     // renders the reload notice
+    phase='duelLobby'; drawDuelLobby();                     // renders the reload notice
     _netApiNewer=false; phase='menu';
     log('api version gate ok');
 
     // ---- identical-rules handshake: a version mismatch never starts a match ----
-    phase='lobby'; _netLb.msg='';
+    phase='duelLobby'; _netLb.msg='';
     _netOnSignal({from:'00ff00aa', type:'offer', payload:JSON.stringify({sdp:{}, seed:7, v:'v0.0.0-other'})});
     if(_netSess!==null) throw 'mismatched offer must not create a session';
     if(_netLb.msg.indexOf('VERSION MISMATCH')!==0) throw 'missing version-mismatch notice';
@@ -1124,13 +1158,13 @@ runTest('SMOKE-NET', `
 
     // ---- friend names: learned from every received profile, shown in the lobby ----
     localStorage.removeItem('fok-snake-friend-names'); _netFriendNames={};
-    phase='lobby'; _netLb.invite=null; _netHsClear();
-    _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'BUDDY',color:1}})});
+    phase='duelLobby'; _netLb.invite=null; _netHsClear();
+    _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'BUDDY',color:1}})});
     if(netFriendName('00ff00aa')!=='BUDDY') throw 'invite profile did not teach the name';
     if(JSON.parse(localStorage.getItem('fok-snake-friend-names'))['00ff00aa']!=='BUDDY') throw 'name not persisted';
     _netLb.invite=null;
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa']));
-    drawLobby();   // renders NAME + ID
+    drawDuelLobby();   // renders NAME + ID
     localStorage.removeItem('fok-snake-friends'); localStorage.removeItem('fok-snake-friend-names');
     _netFriendNames={}; phase='menu';
     log('friend names ok: learned from profiles, persisted, rendered');
@@ -1147,7 +1181,7 @@ runTest('SMOKE-NET', `
     localStorage.removeItem('lastSName');
     log('in-game names ok: HUD labels + winner banner');
 
-    // ---- HUD clears on leaving a 1:1 (regression): a stale players mirror must not paint duel names on a menu ----
+    // ---- HUD clears on leaving a 1vs1 (regression): a stale players mirror must not paint duel names on a menu ----
     simTick=0; simNow=0; startDuel(0xBEEF); bars=[];
     inGame=true; updateHUD();
     if(_hudAL.textContent==='LIVES ') throw 'in a live duel the HUD must show a name, not LIVES';
@@ -1192,7 +1226,7 @@ runTest('SMOKE-NET', `
     // ---- FRIENDS screen: rows merge server + local, accept/remove flows ----
     simNow=100000; simTick=6000; _splashLeftAt=-1e9;   // past the post-splash input guard again
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    phase='duelMenu'; duelSel=4; press('Enter');
+    phase='multiplayer'; multiSel=4; press('Enter');
     if(phase!=='friends') throw 'FRIENDS entry did not open the screen';
     let rows=_netFrRows();
     if(rows.length!==2||rows[0].state!=='local') throw 'offline rows must show the local list';
@@ -1211,7 +1245,7 @@ runTest('SMOKE-NET', `
     if(rows.length!==2||rows[1].state!=='pending'||rows[1].outgoing) throw 'server rows wrong';
     drawFriends();
     press('Escape');
-    if(phase!=='duelMenu') throw 'friends ESC did not return';
+    if(phase!=='multiplayer') throw 'friends ESC did not return';
     _netFr.list=null; localStorage.removeItem('fok-snake-friends'); localStorage.removeItem('fok-snake-friend-rm');
     phase='menu';
     log('friends screen ok: merge, remove confirm, states, nav');
@@ -1223,7 +1257,7 @@ runTest('SMOKE-NET', `
     globalThis.fetch = ()=>({ then:()=>({ catch:()=>{} }) });   // presence check only (typeof fetch === function)
     _netPost = async (path, body)=>{ if(path.indexOf('hello')>=0) _helloBody=body; return null; };
     cfg.offline=false; _netMyIdAt=0;
-    phase='friendId'; _netHelloBusy=false; _netHello();
+    phase='myId'; _netHelloBusy=false; _netHello();
     if(!_helloBody || _helloBody.auto_accept!==true) throw 'auto_accept must be set on the MY ID screen';
     _helloBody=null; phase='menu'; _netHelloBusy=false; _netHello();
     if(_helloBody && _helloBody.auto_accept) throw 'auto_accept must NOT be set in the main menu';
@@ -1243,7 +1277,7 @@ runTest('SMOKE-NET', `
     _netOnSignal({from:'', type:'friend', payload:JSON.stringify({event:'request', from:'00ff00aa'})});
     if(_netFr.msg.indexOf('ADDED YOU AS A FRIEND')<0) throw 'request notification text missing';
     if(!confetti.length) throw 'request notification must celebrate (confetti)';
-    if(_duelMsg!==_netFr.msg) throw 'notification must surface on the 1:1 menu too';
+    if(_duelMsg!==_netFr.msg) throw 'notification must surface on the 1vs1 menu too';
     confetti.length=0;
     _netOnSignal({from:'00ff00bb', type:'friend', payload:JSON.stringify({event:'accepted', from:'00ff00bb'})});
     if(_netFr.msg.indexOf('YOU ARE FRIENDS')<0) throw 'accepted notification text missing';
@@ -1262,28 +1296,28 @@ runTest('SMOKE-NET', `
     if(netStatusNotice()!=='GAME UPDATE REQUIRED - PLEASE RELOAD') throw 'api notice must outrank unreachable';
     _netApiNewer=false;
     if(netStatusNotice()!=='SERVER UNREACHABLE - RETRYING') throw 'unreachable notice wrong';
-    phase='lobby'; drawLobby(); phase='friends'; drawFriends();   // both render the SAME string
+    phase='duelLobby'; drawDuelLobby(); phase='friends'; drawFriends();   // both render the SAME string
     _netSrvErr=false;
     if(netStatusNotice()!==null) throw 'healthy state must show no notice';
     phase='menu';
     log('status notice ok: shared, prioritized, self-healing');
 
     // ---- MY ID: shows the friend notification and renders name columns cleanly ----
-    phase='friendId';
-    _netFr.msg='SOMEONE ADDED YOU AS A FRIEND'; drawFriendId();
-    _netFr.msg=''; drawFriendId();
+    phase='myId';
+    _netFr.msg='SOMEONE ADDED YOU AS A FRIEND'; drawMyId();
+    _netFr.msg=''; drawMyId();
     localStorage.setItem('fok-snake-friend-names', JSON.stringify({'00ff00aa':'AVERYLONGNAME15'}));
     _netFriendNames=JSON.parse(localStorage.getItem('fok-snake-friend-names'));
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa']));
     phase='friends'; _netFr.sel=0; drawFriends();   // truncated name column renders
-    phase='lobby'; drawLobby();
+    phase='duelLobby'; drawDuelLobby();
     localStorage.removeItem('fok-snake-friends'); localStorage.removeItem('fok-snake-friend-names');
     _netFriendNames={}; phase='menu';
     log('row layout ok: centered ID, truncated name column, my-id notification');
 
     // ---- QR auto-confirm: a request arriving while OUR QR shows accepts itself ----
     localStorage.removeItem('fok-snake-friends');
-    _netMyIdAt=Date.now(); phase='friendId'; _netFr.msg='';
+    _netMyIdAt=Date.now(); phase='myId'; _netFr.msg='';
     _netOnSignal({from:'', type:'friend', payload:JSON.stringify({event:'request', from:'00ff00dd'})});
     if(!getFriends().includes('00ff00dd')) throw 'QR-window request must auto-friend';
     if(_netFr.msg.indexOf('YOU ARE FRIENDS')<0) throw 'auto-confirm must celebrate as friends';
@@ -1294,16 +1328,16 @@ runTest('SMOKE-NET', `
     localStorage.removeItem('fok-snake-friends'); _netFr.msg='';
     log('qr auto-confirm ok: friends while presenting, manual otherwise');
 
-    // ---- invites surface on 1:1/social screens; elsewhere they auto-decline ----
-    for(const ph of ['duelMenu','duel11','friends','friendId']){
+    // ---- invites surface on 1vs1/social screens; elsewhere they auto-decline ----
+    for(const ph of ['multiplayer','duelMenu','friends','myId']){
         phase=ph; _netLb.invite=null; _netSess=null;
-        _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER'}})});
-        if(phase!=='lobby'||!_netLb.invite) throw 'invite must surface from '+ph;
+        _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'PEER'}})});
+        if(phase!=='duelLobby'||!_netLb.invite) throw 'invite must surface from '+ph;
         _netLb.invite=null;
     }
     for(const ph of ['menu','settings','playing']){
         phase=ph;
-        _netOnSignal({from:'00ff00aa', type:'invite', payload:JSON.stringify({profile:{name:'PEER'}})});
+        _netOnSignal({from:'00ff00aa', type:'duelInvite', payload:JSON.stringify({profile:{name:'PEER'}})});
         if(_netLb.invite) throw 'invite must auto-decline in '+ph;
     }
     phase='menu';
@@ -1311,7 +1345,7 @@ runTest('SMOKE-NET', `
 
     // ---- withdraw: leaving the lobby with a pending invite tells the invitee,
     // and a bye closes a still-open ACCEPT dialog (so re-invites are not blocked) ----
-    phase='lobby'; _netLb.invite={from:'00ff00aa', profile:{name:'X',color:0,shopItems:{}}}; _netLb.msg='';
+    phase='duelLobby'; _netLb.invite={from:'00ff00aa', profile:{name:'X',color:0,shopItems:{}}}; _netLb.msg='';
     _netOnSignal({from:'00ff00aa', type:'bye', payload:''});
     if(_netLb.invite) throw 'a bye must close a pending ACCEPT dialog';
     if(_netLb.msg.indexOf('WITHDRAWN')<0) throw 'withdrawn invite needs a notice';
@@ -1321,19 +1355,19 @@ runTest('SMOKE-NET', `
     // ---- universal teardown: EVERY leftover state is reaped on lobby transitions ----
     // (1) a relay session that reached game=true but is not on-screen (inGame=false)
     _netSess=_netMkSess('00ff00aa','peer'); _netSess.relay=true; _netSess.game=true; inGame=false;
-    phase='lobby'; netLobbyLeave();
+    phase='duelLobby'; netLobbyLeave();
     if(_netSess!==null) throw 'a not-yet-playing relay session must be reaped';
     // (2) a P2P session still negotiating (game=false) with mock RTC objects closed
     let _pcC=false,_dcC=false;
     _netSess=_netMkSess('00ff00bb','host'); _netSess.pc={close(){_pcC=true;}}; _netSess.dc={close(){_dcC=true;}};
-    phase='lobby'; netLobbyLeave();
+    phase='duelLobby'; netLobbyLeave();
     if(_netSess!==null||!_pcC||!_dcC) throw 'a negotiating session must be reaped + RTC closed';
     // (3) a pending SENT invite is withdrawn on leave
-    phase='lobby'; _netHsClear(); _netHs.sent='00ff00cc'; _netSess=null; inGame=false;
+    phase='duelLobby'; _netHsClear(); _netHs.sent='00ff00cc'; _netSess=null; inGame=false;
     netLobbyLeave();
     if(_netHs.sent!==null) throw 'a pending sent invite must be withdrawn on leave';
     // (4) a received invite dialog is dismissed on leave
-    phase='lobby'; _netLb.invite={from:'00ff00dd',profile:{name:'X',color:0,shopItems:{}}};
+    phase='duelLobby'; _netLb.invite={from:'00ff00dd',profile:{name:'X',color:0,shopItems:{}}};
     netLobbyLeave();
     if(_netLb.invite!==null) throw 'a received invite must be dismissed on leave';
     // (5) entering the lobby also reaps a stray session so new invites are received
@@ -1352,7 +1386,7 @@ runTest('SMOKE-NET', `
     cfg.offline=false; inGame=false;
     // (1) navigation must NOT wipe an in-flight handshake nor bye the peer
     _netHsClear(); _netSess=null; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netHs.sentRelay=true;
-    phase='duelMenu'; netLobbyEnter(); phase='lobby';
+    phase='multiplayer'; netLobbyEnter(); phase='duelLobby';
     if(_netHs.sent!=='00ff00aa') throw 'entering a screen must not wipe the handshake';
     // ...and the peer's accept is then still recognised (was dropped forever)
     _netOnSignal({from:'00ff00aa', type:'accept-relay', payload:JSON.stringify({profile:{name:'P'}})});
@@ -1360,13 +1394,13 @@ runTest('SMOKE-NET', `
     if(!_netHs.offerTo) throw 'the offer must be remembered for re-send';
     _netTeardown(); _netHsClear();
     // (2) an offer arriving OFF the lobby screen is honoured (phase guard gone)
-    phase='duelMenu'; _netSess=null;
+    phase='multiplayer'; _netSess=null;
     _netOnSignal({from:'00ff00bb', type:'offer', payload:JSON.stringify({seed:9, profile:{name:'Q'}})});
     if(!_netSess||_netSess.role!=='peer') throw 'an offer off the lobby screen must still connect';
     if((_netSess.seed>>>0)!==9) throw 'offer seed lost';
     _netTeardown(); _netHsClear();
     // (3) debris must not swallow the offer (was: if(_netSess) return -> silence)
-    _netSess=_netMkSess('00ff00cc','peer'); _netSess.game=false; phase='lobby';
+    _netSess=_netMkSess('00ff00cc','peer'); _netSess.game=false; phase='duelLobby';
     _netHs.sent='00ff00cc'; _netHs.sentAt=Date.now(); _netHs.sentRelay=true;
     _netOnSignal({from:'00ff00cc', type:'accept-relay', payload:JSON.stringify({profile:{name:'R'}})});
     if(!_netSess||_netSess.role!=='host'||!_netSess.relay) throw 'debris must be replaced, offer still sent';
@@ -1427,10 +1461,10 @@ runTest('SMOKE-NET', `
     inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu';
     log('prng sync ok: state frames align the dice');
 
-    // ---- remote end: bye lands us on the 1:1 menu with a message, never a crash ----
+    // ---- remote end: bye lands us on the 1vs1 menu with a message, never a crash ----
     fakeSess('host'); inGame=true; phase='duel';
     _netHandleMsg(JSON.stringify({t:'bye'}));
-    if(phase!=='duel11'||inGame) throw 'peer bye did not exit cleanly';
+    if(phase!=='duelMenu'||inGame) throw 'peer bye did not exit cleanly';
     if(_duelMsg!=='OPPONENT LEFT') throw 'missing OPPONENT LEFT message';
     if(_netSess!==null) throw 'session not torn down';
     // and the local quit path tells the peer

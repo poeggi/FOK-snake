@@ -8,7 +8,7 @@
 //   * ONE sim. The cap changes a number the existing rules already read (p.lives against a
 //     limit); it does not add a second duel implementation. Stakes off is likewise NOT done
 //     by emptying the worn lists -- that would change the SIM, so the mechanic would differ
-//     between single player, local 1:1 and online 1:1. It suppresses PERSISTENCE only.
+//     between single player, local 1vs1 and online 1vs1. It suppresses PERSISTENCE only.
 //   * The cap is CONFIG, not agreed state: it rides the go, both sides adopt one
 //     host-authored number before tick 0, and it stays out of the lockstep hash -- which is
 //     why the recorded duel golden does not move. Section F asserts exactly that, and the
@@ -220,7 +220,7 @@ const driver = `
     const joinGo = (hm, want)=>{
       const out = mkSess('peer');
       _netSess.heartsWant = (want===undefined) ? null : want;
-      phase='lobby'; _netLb.msg='';   // a roles-sheet preset is applied before the match opens, so a refusal surfaces in the lobby
+      phase='duelLobby'; _netLb.msg='';   // a roles-sheet preset is applied before the match opens, so a refusal surfaces in the lobby
       const m = { t:'go', why:'level', seed:777, startPts:Date.now()+250, epoch:7, lvl:4, bth:0 };
       if(hm!==undefined) m.hm = hm;
       _netHandleMsg(JSON.stringify(m));
@@ -248,7 +248,7 @@ const driver = `
     const joinSk = (sk, want)=>{
       const out = mkSess('peer');
       _netSess.stakesWant = (want===undefined) ? null : want;
-      phase='lobby'; _netLb.msg='';
+      phase='duelLobby'; _netLb.msg='';
       const m = { t:'go', why:'level', seed:777, startPts:Date.now()+250, epoch:7, lvl:4, bth:0, hm:2 };
       if(sk!==undefined) m.sk = sk;
       _netHandleMsg(JSON.stringify(m));
@@ -298,7 +298,7 @@ const driver = `
       const out = mkSess('peer');
       inGame = false;                       // a 'match' go is refused against a running game
       _netSess.levelWant = (want===undefined) ? null : want;
-      phase='lobby'; _netLb.msg='';
+      phase='duelLobby'; _netLb.msg='';
       const m = { t:'go', why:'match', seed:777, startPts:Date.now()+250, epoch:9, bth:0,
                   hm:START_LIVES, sk:0 };
       if(lv!==undefined) m.lvl = lv;
@@ -323,7 +323,7 @@ const driver = `
     // against the very preset that is correct.
     mkSess('peer');
     _netSess.lvl0 = 3; _netSess.lvl = 3; _netSess.levelWant = 3;
-    phase='lobby'; _netLb.msg='';
+    phase='duelLobby'; _netLb.msg='';
     _netHandleMsg(JSON.stringify({ t:'go', why:'level', seed:777, startPts:Date.now()+250, epoch:11,
                                    bth:0, hm:START_LIVES, sk:0, lvl:4 }));
     A(_netSess && _netSess.lvl0===3, 'a level boundary rewrote the level the match opened at');

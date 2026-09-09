@@ -1,4 +1,4 @@
-# Windswept-item steal in 1:1 (shipped v2.7.0)
+# Windswept-item steal in 1vs1 (shipped v2.7.0)
 
 The old "volatile steal" plan is implemented and released; "volatile" was
 renamed to windswept everywhere.
@@ -67,7 +67,7 @@ renamed to windswept everywhere.
 
 ## Rejected - do not re-propose
 
-- An ITEM STAKES toggle for ordinary online 1:1 duels. An online duel plays
+- An ITEM STAKES toggle for ordinary online 1vs1 duels. An online duel plays
   for keeps and has no opt-out by design; only a tournament creator chooses,
   and only _netSess.stakes === false suppresses the wardrobe write-back in
   _wsTransfer. Decided explicitly: no toggle. The asymmetry with the local

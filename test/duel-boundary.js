@@ -1,4 +1,4 @@
-// P2P LEVEL-BOUNDARY test (DEFAULT suite). A level change in an ongoing 1:1 is pure P2P now: at the
+// P2P LEVEL-BOUNDARY test (DEFAULT suite). A level change in an ongoing 1vs1 is pure P2P now: at the
 // boundary the host runs a bilateral clock BURST (both sides measure the peer offset over ~150ms),
 // nudges its own clock onto the shared midpoint, authors the next level's start PTS on that clock
 // and ships it on the echo-acked go {why:'level'} (no /api/start.php, no stale-epoch 409) with the agreed offset

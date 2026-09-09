@@ -29,8 +29,8 @@ with warm-standby failover. Item stakes are a creator choice at creation,
 default OFF (off = local-duel behavior: no registry claims, no wardrobe
 transfer).
 
-IRON RULE preserved throughout: ONE sim implementation for solo, local 1:1,
-online 1:1 and spectating. A spectator is the same sim with input authoring
+IRON RULE preserved throughout: ONE sim implementation for solo, local 1vs1,
+online 1vs1 and spectating. A spectator is the same sim with input authoring
 disabled, fed the players' own packets verbatim.
 
 P2P-ONLY, also throughout: tournament matches and every spectator link run on
@@ -61,8 +61,8 @@ action by a second and a half.
 ## Status
 
 - Step 0 (menu restructure): DONE, commit 2eb6c26. Main menu SOLO PLAY /
-  MULTIPLAYER; duelMenu phase is the MULTIPLAYER menu with TOURNAMENT greyed
-  (COMING SOON); new duel11 phase holds 1:1 ONLINE / 1:1 LOCAL.
+  MULTIPLAYER; multiplayer phase is the MULTIPLAYER menu with TOURNAMENT greyed
+  (COMING SOON); new duelMenu phase holds 1vs1 ONLINE / 1vs1 LOCAL.
 - Phase A (heart cap + stakes as negotiated match parameters): DONE. The
   P2P-only refusal shipped with it (the netP2POnly latch in net-rtc.js plus
   guards at _netRelayOffer / _netRelayAnswer / _netRelayStart). Covered by
@@ -76,7 +76,7 @@ action by a second and a half.
   called from both step() and duelStep(); floor SNAKE_MIN_LEN, shared with
   the chomp). It is written once and called from both, so tournament matches
   inherit it with no tournament-side code at all. Covered by
-  test/power-bite.js, which drives single player and 1:1 off ONE fixture and
+  test/power-bite.js, which drives single player and 1vs1 off ONE fixture and
   asserts the same outcome from both. All three goldens held: no golden
   scenario ever reaches a powered self-bite (verified by arming the rule to
   throw and re-running them), so the rule is new ground rather than a silent

@@ -58,7 +58,7 @@ const _BAR_MOVE_EVERY=6;   // blocks step once every 6th game tick -- ONE cadenc
 const _X10=()=>players?1:(cfg.x10?10:1);
 let timeCrystal=null, timeCrystalAt=0, _slowMode=false, _slowModeAt=0;
 let perfectCount = 0, luckyCount = 0;
-// ---- 1:1 DUEL state. null = classic single-player (that path is untouched). In duel,
+// ---- 1vs1 DUEL state. null = classic single-player (that path is untouched). In duel,
 // players = [P0, P1]; ALL duel input arrives as commands carrying a player index
 // ({t:'dir', p, dir}) -- the same boundary a future remote peer will feed, so going
 // online later swaps the input SOURCE, never the sim.
@@ -206,7 +206,7 @@ function startGame(seed, bestScore) { players = null; duelWinner = -1; _ws = nul
     _shimmerThreshold=Math.max(bestScore||0,25000);
     beginLevel(); }
 
-// ---- 1:1 DUEL --------------------------------------------------------------
+// ---- 1vs1 DUEL --------------------------------------------------------------
 // Same PROGRESSION as single player, played together: start at level 1, shared 10-gem
 // goal per level, level-up regenerates barricades and raises the speed (LEVEL_CFG,
 // pinned to NORMAL difficulty for fairness regardless of local cfg). Each player has
@@ -233,7 +233,7 @@ function _mkDuelPlayer(x0, y0, dx) {
 // through and everything from the bitten segment back falls away. It is the rule a chomp
 // already applies to the OTHER snake -- eaten off from the bitten segment back -- turned on
 // its owner, so it is written once here and called from step() and duelStep() rather than
-// implemented per mode: single player, local 1:1 and online 1:1 shorten identically.
+// implemented per mode: single player, local 1vs1 and online 1vs1 shorten identically.
 // The SHORTENING is sim state (it rides the snapshot and the duel's lockstep hash, so both
 // clients cut the same segments on the same tick); the pieces flying off are the renderer's.
 //
@@ -1024,7 +1024,7 @@ function update() {
     if(phase==='levelDone'&&!levelDoneWaiting&&now-phaseAt>=LEVELDONE_DUR){
         levelDoneWaiting=true;
     }
-    // ---- 1:1 duel ticking (players non-null only in duel mode)
+    // ---- 1vs1 duel ticking (players non-null only in duel mode)
     if(phase==='duelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
         phase='duel'; _gDue=gPer; spawnAt=now; phaseAt=0;
         players.forEach(P=>{ P.stepAccum=0; });
@@ -1089,7 +1089,7 @@ function _dirEnqueue(q, cur, d){
 // worker wraps pause/resume/start with its own tick-loop + post handling.
 // ---- THE AUTHORING CLOCK ------------------------------------------------------
 // Every local input and every locally-created event names the tick it must execute on, and
-// this is the only place that number is decided -- classic, local 1:1 and online 1:1 alike.
+// this is the only place that number is decided -- classic, local 1vs1 and online 1vs1 alike.
 // simTick is the LAST COMPLETED tick, so simTick+1 is the tick already about to run: it can
 // be a millisecond away and offers no slack at all. simTick+2 is the first tick with a whole
 // TICK_MS in front of it. That gap is what the wire spends carrying the identical record to
@@ -1286,7 +1286,7 @@ function simArmTick(){
 // netLocalInput is the online destination AND the test for one: it owns the wire's rules
 // (author a tick ahead, log it, apply it from the log on both sides, author nothing at all
 // while spectating) and it declines -- returns false -- whenever there is no online duel to
-// author into. So single player, local 1:1 and online 1:1 all run this same line, and a
+// author into. So single player, local 1vs1 and online 1vs1 all run this same line, and a
 // transition reaches the sim exactly the way every other input does. Its `0` is the LOCAL
 // player, not the sim index: online the local snake is netMyIndex(), which netLocalInput
 // resolves for itself. Do not fork this hook per home -- two issue bodies is how the modes

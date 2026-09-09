@@ -1,6 +1,6 @@
 # Single-player and duel share ONE sim code path
 
-Single-player and 1:1 duel run the SAME engine and MUST go through the SAME code path. Do not "mirror", copy, or re-implement single-player logic into the duel path (or vice versa). Converge, never duplicate.
+Single-player and 1vs1 duel run the SAME engine and MUST go through the SAME code path. Do not "mirror", copy, or re-implement single-player logic into the duel path (or vice versa). Converge, never duplicate.
 
 Rationale: duplicated logic silently drifts and creates duel-only bugs. Concrete case: bar (barricade) placement had two separate blocks. The DUEL block hard-coded every bar `fragile:false`, so a bar on the outer ring was SOLID in a duel while the identical edge cell is always crushable in single player (`_barFragile` makes the edge ring fragile) -- a "solid barricade on the corner" that can never happen solo. The duel block also skipped the ~10% 2-cell paired extensions.
 

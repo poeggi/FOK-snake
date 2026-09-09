@@ -1,6 +1,6 @@
 # Duel test tooling
 
-The 1:1 duel runs deterministic lockstep with per-tick rollback: each client owns
+The 1vs1 duel runs deterministic lockstep with per-tick rollback: each client owns
 its snake, both sims replay an identical input log, and a divergence is detected by
 a 1Hz hash of the rollback ring. These tests boot TWO full clients over a simulated
 wire and prove the pair stays in lockstep while a real, boosting match is played.

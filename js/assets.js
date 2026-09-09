@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.1.5';
+const APP_VERSION = 'v4.1.6';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -80,7 +80,7 @@ const ANNOUNCEMENT = { id:'v3.1.0', pages:[
         'NEW IN v3.1:',
         'WATCH a friend who is already',
         'in a duel - straight from the',
-        '1:1 lobby, a moment behind live',
+        '1vs1 lobby, a moment behind live',
         '',
         'Not a replay. The same game,',
         'the same snakes, as it happens.' ] },
@@ -96,7 +96,7 @@ const ANNOUNCEMENT = { id:'v3.1.0', pages:[
     { headline:'FINDERS KEEPERS', lines:[
         'NEW IN v2.7:',
         'WINDSWEPT gear gets knocked off',
-        'when two snakes graze in 1:1',
+        'when two snakes graze in 1vs1',
         'It lands nearby - grab it first',
         'and it is yours to keep',
         '',
@@ -113,7 +113,7 @@ const ANNOUNCEMENT = { id:'v3.1.0', pages:[
         'RESUMES instead of ending.' ] },
     { headline:'THE STORY SO FAR', lines:[
         'SINCE v2.0:',
-        '1:1 ONLINE - friends by ID or QR',
+        '1vs1 ONLINE - friends by ID or QR',
         'or a quick match with a stranger',
         'SPEED ROUNDS at level 10 pace',
         'Power pellet? Eat your rival!',
@@ -263,7 +263,7 @@ const EGG_ACHIEVEMENTS = [
 //              time ('head' = headwear, 'eyes' = eyewear, 'neck' = neckwear, 'masquerade' =
 //              face disguise, 'divine' = halo and the like); _shopToggleWear refuses a
 //              second item of an occupied slot.
-//   windswept: loose enough to be knocked off in a 1:1 duel -- a near-miss can blow it
+//   windswept: loose enough to be knocked off in a 1vs1 duel -- a near-miss can blow it
 //              away for the rival to pick up (see WINDSWEPT_ITEMS). Shown as a tag on the
 //              shop rows; the cheaper the item, the likelier it comes off.
 const SHOP_ITEMS = [
@@ -320,7 +320,7 @@ const BOX_ITEMS = [
     { id:'admincrown', name:'ADMIN CROWN',   rarity:'legendary', value:5000000, admin:true, cat:'head', windswept:true, desc:'ADMIN box only. The trophy.',
       icon:{p:{A:'#ffe860',C:'#00e5ff',B:'#cc9a00'},d:['C..C..C.','AAAAAAA.','ACAAACA.','AAAAAAA.','BBBBBBB.','........','........','........']}},
 ];
-// ---------------- Windswept cosmetics (1:1 steal) ----------------
+// ---------------- Windswept cosmetics (1vs1 steal) ----------------
 // Every windswept cosmetic in ONE fixed order: shop items first, then box items, exactly as
 // the two tables above are written. The ORDER IS A LOCKSTEP CONTRACT -- both clients build a
 // player's worn-windswept list by walking THIS table (_wsWorn), never by walking a config

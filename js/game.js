@@ -38,9 +38,9 @@ let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net-api.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['SOLO PLAY', 'MULTIPLAYER', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
-let duelSel = 0;   // MULTIPLAYER submenu selection (0 = 1:1 DUEL, 1 = TOURNAMENT, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
-let duel11Sel = 0; // 1:1 DUEL submenu selection (0 = 1:1 ONLINE, 1 = 1:1 LOCAL)
-// Local 1:1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
+let multiSel = 0;   // MULTIPLAYER submenu selection (0 = 1vs1 DUEL, 1 = TOURNAMENT, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
+let duelSel = 0; // 1vs1 DUEL submenu selection (0 = 1vs1 ONLINE, 1 = 1vs1 LOCAL)
+// Local 1vs1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
 const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
 let cfg = defaultCfg();
 let inGame = false, _worker = null;   // Worker state (see the SIM WORKER section near the bootstrap)
@@ -52,7 +52,7 @@ try { if(location.hash === '#debug' && (cfg.debug||0) < 1){ cfg.debug = 1; saveC
 // Arrived via a friend link (QR): the inviter goes straight into the friends list.
 // On iOS in a BROWSER the installed app can never receive this URL (no link capture,
 // and Safari storage is isolated from the home-screen app), so an invite screen after
-// the splash hands the code over manually (drawInvite): copy it / type it in the app.
+// the splash hands the code over manually (drawDuelInvite): copy it / type it in the app.
 // Installing from THIS page still carries it over automatically (storage is cloned).
 let _inviteFid = null;
 try {
@@ -75,7 +75,7 @@ try {
     if (tm) _tourneyLink = tm[1].toUpperCase();
 } catch(e) {}
 let inviteSel = 0, _inviteMsg = '', _inviteMsgAt = 0;
-let _friendIdBack = 'duelMenu';   // where the MY ID screen returns to (1:1 menu or SETTINGS > USER)
+let _myIdBack = 'multiplayer';   // where the MY ID screen returns to (1vs1 menu or SETTINGS > USER)
 if(cfg.wornItems === null){ cfg.wornItems = Object.assign({}, cfg.shopItems||{}); saveCfg(); }
 Snd.musicSetVolume((cfg.volume==null?1:cfg.volume));
 Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
@@ -93,7 +93,7 @@ let _splashExiting = false, _splashExitAt = 0;
 function updateSplashExit() {
     if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
         _splashExiting = false;
-        const dest = _inviteFid ? 'invite' : _tourneyLink ? 'tourneyLobby' : 'menu';
+        const dest = _inviteFid ? 'duelInvite' : _tourneyLink ? 'tourneyLobby' : 'menu';
         phase = dest;
         inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
         if (phase === 'tourneyLobby' && typeof tourneyEnter === 'function') tourneyEnter();
@@ -135,7 +135,7 @@ let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
 // latched at game start so it survives regardless of later setting access.
 let _scoreTainted = false;
 // What the name-entry dialog edits: 'score' (game-over high score), 'user' (SETTINGS >
-// USER player name), 'friend' (1:1 ADD FRIEND: 8 hex digits + live camera scan), 'tcode'
+// USER player name), 'friend' (1vs1 ADD FRIEND: 8 hex digits + live camera scan), 'tcode'
 // (TOURNAMENT join code: 6 characters off the unambiguous alphabet).
 let entryMode = 'score';
 function _entryFixed(){ return entryMode === 'friend' || entryMode === 'tcode'; }   // a known-length code, not free text
@@ -156,7 +156,7 @@ function _entryMax()   { return entryMode === 'friend' ? 8 : entryMode === 'tcod
 function _entryReady() { return _entryFixed() && nameStr.length >= _entryMax(); }
 function _entryLast()  { return _entryMax() - (_entryReady() ? 0 : 1); }
 function _entryOnOk()  { return _entryReady() && nameCursorPos >= _entryMax(); }
-// Transient confirmation line on the 1:1 menu. Stamped on the WALL clock, not the
+// Transient confirmation line on the 1vs1 menu. Stamped on the WALL clock, not the
 // sim clock: a duel restarts simNow at 0 while the worker's own simNow has been
 // free-running since page load, so ending a session swaps a small simNow for a huge
 // one -- and any message stamped in sim time instantly reads as ancient and never
@@ -178,7 +178,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','duelMenu','duel11','friendId','invite','lobby','friends'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -485,7 +485,7 @@ function updateNetDebugOverlay(rafNow){
     if(!_dbgShown){ for(const k in _dbgCorner) _dbgCorner[k].style.display = 'block'; _dbgShown = true; }   // not every frame
     if(rafNow - _netDbgAt < NET_DBG_MS) return;
     _netDbgAt = rafNow;
-    // Online: the full rollback/latency readout. Offline (menus + LOCAL 1:1 + solo): net
+    // Online: the full rollback/latency readout. Offline (menus + LOCAL 1vs1 + solo): net
     // is meaningless, so timing shows the sim clock -- simTick free-runs from page load and
     // the worker owns it, so a frozen counter is a stalled worker. mseek lets two clients
     // verify menu-music sync on-device (same audio style => same seek, mod the loop length).
@@ -777,13 +777,13 @@ const CONTROLS = {
     nameEntry:    ['esc','pause','ok','start','dpad'],
     playing:      ['esc','pause','ok','dpad'],
     paused:       ['esc','pause','ok','dpad'],
-    duelMenu:     ['esc','ok','dpad'],
-    duel11:       ['esc','ok','dpad'],
+    multiplayer:     ['esc','ok','dpad'],
+    duelMenu:       ['esc','ok','dpad'],
     friends:      ['esc','ok','dpad'],
-    lobby:        ['esc','ok','dpad'],
-    friendId:     ['esc','ok','dpad'],
+    duelLobby:        ['esc','ok','dpad'],
+    myId:     ['esc','ok','dpad'],
     tourneyCode:  ['esc','ok'],
-    invite:       ['esc','ok','dpad'],
+    duelInvite:       ['esc','ok','dpad'],
     tourneyLobby:    ['esc','ok','dpad'],
     tourneyBracket:  ['esc','ok','dpad'],
     tourneyRound:    ['esc','ok','dpad'],
@@ -851,13 +851,13 @@ const SCREENS = {
     quitConfirm:  { d:()=>drawQuitConfirm(),     hud:false },
     resetConfirm: { d:()=>drawResetConfirm(),    hud:false, freeze:true },
     paused:       { d:()=>drawGameBoard(simNow), hud:true,  freeze:true },
-    duelMenu:     { d:()=>drawDuelMenu(),        hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
-    duel11:       { d:()=>drawDuel11(),          hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
-    friendId:     { d:()=>drawFriendId(),        hud:false, freeze:true },
+    multiplayer:     { d:()=>drawMultiplayer(),        hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
+    duelMenu:       { d:()=>drawDuelMenu(),          hud:false, freeze:true, anim:()=> !!_duelMsg && _msgNow()-_duelMsgAt < 2600 },
+    myId:     { d:()=>drawMyId(),        hud:false, freeze:true },
     tourneyCode:  { d:()=>drawTourneyCode(),    hud:false, freeze:true },
-    lobby:        { d:()=>drawLobby(),           hud:false },
+    duelLobby:        { d:()=>drawDuelLobby(),           hud:false },
     friends:      { d:()=>drawFriends(),         hud:false },
-    invite:       { d:()=>drawInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
+    duelInvite:       { d:()=>drawDuelInvite(),          hud:false, freeze:true, anim:()=> !!_inviteMsg && simNow-_inviteMsgAt < 1600 },
     // The tournament screens are static pictures of what the server last said, so they
     // freeze like every other menu -- except that all four waiting screens animate their
     // waiting dots (_ttDots) and the bracket also counts the host's CONTINUE row down, so
@@ -1004,7 +1004,7 @@ function loop(rafNow) {
         }
         if(phase==='menu'){
             if(typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
-            // Leaving 1:1 to the main menu: some exit paths (e.g. duelMenu Back) drop straight
+            // Leaving 1vs1 to the main menu: some exit paths (e.g. multiplayer Back) drop straight
             // to 'menu' without tearing down the duel HUD, so its names/hearts linger. _wsend
             // reaches only the worker (which may already be paused at menu and never post a
             // clearing frame), so ALSO clear the main-thread `players` MIRROR here via simCommand
@@ -1075,7 +1075,7 @@ function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x
 // claim only when it has a mid, so an empty one turns every steal into a board-only
 // event -- the mechanic plays out identically, nothing leaves the room. Deliberately NOT
 // done by emptying the worn lists: that would change the SIM, and single player, local
-// 1:1 and online 1:1 run one mechanic (the harmonized-mechanics rule).
+// 1vs1 and online 1vs1 run one mechanic (the harmonized-mechanics rule).
 function _duelClaimArgs(hosting){
     const s = _netSess || {}, me = getPlayerId(), peer = s.peer || '';
     return { mid: (s.stakes === false) ? '' : (s.mid || ''), sec: s.secret || '',
@@ -1104,7 +1104,7 @@ function _rbPostRollback(barsChanged, keep){
 // onto the session before the begin fires). Ordinary duels never set it and get START_LIVES.
 function _duelMatchHearts(){ return _duelHearts(_netSess && _netSess.hearts); }
 // The level THIS match opens at, negotiated the same way on the same packet. Ordinary duels
-// never set it and open at level 1, so single-player, local 1:1 and online 1:1 all still run
+// never set it and open at level 1, so single-player, local 1vs1 and online 1vs1 all still run
 // the one startDuel -- the tournament round ladder only fills in a different number.
 function _duelMatchLvl(){ return _duelLvl(_netSess && _netSess.lvl); }
 // Online duel entry (called by net-session.js when the DataChannel opens on both ends).
@@ -1224,7 +1224,7 @@ function _rbRecovered(){ if(typeof _netResyncSettled === 'function') _netResyncS
 // In-process home of duel-core's item-handover hook: the registry client is right here, so
 // hand the claim straight to it. The worker home posts an 'iclaim' message instead.
 function _wsClaimOut(c){ if(typeof itemClaim === 'function') itemClaim(c); }
-// Local 1:1 entry (one screen, two keyboards): no network and no seed sharing --
+// Local 1vs1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
 function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
     _wsend({ t:'startDuel', seed:null, ws:_duelWsLists(null) }); }

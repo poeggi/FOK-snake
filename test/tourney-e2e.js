@@ -231,7 +231,7 @@ async function finish(m, plan){
         // ESC over the match, then YES: the way a person leaves. It owes a forfeit at
         // once (the field is not made to wait out the walkover ladder) and it owes the
         // screen the match was started from -- the tournament, still there to be
-        // re-joined, and not the 1:1 menu with the whole field left behind it.
+        // re-joined, and not the 1vs1 menu with the whole field left behind it.
         C[m.ia].quitOut('host', m.pb, sc);
         A(!C[m.ia].live() && C[m.ia].phase().indexOf('tourney') === 0,
           '2 ' + m.nid + ': ESC out of a tournament match landed on ' + C[m.ia].phase());
@@ -334,7 +334,7 @@ async function passBreak(opts){
     A(b0.rows.filter(r => r.adv).every(r => r.until === b0.next),
       'B: a row that is through does not reach the round it is through to');
 
-    // -- the two who just played got here from the duel, not from the 1:1 menu --
+    // -- the two who just played got here from the duel, not from the 1vs1 menu --
     if(opts.played) for(const i of opts.played)
         A(C[i].phase() === 'tourneyRound',
           'B: ' + NAMES[i] + ' left its match onto ' + C[i].phase() + ' instead of the tournament');
@@ -612,7 +612,7 @@ async function passBreak(opts){
     }
     srv.T.quiet = false;
     C[0].pick('DONE');
-    A(C[0].tt() === null && C[0].phase() === 'duelMenu', '10: DONE did not let go of the finished tournament');
+    A(C[0].tt() === null && C[0].phase() === 'multiplayer', '10: DONE did not let go of the finished tournament');
     rows.push('10 podium: ' + NAMES[idx(champ)] + ' took it, all six landed on the podium screen '
               + '(' + NAMES[blind] + ' off the bracket alone, having heard nothing), DONE let go');
 
@@ -969,7 +969,7 @@ async function passBreak(opts){
         // Walking OUT of the screens is not leaving: the id stays on disk, and a reload --
         // which is what actually happens when somebody puts the phone down -- has to find it.
         A(R.held() === tid2, '21: a joined tournament was never written down (' + R.held() + ')');
-        R.setPhase('duelMenu');
+        R.setPhase('multiplayer');
         A(R.held() === tid2, '21: stepping off the screens threw the way back away');
         R.forget();
         R.setPhase('tourneyLobby');

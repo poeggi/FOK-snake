@@ -1,4 +1,4 @@
-// 1:1 duel smoke: start, tick into play, per-player steering, deterministic head-on
+// 1vs1 duel smoke: start, tick into play, per-player steering, deterministic head-on
 // draw, screen rendering, state cleanup. Run: node test/smoke-duel.js
 const { runTest } = require('./harness');
 
@@ -128,7 +128,7 @@ runTest('SMOKE-DUEL', `
     if(players[0].lives!==3||duelWinner!==-1) throw 'duel: rematch did not reset the match';
     simCommand({t:'phase', phase:'menu'});
     if(players!==null) throw 'duel: returning to menu did not clear duel state';
-    log('duel 1:1 ok: steering, pause/resume, lives rounds, match end, rematch, cleanup');
+    log('duel 1vs1 ok: steering, pause/resume, lives rounds, match end, rematch, cleanup');
 
     // ---- SPEED ROUND: rolled from the SEEDED rng, so both clients agree by
     // construction -- nothing about it crosses the wire. Same seed in, same rounds out.

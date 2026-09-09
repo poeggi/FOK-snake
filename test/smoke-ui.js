@@ -97,14 +97,14 @@ runTest('SMOKE-UI', `
     _netApiOutdated=false; _netApiNewer=false;
     log('drawMenu (cached) ok');
 
-    // 1:1 submenu renders in all selection states (+ confirmation line), and the
+    // 1vs1 submenu renders in all selection states (+ confirmation line), and the
     // MY ID / ADD FRIEND / invite screens draw without error.
-    phase='duelMenu'; _duelMsg='FRIEND ADDED: 00FF-00AA'; _duelMsgAt=simNow;
-    for(duelSel=0; duelSel<4; duelSel++) drawDuelMenu();
+    phase='multiplayer'; _duelMsg='FRIEND ADDED: 00FF-00AA'; _duelMsgAt=simNow;
+    for(multiSel=0; multiSel<4; multiSel++) drawMultiplayer();
     _duelMsg='';
-    phase='friendId'; drawFriendId();
-    _inviteFid='00ff00aa'; phase='invite';
-    inviteSel=0; drawInvite(); inviteSel=1; _inviteMsg='COPIED!'; _inviteMsgAt=simNow; drawInvite();
+    phase='myId'; drawMyId();
+    _inviteFid='00ff00aa'; phase='duelInvite';
+    inviteSel=0; drawDuelInvite(); inviteSel=1; _inviteMsg='COPIED!'; _inviteMsgAt=simNow; drawDuelInvite();
     _inviteFid=null; _inviteMsg='';
     phase='nameEntry';
     // The camera is a CODE feature, not an ADD FRIEND one: both fixed-length codes are handed
@@ -133,8 +133,8 @@ runTest('SMOKE-UI', `
         menuItem=(t,y)=>{ if(t==='BACK') backs.push(y); };
         ct=grab; ctg=grab;
         settingsCat=-1; settingsSel=0; drawSettings();
+        phase='multiplayer'; multiSel=0; drawMultiplayer();
         phase='duelMenu'; duelSel=0; drawDuelMenu();
-        phase='duel11'; duel11Sel=0; drawDuel11();
         phase='friends'; _netFr.sel=0; drawFriends();
         _mc.sel=-1; phase='menu'; menuSel=0; drawMenu(simNow);
         phase='achievements'; achPage=1; drawAchievements();
@@ -157,7 +157,7 @@ runTest('SMOKE-UI', `
 
     // A MENU SPEAKS ON THE STATUS LINE OR NOT AT ALL. A greyed row has to say why, and that
     // reason used to be parked a fixed 4.6 rows below the top of the list -- a height that was
-    // clear on the two-row 1:1 menu it was written for and sat on the last row of the five-row
+    // clear on the two-row 1vs1 menu it was written for and sat on the last row of the five-row
     // MULTIPLAYER menu it was copied into. So the reason is not checked against a number here;
     // every line these menus draw has to land on furniture the whole game shares: the title, a
     // row of the list, BACK, the status line, or the hints. A menu that grows a row moves its
@@ -174,9 +174,9 @@ runTest('SMOKE-UI', `
         const onPitch=y=>Number.isInteger((y-MENU_TOP)/MENU_ROW) && y>=MENU_TOP;
         const furniture=y=>y===24||y===BACK_Y||y===STATUS_Y||y===HINT_Y||onPitch(y);
         const off0=cfg.offline; cfg.offline=true; _duelMsg='';
-        seen=[]; phase='duelMenu'; duelSel=1; drawDuelMenu();
+        seen=[]; phase='multiplayer'; multiSel=1; drawMultiplayer();
         const mp=seen;
-        seen=[]; phase='duel11'; duel11Sel=0; drawDuel11();
+        seen=[]; phase='duelMenu'; duelSel=0; drawDuelMenu();
         const d1=seen;
         const why=netStatusNotice();   // read while still offline: it is what the menus just drew
         menuItem=oItem; ct=oCt; ctg=oCtg; cfg.offline=off0; phase='menu';
@@ -187,13 +187,13 @@ runTest('SMOKE-UI', `
         const doubled=lines=>lines.filter((l,i)=>lines.some((o,j)=>j!==i&&o.y===l.y)).map(show);
         const sMp=stray(mp), sD1=stray(d1);
         if(sMp.length) throw 'MULTIPLAYER drew a line at a height of its own: '+sMp.join(' ');
-        if(sD1.length) throw 'the 1:1 menu drew a line at a height of its own: '+sD1.join(' ');
+        if(sD1.length) throw 'the 1vs1 menu drew a line at a height of its own: '+sD1.join(' ');
         if(doubled(mp).length) throw 'MULTIPLAYER drew two lines on one height: '+doubled(mp).join(' ');
-        if(doubled(d1).length) throw 'the 1:1 menu drew two lines on one height: '+doubled(d1).join(' ');
+        if(doubled(d1).length) throw 'the 1vs1 menu drew two lines on one height: '+doubled(d1).join(' ');
         // ... and the reason is actually said, on that line, in the words the rest of the game
         // uses for it -- the check above is also passed by a menu that simply stopped explaining.
         if(!mp.some(l=>l.t===why && l.y===STATUS_Y)) throw 'MULTIPLAYER did not say why TOURNAMENT is grey: '+mp.map(l=>l.t+'@'+l.y).join(' ');
-        if(!d1.some(l=>l.t===why && l.y===STATUS_Y)) throw 'the 1:1 menu did not say why ONLINE is grey: '+d1.map(l=>l.t+'@'+l.y).join(' ');
+        if(!d1.some(l=>l.t===why && l.y===STATUS_Y)) throw 'the 1vs1 menu did not say why ONLINE is grey: '+d1.map(l=>l.t+'@'+l.y).join(' ');
         // The control: the height this bug was written at is one the furniture set rejects, so
         // the pass above is the placement being right, not the set being wide enough to fit it.
         if(furniture(MENU_TOP+4.6*MENU_ROW)) throw 'the pitch check would have accepted the old note height';
@@ -334,9 +334,9 @@ runTest('SMOKE-UI', `
         simCommand({t:'startDuel', seed:0xd0e1});
         phase='duelOver'; duelWinner=0; phaseAt=simNow-10000;
         drawDuelBoard(simNow);
-        if(yn) throw 'a tournament match offered a 1:1 rematch vote';
+        if(yn) throw 'a tournament match offered a 1vs1 rematch vote';
         _tt=null; drawDuelBoard(simNow);
-        if(yn!==1) throw 'an ordinary 1:1 lost its PLAY AGAIN vote';
+        if(yn!==1) throw 'an ordinary 1vs1 lost its PLAY AGAIN vote';
         drawConfirmYesNo=oYN; simCommand({t:'phase',phase:'menu'});
         _tt=null; _ttUi.sel=0; phase='menu';
         log('tournament screens ok: roster rows carry id + name and fill from a fixed top with the host on it, nameless players get a dimmed stand-in, START is the pre-selected row, the summary sits on the status band, BACK carries the cancel, and a tournament match ends without a rematch vote');

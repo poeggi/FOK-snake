@@ -165,7 +165,7 @@ function _ttRealName(id){
     return (typeof netFriendName === 'function' && netFriendName(id)) ? String(netFriendName(id)).toUpperCase() : fmtFriendId(id);
 }
 // Where _duelExit / _netSessionEnd should land while a tournament is held: back to the
-// picture, never to the 1:1 menu. '' means "not ours, keep your default".
+// picture, never to the 1vs1 menu. '' means "not ours, keep your default".
 function tourneyExitPhase(){
     if(!_tt) return '';
     if(_tt.state === 'done') return 'tourneyPodium';
@@ -371,7 +371,7 @@ function _ttOnSignal(d){
     if(!_tt || _tt.tid !== tid) return;
     _ttAfterNote(d);
     switch(ev){
-        case 'lobby':
+        case 'duelLobby':
             _ttAdopt(d);
             if(_tt.state === 'abandoned') _ttDrop('TOURNAMENT ABANDONED');
             break;
@@ -707,7 +707,7 @@ function tourneyEnter(){
         const h = _netHello();   // picks up the tourneys list
         if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
     }
-    // A tournament link is a multiplayer door too: the same age-gated anchor refresh as the 1:1 one.
+    // A tournament link is a multiplayer door too: the same age-gated anchor refresh as the 1vs1 one.
     if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });
     if(_tt) _ttSync(); else _ttProbe();
     _uiDirty = true;
@@ -888,7 +888,7 @@ function tourneyRows(){
         // Acknowledging it and stepping off it are the same press, so they are one row -- and
         // it is the one exit that IS pre-selected, because there is nothing left to lose by
         // pressing it and nobody still playing behind it.
-        rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
+        rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'multiplayer'; Snd.sfxPlay('nav', cfg.music); } });
     } else {
         // A board opened from a ceremony has to lead back to it. ESC off the ceremony is how
         // a spectator gets here -- reading the standings while the match they are watching is
@@ -924,9 +924,9 @@ function tourneyRows(){
     // says what leaving actually costs: a lobby you walk away from is a lobby other people are
     // still sitting in, waiting for a start that is never coming, so walking away IS cancelling
     // it. Off a tournament altogether, BACK is just BACK.
-    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { phase = 'duelMenu'; Snd.sfxPlay('nav', cfg.music); } });
+    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { phase = 'multiplayer'; Snd.sfxPlay('nav', cfg.music); } });
     else if(_tt.state === 'open')
         rows.push({ t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
-                    en:true, act:() => tourneyAsk('duelMenu') });
+                    en:true, act:() => tourneyAsk('multiplayer') });
     return rows;
 }

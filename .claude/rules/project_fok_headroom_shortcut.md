@@ -1,6 +1,6 @@
 # NON-NEGOTIABLE duel pairing: 1-tick input headroom + the peer tk==simTick shortcut
 
-The 1:1 duel lockstep has a MANDATORY design pairing. Both halves must exist together; removing or "simplifying" either breaks the link. Annotated in-code as "HEADROOM here" / "SHORTCUT here" markers.
+The 1vs1 duel lockstep has a MANDATORY design pairing. Both halves must exist together; removing or "simplifying" either breaks the link. Annotated in-code as "HEADROOM here" / "SHORTCUT here" markers.
 
 Half 1 -- HEADROOM (js/duel-core.js `netLocalInput`). Every local input is authored at least ONE tick in the FUTURE (never at simTick or earlier) and sent at once: dir at `simTick + _gDue` (next step boundary, always >= simTick+1), boost/boostend at `simTick+1` (tightest lead). That one-tick lead IS the network transmit headroom -- the window for the peer to receive it and apply it on its own timeline before its sim reaches the authored tick, so the common case costs no rollback. Authoring at the current tick gives the wire zero time => a rollback on every input. Do NOT widen the lead (1 tick suffices), and do NOT collapse it to simTick.
 

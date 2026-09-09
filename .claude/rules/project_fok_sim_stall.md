@@ -3,7 +3,7 @@
 CLOSED after the hardening shipped and the symptom never recurred. Do not
 re-open, re-audit or re-propose work on it without a NEW field report.
 
-What it was (one field report, PC, online 1:1): desync -> failed restart ->
+What it was (one field report, PC, online 1vs1): desync -> failed restart ->
 kicked -> SIM STALL badge stuck. On PC the worker hosts the sim, and its tick
 loop is a self-re-arming setTimeout chain (sim-worker.js _step). ONE uncaught
 throw exited before the re-arm, leaving _running TRUE with no timer pending -

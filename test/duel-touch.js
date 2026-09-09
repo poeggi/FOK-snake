@@ -2,7 +2,7 @@
 // same-direction steer records -- one held gesture in one direction is one intent, and must
 // author no more than the dpad does for the same gesture. A genuine turn must still author.
 //
-// Field report that motivated this (iPhone client + PC, 1:1 duel): travelling in ONE direction
+// Field report that motivated this (iPhone client + PC, 1vs1 duel): travelling in ONE direction
 // and then pressing the SAME direction again --
 //   * via the on-screen DPAD  -> a clean 3 applies on the peer (1 steer + boost-start + boost-end)
 //   * via a free-touch SWIPE  -> USED TO give "multiple" live/rollback applies for that one gesture

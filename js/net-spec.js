@@ -382,6 +382,12 @@ function _spOnSignal(type, from, d){
 function _spOnWatch(from, d){
     const k = d && d.k;
     if(k === 'req'){
+        // MAKE DUELS PRIVATE. A GRANTED peer is not an ordinary watcher: a roles sheet
+        // introduced it (specGrant), and a bracket nobody may watch is a broken bracket --
+        // so the setting covers the plain watch-a-friend ask and nothing else. Refused with
+        // a BARE no: the alts below name the nodes we serve, which would route the asker
+        // straight back into the match being hidden.
+        if(cfg.privateDuels && !_spGrantOk(from)){ _spWatchSig(from, 'no'); return; }
         if(_spServable() && _spOut.length < SPEC_MAX_DIRECT){
             _spAskDrop(from);   // answered now: the copy we were holding has served its purpose
             _spGrant[from] = _spNow();

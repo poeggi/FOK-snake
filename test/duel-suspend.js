@@ -1,4 +1,4 @@
-// DUEL one-sided suspend recovery (REGRESSION suite). The field repro: in a 1:1 duel one
+// DUEL one-sided suspend recovery (REGRESSION suite). The field repro: in a 1vs1 duel one
 // device (a phone) is backgrounded for a few seconds while the OTHER keeps playing, then
 // foregrounded -- "connection re-established... but then out of sync, and resync fails."
 //

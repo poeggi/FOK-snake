@@ -85,7 +85,7 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to bo
 - REDUCE MOTION setting (seeded from the OS accessibility preference) that
   suppresses decorative motion such as the duel near-miss shake
 - Installable PWA (works offline)
-- 1:1 duels, local (one keyboard) and ONLINE: classic level progression for two,
+- 1vs1 duels, local (one keyboard) and ONLINE: classic level progression for two,
   power pellets that turn the opponent's snake into food, PLAY AGAIN rematches,
   and a camera shake when the two heads brush past -- heavier, with a sonic
   boom, when both snakes are boosting through the pass. That pass can also blow a

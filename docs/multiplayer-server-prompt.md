@@ -34,7 +34,7 @@ degrades gracefully when the server is unreachable.
    - Serve the list on demand (paginated). The client shows local scores on
      page 1 and online scores on page 2, loaded lazily.
 
-2. **1:1 multiplayer coordinator**
+2. **1vs1 multiplayer coordinator**
    - Matchmaking: pair two waiting players into a duel session; issue a shared
      seed and a shared `start_pts` (tick 0 of the common timeline).
    - Broker the connection (invite/accept signaling) and provide a relay

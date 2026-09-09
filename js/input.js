@@ -79,7 +79,7 @@ function _syncDial(){ if(nameCursorPos<nameStr.length){const ci=_entryChars().in
 //
 // Where 'user' mode returns to, submitted OR cancelled: SETTINGS when the settings row
 // opened it, the MENU when the splash did on a first start. The other modes name their own
-// destination inline (friend -> duelMenu, tcode -> tourneyLobby, score -> the scoreboard).
+// destination inline (friend -> multiplayer, tcode -> tourneyLobby, score -> the scoreboard).
 let _entryTo='settings';
 function _entryOpen(mode, prefill, to){
     entryMode=mode; nameStr=(prefill||'').substring(0,_entryMax());
@@ -94,7 +94,7 @@ function _friendAdded(id, state, added){
     if(!added) addFriend(id);
     if(state==='accepted'&&typeof _netFrCelebrate==='function') _netFrCelebrate((netFriendName(id)||fmtFriendId(id))+' - YOU ARE FRIENDS!');
     else { _duelMsg='FRIEND ADDED: '+fmtFriendId(id); _duelMsgAt=_msgNow(); }
-    _entryLeave('duelMenu'); Snd.sfxPlay('select',cfg.music);
+    _entryLeave('multiplayer'); Snd.sfxPlay('select',cfg.music);
 }
 function _submitName(){
     if(entryMode==='tcode'){
@@ -170,7 +170,7 @@ function _duelExit(){
     // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
     // follow us out and render on the menu as if it had just happened there.
     _duelMsg=''; _duelMsgAt=0;
-    phase=(typeof tourneyExitPhase==='function' && tourneyExitPhase()) || 'duel11';   // back to where the match was started from, not the main menu
+    phase=(typeof tourneyExitPhase==='function' && tourneyExitPhase()) || 'duelMenu';   // back to where the match was started from, not the main menu
     showHUD(false); Snd.musicStop(); Snd.sfxPlay('nav',cfg.music);
 }
 function _backToMenu(){ phase='menu'; Snd.sfxPlay('nav',cfg.music); }
@@ -235,7 +235,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
                 case 'SOLO PLAY':    beginGame(); break;
-                case 'MULTIPLAYER':  phase='duelMenu'; duelSel=0; if(typeof _netAnchorRefresh==='function') _netAnchorRefresh({ nudge:true }); break;   // the multiplayer door: refresh the clock anchor by age
+                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; if(typeof _netAnchorRefresh==='function') _netAnchorRefresh({ nudge:true }); break;   // the multiplayer door: refresh the clock anchor by age
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;
@@ -245,36 +245,36 @@ const UI_INPUT = {
             }
         },
     },
-    duelMenu: {
-        nav(key){ duelSel=_navStep(key, duelSel, 6); },
+    multiplayer: {
+        nav(key){ multiSel=_navStep(key, multiSel, 6); },
         confirm(){
-            if(duelSel===0){ Snd.sfxPlay('select',cfg.music); phase='duel11'; duel11Sel=0; }
-            else if(duelSel===1){
+            if(multiSel===0){ Snd.sfxPlay('select',cfg.music); phase='duelMenu'; duelSel=0; }
+            else if(multiSel===1){
                 if(typeof netTourneyOk!=='function' || !netTourneyOk()){ Snd.sfxPlay('fail',cfg.music); _duelMsg=netOffline()?'OFFLINE MODE (SETTINGS > NETWORK)':'TOURNAMENTS UNAVAILABLE'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='tourneyLobby'; tourneyEnter(); }
             }
-            else if(duelSel===2){ Snd.sfxPlay('select',cfg.music); _friendIdBack='duelMenu'; _netFr.msg=''; phase='friendId'; netMyIdEnter(); }
-            else if(duelSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
-            else if(duelSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
+            else if(multiSel===2){ Snd.sfxPlay('select',cfg.music); _myIdBack='multiplayer'; _netFr.msg=''; phase='myId'; netMyIdEnter(); }
+            else if(multiSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
+            else if(multiSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
             else this.back();   // BACK row (like drawSettings)
         },
         back: _backToMenu,
     },
-    duel11: {
-        nav(key){ duel11Sel=_navStep(key, duel11Sel, 3); },
+    duelMenu: {
+        nav(key){ duelSel=_navStep(key, duelSel, 3); },
         confirm(){
-            if(duel11Sel===0){
+            if(duelSel===0){
                 if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
-                else { Snd.sfxPlay('select',cfg.music); phase='lobby'; netLobbyEnter(); }
+                else { Snd.sfxPlay('select',cfg.music); phase='duelLobby'; netLobbyEnter(); }
             }
-            else if(duel11Sel===1){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
+            else if(duelSel===1){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
             else this.back();   // BACK row
         },
-        back(){ phase='duelMenu'; Snd.sfxPlay('nav',cfg.music); },
+        back(){ phase='multiplayer'; Snd.sfxPlay('nav',cfg.music); },
     },
-    friendId: {
-        confirm(){ phase=_friendIdBack; Snd.sfxPlay('nav',cfg.music); },
-        back(){ phase=_friendIdBack; Snd.sfxPlay('nav',cfg.music); },
+    myId: {
+        confirm(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
+        back(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
     },
     friends: {
         nav(key){
@@ -288,14 +288,14 @@ const UI_INPUT = {
                 _netFr.confirm=null; return;
             }
             const rows=_netFrRows();
-            if(_netFr.sel>=rows.length){ phase='duelMenu'; Snd.sfxPlay('nav',cfg.music); return; }
+            if(_netFr.sel>=rows.length){ phase='multiplayer'; Snd.sfxPlay('nav',cfg.music); return; }
             const r=rows[_netFr.sel];
             if(r.state==='pending' && !r.outgoing){ Snd.sfxPlay('select',cfg.music); _netFrAccept(r.id); }   // incoming request: accept
             else { Snd.sfxPlay('nav',cfg.music); _netFr.confirm=r.id; _netFr.confirmSel=1; }                  // remove: local confirm (NO preselected)
         },
         back(){
             if(_netFr.confirm){ _netFr.confirm=null; Snd.sfxPlay('nav',cfg.music); }
-            else { phase='duelMenu'; Snd.sfxPlay('nav',cfg.music); }
+            else { phase='multiplayer'; Snd.sfxPlay('nav',cfg.music); }
         },
         other(key){
             if(!_netFr.confirm) return false;
@@ -304,7 +304,7 @@ const UI_INPUT = {
             return false;
         },
     },
-    lobby: {
+    duelLobby: {
         nav(key){
             if(_netLb.invite){ const s=_navLR(key); if(s>=0) _netLb.inviteSel=s; return; }
             _netLb.sel=_navStep(key, _netLb.sel, getFriends().length+2);   // QUICK MATCH + friends + BACK
@@ -323,7 +323,7 @@ const UI_INPUT = {
             }
             else this.back();
         },
-        back(){ netLobbyLeave(); phase='duel11'; Snd.sfxPlay('nav',cfg.music); },
+        back(){ netLobbyLeave(); phase='duelMenu'; Snd.sfxPlay('nav',cfg.music); },
         other(key){
             if(!_netLb.invite) return false;
             if(key==='y'||key==='Y'){ Snd.sfxPlay('select',cfg.music); _netInviteAnswer(true); return true; }
@@ -331,7 +331,7 @@ const UI_INPUT = {
             return false;
         },
     },
-    invite: {
+    duelInvite: {
         nav(key){ if(key==='ArrowUp'||key==='ArrowDown'){ inviteSel=1-inviteSel; Snd.sfxPlay('nav',cfg.music); } },
         confirm(){
             if(inviteSel===0){
@@ -345,16 +345,16 @@ const UI_INPUT = {
     // The three tournament screens that offer a choice share ONE handler, because they
     // share one row model (tourneyRows): whatever the picture above them is, the rows at
     // the bottom are drawn and dispatched from the same list, so they can never disagree.
-    tourneyLobby: _ttUiInput('duelMenu'),
+    tourneyLobby: _ttUiInput('multiplayer'),
     tourneyCode: {
         // Nothing to choose: the screen is one number and the link that carries it.
         nav(){},
         confirm(){ phase='tourneyLobby'; Snd.sfxPlay('nav',cfg.music); },
         back(){ phase='tourneyLobby'; Snd.sfxPlay('nav',cfg.music); },
     },
-    tourneyBracket: _ttUiInput('duelMenu'),
-    tourneyRound: _ttUiInput('duelMenu'),
-    tourneyPodium: _ttUiInput('duelMenu'),
+    tourneyBracket: _ttUiInput('multiplayer'),
+    tourneyRound: _ttUiInput('multiplayer'),
+    tourneyPodium: _ttUiInput('multiplayer'),
     tourneyQuit: {
         nav: _navQC,
         confirm(){
@@ -503,24 +503,24 @@ const UI_INPUT = {
                 // ESC-YES is the THIRD way out of a duel and owes what the other two owe:
                 // a tournament match walked out on is a match lost, said before the teardown
                 // (the report reads the score off the live session), and a watch put down
-                // after it. Without them a spectator kept a feed running from the 1:1 menu.
+                // after it. Without them a spectator kept a feed running from the 1vs1 menu.
                 if(typeof tourneyMatchLeft==='function') tourneyMatchLeft();
                 if(typeof netEndSession==='function') netEndSession();   // online duel: bye + teardown (no-op otherwise)
                 if(typeof netSpectating==='function' && netSpectating() && typeof specStop==='function') specStop('');
-                const wasDuel = (prevPhase && prevPhase.indexOf('duel')===0) || !!players;   // quitting a 1:1 returns to the 1:1 menu, not main ('dying' needs the players marker)
+                const wasDuel = (prevPhase && prevPhase.indexOf('duel')===0) || !!players;   // quitting a 1vs1 returns to the 1vs1 menu, not main ('dying' needs the players marker)
                 inGame=false; showHUD(false);
                 Snd.musicFadeOut(0.25); Snd.duck(false);   // leave: fade the game track 0.25s, sfx back to normal (fadeOut cleared the track, so duck skips music)
                 _musicHoldUntil = performance.now()+250;   // menu music starts after the fade
-                _wsend({t:'run',on:true}); _wsend({t:'phase',phase:'menu'});   // worker has no duelMenu phase: send it to menu
+                _wsend({t:'run',on:true}); _wsend({t:'phase',phase:'menu'});   // worker has no multiplayer phase: send it to menu
                 // Quitting on purpose says nothing: _duelMsg is never cleared, only
                 // overwritten, so an in-game line from the last 2.6s would follow us out
                 // and draw on the menu as if it had happened there. (_duelExit does the
                 // same -- these are the two ways out that a person CHOOSES.)
                 _duelMsg=''; _duelMsgAt=0;
                 // Back to where the match was started from: a tournament match walked out
-                // on lands on the tournament, not on the 1:1 menu, so the field is still
+                // on lands on the tournament, not on the 1vs1 menu, so the field is still
                 // there to be re-joined (minus the match just forfeited).
-                phase = (typeof tourneyExitPhase==='function' && tourneyExitPhase()) || (wasDuel ? 'duel11' : 'menu');   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
+                phase = (typeof tourneyExitPhase==='function' && tourneyExitPhase()) || (wasDuel ? 'duelMenu' : 'menu');   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
             }   // quit: leave gameplay, keep the worker clock running for menu animations
             else { phase=prevPhase; Snd.duck(false); }   // back to the game at full volume
         },
@@ -577,7 +577,7 @@ const UI_INPUT = {
             // goes back to whoever opened the dialog (_entryTo), not always to SETTINGS.
             // Score mode has no cancel at all: a run always ends in a submit.
             if(key!=='Backspace' && entryMode==='tcode'){ _entryLeave('tourneyLobby'); Snd.sfxPlay('nav',cfg.music); return; }
-            if(key!=='Backspace' && entryMode==='friend'){ _entryLeave('duelMenu'); Snd.sfxPlay('nav',cfg.music); return; }
+            if(key!=='Backspace' && entryMode==='friend'){ _entryLeave('multiplayer'); Snd.sfxPlay('nav',cfg.music); return; }
             if(key!=='Backspace' && entryMode!=='score' && nameStr.length===0){ _entryLeave(_entryTo); Snd.sfxPlay('nav',cfg.music); }
             else _nameDelete();
         },
@@ -841,7 +841,7 @@ function _touchSensF(){ return _TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touc
 // pause resets the run, so a spiral you actually mean is still yours to make. Gesture-only: it
 // reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
 // pause has cleared it, our own snake's heading seeds the first turn -- _myDir(), so the guard
-// arms off the same heading in single player, local 1:1 and online 1:1 alike.
+// arms off the same heading in single player, local 1vs1 and online 1vs1 alike.
 let _turnSense=0, _turnRun=0;
 function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;

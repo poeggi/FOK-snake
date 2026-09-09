@@ -328,7 +328,7 @@ function mkServer(opts){
                     if(T.players.length >= T.max) return note(bad(409, 'tournament is full'));
                     const p = { id, name:names[id] || '?', seat:T.players.length };
                     T.players.push(p); T.seen.push(p);
-                    all({ event:'lobby', tid:T.tid, code:T.code, host:T.host, state:T.state, stakes:T.stakes,
+                    all({ event:'duelLobby', tid:T.tid, code:T.code, host:T.host, state:T.state, stakes:T.stakes,
                           max:T.max, players:T.players.map(x => ({ id:x.id, name:x.name })) });
                     return note(ok({ tid:T.tid, code:T.code, stakes:T.stakes, max:T.max, host:T.host, state:T.state,
                                      players:T.players.map(x => ({ id:x.id, name:x.name })) }));
@@ -422,7 +422,7 @@ function driverSrc(id){
         + '  _netRtcAnswer = function(peer, d){ if(inGame) return; REC.answers.push({ peer:String(peer), seed:(d && d.seed) | 0 }); };\n'
         + '  _netSignal = function(to, type, payload){ REC.sigs.push({ to:String(to), type:String(type), payload:String(payload) }); };\n'
         + '  _netTimeSync = function(){};\n'
-        + '  _duelExit = function(){ inGame = false; _netSess = null; REC.exits++; phase = (typeof tourneyExitPhase === "function" && tourneyExitPhase()) || "duel11"; };\n'
+        + '  _duelExit = function(){ inGame = false; _netSess = null; REC.exits++; phase = (typeof tourneyExitPhase === "function" && tourneyExitPhase()) || "duelMenu"; };\n'
         // specWatch is the REAL one, wrapped: it still grants, still signals, still sets
         // p2p-only. Only the RTCPeerConnection it would open is missing from this world.
         + '  var _realWatch = specWatch;\n'

@@ -1,5 +1,5 @@
 // ============================================================================
-// duel-core.js -- the DETERMINISTIC ROLLBACK CORE of the online 1:1 duel: the
+// duel-core.js -- the DETERMINISTIC ROLLBACK CORE of the online 1vs1 duel: the
 // snapshot ring, the input log, live-apply vs rewind, hashes, state recovery and
 // the full resync. Split out of the net layer so the same code runs in TWO homes:
 //   - the SIM WORKER (the default wherever Worker exists): sim-worker.js

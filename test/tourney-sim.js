@@ -161,7 +161,7 @@ function playMatch(p, sh, nd, seed){
     // feeder, the secondary dual-connects to both primaries and picks one.
     const watchers = sh.primaries.map(() => ({ at:0.5, from:'A' }))
         .concat(sh.secondaries.map(() => ({ at:1.5, from:['S1', 'S2'] })));
-    // The match opens on the node's OWN terms, not on a 1:1's: the round's level, the round's
+    // The match opens on the node's OWN terms, not on a 1vs1's: the round's level, the round's
     // hearts, and the gear both players are wearing into it.
     return runSpec({ secs:p.secs, seed, wire:p.wire,
                      specWire:{ base:p.wire.base + 8, jit:p.wire.jit + 4 },
