@@ -306,7 +306,9 @@ const UI_INPUT = {
                 Snd.sfxPlay('nav',cfg.music); _evUi.ask=go; quitConfirmSel=1; phase='eventConfirm'; return;
             }
             Snd.sfxPlay('select',cfg.music);
-            if(go==='pass') eventPassEnter();
+            if(go==='tourney') eventTourneyGo();
+            else if(go==='newtourney') eventTourneyNew();
+            else if(go==='pass') eventPassEnter();
             else if(go==='members') eventMembersEnter();
             else if(go==='run') eventRun();
             else if(go==='pause') eventPause();

@@ -267,15 +267,29 @@ const DRIVER = `
     if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
     // An ordinary member: leave, and nothing that is the organizer's.
     if(gos(mem()).join(',') !== 'pass,members,leave') throw 'an active member gets the QR, the roster and leave: '+gos(mem());
+    // A live tournament is a way IN for anybody in the room; opening one is the organizer's.
+    const TT = { tid:'t1', code:'K7QMX2', state:'open', players:3, max:8 };
+    if(gos(mem({tourney:TT})).join(',') !== 'tourney,pass,members,leave') throw 'a member gets a way into the live one: '+gos(mem({tourney:TT}));
+    if(gos(mem()).indexOf('newtourney') >= 0) throw 'only the organizer opens one';
     // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
     // its own room, because leaving would abandon what it is running.
     const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
-    if(gos(org()).join(',') !== 'pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(gos(org()).join(',') !== 'newtourney,pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    // ...and not a SECOND one while the first stands: the cap is the server's, and one
+    // live per host is the same cap an ordinary tournament has.
+    if(gos(org({tourney:TT})).indexOf('newtourney') >= 0) throw 'no second tournament while one is live';
+    if(gos(org({tourney:TT}))[0] !== 'tourney') throw 'the live one leads';
+    // A PAUSED event takes no new tournaments, and an ENDED one never will again.
+    if(gos(org({state:'paused'})).indexOf('newtourney') >= 0) throw 'a paused event opens no tournament';
+    if(gos(org({state:'ended'})).indexOf('newtourney') >= 0) throw 'an ended event opens no tournament';
+    // ...but a tournament RUNNING at the moment of the end plays on and is still
+    // reachable: it began while the event was live, and a clock must not stop it.
+    if(gos(org({state:'ended', tourney:TT})).indexOf('tourney') < 0) throw 'a running tournament survives the end';
     if(gos(org({state:'paused'})).join(',') !== 'members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
     // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
     // are not offered. The door still is -- it is not on the clock.
-    if(gos(org({starts:1})).join(',') !== 'pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
+    if(gos(org({starts:1})).join(',') !== 'newtourney,pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
     // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
     if(gos(org({state:'ended'})).join(',') !== 'members') throw 'an ended event is still readable, and nothing else: '+gos(org({state:'ended'}));
     if(gos(mem({state:'ended'})).join(',') !== 'members,leave') throw 'an ended event mints no pass, and stays readable';
@@ -325,6 +339,56 @@ const DRIVER = `
       if(_ev !== null) throw 'leaving must drop the page';
       if(eventAny()) throw 'leaving must drop the row from the list';
       if(phase !== 'multiplayer') throw 'the last event left lands on MULTIPLAYER, got '+phase;
+      // ---- an event tournament is an ORDINARY tournament ------------------
+      // eid is a tag on it and a membership check on the way in. There is no
+      // second state machine here and there must never be one.
+      {
+        const _oSetup=tourneySetupOpen, _oPost2=_netPostRes, _oMin=_netSrvMin;
+        // netTourneyOk() is the same gate the menu row uses, and it needs a server
+        // that answers 4.1 or better. Without it every create below would no-op and
+        // each assertion would pass by never running.
+        _netSrvMin = NET_API_BUILT_MINOR;
+        if(!netTourneyOk()) throw 'the suite must look online to a tournament, or the create checks are vacuous';
+        // EVERY post is recorded, not the last one: a create is followed by the reads
+        // it provokes, and the last body on the wire is one of those.
+        let posts=[];
+        const created=()=>posts.filter(x=>String(x.action||'')==='create');
+        _netPostRes=async(path,b)=>{ posts.push(b||{}); return { json:{ok:true, tid:'t9', code:'K7QMX2'}, status:200, body:{} }; };
+        _evEid='K7QM'; _ev=mem({ you:{state:'member',organizer:true} });
+        // The create is the NORMAL dialog, opened with the room it belongs to.
+        tourneySetupOpen=(eid)=>{ _ttUi.eid=String(eid||''); };
+        eventTourneyNew();
+        if(_ttUi.eid !== 'K7QM') throw 'the create must carry the room it was opened from';
+        tourneySetupOpen=_oSetup;
+        // ...and that eid reaches the wire on the create itself.
+        _tt=null; _ttUi.busy=false; _ttUi.eid='K7QM'; posts=[];
+        await tourneyCreate(false, 1, false);
+        if(created().length !== 1) throw 'exactly one create: '+created().length;
+        if(created()[0].eid !== 'K7QM') throw 'create must post the eid: '+JSON.stringify(created()[0]);
+        // A create started from the ORDINARY tournament screen inherits no room.
+        _tt=null; _ttUi.busy=false; posts=[];
+        tourneySetupOpen();
+        if(_ttUi.eid !== '') throw 'an ordinary create must carry no eid';
+        await tourneyCreate(false, 1, false);
+        if(created().length !== 1) throw 'exactly one ordinary create';
+        if('eid' in created()[0]) throw 'an ordinary create must not post one: '+JSON.stringify(created()[0]);
+        _netPostRes=_oPost2; _netSrvMin=_oMin; _tt=null; _ttUi.busy=false; _ttUi.eid='';
+      }
+      // A lobby carrying an eid is marked in the announce -- it reached that list at
+      // all only because we are in the event, and the room is why it is there.
+      {
+        const _oList=_netTourneys;
+        _netTourneys=[{ tid:'t1', code:'AAAAAA', host_name:'x', players:1, max:8 },
+                      { tid:'t2', code:'BBBBBB', host_name:'y', players:1, max:8, eid:'K7QM' }];
+        _tt=null; phase='tourneyLobby';
+        const notes=tourneyRows().filter(r=>r.name).map(r=>String(r.note));
+        if(notes.length !== 2) throw 'both lobbies must be listed: '+notes;
+        if(/EVENT/.test(notes[0])) throw 'an ordinary lobby is not marked';
+        if(!/EVENT/.test(notes[1])) throw 'an event lobby must say so: '+notes[1];
+        _netTourneys=_oList; phase='menu';
+      }
+      R.steps.push('event tournaments ok: eid rides the create and only that create, the announce marks the room');
+
       // ---- the pass rotates locally, on the synced clock ------------------
       // ONE call gives six slots -- a minute of QR -- and nothing polls: the
       // codes are already in hand and the screen picks the one that is live.

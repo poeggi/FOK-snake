@@ -2192,6 +2192,19 @@ function drawEventPage(){
     }
     if(e.organizer_name) ct('HOSTED BY ' + String(e.organizer_name).substring(0, 15), CW/2, y, '#888', FONT.HINT);
     const rows = eventRows();
+    // The ARCHIVE, at the foot: every tournament this room has finished, newest
+    // first, with who stood on the podium. It is the record an evening leaves
+    // behind, and ending the event freezes it rather than clearing it.
+    const arch = Array.isArray(e.archive) ? e.archive : [];
+    if(arch.length){
+        let ay = BACK_Y - 16 - Math.min(2, arch.length) * 14;
+        ct('PLAYED HERE', CW/2, ay - 14, '#4a7a4a', FONT.HINT);
+        for(const a of arch.slice(0, 2)){
+            const pod = (a.podium || []).slice(0, 3).map(x => String(x.name || fmtFriendId(String(x.id))).substring(0, 8));
+            ct((a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-'), CW/2, ay, '#888', FONT.HINT);
+            ay += 14;
+        }
+    }
     rows.forEach((r,i)=>menuItem(r.t, MENU_TOP + 40 + i*MENU_ROW, ui.sel===i));
     // The line under the door row, because "closed" is a word people read two ways
     // and the wrong reading is that the event itself has shut.

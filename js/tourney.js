@@ -44,7 +44,7 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, busy:false, contAt:0, from:'', to:'', ask:null };
+var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, eid:'', busy:false, contAt:0, from:'', to:'', ask:null };
 // stakes and lvl are what the CREATE screen collects before there is a tournament to put
 // them on. They live here rather than in cfg because they describe one tournament, not
 // this device: the next one is configured from its own screen.
@@ -788,7 +788,11 @@ function tourneyRejoin(){
 // CREATE is two presses, not one: the screen that collects what a tournament is played FOR
 // comes first, and the row on it that says CREATE is the one that talks to the server. The
 // settings are read off _ttUi there, so nothing is passed in and nothing can be half-passed.
-function tourneySetupOpen(){
+function tourneySetupOpen(eid){
+    // The event the create belongs to, or none. Set on every open rather than left
+    // standing: a create started from the ordinary tournament screen after one
+    // started from an event page must not inherit the room.
+    _ttUi.eid = String(eid || '');
     _ttUi.sel = 0;   // an ordinary list, top row armed -- and the top row is CREATE, which is what this screen is for
     phase = 'tourneySetup';
     Snd.sfxPlay('select', cfg.music);
@@ -799,6 +803,11 @@ async function tourneyCreate(stakes, lvl, speed, replace){
     if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
     _ttUi.busy = true; _ttMsg('CREATING...');
     const body = { stakes: !!stakes, lvl: _duelLvl(lvl), speed: !!speed };
+    // AN EVENT TOURNAMENT IS AN ORDINARY TOURNAMENT. `eid` is a tag on it and a
+    // membership check on the way in, and that is the entire difference: no second
+    // state machine, no event branch in the bracket, nothing else on this side.
+    // The one place it is set is the create the event page opened.
+    if(_ttUi.eid) body.eid = _ttUi.eid;
     if(replace) body.replace = true;
     const r = await _ttPost('create', body);
     _ttUi.busy = false;
@@ -992,8 +1001,13 @@ function tourneyRows(){
         // than more text in the label.
         for(const l of tourneyLobbyList().slice(0, 6)){
             const n = l.players | 0, mx = l.max | 0;
+            // A lobby carrying an eid is an EVENT's, and it reached this list at all
+            // only because we are in that event -- the server serves it to members
+            // regardless of network and to nobody else. Marked rather than hidden:
+            // the room it belongs to is why it is here.
             rows.push({ t:String(l.code || ''), name:String(l.host_name || '?').toUpperCase(),
-                        note:n + '/' + mx, en:ok && n < mx, act:() => tourneyJoin(l.tid || l.code) });
+                        note:(l.eid ? 'EVENT  ' : '') + n + '/' + mx,
+                        en:ok && n < mx, act:() => tourneyJoin(l.tid || l.code) });
         }
     } else if(_tt.state === 'open'){
         const host = _tt.host === getPlayerId(), n = (_tt.players || []).length;

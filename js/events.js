@@ -286,6 +286,12 @@ function eventRows(){
     // A MONITOR may call state and monitor and nothing else, so it is offered
     // nothing else. Its own screen arrives with the monitor itself.
     if(_evYou() === 'monitor') return rows;
+    // THE LIVE TOURNAMENT, if one is open or running. It is an ordinary tournament
+    // and the ordinary screens show it, so this row is a way IN and nothing more.
+    if(e.tourney && e.tourney.tid) rows.push({ t:'GO TO THE TOURNAMENT', go:'tourney' });
+    // ...and the organizer is the one who may open it. The create is the NORMAL
+    // dialog: same settings, same screen, posting an eid too.
+    if(org && st === 'active' && !(e.tourney && e.tourney.tid)) rows.push({ t:'CREATE TOURNAMENT', go:'newtourney' });
     // Any member may pass the event on while it is ACTIVE -- that is what makes it
     // spread in a room. Not before it starts, not while it is paused, and never
     // once it has ended: the server mints no pass then, so nothing here offers one.
@@ -451,6 +457,32 @@ async function eventAskFriend(m){
     // The roster carries the `friend` field, so the answer to "did that land"
     // is the same read as everything else on this screen.
     await eventMembersRead();
+    return true;
+}
+
+// ---- the event's tournaments -----------------------------------------------
+// AN EVENT TOURNAMENT IS AN ORDINARY TOURNAMENT: same lifecycle, same bracket,
+// same deadlines, same caps, same screens. `eid` is a tag on it and a membership
+// check on the way in, and that is the whole of the difference. Nothing here is a
+// second implementation of anything -- both of these hand over to tourney.js.
+function eventTourneyGo(){
+    const t = _ev && _ev.tourney;
+    if(!t || !t.tid || typeof tourneyJoin !== 'function'){ _evMsg('NO TOURNAMENT RIGHT NOW', true); return false; }
+    // By tid, which is what the state answer names it by. A non-member is refused
+    // 403 by the server -- that refusal IS the secrecy, and it is the server's to
+    // make, not this screen's to anticipate.
+    phase = 'tourneyLobby';
+    if(typeof tourneyEnter === 'function') tourneyEnter();
+    tourneyJoin(t.tid);
+    return true;
+}
+// The NORMAL create dialog, carrying the room it was opened from. The event page
+// is where an organizer stands when they decide to run one, so it is where the
+// dialog opens -- but the dialog is the same one, and the settings on it are the
+// same settings.
+function eventTourneyNew(){
+    if(typeof tourneySetupOpen !== 'function'){ _evMsg('NOT RIGHT NOW', true); return false; }
+    tourneySetupOpen(_evEid);
     return true;
 }
 
