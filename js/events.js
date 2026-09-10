@@ -100,6 +100,14 @@ async function _evPost(action, extra){
     return await netActionPost('/api/event.php', action,
                                Object.assign({ eid:_evEid }, extra || {}));
 }
+// ...except JOIN, which is the one action asked by somebody who has no row yet
+// and therefore no eid to name. It posts THE CODE EXACTLY AS SCANNED and the
+// server reads the event out of it: a pass carries the eid in front of its own
+// dot, a printed key names its own event and has no dot at all. Sending an eid
+// here would be the client guessing at something it cannot know from a key.
+async function _evPostJoin(code){
+    return await netActionPost('/api/event.php', 'join', { code:code });
+}
 
 // ---- getting in ------------------------------------------------------------
 // The seven answers a join can give, each in its own words. A 404 is a wrong
@@ -124,14 +132,17 @@ function _evJoinFail(r){
 }
 // Scan -> row. Idempotent at the server, so a lost answer costs nothing: asking
 // again answers what the first one did, achievement included.
-async function eventJoin(eid, code){
+async function eventJoin(code){
     if(_evUi.busy) return false;
     if(!_evOk()){ _evMsg('EVENTS NEED A NETWORK', true); return false; }
-    _evEid = String(eid || '').toUpperCase();
     _evUi.busy = true; _evMsg('JOINING...');
-    const r = await _evPost('join', { code:String(code || '').toUpperCase() });
+    const r = await _evPostJoin(String(code || '').toUpperCase());
     _evUi.busy = false;
     if(!r.json){ _ev = null; _evMsg(_evJoinFail(r), true); return false; }
+    // WHICH EVENT this was is the ANSWER's to say, not the code's. A pass shows
+    // its eid and a key does not, so there is exactly one way to learn it that
+    // works for both: read it back off the state the join returns -- which is
+    // what _evAdopt already does with every eid it is handed, so it does it here.
     _evAdopt(r.json);
     const pending = _evYou() === 'pending';
     _evMsg(pending ? 'WAITING FOR APPROVAL' : 'YOU ARE IN');
@@ -258,7 +269,7 @@ function eventEnter(){
         const l = _eventLink;
         if(!l){ if(_evEid) eventRead(); return; }
         _eventLink = null;
-        eventJoin(l.eid, l.code);
+        eventJoin(l);
     };
     if(typeof _netHello === 'function' && _netOk()){
         const h = _netHello();

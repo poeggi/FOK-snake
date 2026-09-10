@@ -133,8 +133,11 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to bo
   in-app camera QR scanner with a dependency-free decoder (ADD FRIEND)
 - Three deep links, each also readable by the in-app scanner from any screen:
   `#friend=<8 hex>` (add me), `#tourney=<code>` (join that lobby) and
-  `#event=<eid>.<code>` (join that event -- the code is the printed 16-character
-  key or a live 6-character pass, and the client never has to tell them apart)
+  `#event=<code>` (join that event). An event code is 11 characters either way and
+  the dot tells the two apart: a live pass is `<eid>.<pass>`, and a printed key has
+  no dot because it names its own event. Eleven is the whole budget -- every QR an
+  event shows has to be readable by the game's own scanner, which is a fixed QR
+  version 3 holding 53 bytes, and 42 of those are the URL itself
 - Online matchmaking via FOK-server (invite friends with live online status and
   latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
   DataChannel, with an HTTP relay fallback when P2P cannot connect. The netcode is
@@ -167,8 +170,10 @@ start duels. Tournaments and spectating additionally need **4.1** -- against a
 The per-round detail described above -- a match starting at the level the bracket
 says, a finished round stopping on a scoreboard -- arrived in **4.3**; a 4.1 or
 4.2 server still runs tournaments, just without it.
-Events need **4.11**: an older server serves no event list, so the menu entry
-never appears and everything else works as before.
+Events need **4.11**, and their printed poster needs **4.12** -- that is where the
+key became 11 characters and the server began rendering the poster at the one QR
+shape the in-app scanner reads. An older server serves no event list at all, so the
+menu entry never appears and everything else works as before.
 Single-player is unaffected either way.
 The engine runs on a deterministic fixed-timestep 60 Hz tick clock, which is
 what makes prediction netcode and replay-validated scores possible.

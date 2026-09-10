@@ -16,41 +16,53 @@ const DRIVER = `
     // it. The two code lengths are the printed key (16) and the live pass (6),
     // and nothing here has to tell them apart: both go out as \`code\`.
     const hit = (s) => EVENT_HASH_RE.exec(s);
+    // ONE capture: the code exactly as scanned, dot and all, because that is what
+    // join posts. The two shapes spend the same 11 characters differently.
     let m = hit(U + '#event=K7QM.H3KM9P');
-    if(!m || m[1]!=='K7QM' || m[2]!=='H3KM9P') throw 'pass link did not parse: '+JSON.stringify(m&&m.slice(1));
-    m = hit(U + '#event=K7QM.ABCDEFGHJKMNPQRS');
-    if(!m || m[2].length!==16) throw '16-char key link did not parse';
-    if(hit(U + '#event=K7QM.H3KM9')) throw 'a 5-char code must not parse';
-    if(hit(U + '#event=K7QM.H3KM9PQ')) throw 'a 7-char code must not parse';
+    if(!m || m[1] !== 'K7QM.H3KM9P') throw 'a PASS keeps its dot and its eid: '+JSON.stringify(m&&m[1]);
+    m = hit(U + '#event=ABCDEFGHJKM');
+    if(!m || m[1] !== 'ABCDEFGHJKM') throw 'a KEY is 11 characters and no dot: '+JSON.stringify(m&&m[1]);
+    // THE DOT IS THE ONLY THING that tells them apart, and the lengths are exact.
+    if(hit(U + '#event=K7QM.H3KM9')) throw 'a 5-char pass must not parse';
+    if(hit(U + '#event=K7QM.H3KM9PQ')) throw 'a 7-char pass must not parse';
     if(hit(U + '#event=K7Q.H3KM9P')) throw 'a 3-char eid must not parse';
-    if(hit(U + '#event=K7QMX.H3KM9P')) throw 'a 5-char eid must not parse';
+    if(hit(U + '#event=ABCDEFGHJK')) throw 'a 10-char key must not parse';
+    if(hit(U + '#event=ABCDEFGHJKMN')) throw 'a 12-char key must not parse';
+    // ...and 4.11's 16-character key is gone: it was 63 bytes, which no version 3
+    // code holds, which is the whole reason the key was shortened.
+    if(hit(U + '#event=K7QM.ABCDEFGHJKMNPQRS')) throw 'the 4.11 key shape must no longer parse';
     if(hit(U + '#event=K7QM.H3KM9P&x=1')) throw 'a trailing query must not parse (anchored)';
-    if(hit(U + '#event=K0QM.H3KM9P')) throw '0 is outside A-Z2-9';
-    if(hit(U + '#event=K1QM.H3KM9P')) throw '1 is outside A-Z2-9';
     if(hit(U + '#event=k7qm.h3km9p')) throw 'lowercase is not a code';
-    // THE CLASS IS THE CONTRACT'S, NOT THE ALPHABET'S. A-Z2-9 is what API.md
-    // states, and it is one character wider than the codes actually use: the
-    // unambiguous alphabet also drops I, L and O. Kept as stated on purpose --
-    // this is a SHAPE filter, and what a code really is belongs to the server,
-    // which answers a wrong one 404 like every other wrong one. Narrowing it
-    // here would make the client the second opinion on somebody else's alphabet.
+    // The class is the CONTRACT'S (A-Z2-9), one character wider than the alphabet,
+    // which also drops I, L and O. Deliberate: this is a SHAPE filter, and what a
+    // code really is belongs to the server, which answers a wrong one 404.
     if(!hit(U + '#event=KOQM.H3KM9P')) throw 'the shape filter is the contract regex, not the alphabet';
     // The other two hashes are not events, and an event is not one of them.
     if(hit(U + '#friend=00ff00ee')) throw 'a friend link must not read as an event';
     if(hit(U + '#tourney=K7QMX2')) throw 'a tournament link must not read as an event';
-    if(EVENT_EID_LEN!==4 || EVENT_PASS_LEN!==6 || EVENT_KEY_LEN!==16) throw 'identifier lengths moved';
-    log('hash parser ok: 4+1+(6|16), the contract shape class, anchored, never the other two links');
+    if(EVENT_EID_LEN!==4 || EVENT_PASS_LEN!==6 || EVENT_KEY_LEN!==11) throw 'identifier lengths moved';
+    if(EVENT_EID_LEN + 1 + EVENT_PASS_LEN !== EVENT_CODE_LEN) throw 'a dotted pass must spend the whole budget';
+    if(EVENT_KEY_LEN !== EVENT_CODE_LEN) throw 'a key must spend the same budget';
+    log('hash parser ok: one 11-char budget, the dot tells a pass from a key, never the other two links');
 
     // ---- THE 53-BYTE BUDGET ------------------------------------------------
     // The live pass QR is rendered HERE, by a fixed version-3 byte-mode encoder,
     // and the identifiers are the length they are because of it: 42 bytes of
     // URL + 4 + 1 + 6 = 53, with not one byte spare. If this fails, the wire
     // shape has to change, not the encoder.
-    const payload = U + '#event=K7QM.H3KM9P';
-    if(payload.length !== 53) throw 'pass payload is '+payload.length+' bytes, not 53';
     if(U.length + '#event='.length !== 42) throw 'the URL prefix is not 42 bytes';
+    // BOTH shapes, because the server now renders the poster at this same version 3
+    // too -- level L, mask 0, the one shape this client's decoder reads. A poster
+    // nobody can scan in the app is the wrong poster, and 4.11's 63-byte key was
+    // exactly that.
+    const payload = U + '#event=K7QM.H3KM9P';
+    const keyload = U + '#event=ABCDEFGHJKM';
+    if(payload.length !== 53) throw 'pass payload is '+payload.length+' bytes, not 53';
+    if(keyload.length !== 53) throw 'key payload is '+keyload.length+' bytes, not 53';
     const q = qrMatrix(payload);
     if(!q || q.size !== 29) throw 'the pass payload did not render at version 3';
+    const qk = qrMatrix(keyload);
+    if(!qk || qk.size !== 29) throw 'the key payload did not render at version 3';
     // ...and one byte more must be refused rather than silently truncated.
     let over = false;
     try { qrMatrix(payload + 'X'); } catch(e){ over = true; }
@@ -588,6 +600,34 @@ const DRIVER = `
       if(phase !== 'eventPage') throw 'the QR screen returns to the page';
       _evPass=null; _evPassBusy=false; _evEid='';
       R.steps.push('pass ok: six slots one call, newest live slot at 9.9/10/19.9/20s, re-asked before the last lapses');
+
+      // ---- JOIN posts the code and NOTHING ELSE ---------------------------
+      // It is the one action asked by somebody with no row yet, so there is no
+      // eid to name -- and a printed KEY has none to send in the first place.
+      // Which event it was is the ANSWER's to say.
+      {
+        let sent = null;
+        _evPost = async () => { throw 'join must not go through the eid-stamping post'; };
+        netActionPost = async (path, action, extra) => {
+            sent = { path, action, extra };
+            return { json:{ ok:true, eid:'K7QM', name:'Snake Night',
+                            you:{ state:'member', organizer:false } }, status:200, body:{} };
+        };
+        _ev = null; _evEid = ''; _evUi.busy = false;
+        await eventJoin('ABCDEFGHJKM');                 // a printed key: no eid anywhere
+        if(!sent || sent.action !== 'join') throw 'join did not go out';
+        if('eid' in sent.extra) throw 'join must post NO eid: ' + JSON.stringify(sent.extra);
+        if(sent.extra.code !== 'ABCDEFGHJKM') throw 'the code goes exactly as scanned: ' + sent.extra.code;
+        if(_evEid !== 'K7QM') throw 'the eid is read back off the answer, got ' + _evEid;
+        // A pass goes the same way, dot and all -- the client never has to know
+        // which of the two it is holding.
+        _ev = null; _evEid = ''; _evUi.busy = false;
+        await eventJoin('k7qm.h3km9p');
+        if('eid' in sent.extra) throw 'a pass posts no eid either';
+        if(sent.extra.code !== 'K7QM.H3KM9P') throw 'the code is upper-cased, dot kept: ' + sent.extra.code;
+        _evEid = ''; _ev = null;
+      }
+      R.steps.push('join ok: the code alone, dot and all, and the eid comes back on the answer');
 
       // ---- the roster is a VIEW, never a list this client keeps -----------
       // Read on every open, re-read after every verb, dropped when the screen

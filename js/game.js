@@ -99,7 +99,7 @@ try {
 let _eventLink = null;
 try {
     const em = EVENT_HASH_RE.exec(location.hash);
-    if (em) _eventLink = { eid: em[1], code: em[2] };
+    if (em) _eventLink = em[1];   // the code exactly as scanned -- the server reads the event out of it
 } catch(e) {}
 let inviteSel = 0, _inviteMsg = '', _inviteMsgAt = 0;
 let _myIdBack = 'multiplayer';   // where the MY ID screen returns to (1vs1 menu or SETTINGS > USER)

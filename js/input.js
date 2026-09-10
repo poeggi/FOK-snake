@@ -1395,9 +1395,13 @@ function _scanHit(str){
     // so it takes the camera over and joins.
     const ev=EVENT_HASH_RE.exec(s);
     if(ev){
-        _scanOk='EVENT '+ev[1]; _scanOkAt=simNow;
+        _scanOk='EVENT'; _scanOkAt=simNow;
         scanStop(); Snd.sfxPlay('achievement',cfg.music); spawnConfetti();
-        setTimeout(()=>{ _entryLeave('eventPage'); if(typeof eventJoin==='function') eventJoin(ev[1],ev[2]); },1400);
+        // Where BACK goes is decided HERE, at the screen the camera was opened
+        // from -- ADD FRIEND and JOIN TOURNAMENT both return to MULTIPLAYER, and
+        // leaving it standing from a previous visit sent people somewhere else.
+        _eventBack='multiplayer';
+        setTimeout(()=>{ _entryLeave('eventPage'); if(typeof eventJoin==='function') eventJoin(ev[1]); },1400);
         return;
     }
     const m=mode==='friend' ? /#friend=([0-9a-f]{8})$/.exec(s) : /#tourney=([A-Za-z0-9]{4,12})$/.exec(s);

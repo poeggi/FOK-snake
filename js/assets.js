@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.15';
+const APP_VERSION = 'v4.4.16';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -146,14 +146,25 @@ const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs a
 // ambiguous -- and the dial offers exactly the characters a code can contain.
 const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ\r';
 const CODE_LEN = 6;
-// EVENT identifiers, off that same unambiguous alphabet. An eid is 4 characters and public
-// -- it grants nothing on its own. The code beside it is either the 16-character KEY printed
-// on the poster or the 6-character PASS a member holds up on screen, and the client never
-// has to tell them apart: both go out as `code` and the server reads the length.
-const EVENT_EID_LEN = 4, EVENT_PASS_LEN = 6, EVENT_KEY_LEN = 16;
-// One shape for both, and the third hash the game answers to beside #friend= and #tourney=.
-// Anchored at the end: a link with anything trailing is not one of ours.
-const EVENT_HASH_RE = /#event=([A-Z2-9]{4})\.([A-Z2-9]{6}|[A-Z2-9]{16})$/;
+// EVENT identifiers, off that same unambiguous alphabet (server API 4.12).
+//
+// ELEVEN CHARACTERS IS THE WHOLE BUDGET, and both codes spend it differently. A
+// PASS is an eid plus its own 6 characters, dotted: 4 + 1 + 6. A printed KEY has
+// no eid at all -- it NAMES ITS OWN EVENT -- because 11 is all there is and an
+// eid beside a long key does not fit. THE DOT IS WHAT TELLS THEM APART, and it is
+// the only thing that does.
+//
+// Why 11: every QR an event shows has to be readable by the game's OWN scanner,
+// which is a fixed version 3 at level L -- 53 text bytes, no more. The URL prefix
+// is 42, so 11 is what is left, and both URLs come to exactly 53. A poster nobody
+// can scan in the app is the wrong poster, which is what a 16-character key made.
+const EVENT_EID_LEN = 4, EVENT_PASS_LEN = 6, EVENT_KEY_LEN = 11, EVENT_CODE_LEN = 11;
+// The third hash the game answers to, beside #friend= and #tourney=. ONE capture:
+// the code exactly as it was scanned, dot and all, because that is what `join`
+// posts -- the server reads the event out of it and the client never has to know
+// which of the two it is holding. Anchored at the end: a link with anything
+// trailing is not one of ours.
+const EVENT_HASH_RE = /#event=((?:[A-Z2-9]{4}\.[A-Z2-9]{6})|(?:[A-Z2-9]{11}))$/;
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
 // boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2
