@@ -31,7 +31,14 @@ renamed to windswept everywhere.
 
 ## Hazards that cost real time (do not rediscover)
 
-- FIVE hand-synced duel field lists, not four: RB_HASH_DUEL (also the wire
+- FIVE hand-synced duel field lists, not four -- and 4.4.0 put eight more fields
+  through all five (timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
+  _gourangaLine, _gourangaActive, _gourangaEaten, _gourangaSteps), APPENDED
+  because the wire array is positional. A trap worth knowing before adding a
+  ninth: _gourangaEaten was a Set, and JSON.stringify of a Set is `{}` -- it
+  would have joined the agreement and covered NOTHING, silently, forever. It is
+  a 7-bit mask now, and test/sim-duel.js asserts structurally that every
+  RB_HASH_DUEL field is JSON-transparent. The lists: RB_HASH_DUEL (also the wire
   contract), _rbDuelSnap(), simApplyDuel(), _rbFullState()/_rbApplyResync(),
   and _rbCloneSnap()/_rbCloneFlat/_rbClonePlayer. Miss one = guaranteed
   desync. _rbCloneWs key ORDER is part of the byte-identity contract.

@@ -26,19 +26,7 @@ const log = s => { steps.push(s); };
 //                 running longer only buys more level-3 minutes, running shorter silently
 //                 drops the second boundary and the name stops being true.
 //   windswept   : jousting passes + loss     -> the near-miss steal, sim AND wardrobe write-back
-//   headroom    : CRUCIAL -- do not shorten, relax maxRb or fold into another case. It is
-//                 SEED-PINNED, and the pin is only ever moved when a sim rule change moves
-//                 every duel board out from under it -- never to make a rollback go away.
-//                 0x7002 -> 0x700E when the gouranga line and the time crystal came to the
-//                 duel: those add rng draws per gem spawn, so the gems land elsewhere, the
-//                 pilots steer elsewhere, and the inputs meet the step grid at a different
-//                 phase. This lane runs a SUB-MILLISECOND margin by construction (see the
-//                 jit1 note below), so that phase is what decides rb=0, and 0x7002 stopped
-//                 landing on a zero-rollback one. It was proved to be phase and not a leak
-//                 by rebuilding with the whole change in place and ONLY the duel rng stream
-//                 restored: rb went back to 0. Every assertion is unchanged -- maxRb:0,
-//                 expectSpeed, expectLevel, postAuthor, doubleEvery, the wire, and the RED
-//                 twin (still rb=68 on the new pin, so it stays load-bearing). It is
+//   headroom    : CRUCIAL -- do not shorten, reseed, relax maxRb or fold into another case. It is
 //                 the only guard on the duel pairing's load-bearing invariant, and it is a HARD
 //                 zero: there is no "a few rollbacks are fine" reading of it to erode.
 //                 The clocks START 60ms apart (err0 60 -- past the whole authoring lead) on a
@@ -114,13 +102,13 @@ const SCEN = [
     // tick's flush -- the cap-deferred path stays on the wire and inside the authoring lead).
     // Decoys are provably-inert reverses of the dirQueue TAIL -- see duel-driver.
     // CRUCIAL (see header): the 0-rollback headroom guard. Keep it long and keep maxRb at 0.
-    { name:'headroom     burst 0rb   ', seed:0x700E, secs:30, wire:{ base:14, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, authorPhase:0.05, doubleEvery:2, maxRb:0, expectSync:{ minGap0:50, maxGap1:3 }, expectLevel:2, expectSpeed:true },
+    { name:'headroom     burst 0rb   ', seed:0x7002, secs:30, wire:{ base:14, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, p2pBoundary:true, recv:true, postAuthor:true, authorPhase:0.05, doubleEvery:2, maxRb:0, expectSync:{ minGap0:50, maxGap1:3 }, expectLevel:2, expectSpeed:true },
     // Falsification twin: identical start gap and wire, burst APPLY disabled (noBurst) -> the raw
     // 30ms (~1.8 tick) offset stands, the ahead peer runs a persistent tick lead, the other side's
     // inputs land late there, rollbacks MUST appear (minRb) while the pair still HEALS by rollback
     // (all health gates stay on). RED without the burst, GREEN with -- proves the lane above is
     // load-bearing, not vacuously 0.
-    { name:'headroom     noburst RED ', seed:0x700E, secs:10, wire:{ base:14, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, authorPhase:0.05, doubleEvery:2, minRb:1, expectSync:{ minGap1:50 } },
+    { name:'headroom     noburst RED ', seed:0x7002, secs:10, wire:{ base:14, jit:1,  loss:0    }, phase:0, tjit:0, clock:{ err0:60, drift:5, samples:8 }, startBurst:true, noBurst:true, recv:true, postAuthor:true, authorPhase:0.05, doubleEvery:2, minRb:1, expectSync:{ minGap1:50 } },
     // WINDSWEPT steal over the wire. The autopilot deliberately keeps two cells of clearance, so
     // under it the near-miss rules are dead code -- this lane flies the `jouster` director instead:
     // adjacent opposing lanes, one cell apart, boosting down the lane and braking into the turns,
@@ -158,13 +146,22 @@ for(const sc of lane(SCEN)){
     const ew = sc.expectWs;
     const wsBad = !!ew && (r.wsBlows < ew.minBlows || r.wsSteals < ew.minSteals   // the rules must have actually fired
         || !r.wsSame || r.wsOwnBad > 0);                                          // and both ends agree, sim AND wardrobe
+    // TICK COINCIDENCE (see the driver's tickSplit). One shared clock and one agreed startPts
+    // mean the two sims must share a tick at some point in every stretch between boundaries. A
+    // boundary that zeroes one side's counter off that startPts breaks exactly this and nothing
+    // else: the pair still agrees on every hashed field, so conv/desync/firstDiverge all stay
+    // clean while the side left running ahead pays a rollback for every ON-TIME peer record.
+    // The noburst twin opts out -- its whole point is a pair running WITHOUT the burst that
+    // agrees their clocks, so a standing split there is the result being demonstrated.
+    const splitBad = !sc.noBurst && r.tickSplit > 0;
     const bad = r.localJumps > 0 || !!r.firstDiverge || !r.converged
         || r.desyncA > 0 || r.desyncB > 0 || r.exitReason === 'session-end' || rbOver || rbUnder
-        || syncBad || lvlBad || spdBad || wsBad;
+        || syncBad || lvlBad || spdBad || wsBad || splitBad;
     const fd = r.firstDiverge ? ('  1stDiverge @' + r.firstDiverge.tick + ' [' + r.firstDiverge.fields.join(',') + ']') : '';
     const rbNote = sc.maxRb != null ? (rbOver ? '  rb>' + sc.maxRb + ' HEADROOM LEAK' : '  (<=' + sc.maxRb + ' rb: headroom holds)')
         : sc.minRb != null ? (rbUnder ? '  rb<' + sc.minRb + ' LANE NOT LOAD-BEARING' : '  (rb>=' + sc.minRb + ': burst is load-bearing)') : '';
     const syncNote = ss ? ' pts=' + ss.gap0 + '->' + ss.gap1 + (syncBad ? ' SYNC BAD' : '') : '';
+    const splitNote = splitBad ? '  TICK SPLIT ' + r.tickSplit + 't (a whole stretch with no shared tick)' : '';
     log(sc.name.trim().padEnd(22)
         + ' L' + r.levelReached + (lvlBad ? ' NO LEVEL-UP' : '')
         + (sc.expectSpeed ? ' speed=' + (r.speedRoundA ? 'A' : '-') + (r.speedRoundB ? 'B' : '-') + (spdBad ? ' MISSED' : '') : '')
@@ -173,7 +170,7 @@ for(const sc of lane(SCEN)){
         + (ew ? ' ws=' + r.wsBlows + 'blown/' + r.wsSteals + 'stolen'
                  + (r.wsSame ? '' : ' SIM SPLIT') + (r.wsOwnBad ? ' WARDROBE x' + r.wsOwnBad : '') : '')
         + ' desync=' + r.desyncA + '/' + r.desyncB
-        + ' rb=' + r.rb + ' lost=' + r.lost + syncNote
+        + ' rb=' + r.rb + ' lost=' + r.lost + syncNote + splitNote
         + (r.exitReason ? ' exit=' + r.exitReason + '@' + r.diedAt.toFixed(0) + 's' : '')
         + fd + rbNote
         + '   ' + (bad ? 'FAIL' : 'ok'));

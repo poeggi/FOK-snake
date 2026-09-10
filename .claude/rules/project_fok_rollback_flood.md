@@ -64,9 +64,16 @@ Nothing open here.
 
 Any rig that stands up a duel by hand (CDP-driven real browsers, scratch
 probes) must NOT call beginOnlineDuel directly. Production never does: both
-the host path and the joiner path hand it to _netArmBegin(s, startPts, ...),
-which fires it AT startPts on the shared clock, so both sims reach tick 0 at
-the same shared instant and simTick == _dcTarget() from tick one.
+the host path and the joiner path hand it to _netArmBegin(s, startPts, ...).
+
+What makes both sims reach tick 0 at the same shared instant is NOT the arm on
+its own -- read that carefully, because assuming it was is what hid a real bug
+until 4.4.1. _netArmBegin arms on the agreed PTS but FIRES on a local timer, and
+the rebuild used to zero the counter whatever the clock said at that moment. The
+guarantee comes from _netBoundarySettle running the ticks already owed against
+startPts at the rebuild (project_fok_boundary_tick.md). With that in place
+simTick == _dcTarget() from tick one; without it the two sides zero on whichever
+side of a tick their own timers landed, and the offset never closes.
 
 Calling it immediately with a startPts in the future makes each page free-run
 from tick 0 the moment its own round trip lands. That skew is PERMANENT: the

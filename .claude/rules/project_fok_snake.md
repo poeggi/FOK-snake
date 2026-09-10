@@ -74,7 +74,14 @@ guards the house edge.
   Echo-ack (receiver answers verbatim +a:1 from the receive handler;
   duplicates re-echo, effects epoch-deduped); ONE pending tx with retry
   ladder; an unanswered go kills at 4s, req never. Every boundary runs the
-  bilateral clock burst first; bth rides the echoed go. Death is a halt
+  bilateral clock burst first; bth rides the echoed go. The go also carries the
+  per-match parameters both sims must agree on BEFORE tick 0 - hm (heart cap),
+  lvl (opening level), sk (item stakes) and sp (speed tournament) - each an
+  absent-reads-as-default field, echoed back so the agreement is byte-exact, and
+  each ending the match with MATCH SETUP MISMATCH when it contradicts a
+  tournament roles-sheet preset. duel-hearts.js has a static guard demanding all
+  four in BOTH go builders. Its startPts is the instant both sims zero their
+  tick counter, and that is a rule of its own - project_fok_boundary_tick.md. Death is a halt
   (duelHalt -> host go{respawn}; the dying hold re-announces every _HALT_RE=6
   ticks until answered); an outage recovery ends in a resume boundary
   (adopt-only clock re-anchor, no rebuild - see

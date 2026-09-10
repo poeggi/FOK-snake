@@ -559,6 +559,7 @@ function runMatch(opts){
     const localJumpsBy = { A:0, B:0 };   // per-side: a frozen client legitimately snaps its own head ONCE on catch-up; a LIVE client must never
     const lastHead = { A:null, B:null };
     let levelReached = 1, exitReason = null;
+    let coMin = Infinity, coWorst = 0, coSeen = false, coPrevA = 0, coPrevB = 0, coSkip = 3;
     // Compare only an IMMUTABLE tick: an accepted input reaches at most RB_DEPTH ticks back, so a
     // tick that ran RB_DEPTH ago can no longer be rewritten by any late arrival -- a mismatch there
     // is a genuine, unhealed divergence, never the normal in-window rollback lag. A shallower lag
@@ -884,6 +885,27 @@ function runMatch(opts){
             }
         }
         A.__now = now; B.__now = now;
+        // TICK COINCIDENCE. Both sims ride one shared clock off one agreed startPts, so within
+        // any stretch between boundaries they must be ON THE SAME TICK at least sometimes.
+        // Comparing tickA-vs-tickB at a single instant proves nothing on its own: with a
+        // staggered fire phase (opts.phase/tjit) one side has already ticked this interval and
+        // the other has not, so the difference legitimately reads 1 for part of every interval.
+        // But it comes BACK to 0 inside that same interval. A side that zeroed its counter off
+        // the agreed startPts never does -- it sits a whole tick away for the entire level. So
+        // the fault is a stretch whose MINIMUM difference never reaches zero, not any single
+        // reading. Sampled here, before the fire phase, with both clients pinned to the loop's
+        // own `now`: fireOnce moves a client's __now to its own sub-tick authoring instant and
+        // netPts rides __now, so a reading taken after it compares two different instants.
+        // The two cross a rebase one sample apart, so the crossing itself reads a huge difference
+        // (one side already at 0, the other still at its old count). A drop in EITHER tick closes
+        // the stretch and blinds the next few samples until both have landed on the new base.
+        { const ta = A.__simTick(), tb = B.__simTick();
+          if(ta < coPrevA || tb < coPrevB){
+              if(coSeen) coWorst = Math.max(coWorst, coMin);
+              coMin = Infinity; coSeen = false; coSkip = 3; }
+          coPrevA = ta; coPrevB = tb;
+          if(coSkip > 0) coSkip--;
+          else { const d = Math.abs(ta - tb); if(d < coMin) coMin = d; coSeen = true; } }
         if(!(dozing && dozeWho === 'A')) A.__fire();
         if(!(dozing && dozeWho === 'B')) B.__fire();
         // Real liveness pass at production cadence (250ms): the same _netLiveCheck the browser runs
@@ -1001,6 +1023,10 @@ function runMatch(opts){
         fix: a.fix + b.fix, drop: a.drop + b.drop, dropA: a.drop, dropB: b.drop,
         desyncProbe: opts.desyncProbe ? classifyDesyncs() : null,
         startSync,
+        // The worst stretch between two boundaries: how far apart the two sims stayed at their
+        // CLOSEST. 0 = they shared a tick in every stretch, which is what one clock and one
+        // startPts must produce. >0 = a standing whole-tick split no hash can see.
+        tickSplit: Math.max(coWorst, coSeen && coMin !== Infinity ? coMin : 0),
         rbTrace: { A: A.__rbTraceDump(), B: B.__rbTraceDump() },
         sig: { A: A.__sigDump(), B: B.__sigDump() },
         clients: { A, B },

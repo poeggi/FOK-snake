@@ -970,6 +970,34 @@ function netTickTarget(){
     }
     return t;
 }
+// TICK 0 IS THE BOUNDARY'S startPts -- the same absolute instant on BOTH clients, by definition
+// rather than by luck. The host mints ONE PTS and ships it; this is what makes both sims zero
+// their counter AT it, exactly as they do at a match start off the server's start_pts.
+//
+// The armed begin fires on a LOCAL timer, so a client can reach the rebuild a tick or two after
+// that instant. The rebuild zeroes the counter regardless, so that lateness would otherwise
+// become a PERMANENT whole-tick offset between the two sims: every home's steady-state catch-up
+// only repairs a deficit of MORE than one tick (`d > 1` in game.js, sim-worker.js and the test
+// driver alike), so a one-tick gap opened here is closed by nothing, ever. It is not a desync --
+// both sims agree on state -- but the side that ends up ahead receives on-time peer records for
+// a tick it has already stepped, and pays a rollback for every one of them.
+//
+// So the ticks already owed against startPts are run HERE, at the rebuild. Normally that is none.
+function _netBoundarySettle(){
+    // PLAYERS ONLY. Running a tick means simulating it, and simulating it means holding the
+    // inputs for it -- which a player does (its own, and the peer's already in the log) and a
+    // SPECTATOR never does: it authors nothing and replays what the players forward to it.
+    // At a level boundary this guard costs a spectator nothing (its origin is biased into the
+    // future, so the target below is negative and this returns anyway). What it stops is the
+    // OTHER caller: beginOnlineDuel also serves a watcher ATTACHING to a match already in
+    // progress, where the elapsed ticks are real (~100 of them for a 1.5s-old match) and
+    // simulating them is exactly wrong -- a joiner boots from a checkpoint off the feed, it
+    // does not simulate its way in.
+    if(netSpectating()) return;
+    const t = netTickTarget();
+    if(t == null || t <= 0) return;
+    for(let i = 0; i < t && i < 120; i++){ netTickPre(); update(); netTickPost(); }
+}
 // The CONTINUOUS tick position on the shared clock (netTickTarget without the floor),
 // for the phase seed at duel start and the one-shot displacement snap: both clients
 // fire each tick at the MIDDLE of its wall-time window, so neither is the early one.

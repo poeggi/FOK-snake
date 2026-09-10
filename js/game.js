@@ -1159,6 +1159,7 @@ function beginOnlineDuel(seed, hosting){
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
+    _netBoundarySettle();   // tick 0 is the agreed startPts, not whenever our own timer fired
 }
 // Online level-up: the same shared-start negotiation as a match start, but the match
 // continues -- score/lives carry over and only the level is rebuilt from (seed, level).
@@ -1189,6 +1190,7 @@ function beginOnlineDuelLevel(hosting, lvl){
     if(typeof _rbReset === 'function') _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();
+    _netBoundarySettle();   // tick 0 is the agreed startPts, not whenever our own timer fired
 }
 // Online post-death restart: the death held the sim in 'dying' (the duelHalt emit) while the
 // host negotiated a fresh start_pts; both clients rebuild the SAME level from the flowing rng
@@ -1214,6 +1216,7 @@ function beginOnlineDuelRespawn(hosting){
     if(typeof _rbReset === 'function') _rbReset();   // startDuelRespawn rewound simTick; the rollback base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();
+    _netBoundarySettle();   // tick 0 is the agreed startPts, not whenever our own timer fired
 }
 // Recovery re-anchor (go why:'resume'): the full resync burst already healed the STATE; this
 // boundary heals the CLOCK. Adopt only -- no rebuild, no tick reset, no queue clears: the sims

@@ -193,6 +193,14 @@ function _step() {
     // stays the authoritative on/off flag; _timer only says whether a fire is scheduled.
     if (_running) _timer = setTimeout(_step, Math.max(0, Math.min(TICK_MS, TICK_MS - _acc)));
 }
+// The worker home's twin of net-session.js _netBoundarySettle -- it is a twin of net.js, not a
+// second implementation. Tick 0 is the boundary's startPts, so a rebuild reached late runs
+// the ticks it already owes; _stepTicks below only repairs a deficit of MORE than one.
+function _dcBoundarySettle(){
+    const t = _dcTarget();
+    if (t == null || t <= 0) return;
+    for (let i = 0; i < t && i < 120; i++) { netTickPre(); update(); netTickPost(); }
+}
 function _stepTicks() {
     const now = performance.now();
     let dt = now - _last; _last = now;
@@ -253,6 +261,7 @@ onmessage = (e) => {
             _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
             _last = performance.now(); _acc = 0; _dcSnapN = 0; _dcSnapAt = 0;
             _dcSeedPhase();   // the grid exists now: set the phase once (pset -> 1x)
+            _dcBoundarySettle();
             _post(); _run(true);
             break;
         case 'duelClock':      // main re-anchored (paired with a new start_pts where required)
@@ -269,6 +278,7 @@ onmessage = (e) => {
             _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
             _last = performance.now(); _acc = 0; _dcSnapN = 0; _dcSnapAt = 0;
             _dcSeedPhase();
+            _dcBoundarySettle();
             _post(); _run(true);
             break;
         case 'duelRespawnNet': // post-death restart (mirrors duelLevelNet; seed + level stay, board rebuilt)
@@ -281,6 +291,7 @@ onmessage = (e) => {
             _dcEvents.length = 0; _dcRewTo = 0; _duelMsg = '';
             _last = performance.now(); _acc = 0; _dcSnapN = 0; _dcSnapAt = 0;
             _dcSeedPhase();
+            _dcBoundarySettle();
             _post(); _run(true);
             break;
         case 'duelResync':     // transport asks the host to ship the full state (reconnect)

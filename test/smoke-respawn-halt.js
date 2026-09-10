@@ -42,9 +42,16 @@ try {
 
     // The host's go {why:'respawn'} begins the rebuild: same level, tick 0, players kept.
     sent.length = 0; simEvents.length = 0;
-    _netHandleMsg(JSON.stringify({ t:'go', why:'respawn', seed:0xABCD, startPts:99000, epoch:1, lvl:1, bth:0 }));
+    // startPts here is 1000ms in the PAST (netPts ~100000), which is what makes the begin fire at
+    // once instead of arming a timer. Tick 0 IS that startPts, so the rebuild lands on the tick it
+    // implies -- level with the host, which has been running since -- and NOT at 0: a client that
+    // zeroed its counter here would sit 60 ticks behind, and nothing closes a gap that way. The
+    // number is DERIVED, never a literal, so moving the fixture clock cannot leave this passing
+    // against a stale expectation.
+    const RSP_PTS = 99000, rspExp = Math.floor((netPts() - RSP_PTS) / TICK_MS);
+    _netHandleMsg(JSON.stringify({ t:'go', why:'respawn', seed:0xABCD, startPts:RSP_PTS, epoch:1, lvl:1, bth:0 }));
     if(!sent.some(m=>m.t==='go' && m.a===1)) fail('respawn go was not echoed');
-    if(simTick !== 0) fail('respawn begin left simTick ' + simTick + ' != 0');
+    if(simTick !== rspExp) fail('respawn begin left simTick ' + simTick + ' != ' + rspExp + ' (the tick startPts implies)');
     if(phase !== 'duelReady') fail('respawn begin left phase ' + phase + " != 'duelReady'");
     if(level !== 1 || !players) fail('respawn rebuilt wrong world (level ' + level + ', players ' + !!players + ')');
     if((_netSess.epoch|0) !== 1) fail('respawn go did not adopt epoch 1');

@@ -108,7 +108,9 @@ const NET_BURST_GAP_TICKS = 1;    // probe CREATION cadence in engine ticks (x T
 const NET_BURST_WAIT_MS = 200;    // window past the LAST send == the max round trip the burst can verify; the early-out closes a healthy link at ~its own RTT
 const NET_BURST_MIN = 5;          // accept-gate per direction: 5 of 6 delivered = at most ONE loss; anything worse means the channel is too unreliable to trust
 const NET_BURST_SLEW_MS = 200;    // cap on the per-boundary clock nudge: damage control against ONE bad verdict, never reached by a realistic residual (<150ms = a 75ms nudge); ~12 ticks, well inside the rollback ring
-const NET_BURST_LEAD_MS = 250;    // host's lead when it authors a start PTS on its own clock: covers the start packet's transit + reliable repeats
+const NET_BURST_LEAD_MS = 500;    // host's lead when it authors a start PTS on its own clock: covers the go's transit, its
+                                  // reliable repeats AND the joiner's half of the burst residual -- that clock nudge must be
+                                  // SETTLED well before either side reaches the PTS it is measured against
 const NET_BURST_TRIES = 10;       // starved-burst retries before the boundary opens anyway on the PRIOR clock (itself
                                   // burst-verified at the last boundary). 10 x ~290ms (probe span + WAIT window) stays
                                   // inside the RB_PERSIST_KILL_MS silence deadline, so a genuinely dead peer ends the
