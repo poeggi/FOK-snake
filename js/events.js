@@ -82,21 +82,23 @@ function eventView(){ return _ev; }
 function eventUi(){ return _evUi; }
 // Are we in any event at all? The list is the only answer to that question.
 function eventAny(){ return _evList.length > 0; }
-function _evMsg(m, bad){
-    _evUi.msg = m || ''; _evUi.msgAt = _msgNow(); _evUi.bad = !!bad;
-    if(bad && typeof Snd !== 'undefined') Snd.sfxPlay('fail', cfg.music);
-    _uiDirty = true;
-}
+// The transient status line, shared with the tournament screens (uiMsg, game.js):
+// same stamp, same sound, same band on screen. All this adds is `bad`, which the
+// event page reads to colour it.
+function _evMsg(m, bad){ uiMsg(_evUi, m, bad ? 'fail' : ''); _evUi.bad = !!bad; }
 function _evOk(){ return typeof _netOk === 'function' && _netOk() && typeof _netPostRes === 'function'; }
 
 // ---- the endpoint ----------------------------------------------------------
-// Every action but `join` needs a row, and a caller with no row is answered 404
-// exactly like an eid that does not exist -- so nothing here can enumerate and
-// nothing here should try to tell the two apart. NET_BG_SOLO throughout: a
-// player is waiting on every one of these right now.
+// event.php is the same shape of endpoint as tournament.php and goes out through
+// the same wrapper (netActionPost, net-api.js) on the same lane. All this adds is
+// the eid, which every action requires.
+//
+// Every action but `join` needs a ROW, and a caller with no row is answered 404
+// exactly like an eid that does not exist -- so nothing here can enumerate, and
+// nothing here should try to tell the two apart.
 async function _evPost(action, extra){
-    const body = Object.assign({ id:getPlayerId(), action, eid:_evEid }, extra || {});
-    return await _netPostRes('/api/event.php', body, NET_BG_SOLO);
+    return await netActionPost('/api/event.php', action,
+                               Object.assign({ eid:_evEid }, extra || {}));
 }
 
 // ---- getting in ------------------------------------------------------------
@@ -185,10 +187,9 @@ function eventState(e){
 function eventWhen(e){
     e = e || _ev;
     if(!e || (e.starts == null && e.ends == null)) return '';
-    const p2 = n => ('0' + n).slice(-2);
     const at = ms => {
         const d = new Date(+ms);
-        return p2(d.getDate()) + '.' + p2(d.getMonth()+1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+        return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
     };
     if(e.starts != null && e.ends != null) return at(e.starts) + ' - ' + at(e.ends);
     return e.starts != null ? 'FROM ' + at(e.starts) : 'UNTIL ' + at(e.ends);
@@ -583,6 +584,16 @@ function eventPassLeave(){
     if(_evPassT != null){ if(typeof clearInterval === 'function') clearInterval(_evPassT); _evPassT = null; }
     _evPass = null;
     if(phase === 'eventQr'){ phase = 'eventPage'; _uiDirty = true; }
+}
+
+// One archived tournament as a line: what it seated, what was played, who stood on
+// the podium. The page and the monitor both show the archive, so they show it the
+// same way -- and podium ids carry their names, so an id is only ever the fallback.
+function eventArchiveLine(a){
+    if(!a) return '';
+    const pod = (a.podium || []).slice(0, 3)
+        .map(x => String(x.name || fmtFriendId(String(x.id))).substring(0, 8));
+    return (a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-');
 }
 
 // ---- the monitor: a screen for a TV ----------------------------------------

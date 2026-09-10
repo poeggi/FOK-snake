@@ -209,6 +209,17 @@ function _entryOnOk()  { return _entryReady() && nameCursorPos >= _entryMax(); }
 // one -- and any message stamped in sim time instantly reads as ancient and never
 // draws. That is precisely the message you most want ("OPPONENT LEFT").
 let _duelMsg = '', _duelMsgAt = 0;
+// A transient status line on a menu screen: stamp it on the WALL clock and say it.
+// The tournament screens and the event screens both have one and they are the same
+// thing, so the STAMP is written once. The SOUND is not shared and must not be: the
+// tournament line speaks on every message, the event line only when something went
+// wrong, and folding those together gives a join three sounds instead of one.
+// Callers name their own, or '' for none.
+function uiMsg(ui, m, sfx){
+    if(!ui) return;
+    ui.msg = m || ''; ui.msgAt = _msgNow(); _uiDirty = true;
+    if(m && sfx && typeof Snd !== 'undefined') Snd.sfxPlay(sfx, cfg.music);
+}
 function _msgNow(){ return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
 let _nameFlashAt = 0, _nameFlashPos = -1;
 let creditsScroll = 0, creditsSpeed = 0.8, _creditsNormal = 0.8;

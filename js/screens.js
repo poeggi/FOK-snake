@@ -1399,22 +1399,36 @@ function drawDuelMenu() {
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // MY ID: this player's identity + the friend-link QR (moved here from SETTINGS).
+// THE QR CARD, painted once for all three screens that hold one up: MY ID, the
+// tournament JOIN CODE and the event pass. They do the same job -- somebody points
+// a phone at this -- so they are the same picture, down to the module size, and a
+// person who has held one up already should not have to work out that they are
+// looking at the same thing again. That was a comment on one of the copies before
+// it was a function; now it is the function.
+//
+// White card with the spec's 4-module quiet zone, black modules, centred. Returns
+// the box so a caller can put its own line or bar under it without guessing where
+// the card ended.
+function drawQrCard(text, qy, mod){
+    const q = qrMatrix(text);
+    mod = mod || 8;
+    const quiet = 4, card = (q.size + quiet*2) * mod;
+    const qx = Math.round((CW - card) / 2);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, card, card);
+    ctx.fillStyle = '#000000';
+    for(let r = 0; r < q.size; r++) for(let c = 0; c < q.size; c++)
+        if(q.m[r][c]) ctx.fillRect(qx + (quiet + c)*mod, qy + (quiet + r)*mod, mod, mod);
+    return { x:qx, y:qy, size:card, bottom:qy + card };
+}
 function drawMyId() {
     _netMyIdAt = Date.now();   // an incoming request while our QR shows auto-accepts (see net-session.js)
     drawGrid(); drawOvBg(0.92);
     ctg('MY ID',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     ct(fmtPlayerId()+'   FRIENDS: '+getFriends().length, CW/2, 50, '#ffd700', FONT.MENU);
-    // Friend-link QR: white card (spec quiet zone = 4 modules), black modules.
-    // Scanning opens the game with #friend=<this player's ID> in the hash.
-    const q=qrMatrix(friendUrl());
-    const mod=8, quiet=4, card=(q.size+quiet*2)*mod;
-    const qx=Math.round((CW-card)/2), qy=64;
-    ctx.fillStyle='#ffffff'; ctx.fillRect(qx,qy,card,card);
-    ctx.fillStyle='#000000';
-    for(let r=0;r<q.size;r++) for(let c=0;c<q.size;c++)
-        if(q.m[r][c]) ctx.fillRect(qx+(quiet+c)*mod, qy+(quiet+r)*mod, mod, mod);
-    if(_netFr.msg) ct(_netFr.msg, CW/2, qy+card+12, '#ffd700', FONT.HINT);   // e.g. X ADDED YOU AS A FRIEND (see _netFrCelebrate)
-    else ct('SCAN TO ADD ME AS A FRIEND', CW/2, qy+card+12, '#4a7a4a', FONT.HINT);
+    // Scanning this opens the game with #friend=<this player's ID> in the hash.
+    const card=drawQrCard(friendUrl(), 64);
+    if(_netFr.msg) ct(_netFr.msg, CW/2, card.bottom+12, '#ffd700', FONT.HINT);   // e.g. X ADDED YOU AS A FRIEND (see _netFrCelebrate)
+    else ct('SCAN TO ADD ME AS A FRIEND', CW/2, card.bottom+12, '#4a7a4a', FONT.HINT);
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // ONLINE 1vs1 lobby: quick match, friends with online status, incoming invites.
@@ -1805,19 +1819,10 @@ function drawTourneyCode(){
     // handed over, and the room's size is a note about it.
     _ttRun([[t.code || '------', '#ffd700'], ['   MAX PLAYERS: ' + tourneyMax(), '#888']],
            50, FONT.MENU);
-    // Deliberately the MY ID screen's geometry, down to the module size: the two screens do the
-    // same job -- hold a phone up to this -- and a person who has held one up already should
-    // not have to work out that they are looking at the same thing again.
     // The payload is the whole link, not the six letters: a scanner handed bare text can only
     // show it to you, handed this it opens the game already walking into this lobby.
-    const q = qrMatrix(tourneyUrl(t.code || ''));
-    const mod = 8, quiet = 4, card = (q.size + quiet * 2) * mod;
-    const qx = Math.round((CW - card) / 2), qy = 64;
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, card, card);
-    ctx.fillStyle = '#000000';
-    for(let r = 0; r < q.size; r++) for(let c = 0; c < q.size; c++)
-        if(q.m[r][c]) ctx.fillRect(qx + (quiet + c) * mod, qy + (quiet + r) * mod, mod, mod);
-    ct('SCAN TO JOIN THIS TOURNAMENT', CW/2, qy + card + 12, '#4a7a4a', FONT.HINT);
+    const card = drawQrCard(tourneyUrl(t.code || ''), 64);
+    ct('SCAN TO JOIN THIS TOURNAMENT', CW/2, card.bottom + 12, '#4a7a4a', FONT.HINT);
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // Round 1 is a table of points; every round after it is a tree of nodes. Both are the
@@ -2199,11 +2204,7 @@ function drawEventPage(){
     if(arch.length){
         let ay = BACK_Y - 16 - Math.min(2, arch.length) * 14;
         ct('PLAYED HERE', CW/2, ay - 14, '#4a7a4a', FONT.HINT);
-        for(const a of arch.slice(0, 2)){
-            const pod = (a.podium || []).slice(0, 3).map(x => String(x.name || fmtFriendId(String(x.id))).substring(0, 8));
-            ct((a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-'), CW/2, ay, '#888', FONT.HINT);
-            ay += 14;
-        }
+        for(const a of arch.slice(0, 2)){ ct(eventArchiveLine(a), CW/2, ay, '#888', FONT.HINT); ay += 14; }
     }
     rows.forEach((r,i)=>menuItem(r.t, MENU_TOP + 40 + i*MENU_ROW, ui.sel===i));
     // The line under the door row, because "closed" is a word people read two ways
@@ -2306,20 +2307,14 @@ function drawEventQr(){
         ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    const q = qrMatrix(eventUrl(_evEid, slot.code));
-    const mod = 8, quiet = 4, card = (q.size + quiet*2) * mod;
-    const qx = Math.round((CW - card) / 2), qy = 58;
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, card, card);
-    ctx.fillStyle = '#000000';
-    for(let r = 0; r < q.size; r++) for(let c = 0; c < q.size; c++)
-        if(q.m[r][c]) ctx.fillRect(qx + (quiet + c)*mod, qy + (quiet + r)*mod, mod, mod);
+    const card = drawQrCard(eventUrl(_evEid, slot.code), 58);
     // The life left in the code on screen. It is the honest thing to draw here: the
     // code is refused the moment this reaches the left edge, and somebody walking
     // over with a phone can see whether they have time.
-    const left = eventPassLeft(now), bw = card, bx = qx, by = qy + card + 6;
-    ctx.fillStyle = '#1a3a1a'; ctx.fillRect(bx, by, bw, 4);
+    const left = eventPassLeft(now), by = card.bottom + 6;
+    ctx.fillStyle = '#1a3a1a'; ctx.fillRect(card.x, by, card.size, 4);
     ctx.fillStyle = left > 0.25 ? '#7fff7f' : '#ffd700';
-    ctx.fillRect(bx, by, Math.round(bw * left), 4);
+    ctx.fillRect(card.x, by, Math.round(card.size * left), 4);
     ct('THIS CODE ONLY WORKS WHILE IT IS ON SCREEN', CW/2, by + 16, '#4a7a4a', FONT.HINT);
     menuItem('BACK', BACK_Y, true);
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -2379,12 +2374,7 @@ function drawEventMonitor(){
     } else {
         ct('NO TOURNAMENT RUNNING', CW/2, y, '#555', FONT.HINT); y += 22;
         const arch = Array.isArray(m.archive) ? m.archive : [];
-        for(const a of arch.slice(0, 3)){
-            const pod = (a.podium || []).slice(0, 3)
-                .map(x => String(x.name || fmtFriendId(String(x.id))).substring(0, 8));
-            ct((a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-'), CW/2, y, '#888', FONT.HINT);
-            y += 16;
-        }
+        for(const a of arch.slice(0, 3)){ ct(eventArchiveLine(a), CW/2, y, '#888', FONT.HINT); y += 16; }
     }
     ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

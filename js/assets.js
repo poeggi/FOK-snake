@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.13';
+const APP_VERSION = 'v4.4.14';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -134,6 +134,10 @@ const SPLASHES = [
     'Watch the barricades!', 'You are the snake.', 'No walls were harmed.',
     'Now with two shop pages!',
 ];
+// Two-digit zero pad, for the places that render a DATE or a TIME to a person.
+// ES5 on purpose: padStart is ES2017 and absent on the old smart-TV engines this
+// still has to parse on (see the compat floor in the README).
+function pad2(n){ return ('0' + n).slice(-2); }
 const MAX_NAME = 15;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-!?.,\'"#$@&()[]:+ \r';
 const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs are hex)

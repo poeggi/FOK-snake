@@ -158,10 +158,7 @@ function _ttRounds(t){
 function netTourneyOk(){
     return _netOk() && typeof netSrvMinor === 'function' && netSrvMinor() >= 1;
 }
-function _ttMsg(m, bad){
-    _ttUi.msg = m || ''; _ttUi.msgAt = _msgNow(); _uiDirty = true;
-    if(m) Snd.sfxPlay(bad ? 'fail' : 'select', cfg.music);
-}
+function _ttMsg(m, bad){ uiMsg(_ttUi, m, bad ? 'fail' : 'select'); }
 // A LINE about a match reads better with YOU in it -- "KAI vs YOU" -- so that is what
 // _ttName answers a person's own id with. A TABLE is the other case entirely: a row is a
 // person, and the column that says who everybody is has to say who YOU are too, or the
@@ -203,8 +200,7 @@ function tourneyExitPhase(){
 // and start.php leaving in the same millisecond and both waiting 128ms for a worker on an
 // idle host. Second in line costs one wait; side by side costs two.
 async function _ttPost(action, extra){
-    const body = Object.assign({ id: getPlayerId(), action }, extra || {});
-    return await _netPostRes('/api/tournament.php', body, NET_BG_SOLO);
+    return await netActionPost('/api/tournament.php', action, extra);
 }
 function _ttArm(){ if(!_ttT && typeof setInterval === 'function') _ttT = setInterval(_ttTick, TT_TICK_MS); }
 function _ttDisarm(){ if(_ttT){ clearInterval(_ttT); _ttT = null; } }

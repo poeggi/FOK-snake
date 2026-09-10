@@ -57,8 +57,7 @@ function addFOKoins(n) {
 function addScore(name, sc, lvl, won) {
     const s = getScores();
     const now = new Date();
-    const p2 = n => ('0' + n).slice(-2);   // ES5 pad: padStart is ES2017, absent on old smart-TV engines (this runs at game over)
-    const date = p2(now.getDate()) + '.' + p2(now.getMonth()+1) + '.' + String(now.getFullYear()).slice(-2);
+    const date = pad2(now.getDate()) + '.' + pad2(now.getMonth()+1) + '.' + String(now.getFullYear()).slice(-2);
     // won: the run CLEARED level 10 (a finish), not merely reached it. The board stars it.
     s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl, won:!!won,
              diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });

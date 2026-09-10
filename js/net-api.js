@@ -1406,6 +1406,19 @@ function _netUnload(){
 }
 if(typeof window !== 'undefined' && window.addEventListener) window.addEventListener('beforeunload', _netUnload);
 
+// The ACTION ENDPOINTS -- tournament.php and event.php -- are one shape: always POST,
+// always {id, action, ...}, always answered by one switch. So they are wrapped once.
+//
+// NET_BG_SOLO for both, and the reason is the same for both: a player is waiting on
+// the screen this fills right now. It is not background, but the cost the gate exists
+// for is paid per request IN FLIGHT -- what the server measured was this kind of call
+// and start.php leaving in the same millisecond and both waiting 128 ms for a worker
+// on an idle host. Second in line costs one wait; side by side costs two.
+async function netActionPost(path, action, extra){
+    const body = Object.assign({ id:getPlayerId(), action }, extra || {});
+    return await _netPostRes(path, body, NET_BG_SOLO);
+}
+
 // ---- friendships (friend.php): relations exist only once the SERVER recorded
 // them -- the local list is just the UI seed. Adds run the request handshake,
 // removals reach the server (queued through localStorage when offline). ----
