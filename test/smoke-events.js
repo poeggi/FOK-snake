@@ -189,21 +189,37 @@ runTest('SMOKE-EVENTS', `
         _netGet=async (p)=>{ _u=p; return null; };
         _netPost=async (p,b)=>{ _body=b; return null; };
         _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now(); _netPollHoldEnd=0;
+        const due=()=>{ _netEvAt=Date.now()-NET_EVENTS_MS-1; };
         const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); return _u||''; };
         const hello=(ph)=>{ _body=null; _netHelloBusy=false; phase=ph; _netHello(); return _body||{}; };
 
         for(const ph of ['multiplayer','eventChooser','eventPage','eventMembers','eventQr','eventMonitor']){
+            due();
             if(!/[?&]ev=1(&|$)/.test(poll(ph))) throw 'the poll must ask for events on '+ph;
             if(hello(ph).events !== true) throw 'the hello must ask for events on '+ph;
         }
         for(const ph of ['menu','friends','duelLobby','tourneyLobby','settings']){
+            due();
             if(/[?&]ev=/.test(poll(ph))) throw 'the poll must NOT ask for events on '+ph;
             if('events' in hello(ph)) throw 'the hello must NOT ask for events on '+ph;
         }
+        // ...AND IT RIDES A TICK OF ITS OWN. poll.php never 204s a request that
+        // asked for rows (ev ANSWERS AT ONCE, exactly like fl and tl), so on every
+        // poll it would cut every hold short and spin an event screen into a hot
+        // loop -- the same trap the tournament announce is spaced for.
+        _netEvAt = Date.now();
+        if(/[?&]ev=/.test(poll('eventPage'))) throw 'the event rows must not ride every poll';
+        due();
+        if(!/[?&]ev=1(&|$)/.test(poll('eventPage'))) throw 'the event tick must ask once it is due';
+        // The tick is spent only when an answer actually came back: a failed poll
+        // must not cost the screen its next read.
+        _netEvAt=0; _netGet=async(p)=>{ _u=p; return null; };
+        poll('eventPage');
+        if(_netEvAt !== 0) throw 'a poll that never answered must not spend the tick';
         _netGet=_oGet; _netPost=_oPost; globalThis.fetch=_oFetch;
         _netPace=_oPace; _netPollHoldEnd=_oHold; _netPollBusy=false; _netHelloBusy=false; phase='menu';
     }
-    log('request shape ok: events rides the hello and the poll on the six screens that show it');
+    log('request shape ok: events rides the hello, and a poll tick of its own, on the six screens that show it');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

@@ -1114,6 +1114,11 @@ let _netTtPoll = false;    // the poll serves `tourneys`: the tournament lobby's
 let _netFlWant = false;    // ask for the roster on the next poll (one-shot, armed by netFriendsEnter)
 let _netTlAt = 0;          // when the announce last came back: tl makes the server answer AT ONCE, so it rides a tick of its own
 const NET_TOURNEYS_MS = 5000;   // the announce tick the tournament lobby used to spend a hello on
+let _netEvAt = 0;          // when the caller's event rows last came back
+// ev ANSWERS AT ONCE, exactly like fl and tl: poll.php never 204s a request that asked for
+// rows, so riding every poll would cut every hold short and spin an event screen into a hot
+// loop. It gets a tick of its own for the same reason the announce does.
+const NET_EVENTS_MS = 5000;
 // aa, de and db cannot be seen in a 204, so a client only stops beating for them against a
 // server that states 4.9. fl and tl are read off the answer instead (see the latches above).
 function _netPoll49(){ return netSrvMinor() >= 9; }
@@ -1250,7 +1255,7 @@ async function _netPollOnce(){
     const de = (_netPoll49() && _netDuelEnd) ? _netDuelEnd : '';
     const fl = _netFlWant;
     const tl = phase === 'tourneyLobby' && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
-    const ev = _netEvWant();
+    const ev = _netEvWant() && Date.now() - _netEvAt >= NET_EVENTS_MS;
     const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
     const q = fs + (de ? '&de=' + de : '')
                  + (_netPoll49() ? '&db=' + ((cfg.debug|0) > 0 ? 1 : 0) : '')   // REPORT what is true: a poll that never says is never woken with an instruction
@@ -1271,7 +1276,7 @@ async function _netPollOnce(){
         // _netSrvSays un-latches the minor rather than trusting what it saw before.
         if(fl){ _netFlWant = false; _netFrPoll = Array.isArray(r.friends); if(_netFrPoll) _netFrAdopt(r.friends, false); }
         if(tl){ _netTlAt = Date.now(); _netTtPoll = Array.isArray(r.tourneys); if(_netTtPoll) _netTourneys = r.tourneys; }
-        if(ev) _netEvApply(r.events);
+        if(ev){ _netEvAt = Date.now(); _netEvApply(r.events); }
     }
     // The mailbox was down and is back. A push may have died in between (the server drops an
     // undelivered signal at its TTL), and only the whole picture recovers one: hand a held
