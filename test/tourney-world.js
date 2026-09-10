@@ -34,7 +34,7 @@ const TT_CONNECT_MS = 20000;   // tourney.js: a sheet that has not become a matc
 function mkServer(opts){
     const O = opts || {};
     const T = { tid:'7f3c9a21b4d85e60c1f2a3b4c5d6e7f8', code:'K7MZ4Q', host:'', stakes:false,
-                max:10, state:'open', players:[], round:0, cursor:null,
+                max:8, state:'open', players:[], round:0, cursor:null,   // tournament_max_players
                 nodes:{}, order:[], standings:[], advancers:[], podium:null,
                 brk:null, brkNext:'', seen:[], feeds:{}, cut:O.cut | 0, quiet:!!O.quietPodium };
     const out = {};                 // player id -> queued signals, drained by hello
@@ -447,11 +447,17 @@ function driverSrc(id){
         + '    brk: function(){ var b = tourneyBreak(); return b ? JSON.parse(JSON.stringify(b)) : null; },\n'
         + '    cont: function(){ return tourneyContinue(); },\n'
         + '    stage: function(tok, r){ return _ttStage(tok, r); },\n'
-        + '    rows: function(){ return tourneyRows().map(function(r){ return { t:r.t, en:r.en !== false, note:r.note || "", nosel:!!r.nosel }; }); },\n'
+        + '    rows: function(){ return tourneyRows().map(function(r){ return { t:r.t, en:r.en !== false, note:r.note || "", nosel:!!r.nosel, gap:!!r.gap, dial:!!r.adj }; }); },\n'
         // WHICH ROW THE SCREEN OPENS ON, which is a rule about rows and not about drawing:
         // -1 is unarmed, and a list whose first row is not this player's to press opens there.
         + '    sel: function(){ return tourneySel(); },\n'
-        + '    pick: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return rs[i].act(); } throw "no row " + t; },\n'
+        // LEFT/RIGHT on the armed row, through the real handler: a value row dials,
+        // a command row refuses and hands the key back.
+        + '    lr: function(right){ var h = UI_INPUT[phase];\n'
+        + '                         if(!h || !h.other) throw "no other on " + phase;\n'
+        + '                         return h.other(right ? "ArrowRight" : "ArrowLeft"); },\n'
+        + '    arm: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return i; } throw "no row " + t; },\n'
+        + '    pick: function(t){ C.arm(t); return tourneyRows()[_ttUi.sel].act(); },\n'
         + '    has: function(t){ return tourneyRows().some(function(r){ return r.t.indexOf(t) === 0; }); },\n'
         + '    draw: function(){ var s = SCREENS[phase]; if(!s || !s.d) throw "no screen for " + phase; s.d(); return true; },\n'
         + '    line: function(nd){ return _ttMatchLine(tourneyView() || {}, nd.nid, nd); },\n'

@@ -577,7 +577,11 @@ function _netBurstApply(s, theta){
     let d = (s.role === 'host' ? -1 : 1) * (theta / 2);
     if(d >  NET_BURST_SLEW_MS) d =  NET_BURST_SLEW_MS;   // symmetric clamp: clips to the same magnitude on both sides
     if(d < -NET_BURST_SLEW_MS) d = -NET_BURST_SLEW_MS;
-    _netSync = { ofs:_netSync.ofs + d, rtt:_netSync.rtt, at:Date.now() };
+    // `at` stamps when the SERVER was last measured and is left exactly where it is: this
+    // is an alignment onto the PAIR's midpoint, which is a different clock. Stamping it
+    // here lets a match's boundaries postpone the age-based server sweep for as long as
+    // the boundaries keep coming, and a tournament evening is nothing but boundaries.
+    _netSync = { ofs:_netSync.ofs + d, rtt:_netSync.rtt, at:_netSync.at };
     _netClockPush();
     return d;
 }

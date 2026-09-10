@@ -70,7 +70,7 @@ try {
     // are actually read in, which is the one with ten people in it.
     const _tid = i => ('0000000' + i).slice(-8);
     const _tps = [];
-    for(let i=0;i<10;i++) _tps.push({ id:_tid(i), name:'clnt-CI-' + _tid(i).slice(-4) });
+    for(let i=0;i<8;i++) _tps.push({ id:_tid(i), name:'clnt-CI-' + _tid(i).slice(-4) });   // tournament_max_players
     const _oPid = getPlayerId, _oOk = netTourneyOk;
     // Two overrides, both there to buy the EXPENSIVE path: a board draws the [YOU] marker
     // only for the player standing on it, and every row on a screen the server has not
@@ -82,12 +82,16 @@ try {
     // between screens depending on which branch each one happened to take.
     _ttUi.sel = 0; _ttUi.msg = 'WAITING FOR THE SERVER'; _ttUi.from = ''; _ttUi.contAt = 0;
     _tt = null; _netTourneys = [];
-    for(let i=0;i<6;i++) _netTourneys.push({ tid:'t'+i, code:'ABC'+i+'XY', players:i+2, max:10,
+    for(let i=0;i<6;i++) _netTourneys.push({ tid:'t'+i, code:'ABC'+i+'XY', players:i+2, max:8,
                                              host:_tid(i), host_name:'clnt-CI-000'+i });
     phase='tourneyLobby'; bench('tourney lobby (browse, 6 rooms)', ()=>drawTourneyLobby());
-    _tt = { tid:'t1', code:'K7MZ4Q', state:'open', host:_tid(0), max:10, stakes:true, round:0,
+    // The settings a tournament is created from, still with no tournament held: it draws the
+    // same row list the browse lobby does, over a band line it computes per frame.
+    _ttUi.stakes = true; _ttUi.lvl = MAX_LEVELS;
+    phase='tourneySetup'; bench('tourney setup (create settings)', ()=>drawTourneySetup());
+    _tt = { tid:'t1', code:'K7MZ4Q', state:'open', host:_tid(0), max:8, stakes:true, round:0,
             players:_tps.slice() };
-    bench('tourney lobby (10-player roster)', ()=>drawTourneyLobby());
+    phase='tourneyLobby'; bench('tourney lobby (full roster)', ()=>drawTourneyLobby());
     // The QR is built once and cached against its own text, so the warm redraw is what a
     // frame of this screen actually costs -- the cold build is already profiled above.
     phase='tourneyCode'; bench('tourney join code (QR cached)', ()=>drawTourneyCode());
@@ -167,7 +171,7 @@ try {
       'credits','multiplayer','duelMenu','duelLobby','friends','myId','duelInvite','quitConfirm','resetConfirm','nameEntry',
       'playing','paused','dying','levelReady','levelDone',
       'duel','duelReady','duelPaused','duelOver',
-      'tourneyCode','tourneyLobby','tourneyBracket','tourneyRound','tourneyCeremony',
+      'tourneyCode','tourneyLobby','tourneySetup','tourneyBracket','tourneyRound','tourneyCeremony',
       'tourneyPodium','tourneyQuit']);
     for(const ph of Object.keys(SCREENS))
       if(!covered.has(ph)) R.warns.push('NOT PROFILED (new screen?): '+ph);

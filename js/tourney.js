@@ -194,7 +194,7 @@ function tourneyExitPhase(){
 // idle host. Second in line costs one wait; side by side costs two.
 async function _ttPost(action, extra){
     const body = Object.assign({ id: getPlayerId(), action }, extra || {});
-    return await _netPostRes('/api/tournament.php', body, true);
+    return await _netPostRes('/api/tournament.php', body, NET_BG_SOLO);
 }
 function _ttArm(){ if(!_ttT && typeof setInterval === 'function') _ttT = setInterval(_ttTick, TT_TICK_MS); }
 function _ttDisarm(){ if(_ttT){ clearInterval(_ttT); _ttT = null; } }
@@ -596,7 +596,7 @@ async function _ttFlushRep(){
     if(_ttRep.tries >= TT_REPORT_MAX){ _ttRep = null; return; }   // the walkover ladder has it from here
     _ttRep.at = now; _ttRep.tries++;
     _ttRepBusy = true;
-    const r = await _netPostRes('/api/tournament.php', _ttRep.body, true);
+    const r = await _netPostRes('/api/tournament.php', _ttRep.body, NET_BG_SOLO);
     _ttRepBusy = false;
     if(!_ttRep) return;
     // 403/404/409 are all terminal: not our match, no such node, or a node that has moved
@@ -773,7 +773,7 @@ function tourneyRejoin(){
 // comes first, and the row on it that says CREATE is the one that talks to the server. The
 // settings are read off _ttUi there, so nothing is passed in and nothing can be half-passed.
 function tourneySetupOpen(){
-    _ttUi.sel = 0;   // an ordinary list, top row armed: nothing on this screen costs anybody anything
+    _ttUi.sel = 0;   // an ordinary list, top row armed -- and the top row is CREATE, which is what this screen is for
     phase = 'tourneySetup';
     Snd.sfxPlay('select', cfg.music);
     _uiDirty = true;
@@ -920,25 +920,36 @@ function tourneyAsk(to){
 }
 
 // ---- the row model the lobby screen and its input share ------------------------------
+// A row that is a VALUE rather than a command, in the shape every multi-value SETTINGS row
+// already has: A cycles it forward, LEFT and RIGHT dial it either way. cur is the current
+// choice as an index into n of them, put() takes the new one. gap asks the screen for a
+// blank line above the row -- a break in the list, never a row of its own.
+function _ttDial(t, cur, n, put, gap){
+    return { t:t, en:true, gap:!!gap,
+             adj:(right) => { put(((cur | 0) + (right ? 1 : n - 1)) % n); _uiDirty = true; },
+             act:() => { put(((cur | 0) + 1) % n); Snd.sfxPlay('select', cfg.music); _uiDirty = true; } };
+}
 // One list, two readers: drawTourneyLobby paints it and UI_INPUT.tourneyLobby dispatches
 // it, so a row can never be drawn in one place and acted on in another.
 function tourneyRows(){
     const rows = [];
     if(phase === 'tourneySetup'){
-        // What a tournament is played FOR, before there is one. Both rows are two-way (LEFT/
-        // RIGHT as well as A), because both are a value being dialled rather than a command --
-        // and the command is the row underneath them, so nothing here is pressed by accident.
-        // The label names what the toggle does, so this row takes no note: a note is drawn
-        // at a fixed x and a row this long runs straight through that column.
-        rows.push({ t:'ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'), en:true, lr:true,
-                    act:() => { _ttUi.stakes = !_ttUi.stakes; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        // The press this screen exists for, on the row the screen opens on: every setting
+        // under it has a working default, so a host who wants an ordinary tournament presses
+        // A twice and is in a room. The blank line below it is what keeps the settings from
+        // reading as more of the command -- and the command from being fallen into while
+        // dialling one. The label names what the row does, so it takes no note: a note is
+        // drawn at a fixed x and a row this long runs straight through that column.
+        rows.push({ t:'CREATE TOURNAMENT', en:netTourneyOk() && !_ttUi.busy,
+                    act:() => tourneyCreate(_ttUi.stakes, _ttUi.lvl) });
+        // What a tournament is played FOR, before there is one.
+        rows.push(_ttDial('ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'),
+                          _ttUi.stakes ? 1 : 0, 2, v => { _ttUi.stakes = !!v; }, true));
         // The level round 1 is played at. Every round after it is one deeper, so this is the
         // floor of the whole ladder, not just of the first match -- which is what the summary
         // band under the rows spells out.
-        rows.push({ t:'START LEVEL: ' + _duelLvl(_ttUi.lvl), en:true, lr:true,
-                    act:() => { _ttUi.lvl = _duelLvl(_ttUi.lvl) % MAX_LEVELS + 1; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
-        rows.push({ t:'CREATE TOURNAMENT', en:netTourneyOk() && !_ttUi.busy,
-                    act:() => tourneyCreate(_ttUi.stakes, _ttUi.lvl) });
+        rows.push(_ttDial('START LEVEL: ' + _duelLvl(_ttUi.lvl),
+                          _duelLvl(_ttUi.lvl) - 1, MAX_LEVELS, v => { _ttUi.lvl = v + 1; }));
         rows.push({ t:'BACK', en:true, act:() => { phase = 'tourneyLobby'; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
         return rows;
     }

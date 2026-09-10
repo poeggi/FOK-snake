@@ -649,19 +649,30 @@ runTest('SMOKE-NET', `
         _netGet('/api/poll.php', undefined, false);
         if(_netFlight!==1) throw 'an unheld request must count as in flight, got ' + _netFlight;
         if(!(_netFlightMax>=1)) throw 'the field readout must keep the high-water mark of our own concurrency';
-        // (c2) ...for the HEARTBEAT tier. The idle tier -- items, the cloud backup, the traffic
-        // nobody is waiting for -- stands aside for that held poll anyway: parked in PHP or not,
-        // it holds a connection open the whole time, and the slice is paid per request in flight
-        // up there. Bounded by the same count as every other wait here, so the drain is delayed
-        // and never dropped.
+        // (c2) ...for the GATE, which is a different question from the wire being busy. A poll
+        // parked server-side owns a PHP worker for its whole wait, so a request sent beside it
+        // is the one that can take the host to a concurrency it has not served -- and two beside
+        // it race each other and BOTH pay the full wait. So every lane stands aside for a held
+        // poll except the exempt one, which is what a player is waiting on right now. Bounded by
+        // the same count as every other wait here, so the drain is delayed and never dropped.
         const _oHeldG=_netPollHeld;
         _netFlight=0; _netPollHeld=true;
         if(_netGapFlight(NET_BG_IDLE)!==1) throw 'the idle tier must stand aside for a held poll, got ' + _netGapFlight(NET_BG_IDLE);
-        if(_netGapFlight(true)!==0) throw 'the heartbeat must NOT be parked behind the poll a lobby holds open by design';
+        if(_netGapFlight(true)!==1) throw 'the background lane must stand aside for a held poll too, got ' + _netGapFlight(true);
+        if(_netGapFlight(NET_BG_SOLO)!==0) throw 'the exempt lane must go beside a held poll, got ' + _netGapFlight(NET_BG_SOLO);
         _netPollHeld=false;
         if(_netGapFlight(NET_BG_IDLE)!==0) throw 'with no poll open the idle tier owes nothing extra';
+        if(_netGapFlight(true)!==0) throw 'with no poll open the background lane owes nothing extra';
+        // ...and a worker does not know which endpoint parked it: DEPRECATED(relay)'s held
+        // GET is the other hold a client can have open, and it counts the same.
+        _netRelayHeld=true;
+        if(_netGapFlight(true)!==1) throw 'a held relay GET parks a worker too and must be waited out';
+        if(_netGapFlight(NET_BG_SOLO)!==0) throw 'the exempt lane goes beside either kind of hold';
+        _netRelayHeld=false;
+        if(_netGapFlight(true)!==0) throw 'with no hold open the background lane owes nothing extra';
         _netFlight=1;
         if(_netGapFlight(true)!==1) throw 'a real request of ours in flight counts for every tier';
+        if(_netGapFlight(NET_BG_SOLO)!==1) throw 'and counts for the exempt lane as well -- a THIRD is forbidden';
         _netPollHeld=_oHeldG; _netFlight=_oFlightG;
         // (c3) the SOLO lane, for the traffic a player is waiting for that must not be SPACED
         // -- the signalling burst of a forming duel, and an unheld poll. The server measured
@@ -676,6 +687,14 @@ runTest('SMOKE-NET', `
         _netFlight=0; _netPollHeld=true;
         if(_netGapFlight(NET_BG_SOLO)!==0) throw 'solo is not the idle tier: the parked poll IS the slot it is allowed beside';
         _netPollHeld=_oHeldG; _netFlight=_oFlightG;
+        // (c3b) THE SLOT (4.10). A screen holds its poll for as long as it is open, so the
+        // one moment background work can leave without sitting beside the hold is between a
+        // poll answering and the next being armed. Same shape as the gap rule above: a pure
+        // predicate, so what the arm owes can be read and tested without a clock.
+        if(_netArmHold(0, 0)) throw 'a clear wire must arm the poll at once';
+        if(!_netArmHold(1, 0)) throw 'the poll must not park a worker while work of ours waits at the gate';
+        if(!_netArmHold(0, 1)) throw 'the poll must not park a worker beside a request of ours in flight';
+        if(!_netArmHold(2, 3)) throw 'both counts hold the arm back';
         // (c4) ...and a lane nothing opts into is not a lane. The deal moment is made of
         // signals, so ask the transport which one a signal actually asks for.
         const _oPostS=_netPostRes; let _bgS='none';

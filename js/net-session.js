@@ -130,7 +130,7 @@ function _netSeekStart(){
     _netLb.seeking = true; _netLb.msg = '';
     _netSeekT = setInterval(async ()=>{
         if(!_netLb.seeking || _netSess){ _netSeekStop(); return; }
-        const r = await _netPost('/api/match.php', { id:getPlayerId(), action:'seek' }, true);
+        const r = await _netPost('/api/match.php', { id:getPlayerId(), action:'seek' }, NET_BG_SOLO);
         if(!r || !r.matched) return;
         _netSeekStop();
         if(r.peer_name) _netNameSeen(String(r.matched), r.peer_name);   // strangers: the pairing is the entitlement
@@ -141,7 +141,7 @@ function _netSeekStart(){
 }
 function _netSeekStop(){
     _netLb.seeking = false;
-    if(_netSeekT){ clearInterval(_netSeekT); _netSeekT = null; _netPost('/api/match.php', { id:getPlayerId(), action:'cancel' }, true); }
+    if(_netSeekT){ clearInterval(_netSeekT); _netSeekT = null; _netPost('/api/match.php', { id:getPlayerId(), action:'cancel' }, NET_BG_SOLO); }
 }
 
 // ---- signal dispatch (from hello + poll; each message is delivered exactly once) ----
@@ -511,7 +511,9 @@ async function _netRequestStart(s, reason){
     // gate in net-api.js). The gate is a wait, and a pts read before it would be a wait old
     // by the time it is sent -- start.php rejects a stale one -- so the body is built after.
     // The rtt is measured from the same point, or the wait would land in the clock offset.
-    await _netGate(true);
+    // The SOLO lane: a start is the duel handshake the contract exempts beside a parked
+    // poll, and the stale gate leaves a 1 s budget that a background wait would eat.
+    await _netGate(NET_BG_SOLO);
     if(_netSess !== s || !s.game) return;
     const _t0 = performance.now();
     const _sb = { id: getPlayerId(), peer: s.peer, epoch: s.epoch|0, reason: reason || 'first', pts: netPts() };

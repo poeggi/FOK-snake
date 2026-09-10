@@ -621,14 +621,17 @@ try {
   });
 
   // A request that goes out beside another of ours pays the scheduling slice twice over --
-  // which is what the server measured at the deal moment. start.php is one of the two calls
-  // it caught, so it owes the gate like everything else.
+  // which is what the server measured at the deal moment. So a start passes the gate, on the
+  // EXEMPT lane: it is the duel handshake, the one thing a parked poll may not hold back, and
+  // the stale gate leaves a 1 s budget a background wait would eat. Exempt is not ungated --
+  // it still stands behind another request of ours, because a THIRD beside the poll is
+  // forbidden. And the pts is read AFTER the wait, or it is old by the time it is sent.
   await acheck('4.4: the start request passes the pacing gate before its body is built', async () => {
     const A = mk(A_ID);
     A.__gameSess(B_ID, 'host');
     const r = await A.__startWith({});
-    if(r.order.join(' ') !== 'gate:true post:pts')
-      throw new Error('start.php must take the paced lane first, then read a fresh pts: ' + r.order.join(' '));
+    if(r.order.join(' ') !== 'gate:solo post:pts')
+      throw new Error('start.php must take the exempt lane first, then read a fresh pts: ' + r.order.join(' '));
   });
 
   // The anchor is refreshed by AGE, never by the start itself: a pts is computed at send

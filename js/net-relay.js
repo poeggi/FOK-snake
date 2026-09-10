@@ -113,17 +113,12 @@ async function _netRelayPost(s, o){
     if(!_netOk()) return 'drop';
     try {
         const _t0 = performance.now();
-        // The ENVELOPE pts is backdated like every other PTS we send: the server
-        // rejects a future one outright (zero tolerance), and stamping it raw made
-        // an asymmetric-link clock bias 400 every packet of the match -- silently,
-        // since nothing below looked at the status. The payload keeps the true pts,
-        // so the peer's lag math is untouched.
         // pull (API 3.2): piggyback our OWN inbound onto this reply, so receive survives a
         // saturated FPM pool that stalls the held GET. Harmless on a 3.1 server (ignored),
         // but the reply is DRAINED, so we MUST consume messages[] below -- which we do.
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
-                                   pts: o.pts != null ? o.pts - 50 : undefined, pull: true }),
+                                   pts: o.pts != null ? o.pts : undefined, pull: true }),
             cache:'no-store', priority:'high' });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
@@ -205,8 +200,12 @@ async function _netRelayLoop(s){
         // Abortable: without this the held socket lingers up to a whole hold after a teardown
         // (leaving a match, or unload), long after we stopped caring about it.
         s.relayAbort = (typeof AbortController === 'function') ? new AbortController() : null;
+        // Held: parked server-side, so not traffic the clock sync has to wait out -- but it
+        // owns a PHP worker exactly as a held poll does, and the gate is told so.
+        _netRelayHeld = true;
         const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=' + NET_POLL_S,
-                                s.relayAbort ? s.relayAbort.signal : undefined, true);   // held: parked server-side, so not traffic the clock sync has to wait out
+                                s.relayAbort ? s.relayAbort.signal : undefined, true);
+        _netRelayHeld = false;
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;
         if(!r && _netTimers) await new Promise(res => setTimeout(res, 1000));   // transport error: back off

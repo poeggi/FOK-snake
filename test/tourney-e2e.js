@@ -59,15 +59,41 @@ async function lobby(){
     A(C[0].phase() === 'tourneySetup', '1: CREATE did not open the settings (' + C[0].phase() + ')');
     A(!C[0].tt(), '1: opening the settings created a tournament');
     const rs = C[0].rows();
-    A(rs.length === 4 && rs[0].t === 'ITEM STAKES (WINDSWEPPING): OFF' && rs[1].t === 'START LEVEL: 1'
-      && rs[2].t === 'CREATE TOURNAMENT' && rs[3].t === 'BACK',
+    A(rs.length === 4 && rs[0].t === 'CREATE TOURNAMENT' && rs[1].t === 'ITEM STAKES (WINDSWEPPING): OFF'
+      && rs[2].t === 'START LEVEL: 1' && rs[3].t === 'BACK',
       '1: the settings screen offers ' + rs.map(x => x.t).join('/'));
+    // The press the screen is for is the row it opens on, with a blank line between it and
+    // the two settings -- and the settings are the two rows that dial.
+    A(C[0].sel() === 0, '1: the settings screen does not open on CREATE (' + C[0].sel() + ')');
+    A(rs[1].gap && !rs[0].gap && !rs[2].gap && !rs[3].gap, '1: the blank line is not above the settings');
+    A(!rs[0].dial && rs[1].dial && rs[2].dial && !rs[3].dial,
+      '1: the rows that dial are ' + rs.filter(x => x.dial).map(x => x.t).join('/'));
     C[0].draw();
 
     C[0].pick('ITEM STAKES');                  // stakes are the host's call, off by default
-    A(C[0].rows()[0].t === 'ITEM STAKES (WINDSWEPPING): ON', '1: the stakes row did not toggle');
+    A(C[0].rows()[1].t === 'ITEM STAKES (WINDSWEPPING): ON', '1: the stakes row did not toggle');
     C[0].pick('START LEVEL');                  // and so is the level round 1 is played at
-    A(C[0].rows()[1].t === 'START LEVEL: 2', '1: the level row did not step');
+    A(C[0].rows()[2].t === 'START LEVEL: 2', '1: the level row did not step');
+    // A setting here is a multi-value SETTINGS row and dials like one: A steps it forward,
+    // LEFT and RIGHT turn it either way, and it wraps at both ends. A command row is not a
+    // value and hands the arrow key back.
+    A(C[0].lr(true) === true && C[0].rows()[2].t === 'START LEVEL: 3', '1: RIGHT did not raise the level');
+    A(C[0].lr(false) === true && C[0].rows()[2].t === 'START LEVEL: 2', '1: LEFT did not lower the level');
+    C[0].lr(false);
+    A(C[0].rows()[2].t === 'START LEVEL: 1', '1: LEFT stopped short of the floor');
+    C[0].lr(false);
+    A(C[0].rows()[2].t === 'START LEVEL: ' + MAX_LEVEL, '1: LEFT off level 1 did not wrap to the deepest');
+    C[0].lr(true);
+    A(C[0].rows()[2].t === 'START LEVEL: 1', '1: RIGHT off the deepest did not wrap to level 1');
+    C[0].lr(true);                             // and back to the level the rest of this run is played from
+    A(C[0].rows()[2].t === 'START LEVEL: 2', '1: RIGHT did not raise the level off the floor');
+    C[0].arm('ITEM STAKES');                   // OFF again, so LEFT can be seen turning it back on
+    C[0].lr(true);
+    A(C[0].rows()[1].t === 'ITEM STAKES (WINDSWEPPING): OFF', '1: RIGHT did not turn the stakes off');
+    A(C[0].lr(false) === true && C[0].rows()[1].t === 'ITEM STAKES (WINDSWEPPING): ON', '1: LEFT did not turn the stakes on');
+    C[0].arm('CREATE TOURNAMENT');
+    A(C[0].lr(true) === false, '1: a command row took an arrow key');
+    A(C[0].rows()[2].t === 'START LEVEL: 2', '1: an arrow on CREATE moved a setting');
     C[0].clear();
     await C[0].pick('CREATE TOURNAMENT');
     await settleAsync();
@@ -95,7 +121,10 @@ async function lobby(){
     await pump(1);
     const rl = C[1].rows();
     const ann = rl.filter(x => x.t.indexOf('K7MZ4Q') === 0);
-    A(ann.length === 1 && ann[0].note === '1/10', '1: the open lobby did not reach the announce list');
+    // The count is read off the room, never written down here: a literal '1/10' outlived the
+    // cap it was copied from and failed the moment the world matched the real server.
+    A(ann.length === 1 && ann[0].note === '1/' + srv.T.max,
+      '1: the open lobby did not reach the announce list (note ' + (ann[0] ? ann[0].note : '-') + ')');
     C[1].draw();
 
     C[1].pick('K7MZ4Q');                       // joined off the announce

@@ -1690,8 +1690,14 @@ function _ttDots(){ return '.'.repeat(1 + Math.floor(((typeof performance !== 'u
 // startY, with its last entry (always BACK) parked at the bottom like every other menu.
 function _ttDrawRows(startY, rowH){
     const rows = tourneyRows(), sel = tourneySel(rows);
+    // A gap row asks for a blank line above it, and that line is a SLOT on the pitch and
+    // nothing else -- there is no row there to select, so the list the input steps through
+    // and the list the screen paints stay the same list.
+    let slot = 0;
     rows.forEach((r, i) => {
-        const last = i === rows.length - 1, y = last ? BACK_Y : startY + i * rowH;
+        if(r.gap) slot++;
+        const last = i === rows.length - 1, y = last ? BACK_Y : startY + slot * rowH;
+        slot++;
         if(r.en === false) ct(sel === i ? ('> ' + r.t + ' <') : r.t, CW/2, y, sel === i ? '#777' : '#555', FONT.MENU);
         else menuItem(r.t, y, sel === i);
         // A row that names a PERSON is drawn as one: the name goes in the list column every

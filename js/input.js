@@ -212,11 +212,13 @@ function _ttUiInput(escTo){
             if(!r || r.en === false){ Snd.sfxPlay('fail', cfg.music); return; }
             _ttUi.sel = p.i; r.act();
         },
+        // A value row dials either way, the way a multi-value SETTINGS row does: the row
+        // owns the value, the handler owns the blip. Everything else ignores LEFT/RIGHT.
         other(key){
             if(key !== 'ArrowLeft' && key !== 'ArrowRight') return false;
             const p = pick(), r = p.i >= 0 ? p.rows[p.i] : null;
-            if(!r || !r.lr) return false;
-            r.act(); return true;   // a two-way row toggles on LEFT/RIGHT exactly as it does on A
+            if(!r || !r.adj || r.en === false) return false;
+            r.adj(key === 'ArrowRight'); Snd.sfxPlay('nav', cfg.music); return true;
         },
         // ESC presses the BACK row rather than going around it. On the lobby that row also
         // cancels or leaves, and an ESC that quietly slipped past it would strand a room of

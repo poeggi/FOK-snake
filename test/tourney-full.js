@@ -1,30 +1,36 @@
-// TOURNAMENT FULL LADDER (ON DEMAND -- not part of any tier). A full field of ten real
-// clients plays every match of every round, from the join code to the podium.
+// TOURNAMENT FULL LADDER (ON DEMAND -- not part of any tier). A full field of real clients
+// -- tournament_max_players of them -- plays every match of every round, from the join code
+// to the podium.
 //
 // WHY THIS EXISTS BESIDE tourney-e2e.js. That suite is the one that runs on every --full:
 // six clients, twelve matches, and every failure mode injected one at a time. Keeping it
 // that size is deliberate. But a tournament is a LADDER, and a ladder only shows itself at
 // full length: the round-robin at the player cap, a break between every pair of rounds, the
-// level walking up one per round, the stage tokens turning from GROUP STAGE into QUARTER
-// FINALS into SEMI FINALS into THE FINAL, and the bracket halving until one node is left.
-// None of that is reachable in twelve matches, and all of it is what a player actually
-// sees. This suite walks it once, end to end, and is run by hand:
+// level walking up one per round, the stage tokens turning from GROUP STAGE into SEMI FINALS
+// into THE FINAL, and the bracket halving until one node is left. None of that is reachable
+// in twelve matches, and all of it is what a player actually sees. This suite walks it once,
+// end to end, and is run by hand:
+//
+// A cap-sized field is three rounds, so QUARTER FINALS is not a stage this ladder can reach
+// -- it needs a field above the cap. The token itself is covered in tourney-e2e section 15,
+// which reads all four. Do not grow the field back to reach it here: a suite that plays a
+// tournament the server would refuse to open is testing nothing anybody can meet.
 //
 //   node test/tourney-full.js        (or: bash test/checks.sh --tourney)
 //
-// The world -- the scripted server and the ten harness clients -- is test/tourney-world.js,
+// The world -- the scripted server and the harness clients -- is test/tourney-world.js,
 // the same one tourney-e2e.js drives. The clients are the shipping client.
 const { mkWorld, MAX_LEVEL, BREAK_MS, BREAK_TTL_MS,
         TT_OVER_MS } = require('./tourney-world');
 
-const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005',
-               'aaaa0006', 'aaaa0007', 'aaaa0008', 'aaaa0009', 'aaaa0010'];
+const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004',
+               'aaaa0005', 'aaaa0006', 'aaaa0007', 'aaaa0008'];
 // clnt-CI-<the four hex that tell these ids apart>: the shape the live probes register
 // under, so a name in the log traces back to the id that wore it. Here that is the tail
 // (the live ids differ in their head instead).
 const NAMES = IDS.map(id => 'clnt-CI-' + id.slice(-4));
-const N = IDS.length;              // the player cap: tournament_max_players
-const CUT = 8;                     // how many survive the round-robin, so the tree is 8-4-2
+const N = IDS.length;              // the player cap: tournament_max_players, which is 8
+const CUT = N / 2;                 // half survive the round-robin, so the tree is 4-2-1
 
 const rows = [];
 let fails = 0;
@@ -33,7 +39,7 @@ const A = (c, m) => { if(!c){ rows.push('FAIL: ' + m); fails++; } };
 const { srv, C, idx, clock, pump, settleAsync, clearAll } = mkWorld(IDS, NAMES, { cut:CUT });
 
 // Everyone the server still counts as a member. A forfeit mid-run leaves the rest of the
-// field playing on, so most expectations below are about these and not about all ten.
+// field playing on, so most expectations below are about these and not about the whole cast.
 const alive = () => IDS.map((id, i) => i).filter(i => srv.T.players.some(p => p.id === IDS[i]));
 const nodesOf = (r) => srv.T.order.filter(x => srv.T.nodes[x].round === r);
 
@@ -59,7 +65,7 @@ async function lobby(){
 }
 
 // ---- 2) one match -------------------------------------------------------
-// The per-node contract, asserted on every one of the 27 nodes rather than on a sample:
+// The per-node contract, asserted on every one of the 19 nodes rather than on a sample:
 // the sheet said the same thing to everybody, the level is the one the ladder owes this
 // round, both sides preset the match to it, and exactly the two players reported.
 async function playNode(seen){
@@ -231,10 +237,11 @@ async function ladder(){
     let guard = 0;
     while(srv.T.state === 'running' && guard++ < 80){
         if(srv.T.brk){
-            // The three exits a break has, one each: the host presses, somebody forfeits
-            // while it is up, and the last one is left to time out.
-            const mode = seen.breaks.length === 1 ? 'forfeit'
-                       : (nodesOf(srv.T.nodes[srv.T.brkNext].round).length === 1 ? 'ttl' : 'press');
+            // The three exits a break has, spread across the two a cap-sized field gives us:
+            // the last break is left to time out, and the first is both forfeited during AND
+            // pressed (the forfeit path falls through to the press), so no exit goes unwalked.
+            const last = nodesOf(srv.T.nodes[srv.T.brkNext].round).length === 1;
+            const mode = last ? 'ttl' : (seen.breaks.length === 0 ? 'forfeit' : 'press');
             seen.breaks.push(await passBreak(mode));
             continue;
         }
@@ -256,9 +263,10 @@ async function ladder(){
     const played = Object.keys(seen.lvl).map(Number).sort((a, b) => a - b);
     A(JSON.stringify(played) === JSON.stringify(rounds.map(r => Math.min(r, MAX_LEVEL))),
       '4: levels ' + played.join(',') + ' for rounds ' + rounds.join(','));
-    // All four named stages came out of one run, which is the only way to prove the client
-    // is not quietly drawing every round the same.
-    for(const tok of ['group', 'quarter', 'semi', 'final'])
+    // Every stage a cap-sized field HAS came out of one run, which is the only way to prove
+    // the client is not quietly drawing every round the same. 'quarter' needs a field the
+    // server would not open; tourney-e2e section 15 reads that token instead.
+    for(const tok of ['group', 'semi', 'final'])
         A(seen.stage[tok] > 0, '4: no node in the whole ladder was a "' + tok + '"');
     rows.push('4 ladder: ' + seen.nodes + ' matches over ' + rounds.length + ' rounds ('
               + rounds.map(r => nodesOf(r).length).join('+') + '), levels '
