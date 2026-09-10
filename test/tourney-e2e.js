@@ -20,7 +20,7 @@
 //
 // Run: node test/tourney-e2e.js
 const { mkWorld, RESULT_MS, MAX_DIRECT, MAX_LEVEL, BREAK_MS,
-        TT_OVER_MS, TT_CONNECT_MS } = require('./tourney-world');
+        TT_OVER_MS, TT_CONNECT_MS, TT_READ_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004', 'aaaa0005', 'aaaa0006'];
 // clnt-CI-<the four hex that tell these ids apart>: the shape the live probes register
@@ -59,14 +59,14 @@ async function lobby(){
     A(C[0].phase() === 'tourneySetup', '1: CREATE did not open the settings (' + C[0].phase() + ')');
     A(!C[0].tt(), '1: opening the settings created a tournament');
     const rs = C[0].rows();
-    A(rs.length === 4 && rs[0].t === 'CREATE TOURNAMENT' && rs[1].t === 'ITEM STAKES (WINDSWEPPING): OFF'
-      && rs[2].t === 'START LEVEL: 1' && rs[3].t === 'BACK',
+    A(rs.length === 5 && rs[0].t === 'CREATE TOURNAMENT' && rs[1].t === 'ITEM STAKES (WINDSWEPPING): OFF'
+      && rs[2].t === 'START LEVEL: 1' && rs[3].t === 'SPEED TOURNAMENT: OFF' && rs[4].t === 'BACK',
       '1: the settings screen offers ' + rs.map(x => x.t).join('/'));
     // The press the screen is for is the row it opens on, with a blank line between it and
-    // the two settings -- and the settings are the two rows that dial.
+    // the settings -- and the settings are the rows that dial.
     A(C[0].sel() === 0, '1: the settings screen does not open on CREATE (' + C[0].sel() + ')');
-    A(rs[1].gap && !rs[0].gap && !rs[2].gap && !rs[3].gap, '1: the blank line is not above the settings');
-    A(!rs[0].dial && rs[1].dial && rs[2].dial && !rs[3].dial,
+    A(rs[1].gap && !rs[0].gap && !rs[2].gap && !rs[3].gap && !rs[4].gap, '1: the blank line is not above the settings');
+    A(!rs[0].dial && rs[1].dial && rs[2].dial && rs[3].dial && !rs[4].dial,
       '1: the rows that dial are ' + rs.filter(x => x.dial).map(x => x.t).join('/'));
     C[0].draw();
 
@@ -415,9 +415,21 @@ async function passBreak(opts){
         await settleAsync();
         A(srv.log.length + srv.refused.length === q0, 'B: a guest posted a CONTINUE');
         A(!!C[gi].brk(), 'B: a guest pressing CONTINUE took its own board down');
+        // The server's wait is not the whole gate. When it is shorter than the reading floor
+        // the board is held for the floor instead: how long a table takes to READ is this
+        // client's judgement, so a press at the moment the server would allow it still finds
+        // a dark button.
+        if(BREAK_MS < TT_READ_MS){
+            clock(BREAK_MS + 100);
+            const rw = C[hi].rows().filter(r => r.t === 'CONTINUE')[0];
+            A(rw && !rw.en && /^[0-9]+S$/.test(rw.note),
+              'B: CONTINUE went live on the server wait alone (' + JSON.stringify(rw) + ')');
+        }
     }
 
-    clock(BREAK_MS + 100);
+    // The board is held for the LONGER of the two waits: the server's own deadline and the
+    // client's reading floor. Which one binds is a question about numbers, not behaviour.
+    clock(Math.max(BREAK_MS, TT_READ_MS) + 100);
     if(opts.first){
         // OUR clock is not the server's. When ours says the wait is over and the server's
         // does not, the refusal has to read as nothing at all -- a button that answers "no"
@@ -479,7 +491,7 @@ async function passBreak(opts){
     }
     rows.push('B break ' + b0.done + '->' + b0.next + ': ' + b0.rows.length + ' rows cut at ' + b0.of
               + ' through, ' + b0.matches + ' match(es) at level ' + b0.lvl + '/' + b0.hm + ' hearts, '
-              + 'host-only CONTINUE held for ' + (BREAK_MS / 1000) + 's');
+              + 'host-only CONTINUE held for ' + (Math.max(BREAK_MS, TT_READ_MS) / 1000) + 's');
 }
 
 // ---- the whole thing ------------------------------------------------------

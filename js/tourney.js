@@ -29,6 +29,13 @@ const TT_AFTER_MAX  = 1000;
 const TT_OVER_MS    = 4000;    // how long the duelOver banner holds before the next match
 const TT_CONNECT_MS = 20000;   // a sheet that has not become a match by now is engaged again
 const TT_MSG_MS     = 6000;
+// The floor under a break's own wait. A round board is not a button with a table
+// behind it: it is the standings the whole field is reading, and the host's press ends
+// it for everybody at once. The server's `wait` is there to stop a host wedging an
+// evening, so it is free to be short or absent; how long a table needs to be READ is
+// this client's business and not the server's. Two seconds is long enough that nobody
+// loses the board to a press they were already making when it arrived.
+const TT_READ_MS    = 2000;
 
 // The whole client-side picture, or null when we hold no tournament. Every field in it
 // came from the server; nothing here is derived except the match-count arithmetic the
@@ -37,7 +44,7 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, busy:false, contAt:0, from:'', to:'', ask:null };
+var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, busy:false, contAt:0, from:'', to:'', ask:null };
 // stakes and lvl are what the CREATE screen collects before there is a tournament to put
 // them on. They live here rather than in cfg because they describe one tournament, not
 // this device: the next one is configured from its own screen.
@@ -126,8 +133,11 @@ function _ttMatches(n){ n = n|0; return n < 2 ? 0 : (n <= 4 ? n * (n - 1) / 2 : 
 // and this row, selected, already reaches it.
 function _ttLvlLine(){
     const l = _duelLvl(_ttUi.lvl);
-    return l >= MAX_LEVELS ? 'EVERY ROUND AT LEVEL ' + MAX_LEVELS + ' - THERE IS NO DEEPER BOARD'
-                           : 'ROUND 1 AT LEVEL ' + l + ' - ONE DEEPER EACH ROUND, UP TO ' + MAX_LEVELS;
+    // Speed is the LOUDER of the two settings -- it changes how the game feels at every level
+    // -- so it leads the line when it is on, and the ladder follows it.
+    const lad = l >= MAX_LEVELS ? 'EVERY ROUND AT LEVEL ' + MAX_LEVELS + ' - THERE IS NO DEEPER BOARD'
+                                : 'ROUND 1 AT LEVEL ' + l + ' - ONE DEEPER EACH ROUND, UP TO ' + MAX_LEVELS;
+    return _ttUi.speed ? 'EVERY ROUND AT SPEED - ' + lad : lad;
 }
 // How many rounds this tournament HAS, so a board can say where in it you are rather than
 // only which round is up. Round 1 is the group stage; the knockout halves the field every
@@ -217,7 +227,7 @@ function _ttAdopt(o){
     const tid = String(o.tid);
     _ttHold(tid);
     if(!_tt || _tt.tid !== tid)
-        _tt = { tid, code:'', host:'', state:'open', stakes:false, max:TT_MAX, players:[],
+        _tt = { tid, code:'', host:'', state:'open', stakes:false, speed:false, max:TT_MAX, players:[],
                 round:0, cursor:null, schedule:[], bracket:[], standings:[], advancers:[],
                 roles:null, brk:null, you:'idle', podium:null, frozen:'', reason:'' };
     const t = _tt;
@@ -225,6 +235,10 @@ function _ttAdopt(o){
     if(o.host   != null) t.host   = String(o.host);
     if(o.state  != null) t.state  = String(o.state);
     if(o.stakes != null) t.stakes = !!o.stakes;
+    // Unlike the start level, `speed` rides the LOBBY as well as the roles sheet, so a
+    // player can read it before joining. Absent reads as off: an unstated rule is not one
+    // to play by, and that is the shape a server that does not serve it has.
+    if(o.speed != null) t.speed = !!o.speed;
     if(o.max    != null) t.max    = o.max | 0;
     if(o.round  != null) t.round  = o.round | 0;
     if(o.reason != null) t.reason = String(o.reason);
@@ -292,7 +306,7 @@ function _ttSetBreak(b){
     // server opened it. Seeing it late costs a second; reading a foreign clock costs a button
     // that is either dark forever or live immediately. And re-reading the SAME break must not
     // wind the deadline back, or a press refused a moment ago walks into the same refusal.
-    if(!same) _ttUi.contAt = _msgNow() + Math.max(0, b.wait | 0);
+    if(!same) _ttUi.contAt = _msgNow() + Math.max(TT_READ_MS, b.wait | 0);
     // A break we did not already have takes the screen -- from an event or from a state read
     // alike, which is what makes the round screen survive a missed signal or a reload.
     if(!same && !inGame && _TT_PHASES[_ttFace()] && _ttFace() !== 'tourneyPodium') _ttGo('tourneyRound');
@@ -518,7 +532,7 @@ function _ttEngage(d){
         // The round ladder: round 1 is level 1 and every round after it one deeper, capped
         // at the game's last level. The sheet says which, and _duelLvl refuses anything that
         // is not a level this build has.
-        _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes, lvl:_duelLvl(d.lvl) };
+        _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes, lvl:_duelLvl(d.lvl), speed:!!d.speed };
         _ttPlayNid = String(d.nid || '');   // this node's match owns the board now
         netP2POnlySet(true);   // a tournament match is direct or nothing
         // _netMkSess is not the only moment a session can need dressing: a state re-read can
@@ -572,6 +586,8 @@ function tourneyDressSession(s){
     s.stakesWant = _ttWant.stakes;
     s.lvl0 = _ttWant.lvl;
     s.levelWant = _ttWant.lvl;
+    s.speed = _ttWant.speed;
+    s.speedWant = _ttWant.speed;
     s.p2pOnly = true;
 }
 
@@ -778,11 +794,11 @@ function tourneySetupOpen(){
     Snd.sfxPlay('select', cfg.music);
     _uiDirty = true;
 }
-async function tourneyCreate(stakes, lvl, replace){
+async function tourneyCreate(stakes, lvl, speed, replace){
     if(_tt || _ttUi.busy) return;
     if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
     _ttUi.busy = true; _ttMsg('CREATING...');
-    const body = { stakes: !!stakes, lvl: _duelLvl(lvl) };
+    const body = { stakes: !!stakes, lvl: _duelLvl(lvl), speed: !!speed };
     if(replace) body.replace = true;
     const r = await _ttPost('create', body);
     _ttUi.busy = false;
@@ -790,7 +806,7 @@ async function tourneyCreate(stakes, lvl, replace){
         // The cooldown is charged BEFORE anything is ended, so on a 429 the tournament we
         // host is still standing: show the wait, never report it as ended.
         if(r.status === 429) _ttMsg('TOO SOON - WAIT ' + Math.max(1, Math.ceil(+((r.body && r.body.retry_after) || 60))) + 'S', true);
-        else if(r.status === 409 && !replace) _ttAskReplace(stakes, lvl);
+        else if(r.status === 409 && !replace) _ttAskReplace(stakes, lvl, speed);
         else if(r.status === 409) _ttMsg('YOU ALREADY HOST ONE', true);
         else _ttMsg('COULD NOT CREATE', true);
         return;
@@ -807,10 +823,10 @@ async function tourneyCreate(stakes, lvl, replace){
 // about the tournament we host is what this device still knows of it: the way back
 // (_ttBack) names it when this is the device that hosted it. Elsewhere the question is
 // asked in the general form, with the running case spelled out since it cannot be excluded.
-function _ttAskReplace(stakes, lvl){
+function _ttAskReplace(stakes, lvl, speed){
     const b = _ttBack;
     const mine = !!(b && String(b.host || '') === getPlayerId());
-    _ttUi.ask = { kind:'replace', stakes:!!stakes, lvl:_duelLvl(lvl),
+    _ttUi.ask = { kind:'replace', stakes:!!stakes, lvl:_duelLvl(lvl), speed:!!speed,
                   code:mine ? String(b.code || '') : '',
                   running:mine ? String(b.state || '') === 'running' : null };
     _ttUi.from = 'tourneySetup'; _ttUi.to = '';   // NO returns to the settings the question was asked from
@@ -823,7 +839,7 @@ function _ttAskReplace(stakes, lvl){
 function tourneyAskAnswer(yes){
     const a = _ttUi.ask; _ttUi.ask = null;
     phase = _ttUi.from || 'tourneyLobby'; _uiDirty = true;
-    if(yes && a && a.kind === 'replace') tourneyCreate(a.stakes, a.lvl, true);
+    if(yes && a && a.kind === 'replace') tourneyCreate(a.stakes, a.lvl, a.speed, true);
 }
 // Why a tournament we were in is gone, in the words of the reason the server gave (the
 // lobby event carries it; the read-back does too). The server's vocabulary: the host left
@@ -941,7 +957,7 @@ function tourneyRows(){
         // dialling one. The label names what the row does, so it takes no note: a note is
         // drawn at a fixed x and a row this long runs straight through that column.
         rows.push({ t:'CREATE TOURNAMENT', en:netTourneyOk() && !_ttUi.busy,
-                    act:() => tourneyCreate(_ttUi.stakes, _ttUi.lvl) });
+                    act:() => tourneyCreate(_ttUi.stakes, _ttUi.lvl, _ttUi.speed) });
         // What a tournament is played FOR, before there is one.
         rows.push(_ttDial('ITEM STAKES (WINDSWEPPING): ' + (_ttUi.stakes ? 'ON' : 'OFF'),
                           _ttUi.stakes ? 1 : 0, 2, v => { _ttUi.stakes = !!v; }, true));
@@ -950,6 +966,11 @@ function tourneyRows(){
         // band under the rows spells out.
         rows.push(_ttDial('START LEVEL: ' + _duelLvl(_ttUi.lvl),
                           _duelLvl(_ttUi.lvl) - 1, MAX_LEVELS, v => { _ttUi.lvl = v + 1; }));
+        // Speed and the start level are independent on purpose: a speed tournament runs every
+        // round at the top pace whatever level it is played on, so the two dials combine
+        // freely. Fixed at create, like the stakes -- there is no turning it on later.
+        rows.push(_ttDial('SPEED TOURNAMENT: ' + (_ttUi.speed ? 'ON' : 'OFF'),
+                          _ttUi.speed ? 1 : 0, 2, v => { _ttUi.speed = !!v; }));
         rows.push({ t:'BACK', en:true, act:() => { phase = 'tourneyLobby'; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
         return rows;
     }

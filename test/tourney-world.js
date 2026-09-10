@@ -25,6 +25,7 @@ const MAX_LEVEL    = 10;       // MAX_LEVELS: the ladder cannot go deeper than t
 // Client-side timings the run has to step over.
 const TT_OVER_MS   = 4000;     // tourney.js: how long a settled match holds the screen
 const TT_CONNECT_MS = 20000;   // tourney.js: a sheet that has not become a match by now is engaged again
+const TT_READ_MS   = 2000;     // tourney.js: the client's own floor under a break's wait
 
 // ============================================================================
 // THE SCRIPTED SERVER
@@ -604,4 +605,4 @@ function mkWorld(ids, names, opts){
 
 module.exports = { mkServer, driverSrc, mkWorld,
                    RESULT_MS, BREAK_MS, BREAK_TTL_MS, MAX_DIRECT, MAX_LEVEL,
-                   TT_OVER_MS, TT_CONNECT_MS };
+                   TT_OVER_MS, TT_CONNECT_MS, TT_READ_MS };

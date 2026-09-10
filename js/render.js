@@ -1346,7 +1346,7 @@ function drawAchPopups(now) {
 const SHOP_PAGES = 4, GEAR_PAGE = 2, BOX_PAGE = 3;
 function _drawGourangaPending(now) {
     for(let i=0;i<_gourangaLine.length;i++){
-        if(_gourangaEaten.has(i)) continue;
+        if((_gourangaEaten >> i) & 1) continue;
         const g=_gourangaLine[i], gx=g.x*CS+CS/2, gy=g.y*CS+CS/2, r=CS/2-3;
         ctx.save(); ctx.translate(gx,gy);
         ctx.shadowColor='#ff8800'; ctx.shadowBlur=8; ctx.fillStyle='#ff8800';

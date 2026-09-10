@@ -42,12 +42,18 @@ const GOLDEN = 'bb02d65e:216';
 // the landing tick. It used to sit there stranded -- a body cell is one a head only reaches
 // by dying -- for as long as the tail took to clear it: 18 such ticks in this lane, 0 now,
 // and removing the new branch alone gives b9878561 back byte for byte)
-// -> 8502daef:29923 (THE AUTHORING CLOCK: every input names the tick it executes on, SIM_LEAD
+// -> 3d357412:26042 (THE AUTHORING CLOCK: every input names the tick it executes on, SIM_LEAD
 // ticks out, in every mode alike -- js/sim.js simInputTick. A turn is authored AT its accrual
 // boundary, so one issued within the lead of that boundary now takes the NEXT step instead: the
 // pilots steer on marginally staler state and the lane resolves differently. The CLASSIC golden
 // above does not move, which is the proof that a turn is step-granular either way)
-const GOLDEN_DUEL = '8502daef:29923';
+// 8502daef:29923 -> 3d357412:26042 is SINGLE PLAYER'S COLLECTIBLES COMING TO THE DUEL: the
+// gouranga line and the time crystal run in a duel now, and the crystal, the warp it starts
+// and the line all joined RB_HASH_DUEL -- so the agreement itself is wider and the boards
+// differ from the first level that reaches one. The speed-tournament rule rides the same
+// change. The CLASSIC golden above deliberately did NOT move: the collectibles were
+// converged onto shared routines without disturbing single player's rng stream.
+const GOLDEN_DUEL = '3d357412:26042';
 
 const driver = `
 ;(function(){
@@ -64,7 +70,9 @@ const driver = `
         gem: gem?(gem.x+','+gem.y+','+(gem.tier||0)):'',
         bars:(bars||[]).map(b=>b.x+','+b.y+(b.fragile?'F':'')).join(';'),
         pp: powerPellet?1:0, tc: timeCrystal?1:0, heart: heart?1:0,
-        gour:(_gourangaLine?_gourangaLine.length:0)+':'+(_gourangaEaten?_gourangaEaten.size:0),
+        // _gourangaEaten is a 7-bit MASK; the golden records how many beads are gone, so
+        // it is a popcount here and the recorded value is what it always was.
+        gour:(_gourangaLine?_gourangaLine.length:0)+':'+(function(m){let c=0;while(m){c+=m&1;m>>=1;}return c;})(_gourangaEaten|0),
         bonus:levelBonusCount, perfect:perfectLevel?1:0
       };
       const str=JSON.stringify(snap);

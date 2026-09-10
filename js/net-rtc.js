@@ -184,17 +184,20 @@ function _netMkSess(peer, role){
              tx:null,   // the ONE pending un-echoed transition ({pkt, since, lastAt, tries}; see _netTxShip)
              lastRecv:0, lastSent:0, liveT:null, warmT:null, myAgain:false, peerAgain:false, lvlPending:false,
              bsFwd:Infinity, bsRev:Infinity, bsNf:0, bsRevN:0, bsSeq:0, bsRunning:false,   // boundary clock-burst: my min forward-delta, the peer's min forward-delta (piggybacked), my sample count, the peer's reported count, my outgoing seq, a burst in progress
-             // Per-MATCH negotiated parameters. BOTH ride every go, because neither survives a
-             // disagreement: hearts is the cap both sims open on, and stakes says whether a steal
-             // really changes hands off the board. Stakes is the sharper of the two -- a side that
-             // believes they are on attests its ownership digest and claims every gain, while a
-             // side that believes they are off never attests at all, so nothing corroborates the
-             // first side and nothing anywhere can see that the two disagreed.
-             // heartsWant/stakesWant are PRESETS (a tournament roles sheet): a go that
-             // contradicts one is a protocol fault and ends the match.
+             // Per-MATCH negotiated parameters. ALL of them ride every go, because none
+             // survives a disagreement: hearts is the cap both sims open on, stakes says
+             // whether a steal really changes hands off the board, and speed says every round
+             // is played fast. Stakes is the most INVISIBLE of them -- a side that believes
+             // they are on attests its ownership digest and claims every gain, while a side
+             // that believes they are off never attests at all, so nothing corroborates the
+             // first side and nothing anywhere can see that the two disagreed. Speed is the
+             // loudest: it sets gPer, so a disagreement splits the sims at the first move.
+             // heartsWant/stakesWant/speedWant are PRESETS (a tournament roles sheet): a go
+             // that contradicts one is a protocol fault and ends the match.
              // lvl0 is the level the MATCH opens at and lvl the one being played: a rematch
              // restarts at lvl0, not wherever the last one got to.
-             hearts:START_LIVES, stakes:true, heartsWant:null, stakesWant:null,
+             hearts:START_LIVES, stakes:true, speed:false,
+             heartsWant:null, stakesWant:null, speedWant:null,
              lvl0:1, levelWant:null,
              // Tournament matches and every spectator link are P2P-ONLY: the deprecated
              // server relay is not an acceptable transport for them (see _netRelayStart).

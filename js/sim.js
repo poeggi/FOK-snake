@@ -10,6 +10,19 @@ function startLen(lvl) {
 }
 
 function _lvlGper(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
+// The pace THIS MODE runs a level at. Classic honours the local difficulty; a duel is
+// pinned to NORMAL for fairness and a speed round overrides the level outright. gPer is
+// restored from three places (a level opening, a time warp expiring, a respawn), and a
+// duel restoring it through the difficulty-reading accessor is two devices reaching two
+// different paces from one agreed state -- so there is ONE accessor and every site uses it.
+// LEVEL_CFG has 10 entries and a duel is endless, so past level 10 it reuses the last.
+function _paceNow(){
+    if(!players) return _lvlGper(level);
+    if(_speedRound) return LEVEL_CFG[LEVEL_CFG.length-1].normal;
+    return LEVEL_CFG[Math.min(level, LEVEL_CFG.length)-1].normal;
+}
+// What a TIME WARP drops the pace to: level 3's, read off the same mode's table.
+function _paceWarp(){ return players ? LEVEL_CFG[2].normal : _lvlGper(3); }
 let boostDir=null, boosting=false;
 let _gAt=0;   // engine tick of the last accrual boundary: a boost flip authored after it has changed nothing yet
 const BOOST_GRACE_TICKS=6;    // 100ms of aligned hold before boost engages: enough that the tap that turns you is never read as a boost
@@ -39,7 +52,10 @@ let gPer, _gDue = 0, _stepAccum = 0, phaseAt = 0, gemAt, deathMsg;
 let spawnAt = 0, levelDoneWaiting = false;
 let perfectLevel = true, levelWasPerfect = false;
 let levelBonusCount = 0, epicLevelCount = 0;
-let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=new Set(), _gourangaSteps=0;
+// _gourangaEaten is a 7-BIT MASK, not a Set: it rides RB_HASH_DUEL, and a Set
+// serializes to {} -- it would join the duel agreement and cover nothing at all,
+// silently, forever. A mask hashes, clones and compares as a plain number.
+let _gourangaLine=[], _gourangaActive=false, _gourangaEaten=0, _gourangaSteps=0;
 // The GOURANGA payoff (achievement + fanfare) only fires on a near-continuous sweep of
 // the 7-gem line: 6 straight moves plus 2 blocks of detour slack. A detoured completion
 // still scores the same escalating bonuses but ends as an ordinary run.
@@ -282,9 +298,12 @@ function _duelBeginLevel(reseed) {
     // re-rolls it in either direction. The draw rides the shared PRNG (re-anchored to
     // (gameSeed, level) on a new level, flowing on a respawn; _rngState is hashed and
     // rollback-restored either way), so both clients reach the same verdict.
-    _speedRound = level > 1 && rng() < _SPEED_ROUND_P;
+    // The roll is taken FIRST and unconditionally past its own gate, so a speed tournament
+    // and an ordinary one consume the identical stream and differ only in the verdict.
+    const rolled = level > 1 && rng() < _SPEED_ROUND_P;
+    _speedRound = _duelForceSpeed || rolled;
     if(_speedRound) emit({t:'bonus', label:'SPEED ROUND!'});
-    gPer = _speedRound ? LEVEL_CFG[9].normal : LEVEL_CFG[li].normal;
+    gPer = _paceNow();
     // A blown-off item nobody picked up goes back to the snake it came off: the board is
     // about to be rebuilt, and losing gear to a rebuild is not something either player did.
     if(_ws && _ws.it){ _wsWearBack(_ws.it); _ws.it = null; }
@@ -306,6 +325,10 @@ function _duelBeginLevel(reseed) {
     bars = _placeBars(blocked, numBars);
     _barsV++;
     powerPellet = null; _powerMode = false;
+    // The crystal and the line are board state like the pellet: a rebuild takes them with it,
+    // and a warp still running is over. gPer is set above, so the pace is already correct.
+    timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;
+    _gourangaLine = []; _gourangaActive = false; _gourangaEaten = 0; _gourangaSteps = 0;
     heart = null; heartAt = 0;   // the contested heart never survives a level rebuild/respawn
     _duelSpawnGem();
     _gDue = 0; spawnAt = 0; levelDoneWaiting = false; phase = 'duelReady'; phaseAt = simNow;
@@ -325,6 +348,11 @@ let _duelNetHold = false;
 // through the snapshot, because the renderer must draw the heart row against the cap the
 // match is actually running rather than the constant.
 let _duelHeartsMax = START_LIVES;
+// Every round of this match is a speed round, because the tournament it belongs to was
+// created that way. CONFIG like _duelNetHold and _duelHeartsMax: adopted from the 'go'
+// before tick 0, constant for the match, never hashed and never snapshotted -- what IS
+// hashed is _speedRound, the verdict it produces, so a disagreement surfaces at once.
+let _duelForceSpeed = false;
 // A cap off the wire is untrusted input: anything outside 1..START_LIVES reads as the
 // default, so a malformed or absent hm can never hand a player extra lives.
 function _duelHearts(h){ h = h|0; return (h >= 1 && h <= START_LIVES) ? h : START_LIVES; }
@@ -372,14 +400,14 @@ function startDuel(seed, ws, lvl) {
     // begin it at the same server-issued start_pts, so both begin it at tick 0.
     simTick = 0; simNow = 0;
     // Classic-mode globals survive from this device's last single-player game and the duel
-    // never resets them -- but the duel sim DOES read some (a leftover heart/timeCrystal/
-    // gouranga cell blocks a fleeing bar in _moveBarsGhost; a leftover _slowMode expiry
-    // rewrites gPer from local cfg.diff) and _gAt is hashed. Two devices with different
-    // histories would then desync. Zero them so a duel is a function of seed + inputs only.
+    // never resets them. The crystal, the warp and the gouranga line are all part of the duel
+    // agreement now, and _gAt is hashed too, so two devices arriving with different last games
+    // disagree at tick 0 over state neither one is using. Zero them so a duel is a function of
+    // seed + inputs only (see the startDuel rule in project_fok_netcode_housekeeping.md).
     _gAt = 0;
     heart = null; heartAt = 0; heartIsEarly = false; _earlyHeartUsed = false; _earlyHeartTrigger = -1; _earlyHeartCount = 0;
     timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;
-    _gourangaLine = []; _gourangaActive = false; _gourangaEaten = new Set(); _gourangaSteps = 0;
+    _gourangaLine = []; _gourangaActive = false; _gourangaEaten = 0; _gourangaSteps = 0;
     _nmWasAdjacent = false;
     deathMsg = '';   // hashed on the wire: a message left by this device's last game (single
                      // player or a previous duel) would make tick 0 hash differently on the two
@@ -401,6 +429,80 @@ function startDuel(seed, ws, lvl) {
 // A contested-heart cell as close to board center as is free: neutral ground both snakes
 // can reach. Scanned center-outward in a fixed order (no rng), so it never moves the shared
 // PRNG stream and both clients pick the identical cell.
+// ---- COLLECTIBLES: one implementation, every mode --------------------------------
+// The three things that can appear with a fresh gem, and the two that are taken off the
+// board by a head, live here ONCE and are called from both spawn paths and both step
+// paths. The only difference a mode gets is the blocked set it hands in (one snake or
+// two) and where the score is banked (the module global, or the player who ate it) --
+// the index/score mapping the harmonized-mechanics rule allows, and nothing else.
+//
+// The GOURANGA line, tried at the 1st or 2nd gem of a level from level 2. It REPLACES the
+// ordinary gem while it stands, so the caller must stop spawning one: true = a line took
+// this spawn. The single rng draw inside _tryGouranga is unconditional past the gates, so
+// the stream is identical whether or not a line comes up.
+function _gourangaMaybe(blocked){
+    if(_gourangaActive || level < 2 || (gemsDone !== 1 && gemsDone !== 2)) return false;
+    _tryGouranga(blocked);
+    if(!_gourangaActive) return false;
+    gem = null;   // the line just took over; drop the gem that was about to be placed
+    return true;
+}
+// The two rare pickups that sit BESIDE a gem, in this order. Rolled per gem spawn off the
+// shared stream, so both clients of a duel reach the same verdict. `blocked` already holds
+// the snakes and bars; the gem and whatever else is on the board is added per roll, since a
+// pickup must never land on top of another.
+function _spawnExtras(blocked){
+    // No pellets on level 1 (nothing to smash through yet is worth 5.5s of power).
+    // The level gate sits AFTER the rng() call so the stream is identical either way.
+    if(!powerPellet && !_powerMode && rng() < 0.002*_X10() && level >= 2){
+        const ppB = new Set(blocked);
+        if(gem) ppB.add(ck(gem)); if(heart) ppB.add(ck(heart));
+        powerPellet = freeCell(ppB); powerPelletAt = simNow;
+    }
+    // Time crystal: level 6+, per-gem chance scales 0.1%/level (L6 0.1% .. L10 0.5%).
+    // A duel is endless, so the ladder stops climbing where single player's does.
+    const lv = Math.min(level, MAX_LEVELS);
+    if(!timeCrystal && !_slowMode && lv >= 6 && rng() < (lv-5)*0.001*_X10()){
+        const tcB = new Set(blocked);
+        if(gem) tcB.add(ck(gem));
+        if(powerPellet) tcB.add(ck(powerPellet));
+        if(heart) tcB.add(ck(heart));
+        timeCrystal = freeCell(tcB); timeCrystalAt = simNow;
+    }
+}
+// A head landed on hk: take the pellet and the crystal if they are there. `add` banks the
+// pellet's score wherever this mode keeps it. Neither draws rng, so the call order against
+// a mode's own heart rule does not matter.
+function _takePickups(hk, now, add){
+    if(powerPellet && ck(powerPellet) === hk){
+        powerPellet = null; _powerMode = true; _powerModeAt = now; _barMoveTick = 0;
+        // The wall panics: pairs dissolve into independent blocks that flee one cell at a
+        // time (see _moveBarsGhost) until the power runs out -- then they freeze in place.
+        bars.forEach(b => { delete b.paired; delete b.pairEnd; });
+        add(level*200); emit({t:'bonus', label:'POWER UP!'});
+    }
+    if(timeCrystal && ck(timeCrystal) === hk){
+        timeCrystal = null; _slowMode = true; _slowModeAt = now; gPer = _paceWarp();
+        emit({t:'bonus', label:'TIME WARP!'});
+    }
+}
+// Claim the gouranga bead at hk, or -1. The mask is set HERE rather than by the caller so
+// two heads arriving on the same bead in the same tick cannot both take it.
+function _gourangaTake(hk){
+    if(!_gourangaActive) return -1;
+    for(let i = 0; i < _gourangaLine.length; i++)
+        if(!((_gourangaEaten >> i) & 1) && ck(_gourangaLine[i]) === hk){ _gourangaEaten |= 1 << i; return i; }
+    return -1;
+}
+// Seven beads gone. Returns true for a CLEAN sweep (end to end without detouring), which
+// is the full payoff; a detoured completion still finishes the line, it just scores like
+// an ordinary bead. In a duel the moves are made by two snakes, which is the same measure
+// asked of a shared line.
+function _gourangaSwept(){
+    if(_gourangaEaten !== 0x7f) return null;
+    _gourangaActive = false;
+    return _gourangaSteps <= GOURANGA_MAX_MOVES;
+}
 function _duelHeartCell(blocked) {
     const cx = Math.floor(COLS/2), cy = Math.floor(ROWS/2);
     for (let r = 0; r < Math.max(COLS, ROWS); r++) {
@@ -413,16 +515,16 @@ function _duelHeartCell(blocked) {
     return null;
 }
 function _duelSpawnGem() {
-    const gB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
+    const occupied = () => new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
+    // The line replaces the gem here exactly as it does in single player -- same trigger,
+    // same suppression, same draw off the shared stream, so both clients build the same board.
+    if (_gourangaMaybe(occupied())) return;
+    const gB = occupied();
     if (heart) gB.add(ck(heart));   // a heart may still be on the board from an earlier gem this level
     gem = freeCell(gB);
     gem.tier = 0; gemAt = gem.spawnAt = simNow;
-    // Power pellet: same rare roll as classic (per gem spawn, level 2+, X10-scaled).
-    if (!powerPellet && !_powerMode && rng() < 0.002 * _X10() && level >= 2) {
-        const ppB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
-        ppB.add(ck(gem)); if (heart) ppB.add(ck(heart));
-        powerPellet = freeCell(ppB); powerPelletAt = simNow;
-    }
+    // The pellet and the crystal, on the one shared roll (see _spawnExtras).
+    _spawnExtras(occupied());
     // Contested heart: one life-back on neutral ground, rolled per gem spawn but only when it
     // can matter (someone below the cap) and never stacked on another heart. The lives/heart
     // gates are all synced state so both clients take the same branch and consume the rng in
@@ -537,14 +639,21 @@ function duelStep(now) {
     // Apply both moves first; gem consequences afterwards (a level-up rebuilds the
     // players array, so it must not happen while this loop still holds references).
     let eater = -1;
+    const gAte = [-1, -1];
+    // Count every move once the sweep has begun, exactly as single player does -- a duel's
+    // two snakes make the moves, which is the same measure asked of a line they share.
+    if (_gourangaActive && _gourangaEaten) _gourangaSteps++;
     for (let i = 0; i < 2; i++) {
         if (!moves[i]) continue;
         const P = players[i];
         P.snake.unshift(moves[i]);
-        if (powerPellet && ck(powerPellet) === ck(moves[i])) {
-            powerPellet = null; _powerMode = true; _powerModeAt = now; _barMoveTick = 0;
-            P.score += level * 200; emit({t:'bonus',label:'POWER UP!'});
-        }
+        // The pellet and the crystal, on the one shared rule (see _takePickups) -- the score
+        // banks to the player who ate it, which is the whole of the difference.
+        _takePickups(ck(moves[i]), now, n => { P.score += n; });
+        // A gouranga bead. Unlike the one shared gem BOTH snakes can take a bead on the same
+        // tick (different beads), so this is per player; the claim is inside _gourangaTake so
+        // two heads on the SAME bead cannot both have it (player 0 first, no rng involved).
+        gAte[i] = _gourangaTake(ck(moves[i]));
         // A landed windswept item goes to whoever reaches it first -- including the snake it
         // came off, who can simply take it back. Nothing is collectible in flight (at).
         if (_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) _wsTake(i);
@@ -552,8 +661,8 @@ function duelStep(now) {
             heart = null;
             if (P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); }
         }
-        if (eater < 0 && gem && ck(gem) === ck(moves[i])) {
-            eater = i;
+        if ((eater < 0 && gem && ck(gem) === ck(moves[i])) || gAte[i] >= 0) {
+            if (gAte[i] < 0) eater = i;
             P.snake.push(Object.assign({}, P.snake[P.snake.length - 1]));   // +2 growth (classic normal)
         } else P.snake.pop();
     }
@@ -591,20 +700,28 @@ function duelStep(now) {
         const k = ck(_ws.it);
         for (let i = 0; i < 2; i++) if (players[i].snake.some(s => ck(s) === k)) { _wsTake(i); break; }
     }
-    if (eater >= 0) {
-        players[eater].score += level * 100;
-        gemsDone++;
+    // Beads first, in player order, then the gem: ONE settlement, so a level that completes
+    // does it exactly once however many things were eaten on this tick. A bead counts toward
+    // the shared goal and scores like a gem -- the classic bonus ladder has no meaning with
+    // two scorers, so a duel banks the flat level*100 the way it does for every other gem.
+    let last = -1;
+    for (let i = 0; i < 2; i++) if (gAte[i] >= 0) { players[i].score += level * 100; gemsDone++; last = i; }
+    if (eater >= 0) { players[eater].score += level * 100; gemsDone++; last = eater; }
+    if (last >= 0) {
+        const swept = _gourangaSwept();
+        if (swept === true) { emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'}); }
         if (gemsDone >= GEMS_PER_LEVEL) {
             // Twist: the level-finisher earns a heart back, capped at the match's cap.
-            if (players[eater].lives < _duelHeartsMax) players[eater].lives++;
+            if (players[last].lives < _duelHeartsMax) players[last].lives++;
             emit({t:'sfx',name:'levelUp'});
             // Same "press to continue" gate as single player: wait in 'levelDone' for 'advance'.
             levelWasPerfect = false;   // no perfect-level bonus in a duel
             phase = 'levelDone'; phaseAt = now;
             return;
         }
-        emit({t:'sfx',name:'eat'});
-        _duelSpawnGem();
+        if (swept !== true) emit({t:'sfx',name:'eat'});
+        // A finished line hands the level back to ordinary gems; a bead mid-line does not.
+        if (!_gourangaActive) _duelSpawnGem();
     }
 }
 
@@ -670,8 +787,8 @@ function _crushBarAt(hk){
 }
 function beginLevel(isRespawn=false) {
     const lcfg=LEVEL_CFG[level-1], d=DIFF[cfg.diff];
-    gPer = lcfg[['easy','normal','hard'][cfg.diff]];
     _speedRound = false;   // SPEED ROUND is DUEL-ONLY: clear any leftover so single player never runs one
+    gPer = _paceNow();
     const cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
     const sl = _levelStartLen > 0 ? _levelStartLen : startLen(level);
     _levelStartLen = sl;
@@ -680,7 +797,7 @@ function beginLevel(isRespawn=false) {
     phase='levelReady'; _gDue=0; _stepAccum=0; phaseAt=simNow;
     spawnAt=0; levelDoneWaiting=false;
     perfectLevel=true; levelWasPerfect=false; levelBonusCount=0; epicLevelCount=0;
-    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=new Set(); _gourangaSteps=0;
+    _gourangaLine=[]; _gourangaActive=false; _gourangaEaten=0; _gourangaSteps=0;
     heart=null; heartAt=0; heartIsEarly=false;
     powerPellet=null; _powerMode=false;
     timeCrystal=null; _slowMode=false;
@@ -745,12 +862,9 @@ function _pathDist(start, goal) {
     return Infinity;
 }
 function spawnGem() {
-    if(!_gourangaActive && level>=2 && (gemsDone===1||gemsDone===2)){
-        _tryGouranga(new Set(snake.concat(bars).map(ck)));
-        // Gouranga is the only collectible while active: drop any lingering gem (the one
-        // just eaten still sits in `gem` here) so it can't be re-collected on the board.
-        if(_gourangaActive){ gem=null; return; }
-    }
+    // Gouranga is the only collectible while active: _gourangaMaybe drops any lingering gem
+    // (the one just eaten still sits in `gem` here) so it can't be re-collected on the board.
+    if(_gourangaMaybe(new Set(snake.concat(bars).map(ck)))) return;
     gem=freeCell(new Set(snake.concat(bars).map(ck)));
     const rv=rng();
     const rareMult=[1,1,2][cfg.diff]||1;   // hard doubles the epic/lucky odds; easy/normal unchanged
@@ -773,20 +887,7 @@ function spawnGem() {
         gemOptimal=pd+2;
     }
     gemSteps=0;
-    // No pellets on level 1 (nothing to smash through yet is worth 5.5s of power).
-    // level>=2 sits AFTER the rng() call so the RNG stream is identical either way.
-    if(!powerPellet&&!_powerMode&&rng()<0.002*_X10()&&level>=2){
-        const ppB=new Set(snake.concat(bars).map(ck)); ppB.add(ck(gem));
-        if(heart) ppB.add(ck(heart));
-        powerPellet=freeCell(ppB); powerPelletAt=simNow;
-    }
-    // Time crystal: level 6+, per-gem chance scales 0.1%/level (L6 0.1% .. L10 0.5%)
-    if(!timeCrystal&&!_slowMode&&level>=6&&rng()<(level-5)*0.001*_X10()){
-        const tcB=new Set(snake.concat(bars).map(ck)); tcB.add(ck(gem));
-        if(powerPellet) tcB.add(ck(powerPellet));
-        if(heart) tcB.add(ck(heart));
-        timeCrystal=freeCell(tcB); timeCrystalAt=simNow;
-    }
+    _spawnExtras(new Set(snake.concat(bars).map(ck)));
     if(!_earlyHeartUsed&&level>=4&&level<=6){
         // Drop the one early heart at the trigger-th L4-6 gem. If a heart is already on the
         // board that gem, do NOT burn the trigger: >= keeps retrying on each later gem until a
@@ -815,42 +916,30 @@ function step(now) {
             } else { die(now, 'bar', head); return; }
         }
     }
-    if(powerPellet&&ck(powerPellet)===hk){
-        powerPellet=null; _powerMode=true; _powerModeAt=now; _barMoveTick=0;
-        // The wall panics: pairs dissolve into independent blocks that flee one cell at a
-        // time (see _moveBarsGhost) until the power runs out -- then they freeze in place.
-        bars.forEach(b=>{ delete b.paired; delete b.pairEnd; });
-        score+=level*200; emit({t:'bonus',label:'POWER UP!'});
-    }
+    _takePickups(hk, now, n => { score += n; });
     if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;emit({t:'bonus',label:'+1 UP!'});}
-    if(timeCrystal&&ck(timeCrystal)===hk){timeCrystal=null;_slowMode=true;_slowModeAt=now;gPer=_lvlGper(3);emit({t:'bonus',label:'TIME WARP!'});}
     const ate=gem&&ck(gem)===hk;
-    const ateGourangaIdx=_gourangaActive?_gourangaLine.findIndex((g,i)=>!_gourangaEaten.has(i)&&ck(g)===hk):-1;
+    const ateGourangaIdx=_gourangaTake(hk);
     const anyAte=ate||ateGourangaIdx>=0;
     // Own body: lethal normally, but POWERED the head goes through and the bitten segment
     // back falls off instead -- applied at the end of the step, once the move is in.
     const selfAt = protect ? 0 : _powerBiteIdx(anyAte?snake:snake.slice(0,-1), hk);
     if(selfAt > 0 && !_powerMode){die(now, 'self', head);return;}
     if(!anyAte) gemSteps++;
-    if(_gourangaActive && _gourangaEaten.size>0) _gourangaSteps++;   // count every move once the sweep has begun
+    if(_gourangaActive && _gourangaEaten) _gourangaSteps++;   // count every move once the sweep has begun
     snake.unshift(head);
     if(anyAte){
         gemsDone++;
         if(ateGourangaIdx>=0){
-            _gourangaEaten.add(ateGourangaIdx);
             const bonusMult=(levelBonusCount+1)*2;
             score+=level*100*bonusMult;
             levelBonusCount++;
             if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'});
-            if(_gourangaEaten.size>=7){
-                _gourangaActive=false;
-                if(_gourangaSteps<=GOURANGA_MAX_MOVES){   // clean end-to-end sweep: full GOURANGA payoff
-                    emit({t:'ach',id:'gouranga'});
-                    emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'});
-                } else {                                  // detoured completion: ordinary finish, no award
-                    emit({t:'bonus',label:`x${bonusMult} BONUS!`}); emit({t:'sfx',name:'eat'});
-                }
-            } else {
+            const swept=_gourangaSwept();
+            if(swept===true){                             // clean end-to-end sweep: full GOURANGA payoff
+                emit({t:'ach',id:'gouranga'});
+                emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'});
+            } else {                                      // mid-line, or a detoured completion: ordinary bead
                 emit({t:'bonus',label:`x${bonusMult} BONUS!`});
                 emit({t:'sfx',name:'eat'});
             }
@@ -987,7 +1076,7 @@ function update() {
         }
     }
     if(heart&&heartIsEarly&&now-heartAt>=EARLY_HEART_TTL){heart=null;heartIsEarly=false;}
-    if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;gPer=_lvlGper(level);}
+    if(_slowMode&&now-_slowModeAt>=_SLOW_DUR){_slowMode=false;gPer=_paceNow();}
     if(phase==='levelReady'&&now-phaseAt>=READY_DUR+GO_DUR){
         phase='playing'; _gDue=gPer; _stepAccum=0; spawnAt=now; phaseAt=0;
         simArmRebase();   // a held boost must re-earn its grace this level, never spawn already on
@@ -1054,7 +1143,7 @@ function update() {
 // simSnapshot() returns a plain, structured-cloneable copy of the whole sim state; the
 // worker posts it each tick and the main thread applies it into its mirror globals (which
 // render.js reads). simApply() is the inverse. Both live in sim.js so the field list has a
-// single source of truth. _gourangaEaten is a Set (structuredClone handles Sets natively).
+// single source of truth.
 function simSnapshot(){
     return {
         phase, _shimmerThreshold, level, lives, score, _levelStartLen,
@@ -1148,7 +1237,7 @@ function _simExec(m){
         // (see _duelNetHold). Local duels send no flag and keep the immediate rebuild.
         // m.hearts is the negotiated cap (absent = START_LIVES). Set BEFORE startDuel:
         // _mkDuelPlayer reads it for the opening life count.
-        case 'startDuel': _duelNetHold = !!m.net; _duelHeartsMax = _duelHearts(m.hearts); startDuel(m.seed, m.ws, m.lvl); break;
+        case 'startDuel': _duelNetHold = !!m.net; _duelHeartsMax = _duelHearts(m.hearts); _duelForceSpeed = !!m.speed; startDuel(m.seed, m.ws, m.lvl); break;
         // dir/boost carry an optional player index (m.p). In duel mode they route to
         // players[p]; classic mode keeps the original single-snake path untouched.
         // A remote peer's input will arrive as these SAME commands with p = their index.
@@ -1207,7 +1296,7 @@ function _simExec(m){
             break;
         case 'phase':
             phase=m.phase; phaseAt=simNow;
-            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; _duelHeartsMax=START_LIVES; _ws=null; _nmWasAdjacent=false; }   // leaving a duel clears its state
+            if(m.phase==='menu'){ players=null; duelWinner=-1; _duelNetHold=false; _duelHeartsMax=START_LIVES; _duelForceSpeed=false; _ws=null; _nmWasAdjacent=false; }   // leaving a duel clears its state
             break;
     }
 }
@@ -1314,5 +1403,8 @@ function simApplyDuel(s){
     heart=s.heart; heartAt=s.heartAt;
     _barMoveTick=s._barMoveTick; players=s.players; duelWinner=s.duelWinner;
     _speedRound=s._speedRound; _nmWasAdjacent=s._nmWasAdjacent; _ws=s._ws;
+    timeCrystal=s.timeCrystal; timeCrystalAt=s.timeCrystalAt; _slowMode=s._slowMode; _slowModeAt=s._slowModeAt;
+    _gourangaLine=s._gourangaLine; _gourangaActive=s._gourangaActive;
+    _gourangaEaten=s._gourangaEaten; _gourangaSteps=s._gourangaSteps;
     if(s._rngState!=null) _rngState=s._rngState;
 }

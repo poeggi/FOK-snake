@@ -213,7 +213,10 @@ function _rbAdoptEpoch(){ if(typeof netEpoch === 'function') _rbEpoch = netEpoch
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
     'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
     '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner',
-    '_speedRound','_nmWasAdjacent','_ws','_rngState'];
+    '_speedRound','_nmWasAdjacent','_ws','_rngState',
+    // Appended, never inserted: the wire array is POSITIONAL, so a new field goes on the end.
+    'timeCrystal','timeCrystalAt','_slowMode','_slowModeAt',
+    '_gourangaLine','_gourangaActive','_gourangaEaten','_gourangaSteps'];
 // Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
 // duel tick still touches (_barsV is the bars change-ticker the renderer watches;
 // levelDoneWaiting gates 'advance'). The full simSnapshot would drag every classic-
@@ -229,7 +232,9 @@ function _rbDuelSnap(){
     return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue, _gAt,
              phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
              powerPellet, powerPelletAt, _powerMode, _powerModeAt, heart, heartAt, _barMoveTick,
-             players, duelWinner, _speedRound, _nmWasAdjacent, _ws, _rngState };
+             players, duelWinner, _speedRound, _nmWasAdjacent, _ws, _rngState,
+             timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
+             _gourangaLine, _gourangaActive, _gourangaEaten, _gourangaSteps };
 }
 // Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
 // diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
@@ -643,6 +648,11 @@ function _rbFullState(sn, tk){
                       u:[sn._ws.u[0], sn._ws.u[1]], it:sn._ws.it } : null,
         pp:sn.powerPellet, ppa:sn.powerPelletAt, pm:!!sn._powerMode, pma:sn._powerModeAt, bmt:sn._barMoveTick|0,
         hb:sn.heart, hba:sn.heartAt,
+        // The crystal, the warp it starts and the gouranga line: hashed, so an rs that
+        // dropped them would keep the hashes apart forever (the gem lane's lesson).
+        tc:sn.timeCrystal, tca:sn.timeCrystalAt, sm:!!sn._slowMode, sma:sn._slowModeAt,
+        gl:(sn._gourangaLine || []).map(g => [g.x, g.y]), gac:!!sn._gourangaActive,
+        gea:sn._gourangaEaten|0, gst:sn._gourangaSteps|0,
         p0:_rbPackPlayer(sn.players[0]), p1:_rbPackPlayer(sn.players[1]) };
 }
 // The spectator CHECKPOINT (net-spec.js): the same 'rs' the resync burst ships, taken from the
@@ -727,6 +737,15 @@ function _rbApplyResync(m){
     }
     snap.powerPellet = m.pp; snap.powerPelletAt = m.ppa; snap._powerMode = !!m.pm; snap._powerModeAt = m.pma; snap._barMoveTick = m.bmt|0;
     snap.heart = m.hb; snap.heartAt = m.hba;
+    snap.timeCrystal = m.tc; snap.timeCrystalAt = m.tca;
+    snap._slowMode = !!m.sm; snap._slowModeAt = m.sma;
+    // Rebuilt in the sim's own {x,y} shape and bounded at the seven beads a line has: this
+    // field is hashed as JSON, so an off-board or over-long line adopted here would hash
+    // apart from the identical board on every peer that never took an rs.
+    snap._gourangaLine = (Array.isArray(m.gl) ? m.gl : []).slice(0, 7)
+        .map(a => ({ x:(((a[0]|0) % COLS) + COLS) % COLS, y:(((a[1]|0) % ROWS) + ROWS) % ROWS }));
+    snap._gourangaActive = !!m.gac && snap._gourangaLine.length === 7;
+    snap._gourangaEaten = (m.gea|0) & 0x7f; snap._gourangaSteps = m.gst|0;
     _rbUnpackPlayer(m.p0, snap.players[0]);   // the HOST's snake is the host's to author (both branches adopt it)
     if(catchUp){
         // ONE-SIDED SUSPEND CATCH-UP (role-agnostic). The sender's frontier is a FULL RING ahead of
@@ -898,6 +917,14 @@ function _rbCloneWs(v){
              u:[ Object.assign({}, v.u[0]), Object.assign({}, v.u[1]) ],
              it: it ? { id:it.id, uid:it.uid, own:it.own, x:it.x, y:it.y, at:it.at } : it };
 }
+// The gouranga line: a fixed-shape {x,y} per bead, so a literal clone is byte-identical
+// to what _tryGouranga builds (unlike bars and the gem, which are shape-variant).
+function _rbCloneLine(l){
+    if(!l) return l;
+    const n = new Array(l.length);
+    for(let i = 0; i < l.length; i++){ const g = l[i]; n[i] = { x:g.x, y:g.y }; }
+    return n;
+}
 function _rbCloneSnap(s){
     const bs = s.bars || [], bars = new Array(bs.length);
     for(let i = 0; i < bs.length; i++) bars[i] = _rbCloneFlat(bs[i]);
@@ -911,7 +938,11 @@ function _rbCloneSnap(s){
         _barMoveTick:s._barMoveTick,
         players:s.players ? [ _rbClonePlayer(s.players[0]), _rbClonePlayer(s.players[1]) ] : s.players,
         duelWinner:s.duelWinner, _speedRound:s._speedRound, _nmWasAdjacent:s._nmWasAdjacent,
-        _ws:_rbCloneWs(s._ws), _rngState:s._rngState };
+        _ws:_rbCloneWs(s._ws), _rngState:s._rngState,
+        timeCrystal:s.timeCrystal ? { x:s.timeCrystal.x, y:s.timeCrystal.y } : s.timeCrystal,
+        timeCrystalAt:s.timeCrystalAt, _slowMode:s._slowMode, _slowModeAt:s._slowModeAt,
+        _gourangaLine:_rbCloneLine(s._gourangaLine), _gourangaActive:s._gourangaActive,
+        _gourangaEaten:s._gourangaEaten, _gourangaSteps:s._gourangaSteps };
 }
 function _rbAdd(tk, cmd){
     let a = _rbLog.get(tk);

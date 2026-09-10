@@ -383,6 +383,113 @@ const driver = `
     }
     R.steps.push('a crossing head, a clipped body and a protected spawn are still not head-ons');
 
+    // ---- F) the collectibles single player has, running in a duel ----
+    // Gouranga and the time crystal used to be classic-only. They are ONE implementation now
+    // (_gourangaMaybe / _spawnExtras / _takePickups / _gourangaTake), so what is asserted here
+    // is that the duel really reaches them and that the shared state they leave behind is the
+    // state the duel agreement carries.
+    {
+      // The line: the trigger is the 1st or 2nd gem of a level from level 2, and while it
+      // stands there is no ordinary gem to eat -- exactly the single-player rule.
+      startDuel(4242); level=4; _duelBeginLevel(true);
+      let saw=0;
+      for(let k=0;k<4000 && saw<1;k++){
+        gemsDone=1; _gourangaActive=false; _gourangaLine=[]; _gourangaEaten=0;
+        _duelSpawnGem();
+        if(_gourangaActive) saw++;
+      }
+      A(saw===1, 'no gouranga line in 4000 duel gem spawns -- the duel never reaches _tryGouranga');
+      A(_gourangaLine.length===7, 'a duel line is not 7 beads: '+_gourangaLine.length);
+      A(gem===null, 'a duel line left an ordinary gem on the board beside it');
+      R.steps.push('gouranga: a duel reaches the line, 7 beads, and it replaces the gem like single player');
+
+      // Both snakes can take a bead on the same tick, but never the SAME bead: the claim is
+      // inside _gourangaTake, so player 0 wins a tie and player 1 simply eats nothing.
+      const b0=_gourangaLine[0];
+      A(_gourangaTake(ck(b0))===0, 'the first bead was not claimable');
+      A(_gourangaTake(ck(b0))===-1, 'the same bead was claimed twice');
+      A(_gourangaEaten===1, 'the claim did not set the mask: '+_gourangaEaten);
+      R.steps.push('gouranga: a bead is claimed once, by one head -- the mask is set at the claim');
+    }
+    {
+      // The crystal: level 6+, and taking it drops the pace to level 3's and starts the warp.
+      startDuel(99); level=8; _duelBeginLevel(true);
+      let saw=0;
+      for(let k=0;k<20000 && !saw;k++){ timeCrystal=null; _slowMode=false; _duelSpawnGem(); if(timeCrystal) saw=1; }
+      A(saw, 'no time crystal in 20000 duel gem spawns at level 8');
+      const fast=gPer;
+      _takePickups(ck(timeCrystal), simNow, ()=>{});
+      A(timeCrystal===null && _slowMode===true, 'the duel crystal was not taken');
+      A(gPer===LEVEL_CFG[2].normal, 'the duel warp pace is not level 3 normal: '+gPer);
+      A(gPer>fast, 'the warp did not actually slow the board');
+      R.steps.push('crystal: a duel reaches it, and taking it warps the pace to level 3 normal');
+
+      // THE DESYNC THIS GUARDS: the warp expiring restores gPer, and restoring it through the
+      // classic difficulty-reading accessor would hand two devices two different paces from
+      // one agreed state. _paceNow() is pinned to NORMAL in a duel whatever cfg.diff says.
+      for(const d of [0,1,2]){
+        cfg.diff=d; _slowMode=true; _slowModeAt=0; simNow=_SLOW_DUR; simTick=Math.round(_SLOW_DUR/TICK_MS);
+        update();
+        A(_slowMode===false, 'the warp did not expire at difficulty '+d);
+        A(gPer===LEVEL_CFG[7].normal, 'warp expiry read the local difficulty ('+d+'): gPer='+gPer);
+      }
+      cfg.diff=1;
+      R.steps.push('crystal: the warp expiring restores the DUEL pace, never the local difficulty');
+    }
+    {
+      // A speed tournament: every round is a speed round, level 1 included (an ordinary duel
+      // never runs one there), and the pace is the top of the table.
+      simCommand({ t:'startDuel', seed:5150, net:true, ws:null, hearts:3, lvl:1, speed:true });
+      for(let L=1; L<=6; L++){ level=L; _duelBeginLevel(true);
+        A(_speedRound===true, 'a speed tournament was not fast at level '+L);
+        A(gPer===LEVEL_CFG[LEVEL_CFG.length-1].normal, 'speed pace wrong at level '+L+': '+gPer); }
+      for(let k=0;k<50;k++){ _duelBeginLevel(false); A(_speedRound===true, 'a respawn cooled a speed tournament down'); }
+      // ...and it is CONFIG, not state: leaving the duel forgets it, so the next ordinary
+      // match rolls its own 1-in-10 again.
+      simCommand({ t:'phase', phase:'menu' });
+      simCommand({ t:'startDuel', seed:5150, net:true, ws:null, hearts:3, lvl:1 });
+      level=1; _duelBeginLevel(true);
+      A(_speedRound===false, 'the speed rule outlived the match that negotiated it');
+      R.steps.push('speed tournament: every level and every respawn is fast, level 1 included, and it does not outlive the match');
+    }
+
+    {
+      // THE FIVE-LIST TRAP, checked structurally instead of one field at a time. A duel field
+      // has to reach RB_HASH_DUEL, _rbDuelSnap, the cloner and the resync wire; the lists are
+      // hand-synced, and the one forgotten is a world that never converges.
+      startDuel(31337); level=8; _duelBeginLevel(true);
+      // Put the new collectibles ON the board so the check runs over populated values rather
+      // than nulls -- a null clones and hashes correctly whatever the cloner forgot.
+      gemsDone=1; _gourangaActive=false;
+      for(let k=0;k<4000 && !_gourangaActive;k++){ gemsDone=1; _gourangaLine=[]; _gourangaEaten=0; _duelSpawnGem(); }
+      A(_gourangaActive, 'could not stage a line for the list check');
+      _gourangaEaten=0x05; _gourangaSteps=3;
+      timeCrystal={x:2,y:3}; timeCrystalAt=simNow; _slowMode=true; _slowModeAt=simNow;
+      const snap=_rbDuelSnap();
+      // 1) EVERY hashed field must be JSON-transparent. This is what a Set gets wrong: it
+      // serializes to {} whatever it holds, so a field of that shape joins the agreement and
+      // covers nothing at all, silently and forever.
+      for(const k of RB_HASH_DUEL){
+        const v=snap[k];
+        A(!(v && typeof v==='object' && v.constructor!==Object && v.constructor!==Array),
+          'RB_HASH_DUEL field '+k+' is a '+(v&&v.constructor&&v.constructor.name)+' -- it cannot be hashed as JSON');
+        A(v!==undefined, 'RB_HASH_DUEL names '+k+', which _rbDuelSnap does not produce');
+      }
+      R.steps.push('every RB_HASH_DUEL field is produced by _rbDuelSnap and survives JSON (the Set trap)');
+      // 2) the cloner is byte-identical over the whole populated snapshot
+      A(JSON.stringify(_rbCloneSnap(snap))===JSON.stringify(snap),
+        'the rollback cloner is not byte-identical over the crystal/warp/line fields');
+      // 3) the resync wire carries them, and simApplyDuel writes them back
+      const wire=_rbFullState(simSnapshot(), simTick);
+      A(wire.tc && wire.tc.x===2 && wire.sm===true && wire.gac===true && wire.gea===0x05 && wire.gst===3
+        && wire.gl.length===7, 'the crystal, the warp or the line does not ride the resync wire');
+      const before=JSON.stringify(snap);
+      timeCrystal=null; _slowMode=false; _gourangaActive=false; _gourangaLine=[]; _gourangaEaten=0; _gourangaSteps=0;
+      simApplyDuel(snap);
+      A(JSON.stringify(_rbDuelSnap())===before, 'simApplyDuel does not write the new duel fields back');
+      R.steps.push('crystal, warp and line ride the cloner, the resync wire and simApplyDuel (all five lists)');
+    }
+
     R.ok=true;
   } catch(e){ R.err=String(e && e.stack || e); }
 })();

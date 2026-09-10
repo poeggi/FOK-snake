@@ -11,6 +11,7 @@ const EXCLUDE = new Set([
     '_armSlots',               // boost arming is DEVICE-local input authorship: mirroring (or hashing) it would leak one device's keys into the shared state
     '_armPend',                // the arming stage's own in-flight latch: device-local for the same reason as _armSlots, and rebuilt by the next transition
     '_duelNetHold',            // CONFIG, not state: set by the online entry path on both clients alike, constant for the match, never hashed
+    '_duelForceSpeed',         // CONFIG, same standing: adopted from the go before tick 0, constant for the match. What IS mirrored and hashed is _speedRound, the verdict it produces
 ]);
 
 const vars = [];

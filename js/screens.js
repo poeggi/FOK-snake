@@ -1782,7 +1782,7 @@ function drawTourneyLobby(){
     // rather than a caption under the last player, and it stops moving as people arrive.
     const mn = _ttMatches(n);
     ct(n + (n === 1 ? ' PLAYER' : ' PLAYERS') + ' - ' + mn + (mn === 1 ? ' MATCH' : ' MATCHES')
-       + ' IN ROUND 1' + (t.stakes ? ' - ITEM STAKES ON' : ''),
+       + ' IN ROUND 1' + (t.speed ? ' - SPEED' : '') + (t.stakes ? ' - ITEM STAKES ON' : ''),
        CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
     if(ui.msg) drawStatus(ui.msg);
     else if(!host) drawStatus('WAITING FOR THE HOST TO START' + _ttDots());
@@ -2048,6 +2048,7 @@ function drawTourneyCeremony(){
         // The level is as much a part of "what am I walking into" as the heart count: a
         // semi-final opens on a board the player has not seen since their last solo run.
         ct('LEVEL ' + _duelLvl(r.lvl) + '  -  ' + hm + (hm === 1 ? ' HEART' : ' HEARTS')
+           + (r.speed ? '  -  SPEED ROUND' : '')
            + (r.stakes ? '  -  ITEM STAKES ON' : ''), CW/2, 258, '#ffaa44', FONT.HINT);
     } else if(you === 'spectate'){
         ctg('YOU SPECTATE', CW/2, 228, '#7fff7f', FONT.JUMBO, GLOW.BIG);
@@ -2111,7 +2112,7 @@ function drawTourneyPodium(){
     _ttDrawRows(296, MENU_ROW);
     if(tourneyUi().msg) drawStatus(tourneyUi().msg);
     const n = (t.players || []).length;
-    if(n) ct(n + ' PLAYERS' + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
+    if(n) ct(n + ' PLAYERS' + (t.speed ? ' - SPEED' : '') + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
     _drawFireworks(_ttClock());
 }

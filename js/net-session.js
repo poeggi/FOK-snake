@@ -563,7 +563,7 @@ async function _netRequestStart(s, reason){
         if(s.role === 'host'){
             const g = { t:'go', why:(reason === 'rematch') ? 'rematch' : 'match',
                         seed:s.seed, startPts:s.startPts, epoch:s.epoch|0, lvl:_duelLvl(s.lvl0),
-                        hm:s.hearts|0, sk:s.stakes ? 1 : 0 };
+                        hm:s.hearts|0, sk:s.stakes ? 1 : 0, sp:s.speed ? 1 : 0 };
             if(theta != null) g.bth = Math.round(theta);
             _netTxShip(s, g);
         }
@@ -623,7 +623,7 @@ function _netOpenBoundary(s, why){
         s.startPts = startPts;
         _netClockPush();            // anchor + startPts move together: the core must see both
         const g = { t:'go', why, seed:s.seed, startPts:startPts, epoch:s.epoch|0, lvl:(s.lvl|0) || 1,
-                    hm:s.hearts|0, sk:s.stakes ? 1 : 0 };
+                    hm:s.hearts|0, sk:s.stakes ? 1 : 0, sp:s.speed ? 1 : 0 };
         if(theta != null) g.bth = Math.round(theta);
         _netTxShip(s, g);
         _netArmBegin(s, startPts, () => {
@@ -796,6 +796,15 @@ function _netHandleParsed(m, srcIdx){
             const sk = !netSpectating() && !!m.sk;
             if(s.stakesWant != null && sk !== s.stakesWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
             s.stakes = sk;
+            // SPEED rides the same packet on the same reasoning, and it is the sharpest case of
+            // the three: it decides gPer, so two sides that disagree step their snakes at
+            // different rates and split at the first move. A tournament created as a speed
+            // tournament presets it from the roles sheet, exactly like the cap and the stakes,
+            // and a go that contradicts the preset is a protocol fault. Absent reads as OFF --
+            // an unstated rule is not one to play by. A spectator pins it off the players.
+            const sp = !netSpectating() && !!m.sp;
+            if(s.speedWant != null && sp !== s.speedWant){ _netSessionEnd('MATCH SETUP MISMATCH'); break; }
+            s.speed = sp;
             // The STARTING LEVEL rides the match go beside the cap, and is adopted the same
             // way. It matters more than either: the board is a pure function of (seed, level),
             // so two sides that opened on different levels are playing two different games and

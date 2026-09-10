@@ -35,20 +35,25 @@ const { runTest } = require('./harness');
 // the 2-heart lane), never to paper over a refactor. Its companion GOLDEN_DUEL in
 // sim-determinism.js covers the default 3-heart lane and must NOT move when this one does --
 // the ONE exception being a rule that is not about hearts at all and so moves every duel lane
-// at once, which is what took 78e8513a:7575 to 2c8afb23:12776: the authoring clock (js/sim.js
-// simInputTick) gave every input a tick to name, the pilots steer on marginally staler state,
-// and a 2-heart match takes longer to settle -- hence the per-match tick budget below.
-const GOLDEN_DUEL_H2 = '2c8afb23:12776';
+// at once. Two such rules are in the chain. 2c8afb23:12776 -> 49ea7daa:12633 is the gouranga
+// line and the time crystal coming to the duel: both are shared board state, so the crystal,
+// the warp it starts and the line all sit on RB_HASH_DUEL and the agreement itself is wider.
+// 78e8513a:7575 -> 2c8afb23:12776 before it was the authoring clock (js/sim.js simInputTick)
+// giving every input a tick to name: the pilots steer on marginally staler state and a
+// 2-heart match takes longer to settle -- hence the per-match tick budget below.
+const GOLDEN_DUEL_H2 = '49ea7daa:12633';
 
 // ---- static guard: the match parameters ride EVERY go -------------------------------
 // The go is the one timeline opener, authored in two places (the match/rematch start and the
-// boundary opener). The receive handler adopts hm and sk from whichever one arrives, so a
+// boundary opener). The receive handler adopts hm, sk and sp from whichever one arrives, so a
 // builder that forgot a field would silently reset a 2-heart match to 3 at the next level
-// boundary, or drop a staked match to unstaked halfway through. The boundary builder is
+// boundary, drop a staked match to unstaked halfway through, or take a speed tournament off
+// speed at its first level-up -- and that last one splits the two sims outright, because the
+// field decides gPer. The boundary builder is
 // driven for real in section G; this catches the other one, which sits behind an awaited
 // server round trip that a synchronous suite cannot reach.
 const NS = fs.readFileSync(path.join(__dirname, '..', 'js', 'net-session.js'), 'utf8');
-const GO_FIELDS = ['hm', 'sk', 'lvl'];
+const GO_FIELDS = ['hm', 'sk', 'lvl', 'sp'];
 const builders = NS.match(/\{\s*t:'go',[^}]*\}/g) || [];
 const missing = builders.map(g => [g, GO_FIELDS.filter(f => !new RegExp('\\b' + f + '\\s*:').test(g))])
                         .filter(x => x[1].length);

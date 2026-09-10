@@ -1111,6 +1111,10 @@ function _duelMatchHearts(){ return _duelHearts(_netSess && _netSess.hearts); }
 // never set it and open at level 1, so single-player, local 1vs1 and online 1vs1 all still run
 // the one startDuel -- the tournament round ladder only fills in a different number.
 function _duelMatchLvl(){ return _duelLvl(_netSess && _netSess.lvl); }
+// Whether EVERY round of this match is a speed round, negotiated on the same packet as the
+// other two. Only a tournament created as a speed tournament ever sets it; an ordinary duel
+// leaves it off and the sim rolls its 1-in-10 per level as it always has.
+function _duelMatchSpeed(){ return !!(_netSess && _netSess.speed); }
 // Online duel entry (called by net-session.js when the DataChannel opens on both ends).
 // BOTH clients start the same deterministic sim from the shared seed and run it
 // locally (in-process). There is no host and no authority: each side sends only
@@ -1137,7 +1141,7 @@ function beginOnlineDuel(seed, hosting){
         _wDuel = true;
         _worker.postMessage(Object.assign({ t:'duelStartNet', seed:seed>>>0,
             my: hosting ? 0 : 1, ws: _duelWsLists(hosting), hearts: _duelMatchHearts(), lvl: _duelMatchLvl(),
-            spec: netSpectating(),
+            speed: _duelMatchSpeed(), spec: netSpectating(),
             ofs: _netSync ? _netSync.ofs : null,
             startPts: (_netSess && _netSess.startPts) || 0 }, _duelClaimArgs(hosting)));
         // The epoch stamp + receive gate live on MAIN (_netSend/_netHandleMsg read
@@ -1149,7 +1153,7 @@ function beginOnlineDuel(seed, hosting){
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
-    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting), hearts:_duelMatchHearts(), lvl:_duelMatchLvl() });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
+    _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting), hearts:_duelMatchHearts(), lvl:_duelMatchLvl(), speed:_duelMatchSpeed() });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
     const ca = _duelClaimArgs(hosting);
     if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
     if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
