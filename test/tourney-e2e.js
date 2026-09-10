@@ -759,6 +759,22 @@ async function passBreak(opts){
     // the node's own state into void: a result with no winner and no draw. Bare, this
     // read as a pairing still waiting for its turn, and its tag named the LEVEL it
     // would have been played at -- both of which say "still to come".
+    // THE SHAPE THE SERVER ACTUALLY SENDS, read off Tournament::close: a node
+    // neither player could connect for is closed as a formal DRAW -- that is what
+    // advances an empty slot instead of re-dealing a pairing that cannot be played
+    // -- carrying why = unplayed. A draw is the one thing it must not be shown as,
+    // and it is what the screen said before `why` was carried through.
+    const unplayed = { nid:'ko2.7', players:[IDS[0], IDS[1]], state:'void',
+                       winner:null, draw:true, score:null, why:'unplayed', lvl:3 };
+    A(T(unplayed) === 'VOID', '12: an unplayed node must not be tagged a draw, got ' + T(unplayed));
+    A(L(unplayed).indexOf('NOT PLAYED') > 0, '12: nor read as one: ' + L(unplayed));
+    A(L(unplayed).indexOf('DRAW') < 0, '12: and the word DRAW must not appear at all: ' + L(unplayed));
+    // ...the same verdict as the EVENT, before any read has set the node's state.
+    const unplayedEv = { nid:'ko2.8', players:[IDS[0], IDS[1]], state:'settled',
+                         winner:null, draw:true, score:null, why:'unplayed', lvl:3 };
+    A(T(unplayedEv) === 'VOID', '12: the event form must read the same, got ' + T(unplayedEv));
+    A(L(unplayedEv).indexOf('NOT PLAYED') > 0, '12: and so must its line: ' + L(unplayedEv));
+    A(K(unplayed).w === '', '12: an unplayed node dims neither player');
     const settled = { nid:'ko2.4', players:[IDS[0], IDS[1]], state:'settled', winner:null, draw:false, score:null, lvl:3 };
     const sl = L(settled);
     A(sl.indexOf('NOT PLAYED') > 0, '12: a settled node with no winner must read as terminal: ' + sl);

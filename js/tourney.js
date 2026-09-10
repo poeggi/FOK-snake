@@ -432,7 +432,13 @@ function _ttOnSignal(d){
             // The node is settled: whatever we still owed on it is owed no longer.
             if(_ttRep && _ttRep.body.nid === String(d.nid || '')) _ttRep = null;
             if(String(d.nid || '') === _ttNid) _ttDone = _ttNid;   // ...and it is not played again
-            _tt.last = { nid:String(d.nid || ''), winner:d.winner || null, draw:!!d.draw, score:d.score || null };
+            // `why` rides a result that closed a node WITHOUT it being played. It has
+            // to be carried, because such a node closes as a formal DRAW -- that is
+            // what makes the bracket advance an empty slot instead of replaying an
+            // unplayable pairing for ever -- and a draw is the one thing it must not
+            // be shown as. Absent on every ordinary result.
+            _tt.last = { nid:String(d.nid || ''), winner:d.winner || null, draw:!!d.draw,
+                         score:d.score || null, why:String(d.why || '') };
             // The event IS the change. The node it names is settled in the picture we hold,
             // and a server that sends the standings with it (rows, 1.4.17) has said everything
             // the bracket screen draws -- eight clients re-reading 5 KB each on every settle was
@@ -466,6 +472,7 @@ function _ttNodeSettle(r){
     for(const nd of [].concat(_tt.schedule || [], _tt.bracket || [])){
         if(!nd || String(nd.nid) !== r.nid) continue;
         nd.state = 'settled'; nd.winner = r.winner; nd.draw = r.draw; nd.score = r.score;
+        nd.why = r.why || '';
     }
 }
 

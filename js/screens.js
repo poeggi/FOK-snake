@@ -1985,8 +1985,15 @@ function _ttClip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n 
 // two players who were both there trying, and the pairing is a lie about a match
 // that never had one.
 function _ttUnplayed(nd){
-    return String(nd.state || '') === 'void'
-        || (String(nd.state || '') === 'settled' && !nd.winner && !nd.draw);
+    const st = String(nd.state || '');
+    // THE SERVER'S OWN WORD FIRST, and it is needed: a node neither player could
+    // connect for is closed as a formal DRAW with `why` = unplayed, because a draw
+    // is what makes the bracket advance an empty slot rather than re-deal a pairing
+    // that cannot be played. Without this the screen would tell two people who never
+    // got a match going that they had drawn one.
+    if(String(nd.why || '') === 'unplayed') return true;
+    if(st === 'void') return true;
+    return st === 'settled' && !nd.winner && !nd.draw;
 }
 // WHAT A NODE'S CELL SAYS, decided in one pure place so the bracket grid -- the
 // most visible of the three renderings, and the only one that draws instead of
@@ -2015,10 +2022,11 @@ function _ttNode(nd, x, y, col){
 function _ttNodeTag(nd){
     const st = String(nd.state || '');
     if(st === 'frozen') return 'FROZEN';
+    // BEFORE the draw, because an unplayed node closes AS one, and before the level,
+    // because a tag naming the level it would have been played at reads as a node
+    // still to come. A real draw is a match two people played to a standstill.
+    if(_ttUnplayed(nd)) return 'VOID';
     if(nd.draw)         return 'DRAW';
-    // Before the level, always: a settled node with no winner is terminal, and a tag
-    // saying which level it would have been played at reads as one still to come.
-    if(_ttUnplayed(nd))  return 'VOID';
     return nd.lvl ? ('L' + (nd.lvl | 0)) : '';
 }
 // One node as a line: the pairing, plus the result once there is one. An empty slot is a
@@ -2036,11 +2044,12 @@ function _ttMatchLine(t, nid, nd){
     if(b && !a) return b + '  BYE';
     const pair = (a || '?') + ' vs ' + (b || '?');
     if(st === 'frozen') return pair + '  FROZEN';
+    // Terminal, and it says so -- ahead of the draw, which is what such a node is
+    // formally closed as, and ahead of the bare pairing, which reads as a match
+    // still waiting for its turn.
+    if(_ttUnplayed(nd)) return pair + '  NOT PLAYED';
     if(nd.draw) return pair + '  DRAW';
     if(nd.winner) return pair + '  ' + _ttName(nd.winner) + ' WON';
-    // Terminal and it says so. Bare, this read as a match still waiting to be
-    // played -- which is the one thing the two lines above exist to prevent.
-    if(_ttUnplayed(nd)) return pair + '  NOT PLAYED';
     return pair;
 }
 // A finished round stops on a scoreboard and waits for the host to clear it. Everything on
