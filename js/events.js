@@ -248,6 +248,12 @@ function eventsEnter(){
 // network, and an unanswered hello reads exactly like a server with no events.
 function eventEnter(){
     _evUi.sel = 0; _evUi.msg = '';
+    // THE PHASE IS SET HERE, and it has to be: this is reached from the menu as
+    // well as from the boot hash. The boot path happens to set it first (the
+    // splash exit picks its own destination), which is exactly what hid this --
+    // from the MULTIPLAYER row the whole function ran and the screen never moved,
+    // so the entry looked dead on every device.
+    phase = 'eventPage';
     const spend = () => {
         const l = _eventLink;
         if(!l){ if(_evEid) eventRead(); return; }
@@ -586,14 +592,29 @@ function eventPassLeave(){
     if(phase === 'eventQr'){ phase = 'eventPage'; _uiDirty = true; }
 }
 
-// One archived tournament as a line: what it seated, what was played, who stood on
-// the podium. The page and the monitor both show the archive, so they show it the
-// same way -- and podium ids carry their names, so an id is only ever the fallback.
+// A DATE somebody reads, from a stamp the API states in SECONDS.
+//
+// THE UNIT IS THE TRAP, and the contract is explicit about it: every timing value
+// is unix MILLISECONDS -- starts, ends, now, a pass slot's `at` -- EXCEPT the three
+// that are only ever displayed as calendar dates, which are SECONDS: `asked`,
+// `joined` and `finished`. Feeding one of those to Date() unmultiplied renders 1970
+// and nothing throws, so the conversion lives here rather than at each call site.
+function eventDay(secs){
+    if(secs == null) return '';
+    const d = new Date(+secs * 1000);
+    return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + '.' + String(d.getFullYear()).slice(-2);
+}
+// One archived tournament as a line: when it finished, what it seated, how much of
+// it was played, and who stood on the podium. The page and the monitor both show the
+// archive, so they show it the same way -- and podium ids carry their names, so an
+// id is only ever the fallback.
 function eventArchiveLine(a){
     if(!a) return '';
     const pod = (a.podium || []).slice(0, 3)
         .map(x => String(x.name || fmtFriendId(String(x.id))).substring(0, 8));
-    return (a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-');
+    const day = eventDay(a.finished);
+    const seats = (a.seats|0) ? (a.seats|0) + ' SEATS  ' : '';
+    return (day ? day + '   ' : '') + seats + (a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-');
 }
 
 // ---- the monitor: a screen for a TV ----------------------------------------

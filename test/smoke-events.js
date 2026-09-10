@@ -82,6 +82,37 @@ const DRIVER = `
     if(st({state:'active', ends:T-1}) !== 'active') throw 'without a clock the mode stands';
     log('state derived ok: ended outranks the schedule, the schedule outranks the mode');
 
+    // ---- MILLISECONDS vs SECONDS, which is the trap in this contract -------
+    // Every timing value in this API is unix MILLISECONDS -- starts, ends, now, a
+    // pass slot's at -- EXCEPT the three that are only ever displayed as calendar
+    // dates, which are SECONDS: asked, joined, finished. Feeding one of those to
+    // Date() unmultiplied renders 1970 and NOTHING THROWS, so both halves are
+    // pinned here against one instant expressed both ways.
+    const SEC = 1784100000, MS = SEC * 1000;
+    const yr = String(new Date(MS).getFullYear()).slice(-2);
+    if(eventDay(SEC).slice(-2) !== yr) throw 'a SECONDS stamp must render its own year, got '+eventDay(SEC);
+    if(eventDay(SEC).slice(-2) === '70') throw 'a SECONDS stamp rendered as 1970: the x1000 is missing';
+    if(eventDay(null) !== '' || eventDay(undefined) !== '') throw 'an absent date is no date, not a 1970 one';
+    // ...and the MILLISECONDS half, on the same instant: the schedule line reads
+    // starts/ends straight, so feeding it seconds would be the mirror mistake.
+    netPts = () => MS;
+    const w = eventWhen({ starts:MS });
+    if(!/^FROM /.test(w)) throw 'a start-only schedule reads FROM: '+w;
+    if(eventWhen({ starts:SEC }).slice(-2) === w.slice(-2)) throw 'ms and seconds must not render alike';
+    if(eventWhen({}) !== '') throw 'no schedule, no line';
+    if(!/ - /.test(eventWhen({ starts:MS, ends:MS+3600000 }))) throw 'both ends read as a range';
+    // The archive line carries all four fields the server sends for a row.
+    const line = eventArchiveLine({ finished:SEC, seats:8, played:7, podium:[{id:'c0ffee42', name:'KAI'}] });
+    if(line.indexOf('8 SEATS') < 0) throw 'the archive says what it seated: '+line;
+    if(line.indexOf('7 PLAYED') < 0) throw 'and how much was played: '+line;
+    if(line.indexOf('KAI') < 0) throw 'and who was on the podium: '+line;
+    if(line.slice(0,2) !== eventDay(SEC).slice(0,2)) throw 'and when it finished: '+line;
+    // A podium id with no name falls back to the id rather than printing nothing.
+    if(eventArchiveLine({ podium:[{id:'c0ffee42'}] }).indexOf('C0FF') < 0) throw 'a nameless id is still somebody';
+    if(eventArchiveLine(null) !== '') throw 'no row, no line';
+    netPts = () => null;
+    log('units ok: seconds for the three calendar dates, milliseconds for everything timed');
+
     // ---- the achievement is server-carried ---------------------------------
     // \`ev_<eid>\` is not in the shipped table and never could be: the operator
     // names it when they open the event. Only the DEFINITION is kept locally,
@@ -184,6 +215,44 @@ const DRIVER = `
     for(let i=0;i<5;i++) if(without[i] !== withEv[i]) throw 'the existing rows moved: '+withEv;
     _evList = []; phase='menu'; multiSel=0;
     log('menu indices ok: one row list drives the draw and the input, order unchanged');
+
+    // ---- AND THE ROW ACTUALLY GOES SOMEWHERE ------------------------------
+    // The lane above proves the row is in the right PLACE. It does not prove
+    // pressing it does anything, and it did not: eventEnter set no phase, so from
+    // the menu the whole function ran and the screen never moved. The boot path
+    // hid it, because the splash exit picks its own destination and sets the phase
+    // before calling in. On a device that reads as a dead entry.
+    //
+    // So this walks what a PLAYER walks: select EVENTS, press it, and land.
+    const press = (k) => handleKey(k, ()=>{});
+    const toEvents = () => {
+        phase='multiplayer'; multiSel=0;
+        const rows=multiRows();
+        for(let i=0;i<rows.length;i++){ if(rows[i].go==='events') { multiSel=i; break; } }
+        if(multiRows()[multiSel].go !== 'events') throw 'the EVENTS row is not on the menu at all';
+        press('Enter');
+    };
+    // ONE event: straight to its page. This is the common case and the dead one.
+    _netEvApply([{ eid:'K7QM', name:'Snake Night', state:'active', you:{state:'member'}, members:14 }]);
+    toEvents();
+    if(phase !== 'eventPage') throw 'one event must open its page, landed on '+phase;
+    // SEVERAL: a chooser, because picking between rooms is a choice.
+    _netEvApply([{ eid:'K7QM', name:'A', state:'active', you:{state:'member'} },
+                 { eid:'M2PQ', name:'B', state:'active', you:{state:'pending'} }]);
+    toEvents();
+    if(phase !== 'eventChooser') throw 'several events must open the chooser, landed on '+phase;
+    // ...and the chooser's own rows open a page too.
+    _evUi.sel = 0; press('Enter');
+    if(phase !== 'eventPage') throw 'a chooser row must open its page, landed on '+phase;
+    if(_evEid !== 'K7QM') throw 'and the one that was picked: '+_evEid;
+    // Every event screen must be somewhere the input router can reach, or the same
+    // class of dead end comes back on the screen after this one.
+    for(const ph of ['eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventConfirm']){
+        if(!UI_INPUT[ph]) throw 'no input row for '+ph+': that screen would be a dead end';
+        if(!SCREENS[ph]) throw 'no draw for '+ph;
+    }
+    _evList=[]; _ev=null; _evEid=''; phase='menu'; multiSel=0;
+    log('menu row ok: one event opens its page, several open the chooser, every screen has an input row');
 
     // ---- the reserved signal asks, it never applies ------------------------
     // Every one of the four says something moved; not one of them is a state

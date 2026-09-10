@@ -2262,6 +2262,10 @@ function drawEventMembers(){
     rows.forEach((m,i)=>{
         const y = startY + i*rowH, on = sel===i, st = String(m.state || 'member');
         menuItem(String(m.name || fmtFriendId(String(m.id))).substring(0, 15), y, on);
+        // When they came in. A room fills over an evening, so the order people
+        // arrived in is what an organizer is actually reading this list for.
+        const day = eventDay(m.joined);
+        if(day) ct(day, CW/2 + 60, y, '#555', FONT.HINT);
         // The right-hand column says what this row IS, and for a member that is the
         // friendship -- which is the only thing anyone can do about it from here.
         let tag, col;
@@ -2355,6 +2359,10 @@ function drawEventMonitor(){
         ctg(String(m.pending|0), CW/2+90, 110, '#ffd700', FONT.DISPLAY, GLOW.TITLE);
         ct('WAITING', CW/2+90, 140, '#888', FONT.HINT);
     }
+    // Which kind of slot this screen holds. `reserved` is the event naming its own
+    // screen; without it this is whoever asked first, and it keeps the slot only
+    // while it keeps asking. Worth saying on the wall: the two fail differently.
+    ct(m.reserved ? "THIS EVENT'S OWN SCREEN" : 'HOLDING THE SCREEN', CW/2, 160, '#4a7a4a', FONT.HINT);
     const t = m.tourney, roles = t && t.roles;
     let y = 180;
     if(t){
