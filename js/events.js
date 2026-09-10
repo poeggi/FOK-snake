@@ -977,11 +977,17 @@ function _evOnSignal(d){
         return;
     }
     // 'state' (the organizer ran, paused or ended it) and 'tourney' (a lobby
-    // opened) both mean the same thing to us: the page we are looking at is out
-    // of date. Refresh it where it is showing, and let the `events` list carry
-    // the rest -- there is nothing to hold on to for a room we are not in front of.
+    // opened, or the live one stopped being live) both mean the same thing to us:
+    // the screen we are looking at is out of date. Refresh it where it is showing,
+    // and let the `events` list carry the rest -- there is nothing to hold on to
+    // for a room we are not in front of.
+    //
+    // NEITHER PAYLOAD IS ADOPTED. `tourney` carries the tid and the join code on a
+    // create and `over` on an ending, and none of that is read here: what a screen
+    // shows still comes from its own read, so a signal that is late, doubled or
+    // lost costs at most a slower refresh and never a wrong picture.
     if(what === 'state' || what === 'tourney'){
-        if(_evEid === eid && eventScreen()) eventRead();
+        if(_evEid === eid && eventScreen()) eventNewsRead();
         _uiDirty = true;
     }
 }
@@ -1002,6 +1008,14 @@ function _evOnSignal(d){
 // holding, so hearing it there costs nothing and takes the wait from the lease tick
 // down to the announce tick. What it does with the news is unchanged -- it re-reads
 // its own call, which is the one place its screen comes from.
+// WHICH READ ANSWERS THE NEWS is decided by the screen on show, and there are two
+// of them: a page is made of `state` and a monitor is made of its own call. A
+// monitor handed a `state` read freshens a page nobody is looking at and leaves the
+// TV showing the old room -- which is the whole failure this exists to avoid, and
+// it is one line in two places if it is not written down once.
+function eventNewsRead(){
+    return phase === 'eventMonitor' ? eventMonitorRead() : eventRead();
+}
 function eventTourneySeen(list){
     if(!_evEid) return false;
     const mon = phase === 'eventMonitor';
@@ -1010,8 +1024,8 @@ function eventTourneySeen(list){
     const held = String((t && t.tid) || '');
     for(const l of (list || [])){
         if(String((l && l.eid) || '') !== _evEid) continue;
-        if(String(l.tid || '') === held) return false;   // the one we already show
-        if(mon) eventMonitorRead(); else eventRead();
+        if(String(l.tid || '') === held) return false;   // the one we are already showing
+        eventNewsRead();
         return true;
     }
     return false;

@@ -443,8 +443,31 @@ const DRIVER = `
     if(reads !== 3) throw 'an approval must read state -- that is where the achievement is';
     _evOnSignal(null); _evOnSignal({ event:'state' });
     if(reads !== 3) throw 'a payload with no eid is not a signal';
+    // ...AND THE SCREEN ON SHOW DECIDES WHICH READ ANSWERS IT. A monitor's picture
+    // is its own call: handed a state read it would freshen a page nobody is
+    // looking at and leave the TV showing the old room. The server sends the
+    // tourney payload to the event's whole AUDIENCE, monitor included, so this is
+    // the path a screen on a wall actually takes now.
+    {
+        const _mread0 = eventMonitorRead;
+        let mreads = 0;
+        eventMonitorRead = () => { mreads++; return Promise.resolve(true); };
+        phase = 'eventMonitor';
+        _evOnSignal({ event:'tourney', eid:'K7QM', tid:'y', code:'K7QMY3' });
+        if(mreads !== 1) throw 'a monitor must answer the news with ITS own call, got '+mreads;
+        if(reads !== 3) throw 'and never with the page read, got '+reads;
+        // The ENDING is the same signal and the same answer: over:true carries no
+        // more authority than a tid does, and neither is adopted.
+        _evOnSignal({ event:'tourney', eid:'K7QM', tid:'y', over:true });
+        if(mreads !== 2) throw 'the ending edge refreshes the screen too, got '+mreads;
+        // Back on the page, the page read answers again.
+        phase = 'eventPage';
+        _evOnSignal({ event:'tourney', eid:'K7QM', tid:'z', code:'K7QMZ4' });
+        if(reads !== 4 || mreads !== 2) throw 'the page must answer with the page read: '+reads+'/'+mreads;
+        eventMonitorRead = _mread0;
+    }
     eventRead = _read0; _evPending = {}; _ev = null; _evEid = ''; phase = 'menu';
-    log('event signal ok: four payloads, each an ask, never an adopt');
+    log('event signal ok: four payloads, each an ask, never an adopt, and the screen on show picks the read');
 
     // ---- asked for on the screens that show it, and nowhere else -----------
     // The flag rides a request that was going out anyway, so a screen nobody is
