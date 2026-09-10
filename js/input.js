@@ -299,7 +299,10 @@ const UI_INPUT = {
         confirm(){
             const rows=eventRows();
             if(_evUi.sel>=rows.length){ this.back(); return; }
-            const go=rows[_evUi.sel].go;
+            const row=rows[_evUi.sel];
+            // A dark row is shown so it can be READ, not pressed. Say why and stop.
+            if(!eventRowOk(row)){ Snd.sfxPlay('fail',cfg.music); _evMsg(row.note||'NOT RIGHT NOW', true); return; }
+            const go=row.go;
             // The two that cannot be taken back ask first. Everything else is a verb
             // the same press can undo -- the door flips both ways, a pause runs again.
             if(go==='end'||go==='leave'){

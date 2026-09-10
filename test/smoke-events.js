@@ -266,6 +266,59 @@ const DRIVER = `
     _evList=[]; _ev=null; _evEid=''; phase='menu'; multiSel=0;
     log('menu row ok: one event opens its page, several open the chooser, every screen has an input row');
 
+    // ---- THE ROSTER IS THREE COLUMNS AND THEY MUST CLEAR EACH OTHER -------
+    // The numbers come from EV_ROSTER, which is what the DRAW uses -- a guard that
+    // re-declares them proves only that the test agrees with itself. (It did, the
+    // first time I wrote it: widening the name to 15 in screens.js left this lane
+    // green, because the width it checked was its own constant.)
+    //
+    // Press Start 2P is a square monospace: one character advances one font size.
+    const W = (txt, size) => String(txt).length * size;
+    // Widest name a row can draw: clipped to NAME_MAX, selected, so '> ' and ' <'.
+    const nameW = W('> ' + 'X'.repeat(EV_ROSTER.NAME_MAX) + ' <', FONT.MENU);
+    const nameL = CW/2 - nameW/2, nameR = CW/2 + nameW/2;
+    const dateW = W('09.09.26', FONT.HINT);
+    if(EV_ROSTER.DATE_R > nameL - 2) throw 'the date column runs into the name: ends '+EV_ROSTER.DATE_R+', name starts '+nameL;
+    if(EV_ROSTER.DATE_R - dateW < 0) throw 'the date column runs off the left edge';
+    const TAGS = ['WAITING','BANNED','ORGANIZER','YOU','FRIENDS','ASKED','ADD FRIEND'];
+    for(const t of TAGS){
+        const w = W(t, FONT.HINT), l = EV_ROSTER.TAG_C - w/2, r = EV_ROSTER.TAG_C + w/2;
+        if(l < nameR + 2) throw 'tag '+t+' runs into the name: starts '+l+', name ends '+nameR;
+        if(r > CW) throw 'tag '+t+' runs off the right edge: '+r;
+    }
+    // ...and every label the roster can actually produce is in that set, so the
+    // check above cannot be passed by a label nobody draws.
+    for(const f of ['none','pending','accepted']){
+        const lbl = eventFriendLabel({ friend:f, id:'aaaaaaaa' });
+        if(TAGS.indexOf(lbl) < 0) throw 'friend label '+lbl+' is not one the column was checked for';
+    }
+    // THE DRAW HAS TO USE THEM. Numbers that only the guard reads guard nothing:
+    // this is what makes widening the name in screens.js fail here.
+    {
+        const src = String(drawEventMembers);
+        for(const k of ['EV_ROSTER.NAME_MAX','EV_ROSTER.DATE_R','EV_ROSTER.TAG_C'])
+            if(src.indexOf(k) < 0) throw 'the roster draw does not use '+k+', so this lane checks nothing';
+    }
+    // A long name is CLIPPED rather than allowed to grow, and says it was.
+    if(clipName('ABCDEFGHIJKLMNO', EV_ROSTER.NAME_MAX).length > EV_ROSTER.NAME_MAX) throw 'a long name must be clipped';
+    if(clipName('ABCDEFGHIJKLMNO', EV_ROSTER.NAME_MAX).slice(-2) !== '..') throw 'a clipped name must show it was cut';
+    if(clipName('SHORT', EV_ROSTER.NAME_MAX) !== 'SHORT') throw 'a short name is left alone';
+    log('roster columns ok: date, centred name and tag all clear each other at their widest');
+
+    // ---- THE QR SCREENS ALL LOOK THE SAME, AND NONE DRAWS A BACK ROW ------
+    // BACK_Y sits INSIDE the card on a screen whose picture is that tall, so a BACK
+    // row lands on top of the QR. The other two have always used the hint line, and
+    // all three are the same gesture: hold this up to a phone.
+    {
+        // The CALL, not the word: a comment saying there is no BACK row is not one.
+        const src = String(drawEventQr) + String(drawMyId) + String(drawTourneyCode);
+        const backs = src.split('menuItem(').length - 1;
+        if(backs) throw 'a QR screen draws a menu row, which lands on the card ('+backs+' found)';
+        const card = drawQrCard('https://poeggi.github.io/FOK-snake/#event=K7QM.H3KM9P', 58);
+        if(card.bottom <= BACK_Y) throw 'the card no longer reaches BACK_Y -- re-check why this rule exists';
+    }
+    log('QR screens ok: one card painter, no BACK row on any of the three');
+
     // ---- the reserved signal asks, it never applies ------------------------
     // Every one of the four says something moved; not one of them is a state
     // change we may take on its own word. A scheduled event pushes nothing at all.
@@ -339,15 +392,23 @@ const DRIVER = `
     // lies, so the rows are derived from the same three facts the server checks:
     // the row state, who the organizer is, and whether the event runs on a clock.
     const gos = (o) => { _ev = o; _evEid = o && o.eid || ''; return eventRows().map(r=>r.go); };
+    // What is PRESSABLE, which is now a different question from what is shown.
+    const live = (o) => { _ev = o; _evEid = o && o.eid || ''; return eventRows().filter(eventRowOk).map(r=>r.go); };
+    const rowOf = (o, go) => { _ev = o; _evEid = o && o.eid || ''; return eventRows().filter(r=>r.go===go)[0]; };
     const ME = getPlayerId();
     const mem = (x) => Object.assign({ eid:'K7QM', name:'n', state:'active',
                                        you:{ state:'member', organizer:false } }, x||{});
     // A PENDING row gets nothing at all -- it sees the public face and no more.
-    if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing';
+    if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing, not even a dark row';
     // A MONITOR may call state and monitor and NOTHING else, so it is offered nothing else.
     if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
     // An ordinary member: leave, and nothing that is the organizer's.
-    if(gos(mem()).join(',') !== 'monitor,pass,members,leave') throw 'an active member gets the screen, the QR, the roster and leave: '+gos(mem());
+    if(gos(mem()).join(',') !== 'newtourney,monitor,pass,members,leave') throw 'an active member SEES the create too: '+gos(mem());
+    // ...but cannot press it, and the row says whose it is. Shown rather than
+    // hidden on purpose: a member who never sees it cannot tell whether this
+    // event runs tournaments at all.
+    if(live(mem()).join(',') !== 'monitor,pass,members,leave') throw 'a member must not be able to press create: '+live(mem());
+    if(!/ORGANIZER/.test(rowOf(mem(),'newtourney').note||'')) throw 'the dark row must say whose it is';
     // ASKING IS NOT TAKING: the row is decided on monitor_allowed, never by calling
     // 'monitor' to find out -- that call CLAIMS the slot, and would take the screen
     // off a TV that is merely switched off.
@@ -357,30 +418,32 @@ const DRIVER = `
     if(gos(mem()).indexOf('monitor') < 0) throw 'an absent monitor_allowed is not a refusal';
     // A live tournament is a way IN for anybody in the room; opening one is the organizer's.
     const TT = { tid:'t1', code:'K7QMX2', state:'open', players:3, max:8 };
-    if(gos(mem({tourney:TT})).join(',') !== 'tourney,monitor,pass,members,leave') throw 'a member gets a way into the live one: '+gos(mem({tourney:TT}));
-    if(gos(mem()).indexOf('newtourney') >= 0) throw 'only the organizer opens one';
+    if(gos(mem({tourney:TT})).join(',') !== 'tourney,newtourney,monitor,pass,members,leave') throw 'a member gets a way into the live one: '+gos(mem({tourney:TT}));
+    if(live(mem()).indexOf('newtourney') >= 0) throw 'only the organizer opens one';
     // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
     // its own room, because leaving would abandon what it is running.
     const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
     if(gos(org()).join(',') !== 'newtourney,monitor,pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(live(org()).indexOf('newtourney') < 0) throw 'the organizer of an active event CAN press it';
     // ...and not a SECOND one while the first stands: the cap is the server's, and one
     // live per host is the same cap an ordinary tournament has.
-    if(gos(org({tourney:TT})).indexOf('newtourney') >= 0) throw 'no second tournament while one is live';
+    if(live(org({tourney:TT})).indexOf('newtourney') >= 0) throw 'no second tournament while one is live';
+    if(!/ALREADY RUNNING/.test(rowOf(org({tourney:TT}),'newtourney').note||'')) throw 'and it says so';
     if(gos(org({tourney:TT}))[0] !== 'tourney') throw 'the live one leads';
     // A PAUSED event takes no new tournaments, and an ENDED one never will again.
-    if(gos(org({state:'paused'})).indexOf('newtourney') >= 0) throw 'a paused event opens no tournament';
-    if(gos(org({state:'ended'})).indexOf('newtourney') >= 0) throw 'an ended event opens no tournament';
+    if(live(org({state:'paused'})).indexOf('newtourney') >= 0) throw 'a paused event opens no tournament';
+    if(live(org({state:'ended'})).indexOf('newtourney') >= 0) throw 'an ended event opens no tournament';
     // ...but a tournament RUNNING at the moment of the end plays on and is still
     // reachable: it began while the event was live, and a clock must not stop it.
     if(gos(org({state:'ended', tourney:TT})).indexOf('tourney') < 0) throw 'a running tournament survives the end';
-    if(gos(org({state:'paused'})).join(',') !== 'monitor,members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
+    if(gos(org({state:'paused'})).join(',') !== 'newtourney,monitor,members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
     // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
     // are not offered. The door still is -- it is not on the clock.
     if(gos(org({starts:1})).join(',') !== 'newtourney,monitor,pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
     // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
-    if(gos(org({state:'ended'})).join(',') !== 'monitor,members') throw 'an ended event is still readable and still screenable: '+gos(org({state:'ended'}));
-    if(gos(mem({state:'ended'})).join(',') !== 'monitor,members,leave') throw 'an ended event mints no pass, and stays readable';
+    if(gos(org({state:'ended'})).join(',') !== 'newtourney,monitor,members') throw 'an ended event is still readable and still screenable: '+gos(org({state:'ended'}));
+    if(gos(mem({state:'ended'})).join(',') !== 'newtourney,monitor,members,leave') throw 'an ended event mints no pass, and stays readable';
     _ev = null; _evEid = '';
     log('page rows ok: pending and monitor get nothing, the organizer cannot leave, a schedule takes the hand verbs');
 
@@ -652,8 +715,8 @@ const DRIVER = `
       // The row's own 'friend' field picks the label, and disables the button
       // where the server has already answered the question.
       if(eventFriendLabel(ROSTER[0]) !== 'FRIENDS') throw 'an accepted friendship reads FRIENDS';
-      if(eventFriendLabel(ROSTER[3]) !== 'REQUEST SENT') throw 'a pending request reads REQUEST SENT';
-      if(eventFriendLabel(ROSTER[2]) !== 'ASK TO BE FRIENDS') throw 'a stranger can be asked';
+      if(eventFriendLabel(ROSTER[3]) !== 'ASKED') throw 'a pending request reads ASKED';
+      if(eventFriendLabel(ROSTER[2]) !== 'ADD FRIEND') throw 'a stranger can be asked';
       if(eventFriendCan(ROSTER[0]) || eventFriendCan(ROSTER[3])) throw 'an answered question must not be askable again';
       if(!eventFriendCan(ROSTER[2])) throw 'a stranger must be askable';
       // ...and never ourselves, whatever the field says.

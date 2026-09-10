@@ -500,6 +500,19 @@ function _drawScoreTabs(){
     _drawTabs(['LOCAL','GLOBAL'], ['#7fff7f','#ffd24a'],
         ['rgba(28,60,20,0.85)','rgba(60,48,16,0.85)'], ['#bfffbf','#ffe9b0'], scoresTab, 44);
 }
+// THE ROSTER'S THREE COLUMNS, named once so the draw and the guard that checks
+// them cannot disagree. The name is CENTRED on CW/2, so it grows BOTH ways -- and
+// a selected one grows further still, because menuItem draws it as '> NAME <'.
+// At 15 characters it ran straight through the date on one side and the tag on
+// the other. These are the numbers the friends list uses for the same problem.
+const EV_ROSTER = { NAME_MAX: 10, DATE_R: 180, TAG_C: 470 };
+// A name clipped to fit its column, with the tail marked rather than silently cut.
+// Shared by the friends list and the event roster: same font, same problem.
+function clipName(nm, max){
+    nm = String(nm || '');
+    max = max || 10;
+    return nm.length > max ? nm.slice(0, max - 2) + '..' : nm;
+}
 // A gold star in the left margin of a board row: this run finished (cleared level 10),
 // as opposed to one that only reached its level before dying.
 function drawWinStar(cx, cy, r){
@@ -1491,7 +1504,7 @@ function drawDuelLobby(){
 // a placeholder that looked like a name would read as somebody actually called that.
 function _drawRowName(nm, y, sel, col){
     if(!nm) return;
-    const disp = nm.length > 10 ? nm.slice(0,8)+'..' : nm;
+    const disp = clipName(nm, 10);
     // Right edge well CLEAR of the selection marker: the centered ID renders as
     // '> XXXX-XXXX <' whose '>' begins around CW/2-91 (9 id chars + marker).
     ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
@@ -2206,13 +2219,15 @@ function drawEventPage(){
         ct('PLAYED HERE', CW/2, ay - 14, '#4a7a4a', FONT.HINT);
         for(const a of arch.slice(0, 2)){ ct(eventArchiveLine(a), CW/2, ay, '#888', FONT.HINT); ay += 14; }
     }
-    rows.forEach((r,i)=>menuItem(r.t, MENU_TOP + 40 + i*MENU_ROW, ui.sel===i));
-    // The line under the door row, because "closed" is a word people read two ways
-    // and the wrong reading is that the event itself has shut.
-    const door = rows[ui.sel];
-    if(door && door.go === 'access')
-        ct(e.closed ? 'A SCAN HAS TO BE APPROVED BY YOU' : 'A SCAN GETS IN STRAIGHT AWAY',
-           CW/2, MENU_TOP + 40 + ui.sel*MENU_ROW + 16, '#888', FONT.HINT);
+    rows.forEach((r,i)=>menuItem(r.t, MENU_TOP + 40 + i*MENU_ROW, ui.sel===i, ctx, !eventRowOk(r)));
+    // The line under the SELECTED row: why a dark row is dark, or what the door
+    // would do -- "closed" is a word people read two ways, and the wrong reading is
+    // that the event itself has shut.
+    const cur = rows[ui.sel];
+    const line = !cur ? ''
+        : cur.go === 'access' ? (e.closed ? 'A SCAN HAS TO BE APPROVED BY YOU' : 'A SCAN GETS IN STRAIGHT AWAY')
+        : (!eventRowOk(cur) && cur.note) ? cur.note : '';
+    if(line) ct(line, CW/2, MENU_TOP + 40 + ui.sel*MENU_ROW + 16, '#888', FONT.HINT);
     menuItem('BACK', BACK_Y, ui.sel===rows.length);
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -2261,11 +2276,23 @@ function drawEventMembers(){
     const startY = 80, rowH = 24;
     rows.forEach((m,i)=>{
         const y = startY + i*rowH, on = sel===i, st = String(m.state || 'member');
-        menuItem(String(m.name || fmtFriendId(String(m.id))).substring(0, 15), y, on);
-        // When they came in. A room fills over an evening, so the order people
-        // arrived in is what an organizer is actually reading this list for.
+        // THREE COLUMNS, and they have to clear each other at their widest. The name
+        // is CENTRED, so it grows both ways -- and a selected one grows further still,
+        // because menuItem draws it as '> NAME <'. At 15 characters that ran straight
+        // through both neighbours. Clipped to 10 like the friends list, which has the
+        // same three columns and the same font.
+        menuItem(clipName(m.name || fmtFriendId(String(m.id)), EV_ROSTER.NAME_MAX), y, on);
+        // When they came in, in the LEFT column: a room fills over an evening, so the
+        // order people arrived in is what an organizer reads this list for. Right
+        // aligned so it grows away from the name, exactly as the friends list does.
         const day = eventDay(m.joined);
-        if(day) ct(day, CW/2 + 60, y, '#555', FONT.HINT);
+        if(day){
+            ctx.save();
+            ctx.font = FONT.HINT + 'px "Press Start 2P"';
+            ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#555';
+            ctx.fillText(day, EV_ROSTER.DATE_R, y);
+            ctx.restore();
+        }
         // The right-hand column says what this row IS, and for a member that is the
         // friendship -- which is the only thing anyone can do about it from here.
         let tag, col;
@@ -2274,7 +2301,7 @@ function drawEventMembers(){
         else if(m.organizer){ tag = 'ORGANIZER'; col = '#7fff7f'; }
         else if(String(m.id) === getPlayerId()){ tag = 'YOU'; col = '#888'; }
         else { tag = eventFriendLabel(m); col = eventFriendCan(m) ? '#888' : '#4a7a4a'; }
-        ct(tag, CW/2+180, y, col, FONT.HINT);
+        ct(tag, EV_ROSTER.TAG_C, y, col, FONT.HINT);
     });
     if(!rows.length) ct(ui.busy ? 'READING...' : 'NOBODY YET', CW/2, startY, '#555', FONT.HINT);
     menuItem('BACK', BACK_Y, sel===rows.length);
@@ -2307,7 +2334,6 @@ function drawEventQr(){
         ct(ui.msg || (eventPassView() ? 'WAITING FOR THE NEXT CODE...' : 'ASKING FOR A CODE...'),
            CW/2, 120, ui.bad ? '#ff8888' : '#4a7a4a', FONT.HINT);
         if(now == null) ct('NO SYNCED CLOCK YET', CW/2, 140, '#888', FONT.HINT);
-        menuItem('BACK', BACK_Y, true);
         ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
@@ -2320,7 +2346,9 @@ function drawEventQr(){
     ctx.fillStyle = left > 0.25 ? '#7fff7f' : '#ffd700';
     ctx.fillRect(card.x, by, Math.round(card.size * left), 4);
     ct('THIS CODE ONLY WORKS WHILE IT IS ON SCREEN', CW/2, by + 16, '#4a7a4a', FONT.HINT);
-    menuItem('BACK', BACK_Y, true);
+    // NO BACK ROW, exactly like MY ID and the tournament JOIN CODE: BACK_Y sits
+    // INSIDE the card on a screen whose picture is this tall, and all three of
+    // these screens are one thing held up to a phone. The hint line is the way out.
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // THE EVENT MONITOR -- a screen somebody puts on a TV in the room. Nothing on it

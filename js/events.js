@@ -297,6 +297,10 @@ function eventPageLeave(to){
 // A PENDING row gets none of them. It sees the public face and nothing else, and
 // the server would refuse every one of these anyway -- but a screen that offers
 // what it knows will be refused is a screen that lies.
+// Rows carry `en` and `note` like the other menus do (drawMenuRows): a row that
+// is shown but not pressable is dark and says why, rather than vanishing.
+// Anything that does not set `en` is enabled.
+function eventRowOk(r){ return !r || r.en !== false; }
 function eventRows(){
     const e = _ev, rows = [];
     if(!e || _evYou() === 'pending') return rows;
@@ -307,9 +311,19 @@ function eventRows(){
     // THE LIVE TOURNAMENT, if one is open or running. It is an ordinary tournament
     // and the ordinary screens show it, so this row is a way IN and nothing more.
     if(e.tourney && e.tourney.tid) rows.push({ t:'GO TO THE TOURNAMENT', go:'tourney' });
-    // ...and the organizer is the one who may open it. The create is the NORMAL
-    // dialog: same settings, same screen, posting an eid too.
-    if(org && st === 'active' && !(e.tourney && e.tourney.tid)) rows.push({ t:'CREATE TOURNAMENT', go:'newtourney' });
+    // ...and opening one is the organizer's. THE ROW IS SHOWN TO EVERYBODY, dark
+    // where it cannot be pressed: a member who never sees it cannot tell whether
+    // this event runs tournaments at all, and a row that appears only for one
+    // person reads as a screen that changed rather than a thing they may not do.
+    // The reason rides the row and the page prints it under the cursor.
+    const live = !!(e.tourney && e.tourney.tid);
+    rows.push({ t:'CREATE TOURNAMENT', go:'newtourney',
+                en: org && st === 'active' && !live,
+                note: !org ? 'THE ORGANIZER OPENS THE TOURNAMENTS'
+                    : live ? 'ONE IS ALREADY RUNNING'
+                    : st === 'paused' ? 'NOT WHILE THE EVENT IS PAUSED'
+                    : st === 'ended' ? 'THIS EVENT HAS ENDED'
+                    : 'NOT STARTED YET' });
     // THE SCREEN FOR A TV. Offered only where the event says it has one -- asking
     // is not taking, and `monitor_allowed` exists so this row can be decided
     // without claiming the slot off a TV that is merely switched off.
@@ -458,11 +472,14 @@ async function eventRoster(peer, set){
 // `friend` field picks the label and disables the button where a request is
 // already out or the friendship exists -- the server has already answered the
 // question, so nothing here has to guess at it.
+// The row's tag, and it shares a narrow column with the name beside it -- so it
+// says the SHORT form and the header line above the list carries the sentence.
+// 'ASK TO BE FRIENDS' is 17 characters and ran into the name.
 function eventFriendLabel(m){
     const f = String((m && m.friend) || 'none');
     if(f === 'accepted') return 'FRIENDS';
-    if(f === 'pending') return 'REQUEST SENT';
-    return 'ASK TO BE FRIENDS';
+    if(f === 'pending') return 'ASKED';
+    return 'ADD FRIEND';
 }
 function eventFriendCan(m){ return String((m && m.friend) || 'none') === 'none'
                                 && String(m.id) !== getPlayerId(); }
