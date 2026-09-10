@@ -286,6 +286,10 @@ function eventRows(){
     // A MONITOR may call state and monitor and nothing else, so it is offered
     // nothing else. Its own screen arrives with the monitor itself.
     if(_evYou() === 'monitor') return rows;
+    // Any member may pass the event on while it is ACTIVE -- that is what makes it
+    // spread in a room. Not before it starts, not while it is paused, and never
+    // once it has ended: the server mints no pass then, so nothing here offers one.
+    if(st === 'active') rows.push({ t:'SHOW EVENT QR', go:'pass' });
     // The roster, read fresh every time it is opened. A member sees who is in the
     // room; the organizer sees the door as well.
     rows.push({ t:'MEMBERS', go:'members' });
@@ -448,6 +452,101 @@ async function eventAskFriend(m){
     // is the same read as everything else on this screen.
     await eventMembersRead();
     return true;
+}
+
+// ---- passing the event on --------------------------------------------------
+// ANY MEMBER may show the pass QR, and that is what makes an event spread in a
+// room: one person scans in and hands it on. The pass carries NO ISSUER -- there
+// is no room for one in 53 bytes -- so the server never learns who passed it on
+// and could not be made to.
+//
+// ONE CALL gives six 10-second slots, a minute of QR, and the screen rotates
+// LOCALLY on the synced clock. Nothing here polls: the codes for the next minute
+// are already in hand, and the only request is the one that fetches the next
+// minute before this one runs out.
+var _evPass = null;      // { step, valid, slots:[{at, code}] }
+var _evPassT = null;     // the 1 Hz tick that re-asks before the last slot lapses
+var _evPassBusy = false;
+function eventPassView(){ return _evPass; }
+// step and valid are ADMIN-CONFIGURABLE and ride the answer, so nothing here
+// hard-codes 10 and 20. The bounds are not a second opinion on the server's
+// numbers -- they are what stops a wrong or missing one turning this screen into
+// a request loop.
+function _evPassStep(){
+    const ms = _evPass && _evPass.step != null ? +_evPass.step * 1000 : EV_STEP_MS_DEF;
+    return Math.max(EV_STEP_MS_MIN, Math.min(EV_STEP_MS_MAX, ms || EV_STEP_MS_DEF));
+}
+function _evPassValid(){
+    const ms = _evPass && _evPass.valid != null ? +_evPass.valid * 1000 : EV_VALID_MS_DEF;
+    return Math.max(_evPassStep(), Math.min(EV_STEP_MS_MAX * 2, ms || EV_VALID_MS_DEF));
+}
+// THE SLOT ON SCREEN: the NEWEST one that has begun. The windows overlap on
+// purpose -- a code stays valid for two slots, so one already read off a screen
+// still opens the door while the screen has moved on -- and when two are valid
+// the newer is the one with longer left to live.
+function eventPassSlot(now){
+    if(!_evPass || !_evPass.slots || !_evPass.slots.length) return null;
+    if(now == null) now = _evNow();
+    if(now == null) return null;
+    let best = null;
+    for(const s of _evPass.slots) if(+s.at <= now && (!best || +s.at > +best.at)) best = s;
+    // Every slot still in the future, or every one already dead: show nothing
+    // rather than a code the door will refuse.
+    if(!best || now >= +best.at + _evPassValid()) return null;
+    return best;
+}
+// How much of the shown code's life is left, 0..1 -- the wiping bar under the QR.
+function eventPassLeft(now){
+    const s = eventPassSlot(now);
+    if(!s) return 0;
+    if(now == null) now = _evNow();
+    return Math.max(0, Math.min(1, 1 - (now - +s.at) / _evPassValid()));
+}
+async function eventPassRead(){
+    if(_evPassBusy || !_evEid || !_evOk()) return false;
+    _evPassBusy = true;
+    const r = await _evPost('pass');
+    _evPassBusy = false;
+    if(!r.json){
+        const err = String((r.body && r.body.error) || '');
+        _evMsg(err === 'not started' ? 'THIS EVENT HAS NOT STARTED YET'
+             : err === 'paused' ? 'THIS EVENT IS PAUSED'
+             : err === 'ended' ? 'THIS EVENT HAS ENDED'
+             : 'NO CODE RIGHT NOW', true);
+        return false;
+    }
+    const slots = Array.isArray(r.json.slots) ? r.json.slots : [];
+    _evPass = { step:r.json.step, valid:r.json.valid, slots:slots };
+    _evMsg('');
+    return true;
+}
+// Ask again BEFORE the last slot lapses, never after: a screen that waited for
+// the gap would show nothing across it. One request a minute, which is what six
+// slots were handed out for.
+function _evPassTick(){
+    if(phase !== 'eventQr'){ eventPassLeave(); return; }
+    const now = _evNow();
+    if(now == null || _evPassBusy) return;
+    const slots = (_evPass && _evPass.slots) || [];
+    if(!slots.length){ eventPassRead(); return; }
+    let last = slots[0];
+    for(const s of slots) if(+s.at > +last.at) last = s;
+    if(now >= +last.at - _evPassStep()) eventPassRead();
+    _uiDirty = true;
+}
+function eventPassEnter(){
+    _evPass = null;
+    phase = 'eventQr';
+    eventPassRead();
+    if(_evPassT == null && typeof setInterval === 'function') _evPassT = setInterval(_evPassTick, 1000);
+    _uiDirty = true;
+}
+// The codes go with the screen. They are minted from the server's clock and
+// nothing here is worth keeping for a screen that is closed.
+function eventPassLeave(){
+    if(_evPassT != null){ clearInterval(_evPassT); _evPassT = null; }
+    _evPass = null;
+    if(phase === 'eventQr'){ phase = 'eventPage'; _uiDirty = true; }
 }
 
 // ---- the reserved 'event' signal -------------------------------------------

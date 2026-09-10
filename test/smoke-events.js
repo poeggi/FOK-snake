@@ -234,19 +234,19 @@ const DRIVER = `
     // A MONITOR may call state and monitor and NOTHING else, so it is offered nothing else.
     if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
     // An ordinary member: leave, and nothing that is the organizer's.
-    if(gos(mem()).join(',') !== 'members,leave') throw 'a member gets the roster and leave, no verbs: '+gos(mem());
+    if(gos(mem()).join(',') !== 'pass,members,leave') throw 'an active member gets the QR, the roster and leave: '+gos(mem());
     // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
     // its own room, because leaving would abandon what it is running.
     const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
-    if(gos(org()).join(',') !== 'members,pause,end,access') throw 'active organizer rows: '+gos(org());
-    if(gos(org({state:'paused'})).join(',') !== 'members,run,end,access') throw 'paused organizer rows: '+gos(org({state:'paused'}));
+    if(gos(org()).join(',') !== 'pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(gos(org({state:'paused'})).join(',') !== 'members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
     // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
     // are not offered. The door still is -- it is not on the clock.
-    if(gos(org({starts:1})).join(',') !== 'members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
+    if(gos(org({starts:1})).join(',') !== 'pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
     // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
     if(gos(org({state:'ended'})).join(',') !== 'members') throw 'an ended event is still readable, and nothing else: '+gos(org({state:'ended'}));
-    if(gos(mem({state:'ended'})).join(',') !== 'members,leave') throw 'a member may still read and leave an ended event';
+    if(gos(mem({state:'ended'})).join(',') !== 'members,leave') throw 'an ended event mints no pass, and stays readable';
     _ev = null; _evEid = '';
     log('page rows ok: pending and monitor get nothing, the organizer cannot leave, a schedule takes the hand verbs');
 
@@ -293,6 +293,73 @@ const DRIVER = `
       if(_ev !== null) throw 'leaving must drop the page';
       if(eventAny()) throw 'leaving must drop the row from the list';
       if(phase !== 'multiplayer') throw 'the last event left lands on MULTIPLAYER, got '+phase;
+      // ---- the pass rotates locally, on the synced clock ------------------
+      // ONE call gives six slots -- a minute of QR -- and nothing polls: the
+      // codes are already in hand and the screen picks the one that is live.
+      // step and valid are ADMIN-CONFIGURABLE and ride the answer, so nothing
+      // here may hard-code 10 and 20.
+      const T0 = 1784182410000;
+      let passReqs = 0;
+      _evPost=async(a)=>{ if(a==='pass'){ passReqs++; return { json:{ ok:true, step:10, valid:20,
+          slots:[0,1,2,3,4,5].map(i=>({ at:T0+i*10000, code:'SLOT0'+i })) }, status:200, body:{} }; }
+          return { json:{ok:true}, status:200, body:{} }; };
+      _evEid='K7QM'; _evPass=null; _evPassBusy=false;
+      await eventPassRead();
+      if(!_evPass || _evPass.slots.length !== 6) throw 'six slots, one call';
+      if(_evPassStep() !== 10000 || _evPassValid() !== 20000) throw 'step and valid come off the answer';
+      const at = (ms) => { const sl = eventPassSlot(T0+ms); return sl ? sl.code : ''; };
+      // THE NEWEST SLOT THAT HAS BEGUN. The windows overlap on purpose -- a code
+      // stays good for two slots -- and when two are live the newer one is the
+      // one with longer left, so it is the one to show.
+      if(at(0) !== 'SLOT00') throw 'at the first slot: '+at(0);
+      if(at(9900) !== 'SLOT00') throw 'at 9.9s the first slot still stands: '+at(9900);
+      if(at(10000) !== 'SLOT01') throw 'at 10s the second begins: '+at(10000);
+      if(at(19900) !== 'SLOT01') throw 'at 19.9s the second still stands: '+at(19900);
+      if(at(20000) !== 'SLOT02') throw 'at 20s the third begins: '+at(20000);
+      if(at(-1) !== '') throw 'before the first slot there is nothing to show';
+      // The last slot dies at its own at+valid, and a dead code is not shown: the
+      // door would refuse it, and a QR that cannot be scanned is worse than none.
+      if(at(50000) !== 'SLOT05') throw 'the last slot: '+at(50000);
+      if(at(69999) !== 'SLOT05') throw 'the last slot lives its full validity: '+at(69999);
+      if(at(70000) !== '') throw 'past the last slot nothing is shown';
+      // The bar is the life left in the code ON SCREEN, not in the minute.
+      if(Math.abs(eventPassLeft(T0) - 1) > 0.001) throw 'a fresh code is full';
+      if(Math.abs(eventPassLeft(T0+15000) - 0.75) > 0.001) throw 'five seconds into the second slot leaves three quarters: '+eventPassLeft(T0+15000);
+      // ...and the bar empties only on the LAST slot: every earlier one is
+      // superseded at full life by the next, which is what the overlap is for.
+      if(eventPassLeft(T0+69999) > 0.001) throw 'the last code is spent the instant before it dies: '+eventPassLeft(T0+69999);
+      if(eventPassLeft(T0+70000) !== 0) throw 'a dead code has nothing left';
+      // A MISSING step/valid falls back rather than dividing by nothing, and an
+      // absurd one is bounded -- neither is a second opinion on the server's
+      // numbers, both stop a wrong one turning this screen into a request loop.
+      _evPass={ slots:_evPass.slots };
+      if(_evPassStep() !== EV_STEP_MS_DEF || _evPassValid() !== EV_VALID_MS_DEF) throw 'absent step/valid must fall back';
+      _evPass={ step:0, valid:0, slots:[] };
+      if(_evPassStep() < EV_STEP_MS_MIN) throw 'a zero step must be bounded';
+      // ...and the re-ask happens BEFORE the last slot lapses, never after: a
+      // screen that waited for the gap would show nothing across it.
+      _evPass={ step:10, valid:20, slots:[0,1,2,3,4,5].map(i=>({ at:T0+i*10000, code:'S'+i })) };
+      phase='eventQr'; passReqs=0;
+      netPts = () => T0;                // a whole minute in hand
+      _evPassTick();
+      if(passReqs !== 0) throw 'a fresh minute must not re-ask';
+      netPts = () => T0 + 39999;        // still one step clear of the last slot
+      _evPassTick();
+      if(passReqs !== 0) throw 'the re-ask is due one step before the LAST slot begins, not sooner';
+      netPts = () => T0 + 40000;        // one step before the last slot begins
+      _evPassTick();
+      if(passReqs !== 1) throw 'the next minute is asked for before the last slot lapses';
+      // ...which leaves the last slot's whole life as runway, so the screen never
+      // shows a gap while the answer is in flight.
+      if(T0 + 70000 - (T0 + 40000) < 20000) throw 'the re-ask must have more than one validity of runway';
+      // Leaving takes the codes with it: they are minted from the clock and worth
+      // nothing to a screen that is closed.
+      eventPassLeave();
+      if(_evPass !== null) throw 'the codes must not outlive the screen';
+      if(phase !== 'eventPage') throw 'the QR screen returns to the page';
+      _evPass=null; _evPassBusy=false; _evEid='';
+      R.steps.push('pass ok: six slots one call, newest live slot at 9.9/10/19.9/20s, re-asked before the last lapses');
+
       // ---- the roster is a VIEW, never a list this client keeps -----------
       // Read on every open, re-read after every verb, dropped when the screen
       // closes. Pending rows sort to the top because they are the only ones

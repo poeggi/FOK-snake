@@ -306,12 +306,17 @@ const UI_INPUT = {
                 Snd.sfxPlay('nav',cfg.music); _evUi.ask=go; quitConfirmSel=1; phase='eventConfirm'; return;
             }
             Snd.sfxPlay('select',cfg.music);
-            if(go==='members') eventMembersEnter();
+            if(go==='pass') eventPassEnter();
+            else if(go==='members') eventMembersEnter();
             else if(go==='run') eventRun();
             else if(go==='pause') eventPause();
             else if(go==='access') eventAccess();
         },
         back(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+    },
+    eventQr: {
+        confirm(){ Snd.sfxPlay('nav',cfg.music); eventPassLeave(); },
+        back(){ Snd.sfxPlay('nav',cfg.music); eventPassLeave(); },
     },
     eventMembers: {
         nav(key){

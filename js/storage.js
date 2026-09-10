@@ -314,6 +314,16 @@ function friendUrl() { return GAME_URL + '#friend=' + getPlayerId(); }
 // six letters. A scanner handed bare text can only show it to you; handed this, the phone
 // opens the game already knowing which room it is walking into.
 function tourneyUrl(code) { return GAME_URL + '#tourney=' + String(code || '').toUpperCase(); }
+// ...and the same again for an event, where the LENGTH is the whole design. The live
+// pass QR is rendered by this client's fixed version-3 encoder, which takes 53 text
+// bytes and not one more: 42 for the URL, 4 for the eid, the dot, and 6 for the pass.
+// That is why an eid is 4 characters and a pass is 6. Nothing else fits, which is also
+// why a pass names no issuer -- the server cannot learn who passed an event on because
+// there is nowhere to put it. The printed KEY QR is rendered by the server and has no
+// such limit, so this same shape carries a 16-character code too.
+function eventUrl(eid, code) {
+    return GAME_URL + '#event=' + String(eid || '').toUpperCase() + '.' + String(code || '').toUpperCase();
+}
 // ---- Friends: IDs collected from invite links (boot hash parse), the ADD FRIEND
 // entry and the QR scan (1vs1 menu). A capped list of public player IDs -- the
 // future matchmaking server reads it; until then it is display-only.

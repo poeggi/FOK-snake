@@ -2264,3 +2264,41 @@ function drawEventMembers(){
     }
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
+// The pass QR. Same geometry as MY ID and the tournament code, down to the module
+// size: all three do the same job -- hold a phone up to this -- and somebody who
+// has held one up already should not have to work out that this is the same thing.
+//
+// What is different is that this one EXPIRES while you are looking at it, so it
+// says so twice: in words, and in a bar that wipes away the life the shown code
+// has left. Both are read off the synced clock every frame; nothing polls.
+function drawEventQr(){
+    drawGrid(); drawOvBg(0.92);
+    ctg('EVENT QR',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    const ui = eventUi(), now = (typeof netPts === 'function') ? netPts() : null;
+    const slot = eventPassSlot(now);
+    if(!slot){
+        ct(ui.msg || (eventPassView() ? 'WAITING FOR THE NEXT CODE...' : 'ASKING FOR A CODE...'),
+           CW/2, 120, ui.bad ? '#ff8888' : '#4a7a4a', FONT.HINT);
+        if(now == null) ct('NO SYNCED CLOCK YET', CW/2, 140, '#888', FONT.HINT);
+        menuItem('BACK', BACK_Y, true);
+        ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    const q = qrMatrix(eventUrl(_evEid, slot.code));
+    const mod = 8, quiet = 4, card = (q.size + quiet*2) * mod;
+    const qx = Math.round((CW - card) / 2), qy = 58;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, card, card);
+    ctx.fillStyle = '#000000';
+    for(let r = 0; r < q.size; r++) for(let c = 0; c < q.size; c++)
+        if(q.m[r][c]) ctx.fillRect(qx + (quiet + c)*mod, qy + (quiet + r)*mod, mod, mod);
+    // The life left in the code on screen. It is the honest thing to draw here: the
+    // code is refused the moment this reaches the left edge, and somebody walking
+    // over with a phone can see whether they have time.
+    const left = eventPassLeft(now), bw = card, bx = qx, by = qy + card + 6;
+    ctx.fillStyle = '#1a3a1a'; ctx.fillRect(bx, by, bw, 4);
+    ctx.fillStyle = left > 0.25 ? '#7fff7f' : '#ffd700';
+    ctx.fillRect(bx, by, Math.round(bw * left), 4);
+    ct('THIS CODE ONLY WORKS WHILE IT IS ON SCREEN', CW/2, by + 16, '#4a7a4a', FONT.HINT);
+    menuItem('BACK', BACK_Y, true);
+    ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
