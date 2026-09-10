@@ -593,7 +593,16 @@ function drawAchievements() {
     const expert=achExpert(), n=expert?2:1;
     if(achPage>n||(achPage===0&&!achEggFound())) achPage=n;   // a page that no longer exists falls back
     const onEggs=achPage===0, onExpert=achPage===2;
-    const list=onEggs?EGG_ACHIEVEMENTS:onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
+    // The hidden page carries the eggs AND every event achievement earned. Both are
+    // secret and neither is won by playing well, so they read as one page; the
+    // difference is only that the eggs are a fixed table and the events are not.
+    // An operator can run any number of events, so what the GRID holds is the limit
+    // rather than what was earned: cards past the last row would fall off the canvas
+    // silently. The newest are kept -- last week's room is the one worth remembering.
+    const _rows=Math.max(1, Math.floor((BAND_Y-ACH.TOP-8)/(ACH.CARD_H+ACH.GAP_Y)));
+    const _room=Math.max(0, ACH.COLS*_rows-EGG_ACHIEVEMENTS.length);
+    const evs=onEggs?achEventList().slice(-_room):[];
+    const list=onEggs?EGG_ACHIEVEMENTS.concat(evs):onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
     const titleColor=onEggs?'#ff4488':onExpert?'#ff8800':'#7fff7f';
     ctg('ACHIEVEMENTS',CW/2,ACH.TITLE_Y,titleColor,FONT.TITLE, GLOW.TITLE);
     // The indicator never counts the egg page (its N is the visible pages only) and the

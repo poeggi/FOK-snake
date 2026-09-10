@@ -107,6 +107,38 @@ const DRIVER = `
     achUnlocked = {}; achEvents = {};
     log('achievement ok: server-carried, difficulty-free, ev_<EID> only, outside the vault');
 
+    // ---- and it is drawn on the hidden page, only once earned --------------
+    // Secret means secret: an event nobody joined leaves no trace anywhere, and
+    // the page it lands on is the one that is already only reachable by finding
+    // something. Both kinds belong there -- neither is won by playing well.
+    achUnlocked = {}; achEvents = {};
+    if(achEventList().length) throw 'nothing earned, nothing listed';
+    if(achEggFound()) throw 'an empty page must stay unreachable';
+    _evGrantAch({ id:'ev_K7QM', name:'NIGHT OWL', desc:'Joined Snake Night' });
+    const evl = achEventList();
+    if(evl.length !== 1 || evl[0].name !== 'NIGHT OWL') throw 'the earned one is listed: '+JSON.stringify(evl);
+    // An operator names no icon and the card still draws: that is the only part of
+    // an event achievement the server can leave out.
+    if(!evl[0].icon || !evl[0].icon.d) throw 'a card with no icon must fall back to one';
+    if(evl[0].icon !== EVENT_ACH_ICON) throw 'the fallback is the shared default';
+    _evGrantAch({ id:'ev_ABCD', name:'DAY OWL', desc:'x', icon:{p:{A:'#fff'},d:['A','A','A','A','A','A','A','A']} });
+    if(achEventList()[1].icon === EVENT_ACH_ICON) throw 'a named icon must be kept';
+    // ...and an event achievement opens the hidden page on its own, without an egg.
+    if(!achEggFound()) throw 'an event achievement must make the page reachable';
+    // The DEFINITION alone is not an achievement: only the unlock puts a card up.
+    achUnlocked = {};
+    if(achEventList().length) throw 'a definition without an unlock is not earned';
+    // The grid is the limit, not what was earned -- cards past the last row would
+    // fall off the canvas silently. Drawing many must not throw and must not grow.
+    achEvents = {}; achUnlocked = {};
+    for(let i = 0; i < 40; i++){
+        const id = 'ev_' + 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[i % 31] + 'AA' + (i % 10);
+        achEventPut(id, { name:'E'+i, desc:'d' }); achUnlocked[id] = 1000 + i;
+    }
+    achPage = 0; drawAchievements();
+    achUnlocked = {}; achEvents = {}; achPage = 1;
+    log('egg page ok: earned events only, a default icon when none is named, the grid is the cap');
+
     // ---- the list is the only thing that knows we are in an event ----------
     // Show the entry while it is non-empty, hide it when it is empty. A member
     // who was removed finds the row simply gone -- there is no other notice and

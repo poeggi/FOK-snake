@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.9';
+const APP_VERSION = 'v4.4.10';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -265,6 +265,11 @@ const EGG_ACHIEVEMENTS = [
     { id:'egg_tbd2',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
     { id:'egg_tbd3',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
 ];
+// What an EVENT achievement is drawn with when the operator named no icon. Server API
+// 4.11 carries name, desc and an optional 8x8 icon per event, so this is the only part
+// of one that can be missing -- a room somebody opened is still worth a card.
+const EVENT_ACH_ICON = {p:{A:'#ffd700',B:'#cc8800',C:'#fff0aa'},
+    d:['..AAAA..','.ACCCCA.','.ABBBBA.','.ABBBBA.','.ACCCCA.','..AAAA..','...BB...','........']};
 
 // Wearing metadata on cosmetics (shop + box items alike):
 //   cat      : wear slot, never shown in the UI. Only ONE item per slot can be worn at a

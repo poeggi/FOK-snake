@@ -157,7 +157,26 @@ let pauseReadyAt = 0;                       // pause input debounce gate
 // "p/N" indicator) never includes it, so its indicator reads 0/N -- a page off the map.
 let achPage = 1;
 function achExpert(){ return !!(cfg.shopItems&&cfg.shopItems['donate']) && ACHIEVEMENTS.every(a=>achUnlocked[a.id]); }
-function achEggFound(){ return EGG_ACHIEVEMENTS.some(a=>achUnlocked[a.id]); }
+function achEggFound(){ return EGG_ACHIEVEMENTS.some(a=>achUnlocked[a.id]) || achEventList().length > 0; }
+// EVENT achievements, drawn as cards on the hidden page beside the eggs. They belong
+// there because they are the same KIND of thing: secret, never listed before it is
+// earned, and found by being somewhere rather than by playing well.
+//
+// The list is built from what is EARNED, so an event nobody joined leaves no trace --
+// which is the whole of what "secret" means here. The definition comes from the server
+// (name, desc, an optional icon) and is kept locally only so the page can be drawn
+// offline; the icon falls back when the operator named none.
+function achEventList(){
+    const defs = (typeof achEventDefs === 'function') ? achEventDefs() : {};
+    const out = [];
+    for(const id in defs){
+        if(!achUnlocked[id]) continue;
+        const d = defs[id];
+        out.push({ id, name:d.name || 'EVENT', desc:d.desc || '', icon:d.icon || EVENT_ACH_ICON });
+    }
+    out.sort((a,b)=>(achUnlocked[a.id]|0)-(achUnlocked[b.id]|0));   // oldest first, like the fixed pages read
+    return out;
+}
 let nameStr = '', nameCharIdx = 0, nameCursorPos = 0, nameReason = '';
 // A run played with x10 (debug rare-event odds) is never ranked: the flag is
 // latched at game start so it survives regardless of later setting access.
