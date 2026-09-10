@@ -38,7 +38,24 @@ let _scoreboardCache = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net-api.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['SOLO PLAY', 'MULTIPLAYER', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
-let multiSel = 0;   // MULTIPLAYER submenu selection (0 = 1vs1 DUEL, 1 = TOURNAMENT, 2 = MY ID, 3 = ADD FRIEND, 4 = FRIENDS)
+let multiSel = 0;   // MULTIPLAYER submenu selection -- an index into multiRows(), never a literal
+// THE MULTIPLAYER ROWS, in one place because one of them comes and goes. EVENTS shows only
+// while the server says we are in one (the `events` list on hello/poll) and vanishes again
+// when we are not -- which is also how a removed member finds out. Hard-coded indices in the
+// draw and the input would drift apart the first time that row appeared, so both read this.
+function multiRows(){
+    const tt = typeof _ttMenuOk === 'function' && _ttMenuOk();
+    const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
+    const rows = [
+        { t:'1vs1 DUEL',  en:true, go:'duel' },
+        { t:'TOURNAMENT', en:tt, note:tt ? null : (notice || 'TOURNAMENTS NEED A CONNECTION'), go:'tourney' },
+        { t:'MY ID',      en:true, go:'myid' },
+        { t:'ADD FRIEND', en:true, go:'addfriend' },
+        { t:'FRIENDS',    en:true, go:'friends' },
+    ];
+    if(typeof eventAny === 'function' && eventAny()) rows.push({ t:'EVENTS', en:true, go:'events' });
+    return rows;
+}
 let duelSel = 0; // 1vs1 DUEL submenu selection (0 = 1vs1 ONLINE, 1 = 1vs1 LOCAL)
 // Local 1vs1 needs a physical keyboard (P2 = WASD): gate on a fine primary pointer (PC).
 const _hasKeyboard = (()=>{ try { return window.matchMedia('(pointer: fine)').matches; } catch(e){ return false; } })();
@@ -189,7 +206,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventPage'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -885,6 +902,7 @@ const SCREENS = {
     tourneyQuit:     { d:()=>drawTourneyQuit(),     hud:false, freeze:true },
     // The event page is a picture of the last answer: nothing on it moves until the
     // server says something did, except the derived state word, which needs no redraw.
+    eventChooser:    { d:()=>drawEventChooser(),    hud:false, freeze:true },
     eventPage:       { d:()=>drawEventPage(),       hud:false, freeze:true, anim:()=> !!eventUi().msg && _msgNow()-eventUi().msgAt < 2600 },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },

@@ -50,6 +50,33 @@ var _evUi = { sel:0, msg:'', msgAt:0, bad:false, busy:false };
 // there, so sending them back to one would be inventing a step they never took.
 var _eventBack = 'multiplayer';
 
+// ---- the list, and the only way we know we are in an event ------------------
+// Asked for on the screens that show it and nowhere else -- the same rule the
+// roster and the tournament announce follow, and for the same reason: the flag
+// rides a request that was going out anyway, so a screen nobody is looking at
+// costs the server nothing.
+const _EV_SCREENS = { eventChooser:1, eventPage:1, eventMembers:1, eventQr:1, eventMonitor:1 };
+// An event screen is open. It is a MATCHMAKING screen like the lobby and the tournament
+// ones: the four `event` signals arrive in the ordinary mailbox, and the monitor's watch
+// handshake has nowhere else to land -- so net-api.js polls and HOLDS on these too.
+function eventScreen(){ return !!_EV_SCREENS[phase]; }
+// ...and MULTIPLAYER wants the list without being one, because that is the screen the
+// entry appears on.
+function _netEvWant(){ return phase === 'multiplayer' || eventScreen(); }
+// THE one landing place, whichever request brought it. An answer WITHOUT the key
+// is a server that does not serve events, or a 204 that carries nothing at all --
+// neither is an empty roster, so the list stands. An EMPTY ARRAY is the real
+// answer for "you are in none", and that is how a removed member finds out.
+function _netEvApply(v){
+    if(!Array.isArray(v)) return;
+    _evList = v;
+    // The page is a member's view of a room. Losing the row means losing the room:
+    // there is nothing left to read and nothing left to show.
+    if(_evEid && !_evRow(_evEid) && _ev){ _ev = null; _evMsg('YOU ARE NOT IN THIS EVENT', true); }
+    _uiDirty = true;
+}
+function _evRow(eid){ for(const e of _evList) if(String(e.eid) === String(eid)) return e; return null; }
+
 function eventList(){ return _evList; }
 function eventView(){ return _ev; }
 function eventUi(){ return _evUi; }
@@ -187,6 +214,18 @@ function eventOpen(eid){
     eventRead();
     _uiDirty = true;
 }
+// THE MENU ENTRY. One event opens its page; several open a chooser, because
+// picking between rooms is a choice and being in exactly one is not.
+function eventsEnter(){
+    _evUi.sel = 0; _evUi.msg = '';
+    if(_evList.length === 1){ _evEid = String(_evList[0].eid); eventEnter(); return; }
+    phase = 'eventChooser';
+    // The list is a picture of the last answer, so freshen it on the way in: a row
+    // that has gone is a room we have been removed from, and the chooser is where
+    // that shows.
+    if(typeof _netHello === 'function' && _netOk()) _netHello();
+    _uiDirty = true;
+}
 // THE DOOR into events, and the one place a parked deep link is spent. It waits
 // for the hello for the same reason the tournament link does: the answer needs a
 // network, and an unanswered hello reads exactly like a server with no events.
@@ -213,6 +252,48 @@ function eventPageLeave(to){
     _ev = null; _evUi.msg = ''; _evUi.busy = false;
     phase = to || 'multiplayer';
     _uiDirty = true;
+}
+
+// ---- the reserved 'event' signal -------------------------------------------
+// Four payloads, and NOT ONE of them is a state change to apply on its own word.
+// Each says something moved and the server is asked what -- the same discipline
+// the tournament sheet keeps. Nothing is signalled for a join into an open
+// event, a decline or a removal (the friend logic: what did not happen is not
+// announced), and a scheduled event's own moments push nothing at all, because
+// they are derived.
+//
+// _evPending is the ONE thing kept between screens, and it is a nudge rather
+// than a record: somebody is waiting at a closed door of an event we run. It is
+// re-derived from the roster the moment that screen is opened.
+var _evPending = {};
+function eventPendingAt(eid){ return !!_evPending[String(eid || '')]; }
+function _evOnSignal(d){
+    if(!d || typeof d !== 'object') return;
+    const eid = String(d.eid || ''), what = String(d.event || '');
+    if(!eid) return;
+    if(what === 'request'){
+        // To the organizer: a closed event has somebody at the door. A badge on the
+        // entry, and a line when the page it concerns is the one on screen.
+        _evPending[eid] = true;
+        if(_evEid === eid && phase === 'eventPage') _evMsg('SOMEBODY IS WAITING TO JOIN');
+        _uiDirty = true;
+        return;
+    }
+    if(what === 'accepted'){
+        // The wait is over. state now carries the achievement, so read it and let
+        // the ordinary unlock moment play.
+        if(_evEid === eid) eventRead();
+        else { _evEid = eid; eventRead(); }
+        return;
+    }
+    // 'state' (the organizer ran, paused or ended it) and 'tourney' (a lobby
+    // opened) both mean the same thing to us: the page we are looking at is out
+    // of date. Refresh it where it is showing, and let the `events` list carry
+    // the rest -- there is nothing to hold on to for a room we are not in front of.
+    if(what === 'state' || what === 'tourney'){
+        if(_evEid === eid && eventScreen()) eventRead();
+        _uiDirty = true;
+    }
 }
 
 // ---- the achievement -------------------------------------------------------

@@ -252,16 +252,19 @@ const UI_INPUT = {
         },
     },
     multiplayer: {
-        nav(key){ multiSel=_navStep(key, multiSel, 6); },
+        nav(key){ multiSel=_navStep(key, multiSel, multiRows().length+1); },
         confirm(){
-            if(multiSel===0){ Snd.sfxPlay('select',cfg.music); phase='duelMenu'; duelSel=0; }
-            else if(multiSel===1){
+            const rows=multiRows();
+            const go=multiSel<rows.length ? rows[multiSel].go : '';
+            if(go==='duel'){ Snd.sfxPlay('select',cfg.music); phase='duelMenu'; duelSel=0; }
+            else if(go==='tourney'){
                 if(typeof netTourneyOk!=='function' || !netTourneyOk()){ Snd.sfxPlay('fail',cfg.music); _duelMsg=netOffline()?'OFFLINE MODE (SETTINGS > NETWORK)':'TOURNAMENTS UNAVAILABLE'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='tourneyLobby'; tourneyEnter(); }
             }
-            else if(multiSel===2){ Snd.sfxPlay('select',cfg.music); _myIdBack='multiplayer'; _netFr.msg=''; phase='myId'; netMyIdEnter(); }
-            else if(multiSel===3){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
-            else if(multiSel===4){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
+            else if(go==='myid'){ Snd.sfxPlay('select',cfg.music); _myIdBack='multiplayer'; _netFr.msg=''; phase='myId'; netMyIdEnter(); }
+            else if(go==='addfriend'){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
+            else if(go==='friends'){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
+            else if(go==='events'){ Snd.sfxPlay('select',cfg.music); _eventBack='multiplayer'; eventsEnter(); }
             else this.back();   // BACK row (like drawSettings)
         },
         back: _backToMenu,
@@ -281,6 +284,15 @@ const UI_INPUT = {
     myId: {
         confirm(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
         back(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
+    },
+    eventChooser: {
+        nav(key){ _evUi.sel=_navStep(key, _evUi.sel, eventList().length+1); },
+        confirm(){
+            const rows=eventList();
+            if(_evUi.sel>=rows.length){ this.back(); return; }
+            Snd.sfxPlay('select',cfg.music); _eventBack='eventChooser'; eventOpen(rows[_evUi.sel].eid);
+        },
+        back(){ Snd.sfxPlay('nav',cfg.music); phase='multiplayer'; _uiDirty=true; },
     },
     // The event page. One row for now (BACK) -- the page's own actions arrive with the
     // rest of it; what this commit owes is somewhere for a scanned code to land.

@@ -107,6 +107,104 @@ runTest('SMOKE-EVENTS', `
     achUnlocked = {}; achEvents = {};
     log('achievement ok: server-carried, difficulty-free, ev_<EID> only, outside the vault');
 
+    // ---- the list is the only thing that knows we are in an event ----------
+    // Show the entry while it is non-empty, hide it when it is empty. A member
+    // who was removed finds the row simply gone -- there is no other notice and
+    // there is not meant to be one.
+    const rowNames = () => multiRows().map(r => r.t);
+    _evList = [];
+    if(rowNames().indexOf('EVENTS') >= 0) throw 'no rows means no entry';
+    _netEvApply([{ eid:'K7QM', name:'Snake Night', state:'active', you:{state:'member'}, members:14 }]);
+    if(rowNames().indexOf('EVENTS') < 0) throw 'a row must put the entry there';
+    if(!eventAny()) throw 'eventAny reads the list and nothing else';
+    // An answer WITHOUT the key is a server that does not serve events, or a 204
+    // that carries nothing -- neither of which is an empty roster.
+    _netEvApply(undefined); _netEvApply(null); _netEvApply({});
+    if(rowNames().indexOf('EVENTS') < 0) throw 'an absent key must leave the list standing';
+    // An EMPTY ARRAY is the real answer, and it is how a removal arrives.
+    _netEvApply([]);
+    if(rowNames().indexOf('EVENTS') >= 0) throw 'an empty list must take the entry away';
+    log('menu entry ok: comes and goes with the list, an absent key is not an empty one');
+
+    // ---- and the indices never drift --------------------------------------
+    // The row that comes and goes is exactly why the draw and the input read ONE
+    // list: a hard-coded index would send BACK somewhere else the first time it
+    // appeared. Walking the menu with and without it must land on the same rows.
+    simNow=100000; _splashLeftAt=-1e9;
+    const walk = () => {
+        const out = [];
+        phase='multiplayer'; multiSel=0;
+        const rows=multiRows();
+        for(let i=0;i<rows.length+1;i++){
+            out.push(multiSel<rows.length ? rows[multiSel].go : 'BACK');
+            handleKey('ArrowDown',()=>{});
+        }
+        return out;
+    };
+    _evList = [];
+    const without = walk();
+    if(without.join(',') !== 'duel,tourney,myid,addfriend,friends,BACK') throw 'unexpected rows without events: '+without;
+    _netEvApply([{ eid:'K7QM', name:'x', state:'active', you:{state:'member'} }]);
+    const withEv = walk();
+    if(withEv.join(',') !== 'duel,tourney,myid,addfriend,friends,events,BACK') throw 'unexpected rows with events: '+withEv;
+    // The row is appended, so nothing that was already there moved -- and BACK is
+    // still the row past the end, which is the one an index would have got wrong.
+    for(let i=0;i<5;i++) if(without[i] !== withEv[i]) throw 'the existing rows moved: '+withEv;
+    _evList = []; phase='menu'; multiSel=0;
+    log('menu indices ok: one row list drives the draw and the input, order unchanged');
+
+    // ---- the reserved signal asks, it never applies ------------------------
+    // Every one of the four says something moved; not one of them is a state
+    // change we may take on its own word. A scheduled event pushes nothing at all.
+    let reads = 0;
+    const _read0 = eventRead; eventRead = () => { reads++; return Promise.resolve(true); };
+    _evEid = 'K7QM'; _ev = { eid:'K7QM', you:{state:'member'} }; phase = 'eventPage';
+    _evOnSignal({ event:'state', eid:'K7QM', state:'paused' });
+    if(reads !== 1) throw 'a state signal must read the server, not adopt its word';
+    if(_ev.state === 'paused') throw 'the signal must not be applied directly';
+    _evOnSignal({ event:'tourney', eid:'K7QM', tid:'x', code:'K7QMX2' });
+    if(reads !== 2) throw 'a tourney signal refreshes the open page';
+    _evOnSignal({ event:'state', eid:'OTHR', state:'ended' });
+    if(reads !== 2) throw 'a signal for another event must not refresh this page';
+    _evPending = {};
+    _evOnSignal({ event:'request', eid:'K7QM', from:'c0ffee42' });
+    if(!eventPendingAt('K7QM')) throw 'a request must badge the event it names';
+    if(reads !== 2) throw 'a request is a nudge, not a re-read';
+    _evOnSignal({ event:'accepted', eid:'K7QM' });
+    if(reads !== 3) throw 'an approval must read state -- that is where the achievement is';
+    _evOnSignal(null); _evOnSignal({ event:'state' });
+    if(reads !== 3) throw 'a payload with no eid is not a signal';
+    eventRead = _read0; _evPending = {}; _ev = null; _evEid = ''; phase = 'menu';
+    log('event signal ok: four payloads, each an ask, never an adopt');
+
+    // ---- asked for on the screens that show it, and nowhere else -----------
+    // The flag rides a request that was going out anyway, so a screen nobody is
+    // looking at costs the server nothing. Same rule as the roster and the
+    // announce, and the poll and the hello have to agree about it.
+    {
+        const _oGet=_netGet, _oFetch=globalThis.fetch, _oPost=_netPost;
+        const _oPace=_netPace, _oHold=_netPollHoldEnd;
+        globalThis.fetch=()=>({});                 // _netOk(): online, or every check below is vacuous
+        let _u=null, _body=null;
+        _netGet=async (p)=>{ _u=p; return null; };
+        _netPost=async (p,b)=>{ _body=b; return null; };
+        _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now(); _netPollHoldEnd=0;
+        const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); return _u||''; };
+        const hello=(ph)=>{ _body=null; _netHelloBusy=false; phase=ph; _netHello(); return _body||{}; };
+
+        for(const ph of ['multiplayer','eventChooser','eventPage','eventMembers','eventQr','eventMonitor']){
+            if(!/[?&]ev=1(&|$)/.test(poll(ph))) throw 'the poll must ask for events on '+ph;
+            if(hello(ph).events !== true) throw 'the hello must ask for events on '+ph;
+        }
+        for(const ph of ['menu','friends','duelLobby','tourneyLobby','settings']){
+            if(/[?&]ev=/.test(poll(ph))) throw 'the poll must NOT ask for events on '+ph;
+            if('events' in hello(ph)) throw 'the hello must NOT ask for events on '+ph;
+        }
+        _netGet=_oGet; _netPost=_oPost; globalThis.fetch=_oFetch;
+        _netPace=_oPace; _netPollHoldEnd=_oHold; _netPollBusy=false; _netHelloBusy=false; phase='menu';
+    }
+    log('request shape ok: events rides the hello and the poll on the six screens that show it');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 })();

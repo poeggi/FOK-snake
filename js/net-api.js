@@ -1038,6 +1038,12 @@ async function _netHello(){
     if(phase === 'friends') body.friends_list = true;
     // The announce is served only when asked for, so ask only while it can be seen.
     if(phase === 'tourneyLobby') body.tourneys = true;
+    // The caller's own event rows, and the only way a client learns it is in an event at
+    // all: the menu entry shows while the list is non-empty and hides when it is empty, and
+    // a member that was removed finds the row simply gone. Asked for on the hello or poll
+    // that PRECEDES a screen that needs it, never on every beat -- and never stored, because
+    // the server is the roster (js/events.js).
+    if(_netEvWant()) body.events = true;
     // Our own public addresses, both families (see net-rtc.js: the server can only observe the
     // one the browser happened to use). Sent on every hello once discovered -- the server no-ops
     // when nothing changed, so it costs nothing -- and needs no version gate: a 4.1 server
@@ -1083,6 +1089,7 @@ async function _netHello(){
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
     _netFrApply(r);   // the counters, and the presence delta where one was asked for
     if(body.tourneys) _netTourneys = Array.isArray(r.tourneys) ? r.tourneys : [];
+    if(body.events) _netEvApply(r.events);
     // FEATURE-DETECTED, never version-gated: the roster on hello is a re-release of 4.4,
     // so a server answering "4.4" may or may not carry it. It answered once = it answers,
     // and the periodic friend.php list stands down. It never answered = that call stays,
@@ -1134,6 +1141,10 @@ function _netPollDue(){
         return _netPollTick % 5 === 0;   // reconnecting: poll so the re-handshake signals flow
     }
     if(phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId') return true;
+    // An event screen is a matchmaking screen: the four `event` signals arrive in the
+    // ordinary mailbox, and a monitor's watch handshake -- ask, offer, ICE -- has nowhere
+    // else to land at all.
+    if(typeof eventScreen === 'function' && eventScreen()) return true;
     if(typeof tourneyActive === 'function' && tourneyActive()) return true;   // a held tournament reaches us wherever we are
     if(phase === 'tourneyLobby') return true;
     if(_netSess) return true;                        // offer/answer/ice in flight
@@ -1197,6 +1208,7 @@ async function _netPollOnce(){
     // during a match either -- _netSess.game short-circuits above, so the eight people
     // watching hold nothing while they watch.
     const _held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId'
+               || (typeof eventScreen === 'function' && eventScreen())
                || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyRound' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
     // ...and only while the server still lets us. `hold:false` withdraws holding outright
     // (a held poll owns a worker for its whole duration -- the single biggest thing one
@@ -1238,10 +1250,11 @@ async function _netPollOnce(){
     const de = (_netPoll49() && _netDuelEnd) ? _netDuelEnd : '';
     const fl = _netFlWant;
     const tl = phase === 'tourneyLobby' && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
+    const ev = _netEvWant();
     const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
     const q = fs + (de ? '&de=' + de : '')
                  + (_netPoll49() ? '&db=' + ((cfg.debug|0) > 0 ? 1 : 0) : '')   // REPORT what is true: a poll that never says is never woken with an instruction
-                 + (aa ? '&aa=1' : '') + (fl ? '&fl=1' : '') + (tl ? '&tl=1' : '');
+                 + (aa ? '&aa=1' : '') + (fl ? '&fl=1' : '') + (tl ? '&tl=1' : '') + (ev ? '&ev=1' : '');
     const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : '') + q,
                             _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
@@ -1258,6 +1271,7 @@ async function _netPollOnce(){
         // _netSrvSays un-latches the minor rather than trusting what it saw before.
         if(fl){ _netFlWant = false; _netFrPoll = Array.isArray(r.friends); if(_netFrPoll) _netFrAdopt(r.friends, false); }
         if(tl){ _netTlAt = Date.now(); _netTtPoll = Array.isArray(r.tourneys); if(_netTtPoll) _netTourneys = r.tourneys; }
+        if(ev) _netEvApply(r.events);
     }
     // The mailbox was down and is back. A push may have died in between (the server drops an
     // undelivered signal at its TTL), and only the whole picture recovers one: hand a held

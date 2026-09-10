@@ -1374,14 +1374,7 @@ function drawMultiplayer() {
     // at y=24 with glow 16, items from MENU_TOP in MENU_ROW steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
     ctg('MULTIPLAYER',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const items=[
-        {t:'1vs1 DUEL',    en:true},
-        {t:'TOURNAMENT',  en:_ttMenuOk(), note:_ttMenuOk()?null:(netStatusNotice()||'TOURNAMENTS NEED A CONNECTION')},
-        {t:'MY ID',       en:true},
-        {t:'ADD FRIEND',  en:true},
-        {t:'FRIENDS',     en:true},
-    ];
-    drawMenuRows(items, multiSel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
+    drawMenuRows(multiRows(), multiSel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The 1vs1 DUEL submenu: ONLINE opens the lobby, LOCAL is two players on one keyboard
@@ -2187,4 +2180,23 @@ function drawEventPage(){
     menuItem('BACK', BACK_Y, true);
     if(ui.msg) drawStatus(ui.msg);
     ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// The chooser, shown only when the list holds more than one room. The rows are the
+// server's answer verbatim -- a pending row says so and opens the public face only.
+function drawEventChooser(){
+    drawGrid(); drawOvBg(0.92);
+    ctg('EVENTS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    const rows = eventList(), ui = eventUi();
+    ct(rows.length ? 'PICK A ROOM' : 'YOU ARE IN NO EVENT', CW/2, 50, '#4a7a4a', FONT.HINT);
+    const startY = 80, rowH = 26;
+    rows.forEach((e,i)=>{
+        const y = startY + i*rowH;
+        menuItem(String(e.name || e.eid).toUpperCase().substring(0, 20), y, ui.sel===i);
+        const you = (e.you && String(e.you.state)) || '';
+        const [word, wcol] = you === 'pending' ? ['WAITING', '#ffd700'] : _evStateLine(e);
+        ct(word, CW/2+180, y, wcol, FONT.HINT);
+    });
+    menuItem('BACK', BACK_Y, ui.sel===rows.length);
+    if(ui.msg) drawStatus(ui.msg);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

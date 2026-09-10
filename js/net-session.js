@@ -158,7 +158,7 @@ function _netOnSignal(sig){
     try {
         const from = String(sig.from||'');
         _netSigLog('< '+String(sig.type)+' '+from.slice(0,4));   // debug overlay
-        if(!/^[0-9a-f]{8}$/.test(from) && sig.type !== 'friend' && sig.type !== 'peer-net' && sig.type !== 'tourney') return;   // server-generated: sender is in the payload
+        if(!/^[0-9a-f]{8}$/.test(from) && sig.type !== 'friend' && sig.type !== 'peer-net' && sig.type !== 'tourney' && sig.type !== 'event') return;   // server-generated: sender is in the payload
         const pl = String(sig.payload||'');
         // SPECTATOR signalling rides the duel's own offer/answer/ice types, told apart by the
         // sp:1 marker the sender adds -- so the server contract needed exactly ONE new
@@ -174,6 +174,14 @@ function _netOnSignal(sig){
         }
         if(sig.type === 'watch'){
             if(typeof _spOnWatch === 'function') _spOnWatch(from, _netJson(pl));
+            return;
+        }
+        // 'event' is RESERVED like 'tourney': server-generated, so there is no player id
+        // to check and the payload is the whole message. Four of them, every one carrying
+        // eid, and none of them a state change we may apply on its own word -- they say
+        // something moved, and events.js reads the server to find out what.
+        if(sig.type === 'event'){
+            if(typeof _evOnSignal === 'function') _evOnSignal(_netJson(pl));
             return;
         }
         // An `ices` payload is a JSON ARRAY, which has nowhere to carry the sp marker that
