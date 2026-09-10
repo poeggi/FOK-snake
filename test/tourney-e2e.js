@@ -725,7 +725,53 @@ async function passBreak(opts){
     const pend = L({ nid:'final', players:[IDS[0], IDS[1]], state:'pending', winner:null, draw:false, score:null });
     A(pend.indexOf('BYE') < 0 && pend.indexOf('VOID') < 0 && pend.indexOf('FROZEN') < 0,
       '12: an ordinary pending node picked up a terminal label');
-    rows.push('12 node states: bye, void and frozen each read as themselves; a pending node still reads as a pairing');
+    // A VOID HAS TWO CAUSES NOW, and they are told apart by the pairing rather than
+    // by any field on the wire. A bracket that ran out of players voids a node that
+    // never had a pairing; a node the two seats could not connect for is voided with
+    // BOTH OF THEM IN IT, after a re-deal and a second failure. Saying NOBODY LEFT to
+    // two players who were both there twice is the worse of the two possible lies,
+    // and it is the one the screen used to tell.
+    const T = nd => C[0].tag(nd);
+    const won0  = { nid:'ko2.5', players:[IDS[0], IDS[1]], state:'settled', winner:IDS[0], draw:false, score:[3,1], lvl:3 };
+    const drew0 = { nid:'ko2.6', players:[IDS[0], IDS[1]], state:'settled', winner:null, draw:true, score:[2,2], lvl:3 };
+    const dead = { nid:'ko2.3', players:[IDS[0], IDS[1]], state:'void', winner:null, draw:false, score:null };
+    const dl = L(dead);
+    A(dl.indexOf('NOBODY LEFT') < 0, '12: a void with both players in it must not say nobody was left');
+    A(dl.indexOf(' vs ') > 0, '12: a void with both players in it must still name the pairing: ' + dl);
+    A(dl.indexOf('NOT PLAYED') > 0, '12: and it must say the match never happened: ' + dl);
+    A(T(dead) === 'VOID', '12: a void node is tagged VOID whoever was in it, got ' + T(dead));
+    // ...and the BRACKET GRID says the same. It draws rather than returns, so it
+    // decides in a pure helper and this asserts that -- without it, reverting the
+    // rule left every suite green while the grid told two present players that
+    // nobody was left.
+    const K = nd => C[0].cell(nd);
+    A(!K(dead).solo, '12: the grid must draw the pairing of a void that had one');
+    A(K({ nid:'v0', players:[null, null], state:'void' }).solo === 'NOBODY LEFT',
+      '12: a void that never had a pairing still says nobody was left');
+    A(K({ nid:'b0', players:[IDS[0], null], state:'settled', winner:IDS[0] }).solo.indexOf('BYE') > 0,
+      '12: the grid still draws a bye as a bye');
+    // Nobody is dimmed when nobody lost -- the grid greys the loser, and a void and
+    // a draw have none.
+    A(K(dead).w === '', '12: a void must dim neither player in the grid');
+    A(K(drew0).w === '', '12: a draw must dim neither player in the grid');
+    A(K(won0).w === String(IDS[0]), '12: a decided node still names its winner to the grid');
+    // ...and the same verdict arriving as an EVENT, before any state read has turned
+    // the node's own state into void: a result with no winner and no draw. Bare, this
+    // read as a pairing still waiting for its turn, and its tag named the LEVEL it
+    // would have been played at -- both of which say "still to come".
+    const settled = { nid:'ko2.4', players:[IDS[0], IDS[1]], state:'settled', winner:null, draw:false, score:null, lvl:3 };
+    const sl = L(settled);
+    A(sl.indexOf('NOT PLAYED') > 0, '12: a settled node with no winner must read as terminal: ' + sl);
+    A(T(settled) === 'VOID', '12: and its tag must not name a level it will never be played at, got ' + T(settled));
+    // The controls: a real result and a draw are untouched by any of this.
+    const won = won0;
+    A(L(won).indexOf('WON') > 0 && T(won) === 'L3', '12: a decided node still reads as decided');
+    const drew = drew0;
+    A(L(drew).indexOf('DRAW') > 0 && T(drew) === 'DRAW', '12: a draw still reads as a draw');
+    A(T({ nid:'x', players:[IDS[0], IDS[1]], state:'pending', winner:null, draw:false, lvl:2 }) === 'L2',
+      '12: a node still to be played still shows the level it will be played at');
+    rows.push('12 node states: bye, void and frozen each read as themselves; a void with both '
+              + 'players in it names them and says NOT PLAYED rather than NOBODY LEFT; a pending node still reads as a pairing');
 
     // ---- 13. a sheet engaged AFTER the offer it authorises ---------------------------
     // _ttRoles never engages a sheet where it lands: the previous match has to be off the

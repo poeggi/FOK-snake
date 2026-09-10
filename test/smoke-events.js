@@ -1225,6 +1225,57 @@ const DRIVER = `
           globalThis.navigator = _oNav; globalThis.document = _oDoc;
       }
       log('wake lock ok: held only while the monitor is up, re-taken after a hidden page, and absent without complaint');
+      // ---- A MONITOR THAT IS WATCHING IS NOT A MONITOR THAT LEFT ----------
+      // Field report from a TV: the feed died mid-match and the screen landed on the
+      // 1vs1 DUEL menu. One cause for both halves. While a monitor is ATTACHED it is
+      // drawing the duel, so the phase is not 'eventMonitor' -- and the tick read that
+      // as "the screen is gone" and tore the whole thing down. With it went the
+      // lease, the re-ask ladder, and the answer eventExitPhase gives the duel-end
+      // path, which then fell through to its 1vs1 default.
+      {
+        const _oRead2 = eventMonitorRead, _oSpec = netSpectating, _oWatch = specWatch, _oStop2 = specStop;
+        let reads2 = 0, on2 = false;
+        eventMonitorRead = async () => { reads2++; return true; };
+        netSpectating = () => on2;
+        specWatch = () => { on2 = true; };
+        specStop = () => { on2 = false; };
+        _evEid = 'K7QM'; _evMonT = 1;                    // as if the interval were armed
+        // Watching a match: the tick must leave everything standing.
+        phase = 'duel'; on2 = true; _evMonAt = _msgNow();
+        _evMonTick();
+        if(_evMonT !== 1) throw 'a monitor watching a match must not be torn down';
+        if(eventExitPhase() !== 'eventMonitor') throw 'and the way back must still be its own screen';
+        // ...and off both, it IS gone: a screen nobody is looking at and nothing is
+        // feeding has no business holding a slot.
+        on2 = false; phase = 'menu';
+        _evMonTick();
+        if(_evMonT != null) throw 'a monitor that is neither shown nor watching must let go';
+        if(eventExitPhase() !== '') throw 'and it must stop claiming the way back';
+        // THE 4 s RE-ASK HAS TO BE REACHABLE. It was not: _evMonFollow was only ever
+        // called by the 30 s lease read, so the constant that says four could only
+        // ever happen every thirty. The tick renews the lease when it is due and
+        // follows the feed on every other pass.
+        _evMonT = 1; phase = 'eventMonitor'; reads2 = 0;
+        _evMonAt = _msgNow();                            // lease fresh
+        _evMonTick();
+        if(reads2 !== 0) throw 'a lease that is not due must not be renewed, got '+reads2;
+        _evMonAt = _msgNow() - EV_MON_MS - 1;            // lease due
+        _evMonTick();
+        if(reads2 !== 1) throw 'a lease that IS due must be renewed once, got '+reads2;
+        if(EV_MON_WATCH_MS >= EV_MON_MS) throw 'the re-ask must be faster than the lease or it is the lease';
+        // ...and the follow is what a non-lease pass does: a lost feed is asked for
+        // again rather than waited out.
+        _evMon = { eid:'K7QM', tourney:{ tid:'t1', roles:{ nid:'n1', players:['c0ffee42','dddddddd'] } } };
+        _evMonNid = 'n1'; _evMonAskAt = 0; on2 = false;
+        _evMonAt = _msgNow();
+        _evMonTick();
+        if(!on2) throw 'a non-lease pass must re-ask for a feed it does not have';
+        _evMonT = null; _evMon = null; _evMonNid = ''; _evMonAskAt = 0; _evMonAt = 0; _evEid = '';
+        eventMonitorRead = _oRead2; netSpectating = _oSpec; specWatch = _oWatch; specStop = _oStop2;
+        phase = 'eventPage';
+      }
+      log('monitor feed ok: watching is not leaving, the lease and the re-ask keep their own rates, and the way back stays its own screen');
+
 
       _evPost=_oPost; eventRead=_oRead; globalThis.fetch=_oFetch; cfg.offline=_oOff;
       _ev=null; _evEid=''; _evUi.busy=false; _evUi.msg=''; _evList=[];

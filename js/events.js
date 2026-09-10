@@ -845,11 +845,14 @@ function eventArchiveLine(a){
 // The lease lapses within the online window (120 s, a contract constant), so it
 // is renewed at the same half-of-the-window rule the heartbeat uses: a missed
 // renewal never reads as an unplugged TV.
-const EV_MON_MS = 30000;         // renew well inside the window, and follow the bracket
-const EV_MON_WATCH_MS = 4000;    // how often an unanswered watch ask is put out again
+const EV_MON_MS = 30000;         // the LEASE: renewed well inside the 120 s window
+const EV_MON_WATCH_MS = 4000;    // how often an unanswered or LOST watch ask goes out again
+                                 // -- and the timer's own interval, because the ask has to
+                                 // be able to happen at that rate to mean anything
 var _evMon = null;               // the last `monitor` answer -- the whole screen
 var _evMonT = null;
 var _evMonBusy = false;
+var _evMonAt = 0;                // when the lease was last renewed
 var _evMonErr = '';              // 'no monitor' | 'monitor taken' | '' -- said, then stopped
 var _evMonNid = '';              // the match we are watching, so a moved cursor is noticed
 var _evMonAskAt = 0;
@@ -916,15 +919,32 @@ function _evMonFollow(){
     if(/^[0-9a-f]{8}$/.test(feeder)) specWatch(feeder, String(t.tid || ''), nid);
 }
 function _evMonTick(){
-    if(phase !== 'eventMonitor'){ eventMonitorStop(); return; }
-    eventMonitorRead();
+    // ATTACHED IS NOT GONE. While the monitor is watching a match it is drawing the
+    // DUEL, not its own screen -- and tearing it down there is what cost a TV its
+    // feed: the lease stopped being renewed, the re-ask ladder stopped running, and
+    // when the match ended eventExitPhase had nothing to answer with, so the screen
+    // landed on the 1vs1 menu instead of going back to watching.
+    const watching = typeof netSpectating === 'function' && netSpectating();
+    if(phase !== 'eventMonitor' && !watching){ eventMonitorStop(); return; }
+    // TWO CADENCES ON ONE TIMER. The lease is the expensive call -- it claims or
+    // renews the slot AND builds the whole tournament projection -- and wants its
+    // 30 s. A feed that was refused or has died wants asking again in four, which is
+    // what EV_MON_WATCH_MS has always said and could never do: the only caller of
+    // _evMonFollow was the 30 s read, so the 4 s floor was unreachable.
+    const now = _msgNow();
+    // Elapsed only, never a not-yet-set test: entering the screen stamps this AND
+    // does the first read, so a clock whose zero is a real reading cannot be read
+    // as never renewed and spend a lease on every tick.
+    if(now - _evMonAt >= EV_MON_MS){ _evMonAt = now; eventMonitorRead(); return; }
+    _evMonFollow();
 }
 function eventMonitorEnter(){
     _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonAskAt = 0;
     phase = 'eventMonitor';
+    _evMonAt = _msgNow();        // the read below IS this lease period's renewal
     eventWakeSet(true);
     eventMonitorRead();
-    if(_evMonT == null && typeof setInterval === 'function') _evMonT = setInterval(_evMonTick, EV_MON_MS);
+    if(_evMonT == null && typeof setInterval === 'function') _evMonT = setInterval(_evMonTick, EV_MON_WATCH_MS);
     _uiDirty = true;
 }
 // Stop asking and the slot frees itself -- there is nothing to give back and
@@ -935,7 +955,7 @@ function eventMonitorStop(keep){
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
     if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
         specStop('');
-    _evMonNid = ''; _evMonAskAt = 0;
+    _evMonNid = ''; _evMonAskAt = 0; _evMonAt = 0;
     if(!keep){ _evMon = null; _evMonErr = ''; if(phase === 'eventMonitor') phase = 'eventPage'; }
     _uiDirty = true;
 }

@@ -466,6 +466,8 @@ function driverSrc(id){
         + '    has: function(t){ return tourneyRows().some(function(r){ return r.t.indexOf(t) === 0; }); },\n'
         + '    draw: function(){ var s = SCREENS[phase]; if(!s || !s.d) throw "no screen for " + phase; s.d(); return true; },\n'
         + '    line: function(nd){ return _ttMatchLine(tourneyView() || {}, nd.nid, nd); },\n'
+        + '    tag: function(nd){ return _ttNodeTag(nd); },\n'
+        + '    cell: function(nd){ return _ttNodeCell(nd); },\n'
         + '    snap: function(s){ return s ? { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, stakesWant:s.stakesWant, lvl0:s.lvl0, lvl:s.lvl, levelWant:s.levelWant, p2pOnly:s.p2pOnly } : null; },\n'
         + '    sess: function(peer, role){ return C.snap(_netMkSess(peer, role)); },\n'
         // A session that already EXISTS when the sheet is engaged, which is the case a fresh

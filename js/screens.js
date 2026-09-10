@@ -1974,12 +1974,38 @@ function _ttClip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n 
 // while it is undecided, the winner keeping it and the loser going dark once it is not. A
 // node with one side missing is a BYE, and one that closed with nobody left to play it says
 // that instead of naming a pairing that never existed.
-function _ttNode(nd, x, y, col){
+// A node that closed WITHOUT PRODUCING ANYTHING. Two causes now, and they are told
+// apart by the pairing rather than by a field: a bracket that ran out of players
+// voids a node that never had a pairing at all, while a node the two seats could
+// not connect for was voided with both of them sitting in it. A `result` carrying
+// no winner and no draw is the same verdict arriving as an event, before any state
+// read has turned the node's own state into 'void'.
+//
+// It matters which is drawn, because the words differ: NOBODY LEFT is a lie told to
+// two players who were both there trying, and the pairing is a lie about a match
+// that never had one.
+function _ttUnplayed(nd){
+    return String(nd.state || '') === 'void'
+        || (String(nd.state || '') === 'settled' && !nd.winner && !nd.draw);
+}
+// WHAT A NODE'S CELL SAYS, decided in one pure place so the bracket grid -- the
+// most visible of the three renderings, and the only one that draws instead of
+// returning -- can be asserted like the other two, which were pure already. It
+// was not, and reverting the void rule below left every suite green.
+function _ttNodeCell(nd){
     const st = String(nd.state || ''), ps = nd.players || [];
-    if(st === 'void'){ _ttCol('NOBODY LEFT', x, y, col, FONT.MENU); return; }
     const a = _ttClip(_ttName(ps[0]), 6), b = _ttClip(_ttName(ps[1]), 6);
-    if(!a || !b){ _ttCol((a || b || '?') + '  BYE', x, y, col, FONT.MENU); return; }
-    const w = nd.draw ? '' : String(nd.winner || '');
+    // A void that never had a pairing says so. One that HAS a pairing NAMES it,
+    // whatever closed it: two players who were both there are not nobody.
+    if(st === 'void' && !a && !b) return { solo:'NOBODY LEFT' };
+    if(!a || !b) return { solo:(a || b || '?') + '  BYE' };
+    // No winner dims nobody: a void and a draw are both "neither of these lost".
+    return { a:a, b:b, w:(nd.draw ? '' : String(nd.winner || '')) };
+}
+function _ttNode(nd, x, y, col){
+    const c = _ttNodeCell(nd), ps = nd.players || [];
+    if(c.solo){ _ttCol(c.solo, x, y, col, FONT.MENU); return; }
+    const a = c.a, b = c.b, w = c.w;
     _ttCol(a, x, y, !w || String(ps[0]) === w ? col : '#555', FONT.MENU);
     _ttCol('vs', x + (a.length + 1) * FONT.MENU, y, '#666', FONT.MENU);
     _ttCol(b, x + (a.length + 4) * FONT.MENU, y, !w || String(ps[1]) === w ? col : '#555', FONT.MENU);
@@ -1988,9 +2014,11 @@ function _ttNode(nd, x, y, col){
 // was. Only one of the two can ever be true of the same node, so they share the column.
 function _ttNodeTag(nd){
     const st = String(nd.state || '');
-    if(st === 'void')   return 'VOID';
     if(st === 'frozen') return 'FROZEN';
     if(nd.draw)         return 'DRAW';
+    // Before the level, always: a settled node with no winner is terminal, and a tag
+    // saying which level it would have been played at reads as one still to come.
+    if(_ttUnplayed(nd))  return 'VOID';
     return nd.lvl ? ('L' + (nd.lvl | 0)) : '';
 }
 // One node as a line: the pairing, plus the result once there is one. An empty slot is a
@@ -2002,14 +2030,17 @@ function _ttMatchLine(t, nid, nd){
     if(!nd && t.roles && String(t.roles.nid) === String(nid)) nd = { players: t.roles.players };
     if(!nd) return String(nid || '');
     const st = String(nd.state || '');
-    if(st === 'void') return 'VOID - NOBODY LEFT TO PLAY IT';
     const ps = nd.players || [], a = _ttName(ps[0]), b = _ttName(ps[1]);
+    if(st === 'void' && !a && !b) return 'VOID - NOBODY LEFT TO PLAY IT';
     if(a && !b) return a + '  BYE';
     if(b && !a) return b + '  BYE';
     const pair = (a || '?') + ' vs ' + (b || '?');
     if(st === 'frozen') return pair + '  FROZEN';
     if(nd.draw) return pair + '  DRAW';
     if(nd.winner) return pair + '  ' + _ttName(nd.winner) + ' WON';
+    // Terminal and it says so. Bare, this read as a match still waiting to be
+    // played -- which is the one thing the two lines above exist to prevent.
+    if(_ttUnplayed(nd)) return pair + '  NOT PLAYED';
     return pair;
 }
 // A finished round stops on a scoreboard and waits for the host to clear it. Everything on

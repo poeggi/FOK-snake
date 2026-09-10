@@ -170,7 +170,10 @@ function _duelExit(){
     // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
     // follow us out and render on the menu as if it had just happened there.
     _duelMsg=''; _duelMsgAt=0;
-    phase=(typeof tourneyExitPhase==='function' && tourneyExitPhase()) || 'duelMenu';   // back to where the match was started from, not the main menu
+    // Back to where the match was watched or played FROM, not the main menu: a
+    // tournament answers with its own board and an event MONITOR with its screen.
+    phase=(typeof tourneyExitPhase==='function' && tourneyExitPhase())
+        || (typeof eventExitPhase==='function' && eventExitPhase()) || 'duelMenu';
     showHUD(false); Snd.musicStop(); Snd.sfxPlay('nav',cfg.music);
 }
 function _backToMenu(){ phase='menu'; Snd.sfxPlay('nav',cfg.music); }
@@ -683,7 +686,9 @@ const UI_INPUT = {
                 // Back to where the match was started from: a tournament match walked out
                 // on lands on the tournament, not on the 1vs1 menu, so the field is still
                 // there to be re-joined (minus the match just forfeited).
-                phase = (typeof tourneyExitPhase==='function' && tourneyExitPhase()) || (wasDuel ? 'duelMenu' : 'menu');   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
+                phase = (typeof tourneyExitPhase==='function' && tourneyExitPhase())
+                     || (typeof eventExitPhase==='function' && eventExitPhase())
+                     || (wasDuel ? 'duelMenu' : 'menu');   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
             }   // quit: leave gameplay, keep the worker clock running for menu animations
             else { phase=prevPhase; Snd.duck(false); }   // back to the game at full volume
         },
