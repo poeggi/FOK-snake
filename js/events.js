@@ -923,20 +923,34 @@ function _evOnSignal(d){
 // change: an event's open lobbies are served to its MEMBERS regardless of network,
 // so a row carrying our eid IS the tournament. Noticing is not adopting -- the page
 // re-reads `state`, which is the one place the tournament it shows comes from.
+// THE MONITOR IS ON THE SAME NEWS. Its own call is a 30 s tick because that is its
+// LEASE, and the lease is the expensive half: one `monitor` builds the whole
+// tournament projection. The announce is a FLAG on a poll the screen is already
+// holding, so hearing it there costs nothing and takes the wait from the lease tick
+// down to the announce tick. What it does with the news is unchanged -- it re-reads
+// its own call, which is the one place its screen comes from.
 function eventTourneySeen(list){
-    if(!_evEid || !_ev || !eventScreen()) return false;
-    const held = String((_ev.tourney && _ev.tourney.tid) || '');
+    if(!_evEid) return false;
+    const mon = phase === 'eventMonitor';
+    if(!mon && (!_ev || !eventScreen())) return false;
+    const t = mon ? (_evMon && _evMon.tourney) : (_ev && _ev.tourney);
+    const held = String((t && t.tid) || '');
     for(const l of (list || [])){
         if(String((l && l.eid) || '') !== _evEid) continue;
-        if(String(l.tid || '') === held) return false;   // the one we are already showing
-        eventRead();
+        if(String(l.tid || '') === held) return false;   // the one we already show
+        if(mon) eventMonitorRead(); else eventRead();
         return true;
     }
     return false;
 }
-// ...which means the announce has to be ASKED for while the page is up. It rides
-// the poll the page already sends for `ev`, so it costs no request of its own.
-function eventTlWant(){ return !!_evEid && (phase === 'eventPage' || phase === 'eventStats'); }
+// ...which means the announce has to be ASKED for while the screen is up. It rides
+// the poll those screens already send for `ev`, so it costs no request of its own.
+// A RESERVED monitor row may well be served no announce at all -- the contract
+// promises an event's lobbies to its MEMBERS -- and asking is still right: the flag
+// is free, and a TV signed in as an ordinary member is the common case.
+function eventTlWant(){
+    return !!_evEid && (phase === 'eventPage' || phase === 'eventStats' || phase === 'eventMonitor');
+}
 
 // ---- keeping a TV awake ----------------------------------------------------
 // NOTHING IS EVER PRESSED ON THE MONITOR -- that is the point of it -- so the

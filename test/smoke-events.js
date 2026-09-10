@@ -428,7 +428,8 @@ const DRIVER = `
         _evEid='K7QM';
         if(!/[?&]tl=1(&|$)/.test(poll('eventPage'))) throw 'the event page must ask for the announce';
         if(!/[?&]tl=1(&|$)/.test(poll('tourneyLobby'))) throw 'the tournament lobby still asks for it';
-        if(/[?&]tl=/.test(poll('eventMonitor'))) throw 'a monitor reads its own call, not the announce';
+        if(!/[?&]tl=1(&|$)/.test(poll('eventMonitor'))) throw 'the monitor must hear the announce too';
+        if(/[?&]tl=/.test(poll('eventMembers'))) throw 'a screen that cannot show a tournament asks for none';
         _evEid='';
         if(/[?&]tl=/.test(poll('eventPage'))) throw 'with no event open there is nothing to watch for';
         _netGet=_oGet; globalThis.fetch=_oFetch; _netPace=_oPace; _netPollHoldEnd=_oHold;
@@ -689,8 +690,23 @@ const DRIVER = `
         // this reachable at all.
         phase = 'eventPage';
         if(!eventTlWant()) throw 'the page must ask for the announce';
+        // THE MONITOR IS ON THE SAME NEWS, and for the same money: its own call is a
+        // 30 s tick because that is its LEASE, and one of those builds the whole
+        // tournament projection. The announce is a flag on a poll the screen already
+        // holds, so it takes the wait from the lease tick to the announce tick and
+        // costs nothing -- and what the monitor DOES with it is still its own call.
+        const _oMonRead = eventMonitorRead;
+        let monReads = 0;
+        eventMonitorRead = async () => { monReads++; return true; };
         phase = 'eventMonitor';
-        if(eventTlWant()) throw 'the monitor reads its own call and asks for nothing else';
+        if(!eventTlWant()) throw 'the monitor must hear the announce too, or a new tournament waits out its lease';
+        _evMon = { eid:'K7QM', tourney:null };
+        if(!eventTourneySeen([{ tid:'m1', code:'AAA', eid:'K7QM' }])) throw 'a tournament the TV is not showing is news to it';
+        if(monReads !== 1 || reads !== 0) throw 'and the monitor answers with ITS call, not the page read: '+monReads+'/'+reads;
+        _evMon.tourney = { tid:'m1' };
+        if(eventTourneySeen([{ tid:'m1', code:'AAA', eid:'K7QM' }])) throw 'the one already on the TV is not news';
+        if(monReads !== 1) throw 'and it must not re-read on every announce, got '+monReads;
+        eventMonitorRead = _oMonRead; _evMon = null;
         eventRead = _oRead; _ev = null; _evEid = ''; phase = 'eventPage';
     }
     log('new tournament ok: the announce is the second way it arrives, one read per tournament rather than per announce');
