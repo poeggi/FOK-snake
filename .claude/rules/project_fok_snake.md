@@ -110,7 +110,10 @@ guards the house edge.
   pre-commit hook runs; --full (= --regression, implied by
   --profile/--netprofile) adds the heavy duel sweeps (runtime scales with
   simulated match-seconds; see project_fok_ci_time.md for lanes + sharding).
-  CI runs --full, so the regression tier GATES the auto-deploy to Pages.
+  CI runs --full. It is a DETECTOR, not a gate: "pages build and deployment"
+  is an independent workflow on the same push and finishes while ci is still
+  running, so a red tier does not hold the deploy back. Nothing stops a broken
+  main from being live except not pushing it.
   RULE: run --full locally after any netcode/sim rework and before a release.
   Tiers documented in test/README.md + the checks.sh header.
 - On-demand modes (never in a tier/lane/CI/hook): --profile, --netprofile,

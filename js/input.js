@@ -288,10 +288,19 @@ const UI_INPUT = {
         back(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
     },
     eventChooser: {
-        nav(key){ _evUi.sel=_navStep(key, _evUi.sel, eventList().length+1); },
+        // The list is GROUPED, so it carries headings -- and a cursor that can sit on
+        // one is a cursor that can be pressed on nothing. Step until it lands on a
+        // room or on BACK; bounded by the list length, so a list of nothing but
+        // headings cannot spin here.
+        nav(key){
+            const rows=eventChooserRows(), n=rows.length+1;
+            let i=_evUi.sel;
+            for(let k=0;k<n;k++){ i=_navStep(key, i, n); if(eventChooserPickable(rows,i)) break; }
+            _evUi.sel=i;
+        },
         confirm(){
-            const rows=eventList();
-            if(_evUi.sel>=rows.length){ this.back(); return; }
+            const rows=eventChooserRows();
+            if(_evUi.sel>=rows.length || !rows[_evUi.sel] || !rows[_evUi.sel].eid){ this.back(); return; }
             Snd.sfxPlay('select',cfg.music); _eventBack='eventChooser'; eventOpen(rows[_evUi.sel].eid);
         },
         back(){ Snd.sfxPlay('nav',cfg.music); phase='multiplayer'; _uiDirty=true; },

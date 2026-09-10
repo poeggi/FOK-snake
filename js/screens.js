@@ -506,6 +506,15 @@ function _drawScoreTabs(){
 // At 15 characters it ran straight through the date on one side and the tag on
 // the other. These are the numbers the friends list uses for the same problem.
 const EV_ROSTER = { NAME_MAX: 10, DATE_R: 180, TAG_C: 470 };
+// THE EVENT LIST'S THREE COLUMNS and its window. Same shape as the roster and the
+// same reason: the name is CENTRED and grows both ways, so what sits either side
+// of it has to be anchored away from it. The list is grouped and can be longer
+// than the screen, so it scrolls -- and it scrolls by keeping the cursor in view
+// rather than by holding a scroll position, which is one less thing to get wrong.
+const EV_CHOOSE = { TOP: 78, ROW: 22, KEEP: 14, ID_R: 176, TAG_C: 474, NAME_MAX: 12 };
+function eventChooserFits(){
+    return Math.max(1, Math.floor(((STATUS_Y - EV_CHOOSE.KEEP) - EV_CHOOSE.TOP) / EV_CHOOSE.ROW));
+}
 // THE EVENT PAGE'S VERTICAL BUDGET. The header runs to 108, the rows start below
 // it, and everything under them has to fit between the last row and the status
 // band at STATUS_Y. Named here so the guard reads the same numbers the draw does.
@@ -2368,17 +2377,41 @@ function drawEventConfirm(){
 function drawEventChooser(){
     drawGrid(); drawOvBg(0.92);
     ctg('EVENTS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    const rows = eventList(), ui = eventUi();
-    ct(rows.length ? 'PICK A ROOM' : 'YOU ARE IN NO EVENT', CW/2, 50, '#4a7a4a', FONT.HINT);
-    const startY = 80, rowH = 26;
-    rows.forEach((e,i)=>{
-        const y = startY + i*rowH;
-        menuItem(String(e.name || e.eid).toUpperCase().substring(0, 20), y, ui.sel===i);
-        const you = (e.you && String(e.you.state)) || '';
-        const [word, wcol] = you === 'pending' ? ['WAITING', '#ffd700'] : _evStateLine(e);
-        ct(word, CW/2+180, y, wcol, FONT.HINT);
-    });
-    menuItem('BACK', BACK_Y, ui.sel===rows.length);
+    const rows = eventChooserRows(), ui = eventUi(), sel = ui.sel;
+    if(!rows.length){
+        ct('YOU ARE IN NO EVENT', CW/2, 50, '#4a7a4a', FONT.HINT);
+        ct('SCAN AN EVENT QR TO GET IN', CW/2, 74, '#555', FONT.HINT);
+        menuItem('BACK', BACK_Y, true);
+        if(ui.msg) drawStatus(ui.msg);
+        ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    const fits = eventChooserFits();
+    // The window follows the CURSOR: centre it where the list is longer than the
+    // screen, and clamp at both ends so the first and last screens are full.
+    let from = 0;
+    if(rows.length > fits){
+        const want = (sel >= rows.length ? rows.length : sel) - Math.floor(fits/2);
+        from = Math.max(0, Math.min(want, rows.length - fits));
+    }
+    const shown = Math.min(fits, rows.length - from);
+    ct(rows.length > fits ? 'PICK A ROOM   ' + (from + 1) + '-' + (from + shown) + ' OF ' + rows.length
+                          : 'PICK A ROOM', CW/2, 52, '#4a7a4a', FONT.HINT);
+    for(let k = 0; k < shown; k++){
+        const r = rows[from + k], y = EV_CHOOSE.TOP + k*EV_CHOOSE.ROW;
+        // A HEADING IS NOT A ROW. It says what the block under it is, in the left
+        // column where the eyes already are, and nothing sits beside it.
+        if(r.head){ _tableRow([[EV_CHOOSE.ID_R - 80, 'left', r.head]], y, '#4a7a4a'); continue; }
+        const e = r.e;
+        menuItem(clipName(String(e.name || e.eid).toUpperCase(), EV_CHOOSE.NAME_MAX), y, sel === from + k);
+        // THE ID, because that is what somebody reads out across a room and what a
+        // printed poster carries. Right aligned, so it grows away from the name.
+        _tableRow([[EV_CHOOSE.ID_R, 'right', String(e.eid || '')]], y, '#555');
+        // ...and what the room IS on the right, in the list's own short words.
+        const [word, wcol] = eventListTag(e);
+        ct(word, EV_CHOOSE.TAG_C, y, wcol, FONT.HINT);
+    }
+    menuItem('BACK', BACK_Y, sel >= rows.length);
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

@@ -273,27 +273,101 @@ const DRIVER = `
         if(multiRows()[multiSel].go !== 'events') throw 'the EVENTS row is not on the menu at all';
         press('Enter');
     };
-    // ONE event: straight to its page. This is the common case and the dead one.
+    // ALWAYS THE LIST, even for one room. Which events you are in is itself worth
+    // seeing -- when the next one starts, what is over -- and a door that sometimes
+    // opens a list and sometimes a page is two doors.
     _netEvApply([{ eid:'K7QM', name:'Snake Night', state:'active', you:{state:'member'}, members:14 }]);
     toEvents();
-    if(phase !== 'eventPage') throw 'one event must open its page, landed on '+phase;
-    // SEVERAL: a chooser, because picking between rooms is a choice.
+    if(phase !== 'eventChooser') throw 'EVENTS must open the list, landed on '+phase;
+    // ...and the cursor opens on a ROOM, never on the heading above it.
+    const one = eventChooserRows();
+    if(!one[_evUi.sel] || !one[_evUi.sel].eid) throw 'the list must open on a room, not a heading';
+    press('Enter');
+    if(phase !== 'eventPage') throw 'a list row must open its page, landed on '+phase;
+    if(_evEid !== 'K7QM') throw 'and the one that was picked: '+_evEid;
+    // SEVERAL, and the list is the same list.
     _netEvApply([{ eid:'K7QM', name:'A', state:'active', you:{state:'member'} },
                  { eid:'M2PQ', name:'B', state:'active', you:{state:'pending'} }]);
     toEvents();
-    if(phase !== 'eventChooser') throw 'several events must open the chooser, landed on '+phase;
-    // ...and the chooser's own rows open a page too.
-    _evUi.sel = 0; press('Enter');
-    if(phase !== 'eventPage') throw 'a chooser row must open its page, landed on '+phase;
-    if(_evEid !== 'K7QM') throw 'and the one that was picked: '+_evEid;
+    if(phase !== 'eventChooser') throw 'several events must open the list, landed on '+phase;
+    press('Enter');
+    if(phase !== 'eventPage') throw 'a list row must open its page, landed on '+phase;
     // Every event screen must be somewhere the input router can reach, or the same
     // class of dead end comes back on the screen after this one.
-    for(const ph of ['eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventConfirm']){
+    for(const ph of ['eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventStats','eventConfirm']){
         if(!UI_INPUT[ph]) throw 'no input row for '+ph+': that screen would be a dead end';
         if(!SCREENS[ph]) throw 'no draw for '+ph;
     }
     _evList=[]; _ev=null; _evEid=''; phase='menu'; multiSel=0;
-    log('menu row ok: one event opens its page, several open the chooser, every screen has an input row');
+    log('menu row ok: EVENTS always opens the list, a row opens its page, every screen has an input row');
+
+    // ---- THE LIST IS GROUPED, AND THE CURSOR SKIPS THE HEADINGS -----------
+    // Live first: that is the room you are standing in and the only one with
+    // anything to press tonight. Then what is coming, soonest first. Then what is
+    // over, freshest first -- a record rather than a door.
+    {
+        // _evNow() reads the synced clock; without one eventState takes the server's
+        // word, which is what the state field carries here.
+        const E = (eid, name, st, x) => Object.assign({ eid:eid, name:name, state:st,
+                                                        you:{state:'member'} }, x||{});
+        _netEvApply([ E('E1','ZED','ended',{ends:1000}), E('U1','LATER','upcoming',{starts:9000}),
+                      E('A1','ZOO','active'),            E('U2','SOONER','upcoming',{starts:5000}),
+                      E('P1','HELD','paused'),           E('E2','FRESH','ended',{ends:8000}),
+                      E('A2','ARENA','active') ]);
+        const rows = eventChooserRows();
+        const shape = rows.map(r => r.head ? '#'+r.head : r.eid).join(',');
+        if(shape !== '#LIVE NOW,A2,P1,A1,#COMING UP,U2,U1,#FINISHED,E2,E1')
+            throw 'the grouping or the order inside it moved: '+shape;
+        // EVERY room is reachable -- a list that quietly drops one is worse than a
+        // list with an odd heading on it.
+        if(rows.filter(r=>r.eid).length !== _evList.length) throw 'a room fell out of the list';
+        // THE CURSOR NEVER SITS ON A HEADING, in either direction, all the way round.
+        _evUi.sel = eventChooserFirst();
+        if(rows[_evUi.sel].eid !== 'A2') throw 'the list opens on the first live room, got '+rows[_evUi.sel].eid;
+        const seenSel = {};
+        for(let k = 0; k < rows.length + 4; k++){
+            UI_INPUT.eventChooser.nav('ArrowDown');
+            if(!eventChooserPickable(rows, _evUi.sel)) throw 'DOWN landed on a heading at '+_evUi.sel;
+            seenSel[_evUi.sel] = 1;
+        }
+        for(let k = 0; k < rows.length + 4; k++){
+            UI_INPUT.eventChooser.nav('ArrowUp');
+            if(!eventChooserPickable(rows, _evUi.sel)) throw 'UP landed on a heading at '+_evUi.sel;
+        }
+        // ...and going all the way round reaches every room AND the way out.
+        const reach = Object.keys(seenSel).length;
+        if(reach !== _evList.length + 1) throw 'a walk down the list reaches '+reach+' stops, not every room plus BACK';
+        // A list longer than the screen scrolls rather than drawing off the bottom.
+        const fits = eventChooserFits();
+        if(fits < 6) throw 'the list window is too small to be useful: '+fits;
+        if(EV_CHOOSE.TOP + (fits - 1) * EV_CHOOSE.ROW + FONT.MENU/2 > STATUS_Y)
+            throw 'the last row of a full window reaches the status band';
+        // The three columns clear each other at their widest, the roster's problem
+        // exactly: the name is CENTRED and a selected one is drawn as > NAME <.
+        const w = (n) => n * FONT.MENU;                   // the same square-monospace rule the roster lane uses
+        const half = w(EV_CHOOSE.NAME_MAX + 4) / 2;
+        if(CW/2 - half < EV_CHOOSE.ID_R) throw 'a selected name runs into the id column';
+        if(EV_CHOOSE.ID_R - 4*FONT.HINT < 8) throw 'the id column runs off the left edge';
+        // EVERY tag the list can actually produce, not a made-up width: the page can
+        // afford NOT STARTED YET across its whole width and a column cannot, which is
+        // why the list has short words of its own. A guard checking one invented
+        // length is a guard that agrees with itself.
+        const now2 = 1789000000000;
+        const TAGS2 = [ eventListTag({ state:'active', you:{state:'pending'} })[0],
+                        eventListTag({ state:'active' })[0],
+                        eventListTag({ state:'paused' })[0],
+                        eventListTag({ state:'ended' })[0],
+                        eventListTag({ state:'upcoming', starts:now2 })[0],
+                        eventListTag({ state:'upcoming' })[0] ];
+        if(TAGS2.indexOf('WAITING') < 0 || TAGS2.indexOf('LIVE') < 0) throw 'the tag set is not what the list draws';
+        for(const t2 of TAGS2){
+            const tw = String(t2).length * FONT.HINT;
+            if(EV_CHOOSE.TAG_C - tw/2 < CW/2 + half + 2) throw 'the tag '+t2+' runs into the name';
+            if(EV_CHOOSE.TAG_C + tw/2 > CW) throw 'the tag '+t2+' runs off the right edge';
+        }
+        _evList=[]; _evUi.sel=0; phase='menu';
+    }
+    log('event list ok: live first then coming then finished, ordered inside each, and the cursor never lands on a heading');
 
     // ---- THE ROSTER IS THREE COLUMNS AND THEY MUST CLEAR EACH OTHER -------
     // The numbers come from EV_ROSTER, which is what the DRAW uses -- a guard that
@@ -622,7 +696,7 @@ const DRIVER = `
         // pair of them -- both tables, headers included. Checking three pairs of four
         // is how the winner ended up drawn through the field beside it: the lane
         // agreed with itself and the screen did not.
-        const w = (n) => n * FONT.HINT * 1.3;             // one glyph is about 1.3 of the size
+        const w = (n) => n * FONT.HINT;                   // Press Start 2P: one glyph advances one font size
         // left-anchored cell, right-anchored cell, and what each holds at its widest
         const L = (x, n) => ({ from:x, to:x + w(n) });
         const Rc = (x, n) => ({ from:x - w(n), to:x });

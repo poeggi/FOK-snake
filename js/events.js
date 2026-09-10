@@ -195,15 +195,33 @@ function eventState(e){
 // the server clock; a person in the room reads a wall clock, so the conversion
 // is the whole job. An event with no schedule has no line -- its organizer drives
 // it by hand and there is nothing to announce.
+// One scheduled moment in the reader's own time. starts/ends are unix
+// MILLISECONDS -- not the seconds eventDay takes -- and this is the only place
+// that renders one, so the page and the list cannot drift apart about it.
+function eventClock(ms){
+    const d = new Date(+ms);
+    return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
 function eventWhen(e){
     e = e || _ev;
     if(!e || (e.starts == null && e.ends == null)) return '';
-    const at = ms => {
-        const d = new Date(+ms);
-        return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-    };
-    if(e.starts != null && e.ends != null) return at(e.starts) + ' - ' + at(e.ends);
-    return e.starts != null ? 'FROM ' + at(e.starts) : 'UNTIL ' + at(e.ends);
+    if(e.starts != null && e.ends != null) return eventClock(e.starts) + ' - ' + eventClock(e.ends);
+    return e.starts != null ? 'FROM ' + eventClock(e.starts) : 'UNTIL ' + eventClock(e.ends);
+}
+// WHAT A LIST ROW SAYS ON THE RIGHT, and it is a COLUMN, not a line: the page can
+// afford 'NOT STARTED YET' across its whole width, a row cannot. An event that has
+// not started says WHEN instead, which is what a reader wants from a list of what
+// is coming and is shorter into the bargain. Waiting to be let in outranks the
+// event's own word -- it is the part that concerns this reader.
+function eventListTag(e){
+    if(!e) return ['', '#888'];
+    if(((e.you && String(e.you.state)) || '') === 'pending') return ['WAITING', '#ffd700'];
+    const st = eventState(e);
+    if(st === 'upcoming') return [e.starts != null ? eventClock(e.starts) : 'SOON', '#ffd700'];
+    if(st === 'paused')   return ['PAUSED', '#ffd700'];
+    if(st === 'ended')    return ['ENDED', '#888'];
+    if(st === 'active')   return ['LIVE', '#7fff7f'];
+    return ['', '#888'];
 }
 // The server clock, which is what starts/ends are stated against. netPts() is
 // the synced reading; without one there is nothing to derive against and the
@@ -242,12 +260,67 @@ function eventOpen(eid){
     eventRead();
     _uiDirty = true;
 }
-// THE MENU ENTRY. One event opens its page; several open a chooser, because
-// picking between rooms is a choice and being in exactly one is not.
+// THE ROOMS YOU ARE IN, grouped by what is happening in them. LIVE first --
+// that is the room you are standing in and the only one with anything to press
+// tonight -- then what is coming, then what is over, which is a record rather
+// than a door.
+//
+// ONE FLAT LIST, headings and rows together, because the draw and the input have
+// to agree about what is where: a heading the cursor can land on is a row that
+// can be pressed on nothing. A heading is an entry with `head` and no `eid`.
+const _EV_GROUPS = [
+    { t:'LIVE NOW',  has:st => st === 'active' || st === 'paused' },
+    { t:'COMING UP', has:st => st === 'upcoming' },
+    { t:'FINISHED',  has:st => st === 'ended' },
+];
+function eventChooserRows(){
+    const out = [], left = _evList.slice();
+    for(const g of _EV_GROUPS){
+        const rows = left.filter(e => g.has(eventState(e)));
+        if(!rows.length) continue;
+        // Inside a group, the one you want first: what starts soonest is next, what
+        // finished last is the freshest record, and a live room is sorted by name
+        // because they are all happening now and nothing else separates them.
+        rows.sort((a, b) => {
+            const st = eventState(a);
+            if(st === 'upcoming') return (+a.starts || 0) - (+b.starts || 0);
+            if(st === 'ended')    return (+b.ends || 0) - (+a.ends || 0);
+            const an = String(a.name || a.eid), bn = String(b.name || b.eid);
+            return an < bn ? -1 : an > bn ? 1 : 0;
+        });
+        out.push({ head:g.t });
+        for(const e of rows) out.push({ eid:String(e.eid || ''), e:e });
+    }
+    // An event whose state is a word we do not know still has to be reachable: it
+    // is a room somebody is in, and a screen that silently drops it is worse than
+    // one that shows it under a plain heading.
+    const seen = {};
+    for(const r of out) if(r.eid) seen[r.eid] = 1;
+    const rest = left.filter(e => !seen[String(e.eid || '')]);
+    if(rest.length){
+        out.push({ head:'EVENTS' });
+        for(const e of rest) out.push({ eid:String(e.eid || ''), e:e });
+    }
+    return out;
+}
+// Where the cursor may sit: never a heading, and BACK (the index past the end)
+// when there is nothing else at all.
+function eventChooserPickable(rows, i){
+    rows = rows || eventChooserRows();
+    return i >= rows.length || !!(rows[i] && rows[i].eid);
+}
+function eventChooserFirst(){
+    const rows = eventChooserRows();
+    for(let i = 0; i < rows.length; i++) if(rows[i].eid) return i;
+    return rows.length;                                  // nothing to pick: BACK
+}
+// THE MENU ENTRY. It always opens the LIST, even for one room: which events you
+// are in is itself worth seeing -- when the next one starts, what is over -- and
+// a door that sometimes opens a list and sometimes a page is two doors.
 function eventsEnter(){
-    _evUi.sel = 0; _evUi.msg = '';
-    if(_evList.length === 1){ _evEid = String(_evList[0].eid); eventEnter(); return; }
+    _evUi.msg = '';
     phase = 'eventChooser';
+    _evUi.sel = eventChooserFirst();
     // The list is a picture of the last answer, so freshen it on the way in: a row
     // that has gone is a room we have been removed from, and the chooser is where
     // that shows.
