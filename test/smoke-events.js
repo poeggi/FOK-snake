@@ -398,54 +398,73 @@ const DRIVER = `
     const ME = getPlayerId();
     const mem = (x) => Object.assign({ eid:'K7QM', name:'n', state:'active',
                                        you:{ state:'member', organizer:false } }, x||{});
+    // The same event seen by the ORGANIZER, which is the only thing about the
+    // caller the rows are allowed to read besides its row state.
+    const org = (x) => mem(Object.assign({ you:{ state:'member', organizer:true } }, x||{}));
     // A PENDING row gets nothing at all -- it sees the public face and no more.
     if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing, not even a dark row';
-    // A MONITOR may call state and monitor and NOTHING else, so it is offered nothing else.
-    if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
+    // A RESERVED MONITOR gets EXACTLY ONE ROW: the screen it exists to be. It is not
+    // a member -- no pass, no roster, no leaving -- but an empty page is not that
+    // rule, it is the one account that most needs the row unable to reach it. An
+    // operator names a TV, the TV opens the event, and there has to be a way in.
+    if(gos(mem({ you:{state:'monitor'} })).join(',') !== 'monitor')
+        throw 'a reserved monitor gets the screen row and nothing else: '+gos(mem({ you:{state:'monitor'} }));
+    if(!live(mem({ you:{state:'monitor'} })).length) throw 'and it must be pressable';
+    // ...unless the event offers no screen at all, and then it has nothing to do.
+    if(gos(mem({ you:{state:'monitor'}, monitor_allowed:false })).length)
+        throw 'an event with no screen offers a monitor nothing';
     // An ordinary member: leave, and nothing that is the organizer's.
-    if(gos(mem()).join(',') !== 'newtourney,monitor,pass,members,leave') throw 'an active member SEES the create too: '+gos(mem());
-    // ...but cannot press it, and the row says whose it is. Shown rather than
-    // hidden on purpose: a member who never sees it cannot tell whether this
-    // event runs tournaments at all.
-    if(live(mem()).join(',') !== 'monitor,pass,members,leave') throw 'a member must not be able to press create: '+live(mem());
-    if(!/ORGANIZER/.test(rowOf(mem(),'newtourney').note||'')) throw 'the dark row must say whose it is';
-    // ASKING IS NOT TAKING: the row is decided on monitor_allowed, never by calling
-    // 'monitor' to find out -- that call CLAIMS the slot, and would take the screen
-    // off a TV that is merely switched off.
-    if(gos(mem({monitor_allowed:false})).indexOf('monitor') >= 0) throw 'an event that offers no screen must not offer the row';
-    if(gos(mem({monitor_allowed:true})).indexOf('monitor') < 0) throw 'an event that offers one must';
-    // ABSENT reads as allowed: an older server that never says is not saying no.
-    if(gos(mem()).indexOf('monitor') < 0) throw 'an absent monitor_allowed is not a refusal';
-    // A live tournament is a way IN for anybody in the room; opening one is the organizer's.
+    // ONE ROW ABOUT THE TOURNAMENT, and which one depends on what you can do about
+    // it. A MEMBER is never offered CREATE -- a permanently dark row they can never
+    // press teaches them only that there is something they may not do. They get the
+    // way IN instead, dark while there is nothing to join.
+    if(gos(mem()).join(',') !== 'tourney,monitor,pass,members,leave')
+        throw 'a member gets the JOIN row, never the create: '+gos(mem());
+    if(live(mem()).indexOf('tourney') >= 0) throw 'with nothing running it cannot be pressed';
+    if(!/NO TOURNAMENT/.test(rowOf(mem(),'tourney').note||'')) throw 'and it says why';
+    if(gos(mem()).indexOf('newtourney') >= 0) throw 'a member must never see CREATE TOURNAMENT';
+    // ...and once one IS running, everybody gets a live way in, organizer included.
     const TT = { tid:'t1', code:'K7QMX2', state:'open', players:3, max:8 };
-    if(gos(mem({tourney:TT})).join(',') !== 'tourney,newtourney,monitor,pass,members,leave') throw 'a member gets a way into the live one: '+gos(mem({tourney:TT}));
-    if(live(mem()).indexOf('newtourney') >= 0) throw 'only the organizer opens one';
-    // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
-    // its own room, because leaving would abandon what it is running.
-    const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
-    if(gos(org()).join(',') !== 'newtourney,monitor,pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(live(mem({tourney:TT})).indexOf('tourney') < 0) throw 'a running tournament is joinable';
+    if(gos(mem({tourney:TT})).indexOf('newtourney') >= 0) throw 'still no create for a member';
+    if(live(org({tourney:TT})).indexOf('tourney') < 0) throw 'the organizer joins its own too';
+    if(gos(org({tourney:TT})).indexOf('newtourney') >= 0) throw 'no second tournament while one is live';
+    // THE ORGANIZER gets CREATE while there is none, dark where the event is not
+    // active -- that reason IS temporary, which is why this one is shown dark
+    // rather than hidden.
+    if(gos(org()).join(',') !== 'newtourney,monitor,pass,members,pause,end,access')
+        throw 'active organizer rows: '+gos(org());
     if(live(org()).indexOf('newtourney') < 0) throw 'the organizer of an active event CAN press it';
-    // ...and not a SECOND one while the first stands: the cap is the server's, and one
-    // live per host is the same cap an ordinary tournament has.
-    if(live(org({tourney:TT})).indexOf('newtourney') >= 0) throw 'no second tournament while one is live';
-    if(!/ALREADY RUNNING/.test(rowOf(org({tourney:TT}),'newtourney').note||'')) throw 'and it says so';
-    if(gos(org({tourney:TT}))[0] !== 'tourney') throw 'the live one leads';
-    // A PAUSED event takes no new tournaments, and an ENDED one never will again.
     if(live(org({state:'paused'})).indexOf('newtourney') >= 0) throw 'a paused event opens no tournament';
+    if(!/PAUSED/.test(rowOf(org({state:'paused'}),'newtourney').note||'')) throw 'and it says so';
     if(live(org({state:'ended'})).indexOf('newtourney') >= 0) throw 'an ended event opens no tournament';
-    // ...but a tournament RUNNING at the moment of the end plays on and is still
-    // reachable: it began while the event was live, and a clock must not stop it.
-    if(gos(org({state:'ended', tourney:TT})).indexOf('tourney') < 0) throw 'a running tournament survives the end';
-    if(gos(org({state:'paused'})).join(',') !== 'newtourney,monitor,members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
+    // ...but one RUNNING at the moment of the end plays on and stays reachable.
+    if(live(org({state:'ended', tourney:TT})).indexOf('tourney') < 0) throw 'a running tournament survives the end';
+    // A PENDING row and a RESERVED MONITOR are the two that get no tournament row
+    // at all -- one is not in the event yet, the other is not a participant.
+    if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing, not even a dark row';
+    if(gos(mem({ you:{state:'monitor'} })).join(',') !== 'monitor')
+        throw 'a reserved monitor gets the screen row and nothing else: '+gos(mem({ you:{state:'monitor'} }));
+    if(!live(mem({ you:{state:'monitor'} })).length) throw 'and it must be pressable';
+    if(gos(mem({ you:{state:'monitor'}, monitor_allowed:false })).length)
+        throw 'an event with no screen offers a monitor nothing';
+    // The screen row itself is decided on monitor_allowed, never by calling monitor
+    // to find out -- that call CLAIMS the slot.
+    if(gos(mem({monitor_allowed:false})).indexOf('monitor') >= 0) throw 'an event that offers no screen must not offer the row';
+    if(gos(mem()).indexOf('monitor') < 0) throw 'an absent monitor_allowed is not a refusal';
+    // The organizer cannot leave the room it runs; a scheduled event takes the hand
+    // verbs and keeps the door; an ended one is still readable.
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
-    // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
-    // are not offered. The door still is -- it is not on the clock.
-    if(gos(org({starts:1})).join(',') !== 'newtourney,monitor,pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
-    // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
-    if(gos(org({state:'ended'})).join(',') !== 'newtourney,monitor,members') throw 'an ended event is still readable and still screenable: '+gos(org({state:'ended'}));
-    if(gos(mem({state:'ended'})).join(',') !== 'newtourney,monitor,members,leave') throw 'an ended event mints no pass, and stays readable';
+    if(gos(org({starts:1})).join(',') !== 'newtourney,monitor,pass,members,access')
+        throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
+    if(gos(org({state:'paused'})).join(',') !== 'newtourney,monitor,members,run,end,access')
+        throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
+    if(gos(org({state:'ended'})).join(',') !== 'newtourney,monitor,members')
+        throw 'an ended event is still readable and still screenable: '+gos(org({state:'ended'}));
+    if(gos(mem({state:'ended'})).join(',') !== 'tourney,monitor,members,leave')
+        throw 'an ended event mints no pass, and stays readable: '+gos(mem({state:'ended'}));
     _ev = null; _evEid = '';
-    log('page rows ok: pending and monitor get nothing, the organizer cannot leave, a schedule takes the hand verbs');
+    log('page rows ok: a member gets JOIN and never CREATE, a reserved monitor gets its screen, the organizer cannot leave');
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

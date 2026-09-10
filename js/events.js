@@ -305,25 +305,39 @@ function eventRows(){
     const e = _ev, rows = [];
     if(!e || _evYou() === 'pending') return rows;
     const st = eventState(e), org = eventIsOrganizer(), scheduled = e.starts != null || e.ends != null;
-    // A MONITOR may call state and monitor and nothing else, so it is offered
-    // nothing else. Its own screen arrives with the monitor itself.
-    if(_evYou() === 'monitor') return rows;
-    // THE LIVE TOURNAMENT, if one is open or running. It is an ordinary tournament
-    // and the ordinary screens show it, so this row is a way IN and nothing more.
-    if(e.tourney && e.tourney.tid) rows.push({ t:'GO TO THE TOURNAMENT', go:'tourney' });
-    // ...and opening one is the organizer's. THE ROW IS SHOWN TO EVERYBODY, dark
-    // where it cannot be pressed: a member who never sees it cannot tell whether
-    // this event runs tournaments at all, and a row that appears only for one
-    // person reads as a screen that changed rather than a thing they may not do.
-    // The reason rides the row and the page prints it under the cursor.
+    // A RESERVED MONITOR may call state and monitor and NOTHING else, so it is
+    // offered exactly one row -- the screen it exists to be. It is not a member: no
+    // pass, no roster, no leaving, and the server refuses all of it with
+    // `monitor only`.
+    //
+    // Returning an EMPTY list here, which is what this did first, left the one
+    // account that most needs the row unable to reach it: an operator names a TV as
+    // the monitor, the TV opens the event, and the page has nothing on it at all.
+    if(_evYou() === 'monitor'){
+        if(eventMonitorOffered(e)) rows.push({ t:'EVENT MONITOR', go:'monitor' });
+        return rows;
+    }
+    // ONE ROW ABOUT THE TOURNAMENT, and which one depends on what you can do
+    // about it. Everybody gets a way IN while one is running. Only the organizer
+    // is offered the CREATE, because it is the only one who can press it -- a
+    // member seeing a permanently dark CREATE learns nothing except that there is
+    // something they may not do.
     const live = !!(e.tourney && e.tourney.tid);
-    rows.push({ t:'CREATE TOURNAMENT', go:'newtourney',
-                en: org && st === 'active' && !live,
-                note: !org ? 'THE ORGANIZER OPENS THE TOURNAMENTS'
-                    : live ? 'ONE IS ALREADY RUNNING'
-                    : st === 'paused' ? 'NOT WHILE THE EVENT IS PAUSED'
-                    : st === 'ended' ? 'THIS EVENT HAS ENDED'
-                    : 'NOT STARTED YET' });
+    if(live){
+        rows.push({ t:'JOIN EVENT TOURNAMENT', go:'tourney' });
+    } else if(org){
+        // Dark rather than absent HERE, because this row is the organizer's own and
+        // the reason it cannot be pressed is temporary: the event is paused, or has
+        // not started, or has ended.
+        rows.push({ t:'CREATE TOURNAMENT', go:'newtourney',
+                    en: st === 'active',
+                    note: st === 'paused' ? 'NOT WHILE THE EVENT IS PAUSED'
+                        : st === 'ended' ? 'THIS EVENT HAS ENDED'
+                        : 'NOT STARTED YET' });
+    } else {
+        rows.push({ t:'JOIN EVENT TOURNAMENT', go:'tourney',
+                    en: false, note:'NO TOURNAMENT RIGHT NOW' });
+    }
     // THE SCREEN FOR A TV. Offered only where the event says it has one -- asking
     // is not taking, and `monitor_allowed` exists so this row can be decided
     // without claiming the slot off a TV that is merely switched off.
