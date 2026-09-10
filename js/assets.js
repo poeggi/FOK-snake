@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.2';
+const APP_VERSION = 'v4.4.4';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -142,6 +142,14 @@ const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs a
 // ambiguous -- and the dial offers exactly the characters a code can contain.
 const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ\r';
 const CODE_LEN = 6;
+// EVENT identifiers, off that same unambiguous alphabet. An eid is 4 characters and public
+// -- it grants nothing on its own. The code beside it is either the 16-character KEY printed
+// on the poster or the 6-character PASS a member holds up on screen, and the client never
+// has to tell them apart: both go out as `code` and the server reads the length.
+const EVENT_EID_LEN = 4, EVENT_PASS_LEN = 6, EVENT_KEY_LEN = 16;
+// One shape for both, and the third hash the game answers to beside #friend= and #tourney=.
+// Anchored at the end: a link with anything trailing is not one of ours.
+const EVENT_HASH_RE = /#event=([A-Z2-9]{4})\.([A-Z2-9]{6}|[A-Z2-9]{16})$/;
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
 // boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2

@@ -162,21 +162,46 @@ function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAn
 function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch (e){} }
 const EASY_ACHS = new Set(['first_gem','level1','level5','fokoins_1k','fokoins_10k','fokoins_1m']);
 const EGG_ACHS = new Set(EGG_ACHIEVEMENTS.map(a=>a.id));   // found outside a run: difficulty never gates them
+// EVENT achievements (`ev_<eid>`) are the one kind the shipped table cannot hold: an
+// operator names them when they open the event, so the id, name, description and icon
+// all arrive from the server on join and on every member's state read. Only the
+// DEFINITION lives here -- whether it is earned is achUnlocked like every other one.
+//
+// Deliberately OUTSIDE the backup manifest, and that is the whole design: membership is
+// the server's, so the definition comes back with it. A restored config that has the
+// unlock but not the picture gets the picture back on the next state read; one that has
+// neither is a player who is no longer in the event, which is the right answer.
+const ACH_EV_KEY = 'fok-snake-ach-ev';
+let achEvents = {};
+function _achIsEvent(id) { return /^ev_[A-Z2-9]{4}$/.test(String(id || '')); }
+function loadAchEvents() { try { achEvents = JSON.parse(localStorage.getItem(ACH_EV_KEY) || '{}'); } catch (e) {} }
+function achEventDefs() { return achEvents; }
+function achEventPut(id, a) {
+    if(!a || typeof a !== 'object') return;
+    const d = { name:String(a.name || '').substring(0, MAX_NAME) || 'EVENT',
+                desc:String(a.desc || '').substring(0, 40) };
+    if(a.icon && typeof a.icon === 'object' && a.icon.p && Array.isArray(a.icon.d)) d.icon = a.icon;
+    const was = achEvents[id];
+    if(was && was.name === d.name && was.desc === d.desc && JSON.stringify(was.icon) === JSON.stringify(d.icon)) return;
+    achEvents[id] = d; saveLater(ACH_EV_KEY, JSON.stringify(achEvents));
+}
 function unlockAch(id) {
     if(achUnlocked[id]) return;
-    if(cfg.diff === 0 && !EASY_ACHS.has(id) && !EGG_ACHS.has(id)) return;
+    // Difficulty gates what you EARNED BY PLAYING. An egg is found outside a run and an
+    // event achievement is granted for walking into a room, so neither is an easy-mode win.
+    if(cfg.diff === 0 && !EASY_ACHS.has(id) && !EGG_ACHS.has(id) && !_achIsEvent(id)) return;
     achUnlocked[id] = Date.now(); saveAch();
     addFOKoins(1000);
     achPopups.push({ id, at: simNow });
     spawnConfetti();
 }
-loadAch();
+loadAch(); loadAchEvents();
 
 function resetStats() {
-    const keys = [HS_KEY, FK_KEY, ACH_KEY, 'lastSName'];
+    const keys = [HS_KEY, FK_KEY, ACH_KEY, ACH_EV_KEY, 'lastSName'];
     keys.forEach(k=>{ _lsPending.delete(k); try { localStorage.removeItem(k); } catch (e) {} });
     _cachedFOKoins = 0;
-    achUnlocked = {}; achPopups = []; _scoreboardCache = null;
+    achUnlocked = {}; achPopups = []; achEvents = {}; _scoreboardCache = null;
     // Owned items are no longer local truth: the server holds the instances, so a
     // wipe clears the local view and the next reconcile hands back whatever it
     // still says is ours. The unregistered backlog IS local, so it goes for good.

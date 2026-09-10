@@ -282,6 +282,12 @@ const UI_INPUT = {
         confirm(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
         back(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
     },
+    // The event page. One row for now (BACK) -- the page's own actions arrive with the
+    // rest of it; what this commit owes is somewhere for a scanned code to land.
+    eventPage: {
+        confirm(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+        back(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+    },
     friends: {
         nav(key){
             if(_netFr.confirm){ const s=_navLR(key); if(s>=0) _netFr.confirmSel=s; return; }
@@ -1261,6 +1267,18 @@ function _scanHit(str){
     const mode=_scanFor();
     if(!mode||_scanOk) return;
     const s=String(str||'').trim();
+    // AN EVENT LINK IS ANSWERED WHATEVER SCREEN THE CAMERA WAS OPENED FROM, and it is
+    // tested first for exactly that reason: somebody in the room holds up a phone, and
+    // which of our own screens happens to be showing is not something they can know.
+    // It fills no entry slot -- the payload is <eid>.<code>, not a code this dial holds --
+    // so it takes the camera over and joins.
+    const ev=EVENT_HASH_RE.exec(s);
+    if(ev){
+        _scanOk='EVENT '+ev[1]; _scanOkAt=simNow;
+        scanStop(); Snd.sfxPlay('achievement',cfg.music); spawnConfetti();
+        setTimeout(()=>{ _entryLeave('eventPage'); if(typeof eventJoin==='function') eventJoin(ev[1],ev[2]); },1400);
+        return;
+    }
     const m=mode==='friend' ? /#friend=([0-9a-f]{8})$/.exec(s) : /#tourney=([A-Za-z0-9]{4,12})$/.exec(s);
     if(!m) return;
     const code=m[1].toUpperCase();

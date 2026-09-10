@@ -74,6 +74,16 @@ try {
     const tm = /^#tourney=([A-Za-z0-9]{4,12})$/.exec(location.hash);
     if (tm) _tourneyLink = tm[1].toUpperCase();
 } catch(e) {}
+// Arrived via an EVENT link -- the printed poster QR (16-char key) or the live pass QR a
+// member is holding up (6 chars). PARKED like a tournament code and for the same reason:
+// the join is a request, and the boot has no network and no screen for the answer yet.
+// eventEnter() spends it. The two lengths are the two codes and the client never has to
+// know which it scanned -- the server tells them apart and both go out as `code`.
+let _eventLink = null;
+try {
+    const em = EVENT_HASH_RE.exec(location.hash);
+    if (em) _eventLink = { eid: em[1], code: em[2] };
+} catch(e) {}
 let inviteSel = 0, _inviteMsg = '', _inviteMsgAt = 0;
 let _myIdBack = 'multiplayer';   // where the MY ID screen returns to (1vs1 menu or SETTINGS > USER)
 if(cfg.wornItems === null){ cfg.wornItems = Object.assign({}, cfg.shopItems||{}); saveCfg(); }
@@ -93,10 +103,11 @@ let _splashExiting = false, _splashExitAt = 0;
 function updateSplashExit() {
     if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
         _splashExiting = false;
-        const dest = _inviteFid ? 'duelInvite' : _tourneyLink ? 'tourneyLobby' : 'menu';
+        const dest = _inviteFid ? 'duelInvite' : _tourneyLink ? 'tourneyLobby' : _eventLink ? 'eventPage' : 'menu';
         phase = dest;
         inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
         if (phase === 'tourneyLobby' && typeof tourneyEnter === 'function') tourneyEnter();
+        if (phase === 'eventPage' && typeof eventEnter === 'function'){ _eventBack = 'menu'; eventEnter(); }
         // Hold menu music briefly for the clock sync (started during the coin drop), so it
         // opens on the globally-shared bar. Only when online and not yet synced; else no wait.
         if(typeof _netOk === 'function' && _netOk() && (typeof netPts !== 'function' || netPts() == null))
@@ -178,7 +189,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventPage'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -872,6 +883,9 @@ const SCREENS = {
     tourneyCeremony: { d:()=>drawTourneyCeremony(), hud:false, freeze:true, anim:()=> true },
     tourneyPodium:   { d:()=>drawTourneyPodium(),   hud:false, freeze:true, anim:()=> fireworks.length > 0 },
     tourneyQuit:     { d:()=>drawTourneyQuit(),     hud:false, freeze:true },
+    // The event page is a picture of the last answer: nothing on it moves until the
+    // server says something did, except the derived state word, which needs no redraw.
+    eventPage:       { d:()=>drawEventPage(),       hud:false, freeze:true, anim:()=> !!eventUi().msg && _msgNow()-eventUi().msgAt < 2600 },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },
     duelPaused:   { d:()=>drawDuelBoard(simNow), hud:true, freeze:true },

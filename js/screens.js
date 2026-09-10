@@ -2144,3 +2144,47 @@ function drawTourneyQuit(){
         },
     });
 }
+
+// ================================================================
+// EVENTS  (see js/events.js -- the server is the roster, this only draws it)
+// ================================================================
+// The state word, in the event's own voice rather than the wire's. Derived on the
+// synced clock (eventState), so a scheduled event flips here with nothing pushed.
+function _evStateLine(e){
+    const st = eventState(e);
+    if(st === 'upcoming') return ['NOT STARTED YET', '#ffd700'];
+    if(st === 'paused')   return ['PAUSED', '#ffd700'];
+    if(st === 'ended')    return ['ENDED', '#888'];
+    if(st === 'active')   return ['LIVE', '#7fff7f'];
+    return ['', '#888'];
+}
+function drawEventPage(){
+    drawGrid(); drawOvBg(0.92);
+    const e = eventView(), ui = eventUi();
+    ctg(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT',
+        CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    if(!e){
+        const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
+        ct(notice || (ui.busy ? 'READING...' : 'NOTHING TO SHOW'), CW/2, 50,
+           notice ? '#ff8888' : '#4a7a4a', FONT.HINT);
+        menuItem('BACK', BACK_Y, true);
+        if(ui.msg) drawStatus(ui.msg);
+        ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    const [word, wcol] = _evStateLine(e);
+    if(word) ct(word, CW/2, 50, wcol, FONT.HINT);
+    let y = 78;
+    if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += 20; }
+    // A PENDING row sees the public face and nothing else -- no count, no members, no
+    // tournament, no archive, no pass. That is the server's rule and the screen keeps it.
+    if(eventIsMember() && e.members != null){
+        ct((e.members|0) + ' JOINED', CW/2, y, '#7fff7f', FONT.HINT); y += 20;
+    } else if(!eventIsMember()){
+        ct('WAITING FOR APPROVAL', CW/2, y, '#ffd700', FONT.HINT); y += 20;
+    }
+    if(e.organizer_name) ct('HOSTED BY ' + String(e.organizer_name).substring(0, 15), CW/2, y, '#888', FONT.HINT);
+    menuItem('BACK', BACK_Y, true);
+    if(ui.msg) drawStatus(ui.msg);
+    ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
