@@ -870,7 +870,7 @@ const SCREENS = {
     tourneyBracket:  { d:()=>drawTourneyBracket(),  hud:false, freeze:true, anim:()=> true },
     tourneyRound:    { d:()=>drawTourneyRound(),    hud:false, freeze:true, anim:()=> true },
     tourneyCeremony: { d:()=>drawTourneyCeremony(), hud:false, freeze:true, anim:()=> true },
-    tourneyPodium:   { d:()=>drawTourneyPodium(),   hud:false, freeze:true },
+    tourneyPodium:   { d:()=>drawTourneyPodium(),   hud:false, freeze:true, anim:()=> fireworks.length > 0 },
     tourneyQuit:     { d:()=>drawTourneyQuit(),     hud:false, freeze:true },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },

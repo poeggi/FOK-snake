@@ -1072,20 +1072,24 @@ function drawWorld(now) {
         ctx.globalAlpha=1;
     }
     _drawCrashFx(now);   // dent, chips and the stars/birds ring sit ON TOP of the wreck
-    // Fireworks particles (perfect level); the array stays empty in a duel, so this no-ops.
-    if(fireworks.length>0){
-        fireworks=fireworks.filter(p=>{
-            if(now<p.startAt) return true;
-            p.life++; p.x+=p.vx; p.y+=p.vy; p.vy+=0.055; p.vx*=0.97;
-            if(p.life>=p.maxLife) return false;
-            const a=(1-p.life/p.maxLife)*0.92;
-            const px=Math.round(p.x/2)*2, py=Math.round(p.y/2)*2;
-            ctx.globalAlpha=a; ctx.fillStyle=p.color;
-            ctx.fillRect(px,py,2,2);
-            return true;
-        });
-        ctx.globalAlpha=1; ctx.shadowBlur=0;
-    }
+    _drawFireworks(now);   // perfect level; the array stays empty in a duel, so this no-ops
+}
+// Fireworks particles, stepped on whatever clock the caller draws with: the board runs on
+// simNow, the tournament podium on the wall clock. A spawn empties the array first, so a
+// particle is never stepped against a clock it was not born on.
+function _drawFireworks(now){
+    if(!fireworks.length) return;
+    fireworks=fireworks.filter(p=>{
+        if(now<p.startAt) return true;
+        p.life++; p.x+=p.vx; p.y+=p.vy; p.vy+=0.055; p.vx*=0.97;
+        if(p.life>=p.maxLife) return false;
+        const a=(1-p.life/p.maxLife)*0.92;
+        const px=Math.round(p.x/2)*2, py=Math.round(p.y/2)*2;
+        ctx.globalAlpha=a; ctx.fillStyle=p.color;
+        ctx.fillRect(px,py,2,2);
+        return true;
+    });
+    ctx.globalAlpha=1; ctx.shadowBlur=0;
 }
 // Duel colours/cosmetics. Online: both clients derive the SAME pair from the exchanged
 // profiles. Local duel (one screen, one config): my colour + the next index.
@@ -1685,7 +1689,8 @@ function _ttCol(t, x, y, col, size, align){
     ctx.fillText(t, x, y);
     ctx.textAlign = 'center';
 }
-function _ttDots(){ return '.'.repeat(1 + Math.floor(((typeof performance !== 'undefined') ? performance.now() : 0) / 200) % 5); }
+function _ttClock(){ return (typeof performance !== 'undefined') ? performance.now() : 0; }
+function _ttDots(){ return '.'.repeat(1 + Math.floor(_ttClock() / 200) % 5); }
 // The row strip every tournament screen ends with: the list from tourneyRows(), drawn from
 // startY, with its last entry (always BACK) parked at the bottom like every other menu.
 function _ttDrawRows(startY, rowH){
@@ -2064,6 +2069,7 @@ function drawTourneyCeremony(){
 // same verdict line at the same height. The two screens are the before and the after of one
 // event, and reading the second should feel like the first one settling, not like arriving
 // somewhere else.
+let _ttFwTid = '';   // the tournament whose win has already fired its fireworks
 function drawTourneyPodium(){
     const t = tourneyView();
     if(!t){ drawTourneyLobby(); return; }
@@ -2075,6 +2081,12 @@ function drawTourneyPodium(){
     // and telling a tournament somebody just won that it voided is the worse of the two lies.
     const known = Array.isArray(t.podium);
     const pod = (t.podium || []).map(String), me = getPlayerId(), mine = pod.indexOf(me);
+    // Winning the evening earns what a perfect level earns. Once per tournament: this screen
+    // redraws only while particles fly, and the tid is what re-arms it for the next one.
+    if(known && mine === 0 && _ttFwTid !== t.tid){
+        _ttFwTid = t.tid; fireworks = []; spawnFireworks(_ttClock());
+        if(typeof Snd !== 'undefined') Snd.sfxPlay('perfect', cfg.music);   // the voice the perfect-level burst rides
+    }
     const host = _ttRealName(t.host).slice(0, 12);
     if(host) ct('HOSTED BY ' + host, CW/2, 46, '#888', FONT.HINT);
     // ONE size for all three places: a podium is a ranking and the colours already carry it.
@@ -2101,6 +2113,7 @@ function drawTourneyPodium(){
     const n = (t.players || []).length;
     if(n) ct(n + ' PLAYERS' + (t.stakes ? ' - ITEM STAKES ON' : ''), CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+    _drawFireworks(_ttClock());
 }
 
 // The one exit that costs other people something, so it is asked rather than taken. The
