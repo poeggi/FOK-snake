@@ -112,8 +112,29 @@ Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to bo
   at a time and everyone else spectates, over a two-tier relay tree that fails
   over on its own when a forwarder puts their phone away. Item stakes are the
   creator's choice at creation, off by default
+- EVENTS: a room an operator opens on the server -- a LAN party, a club night, a
+  stand at a fair. You get in by scanning its QR, straight in when the event is
+  open and after the organizer approves you when it is closed. Inside, the
+  organizer runs tournaments only members can see or join, past tournaments are
+  archived on the event, and joining grants a secret achievement. Any member can
+  pass the event on with a QR that lives 20 seconds and rotates on the shared
+  clock. The server is the roster: nothing about a membership is kept on the
+  device, so a member who is removed simply finds the event gone. Needs server
+  API 4.11; against anything older the menu entry never appears
+- EVENT MONITOR: a screen to leave on a TV in the room. It shows the event live
+  and, once a tournament runs, becomes an invisible spectator of it -- following
+  the bracket from pair to pair. It never plays, is never seated and takes no
+  tournament seat, so a match being watched still seats its full eight. Nothing
+  on it is ever pressed. One event offers one screen; a member holding it keeps
+  it by asking and gives it up by stopping. NOTE: a player with MAKE DUELS
+  PRIVATE on refuses the monitor's feed, so the screen follows that match on the
+  bracket without the board
 - Friend system: 32-bit player ID, friend-link QR code (SHOW MY ID) and an
   in-app camera QR scanner with a dependency-free decoder (ADD FRIEND)
+- Three deep links, each also readable by the in-app scanner from any screen:
+  `#friend=<8 hex>` (add me), `#tourney=<code>` (join that lobby) and
+  `#event=<eid>.<code>` (join that event -- the code is the printed 16-character
+  key or a live 6-character pass, and the client never has to tell them apart)
 - Online matchmaking via FOK-server (invite friends with live online status and
   latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
   DataChannel, with an HTTP relay fallback when P2P cannot connect. The netcode is
@@ -146,6 +167,8 @@ start duels. Tournaments and spectating additionally need **4.1** -- against a
 The per-round detail described above -- a match starting at the level the bracket
 says, a finished round stopping on a scoreboard -- arrived in **4.3**; a 4.1 or
 4.2 server still runs tournaments, just without it.
+Events need **4.11**: an older server serves no event list, so the menu entry
+never appears and everything else works as before.
 Single-player is unaffected either way.
 The engine runs on a deterministic fixed-timestep 60 Hz tick clock, which is
 what makes prediction netcode and replay-validated scores possible.

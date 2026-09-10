@@ -408,3 +408,55 @@ input reaches us. Comparing on arrival mismatches every time either player steer
 The ring snapshot at a tick that is already IMMUTABLE (no accepted input can still
 rewrite it) is the real equality test -- that is what both the driver's detector and
 the product's own 1Hz detector compare.
+
+### smoke-events.js  (FAST tier -- the client half of events, server API 4.11)
+
+Twelve lanes over `js/events.js` and the screens around it. What each one exists to
+stop, in the order they run:
+
+- **The hash parser.** `EVENT_HASH_RE` is the parser for BOTH entry points -- the boot
+  hash in game.js and the camera in input.js -- so this is the thing itself, not a copy
+  of it. Note the class is the CONTRACT'S (`[A-Z2-9]`) and is one character wider than
+  the code alphabet, which also drops I, L and O. Deliberate: this is a shape filter,
+  and what a code really is belongs to the server, which answers a wrong one 404.
+- **The 53-byte budget.** `GAME_URL#event=<eid>.<pass>` is exactly 42 + 4 + 1 + 6, and
+  the version-3 encoder takes 53. The lane pins both ends: the payload renders, and 54
+  bytes is REFUSED rather than silently truncated. If this goes red the wire shape has
+  to change, not the encoder.
+- **The state is derived**, never read: ended outranks the schedule, the schedule
+  outranks the mode, and without a synced clock the server's word stands.
+- **The achievement** is server-carried (`ev_<eid>` could never be in the shipped
+  table), is not gated by difficulty, accepts no other id shape, and its DEFINITION
+  stays out of the backup manifest while the unlock rides it like any other.
+- **The menu entry** comes and goes with the `events` list, and an answer WITHOUT the
+  key is not an empty one -- that is a server with no events, or a 204.
+- **The menu indices.** The EVENTS row appears and disappears, which is exactly what
+  makes a hard-coded index in the draw drift from one in the input. Both read one list,
+  and this walks the menu with and without the row to prove BACK stays BACK.
+- **The `event` signal**: four payloads, every one an ask and never an adopt.
+- **The request shape**: `events` rides the hello and a poll TICK OF ITS OWN on the six
+  screens that show it, and nowhere else. `ev` answers at once (poll.php never 204s a
+  request that asked for rows), so riding every poll would cut every hold short.
+- **The page rows** are derived from the same three facts the server checks -- row
+  state, organizer, schedule -- because a screen that offers what the next request will
+  refuse is a screen that lies.
+- **The pass** rotates locally: six slots one call, the NEWEST live slot at 9.9 / 10 /
+  19.9 / 20 s against a fixed clock, and the next minute asked for one step before the
+  LAST slot begins, which leaves that slot's whole life as runway.
+- **The monitor** is a SPECTATOR and this lane is what keeps it one: every follow has
+  to come out as a `specWatch` and nothing more. One ask per match, the old feed let go
+  before the next is asked for, a standing feed never re-asked, and a refusal said once
+  and then stopped.
+- **Event tournaments**: `eid` rides the create and ONLY that create (one started from
+  the ordinary tournament screen inherits nothing), and the announce marks a lobby that
+  carries one.
+
+### check-drivers.js  (FAST tier -- suite bodies survive template-literal insertion)
+
+A driver is source inserted into a JS template literal before being evaluated, and two
+things do not survive that. A BACKTICK ends the literal early -- loud, a SyntaxError
+naming a word from the middle of a comment. A BACKSLASH ESCAPE is EATEN: `\d` arrives as
+the letter d and matches it, `poll\.php` arrives as `poll.php` and matches any character.
+Neither is a syntax error, so the suite runs, asserts against something it never meant,
+and PASSES. That silent one is why this checker exists; nothing else in the tier can see
+it. Write `[0-9]` for a digit class, `[.]` for a literal dot, and quotes for backticks.
