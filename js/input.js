@@ -316,11 +316,20 @@ const UI_INPUT = {
             else if(go==='newtourney') eventTourneyNew();
             else if(go==='pass') eventPassEnter();
             else if(go==='members') eventMembersEnter();
+            else if(go==='stats') eventStatsEnter();
             else if(go==='run') eventRun();
             else if(go==='pause') eventPause();
             else if(go==='access') eventAccess();
         },
         back(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+    },
+    // A read-only board with no cursor and no BACK row: UP and DOWN are the archive's
+    // scroll, and A leaves like ESC does. A row list here would take the two keys the
+    // screen actually needs, which is the same reason the QR screens have no BACK row.
+    eventStats: {
+        nav(key){ if(key==='ArrowUp' || key==='ArrowDown'){ if(eventStatsScroll(key==='ArrowUp'?-1:1)) Snd.sfxPlay('nav',cfg.music); } },
+        confirm(){ this.back(); },
+        back(){ Snd.sfxPlay('nav',cfg.music); eventStatsLeave(); },
     },
     // Nothing is ever pressed on the monitor -- that is the point of it -- so the
     // only input it takes is the one that walks off it.

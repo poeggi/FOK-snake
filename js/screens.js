@@ -509,7 +509,43 @@ const EV_ROSTER = { NAME_MAX: 10, DATE_R: 180, TAG_C: 470 };
 // THE EVENT PAGE'S VERTICAL BUDGET. The header runs to 108, the rows start below
 // it, and everything under them has to fit between the last row and the status
 // band at STATUS_Y. Named here so the guard reads the same numbers the draw does.
-const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, ARCH_GAP: 20, ARCH_ROW: 14, ARCH_KEEP: 12 };
+// THE EVENT PAGE'S VERTICAL BUDGET. The header runs to 108 and the rows have to
+// fit between it and the status band. The PITCH shrinks only when the set needs
+// it: an organizer's page carries eight rows and the menu pitch does not hold
+// eight in that room. Named here so the guard reads the same numbers the draw does.
+const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, KEEP: 14 };
+function _evRowH(n){
+    const room = (STATUS_Y - EV_PAGE.KEEP) - EV_PAGE.ROWS_TOP;
+    return (n < 2 || n*MENU_ROW <= room) ? MENU_ROW : Math.floor(room / n);
+}
+// THE STATISTICS SCREEN'S BUDGET, named once so the draw, the scroll and the guard
+// read the same numbers. Two blocks: the standings, capped at TOP_MAX because a
+// board nobody can read is not a board, and the archive, which takes what is left
+// and scrolls. Columns are LEFT and RIGHT anchored rather than centred -- a table
+// is read down its columns, and centring every row makes the numbers wander.
+const EV_STATS = { SUM_Y: 66, SUM2_Y: 84, HEAD_Y: 108, ROW0: 126, ROW_H: 18, TOP_MAX: 4,
+                   RANK_X: 130, NAME_X: 168, WIN_R: 430, POD_R: 530, NAME_MAX: 10,
+                   ARCH_GAP: 20, ARCH_ROW: 16, ARCH_KEEP: 12,
+                   DATE_X: 120, FIELD_X: 300, WON_R: 540 };
+// Where the archive block starts, and how many rows of it there is room for. ONE
+// answer, read by the draw and by the scroll alike, so a list can never be scrolled
+// past what is drawn. The head line (PLAYED HERE) is the -1.
+function _evStatsArchTop(n){
+    return n ? (EV_STATS.ROW0 + n*EV_STATS.ROW_H + EV_STATS.ARCH_GAP) : EV_STATS.HEAD_Y;
+}
+function eventStatsFits(){
+    const n = Math.min((eventStatsView().top || []).length, EV_STATS.TOP_MAX);
+    const room = (STATUS_Y - EV_STATS.ARCH_KEEP) - _evStatsArchTop(n);
+    return Math.max(0, Math.floor(room / EV_STATS.ARCH_ROW) - 1);
+}
+// One row of a plain column table, in one save/restore: [x, align, text] cells.
+function _tableRow(cells, y, col, size){
+    ctx.save();
+    ctx.font = (size || FONT.HINT) + 'px "Press Start 2P"';
+    ctx.textBaseline = 'middle'; ctx.fillStyle = col;
+    for(const c of cells){ ctx.textAlign = c[1]; ctx.fillText(c[2], c[0], y); }
+    ctx.restore();
+}
 // A name clipped to fit its column, with the tail marked rather than silently cut.
 // Shared by the friends list and the event roster: same font, same problem.
 function clipName(nm, max){
@@ -2233,8 +2269,8 @@ function drawEventPage(){
         ct('WAITING FOR THE ORGANIZER TO LET YOU IN', CW/2, y, '#ffd700', FONT.HINT); y += 18;
     }
     if(e.organizer_name) ct('HOSTED BY ' + String(e.organizer_name).substring(0, 15), CW/2, y, '#888', FONT.HINT);
-    const rows = eventRows();
-    rows.forEach((r,i)=>menuItem(r.t, EV_PAGE.ROWS_TOP + i*MENU_ROW, ui.sel===i, ctx, !eventRowOk(r)));
+    const rows = eventRows(), rh = _evRowH(rows.length);
+    rows.forEach((r,i)=>menuItem(r.t, EV_PAGE.ROWS_TOP + i*rh, ui.sel===i, ctx, !eventRowOk(r)));
     // THE NOTE GOES IN THE STATUS BAND, where every other menu puts it
     // (drawMenuRows). Under the row it sat between two rows MENU_ROW apart and
     // overlapped the next one -- there is no gap there to put a line in.
@@ -2242,25 +2278,78 @@ function drawEventPage(){
     const note = !cur ? ''
         : cur.go === 'access' ? (e.closed ? 'A SCAN HAS TO BE APPROVED BY YOU' : 'A SCAN GETS IN STRAIGHT AWAY')
         : (!eventRowOk(cur) && cur.note) ? cur.note : '';
-    // THE ARCHIVE gets what is left between the last row and that band, and NOTHING
-    // if that is not a line's worth. It is the least important thing on the page --
-    // the monitor screen shows it too -- so it is the one that yields. A full
-    // organizer row set leaves no room at all, which is how it came to be drawn on
-    // top of both the last row and the status line.
-    const arch = Array.isArray(e.archive) ? e.archive : [];
-    if(arch.length){
-        const top = EV_PAGE.ROWS_TOP + Math.max(0, rows.length - 1) * MENU_ROW + EV_PAGE.ARCH_GAP;
-        const room = (STATUS_Y - EV_PAGE.ARCH_KEEP) - top;
-        const fits = Math.min(arch.length, Math.floor(room / EV_PAGE.ARCH_ROW) - 1);
-        if(fits > 0){
-            ct('PLAYED HERE', CW/2, top, '#4a7a4a', FONT.HINT);
-            let ay = top + EV_PAGE.ARCH_ROW;
-            for(const a of arch.slice(0, fits)){ ct(eventArchiveLine(a), CW/2, ay, '#888', FONT.HINT); ay += EV_PAGE.ARCH_ROW; }
-        }
-    }
     menuItem('BACK', BACK_Y, ui.sel===rows.length);
     drawStatus(ui.msg || note);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// WHAT THE ROOM HAS DONE. Everything on it is derived from the state answer the page
+// already holds, so opening it costs the ordinary re-read and nothing else.
+//
+// NO BACK ROW, and no cursor: nothing here is pressed, UP and DOWN scroll the archive
+// and ESC leaves -- the same rule the QR screens keep. A BACK row would take the two
+// keys this screen actually needs.
+function drawEventStats(){
+    drawGrid(); drawOvBg(0.92);
+    ctg('EVENT STATISTICS', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const e = eventView(), st = eventStatsView(), ui = eventUi();
+    if(e && e.name) ct(String(e.name).toUpperCase().substring(0, 26), CW/2, 46, '#4a7a4a', FONT.HINT);
+    // The two summary lines: how much has been played here, and the shape of it.
+    const bits = [];
+    bits.push(st.tourneys + (st.tourneys === 1 ? ' TOURNAMENT' : ' TOURNAMENTS'));
+    bits.push(st.played + (st.played === 1 ? ' MATCH' : ' MATCHES'));
+    if(st.members != null) bits.push(st.members + ' JOINED');
+    ct(bits.join('   '), CW/2, EV_STATS.SUM_Y, '#7fff7f', FONT.HINT);
+    const bits2 = [];
+    if(st.seats) bits2.push('BIGGEST FIELD ' + st.seats);
+    if(st.last) bits2.push('LAST PLAYED ' + eventDay(st.last));
+    if(st.live) bits2.push('ONE RUNNING NOW');
+    if(bits2.length) ct(bits2.join('   '), CW/2, EV_STATS.SUM2_Y, '#888', FONT.HINT);
+
+    const top = st.top.slice(0, EV_STATS.TOP_MAX);
+    if(top.length){
+        _tableRow([[EV_STATS.NAME_X, 'left', 'PLAYER'],
+                   [EV_STATS.WIN_R, 'right', 'WINS'],
+                   [EV_STATS.POD_R, 'right', 'PODIUMS']], EV_STATS.HEAD_Y, '#4a7a4a');
+        top.forEach((pl, i) => {
+            const y = EV_STATS.ROW0 + i*EV_STATS.ROW_H;
+            // Gold, silver, bronze and then the rest, the way every board here is
+            // coloured -- the rank is read off the colour before the number is read.
+            const col = i === 0 ? '#ffd700' : i === 1 ? '#dddddd' : i === 2 ? '#cd9b6a' : '#aaaaaa';
+            _tableRow([[EV_STATS.RANK_X, 'right', String(i + 1)],
+                       [EV_STATS.NAME_X, 'left', clipName(pl.name || fmtFriendId(String(pl.id)), EV_STATS.NAME_MAX)],
+                       [EV_STATS.WIN_R, 'right', String(pl.wins)],
+                       [EV_STATS.POD_R, 'right', String(pl.podiums)]], y, col);
+        });
+    }
+    // ...and the log under it. One line each: when, how much of the field turned up,
+    // and who won it -- the rest of each podium is what the board above answers.
+    const arch = st.archive, fits = eventStatsFits(), aTop = _evStatsArchTop(top.length);
+    let range = '';
+    if(!arch.length){
+        ct(ui.busy ? 'READING...' : 'NOTHING PLAYED HERE YET', CW/2, aTop + 8, '#555', FONT.HINT);
+    } else if(fits > 0){
+        const from = Math.min(eventStatsTop(), Math.max(0, arch.length - fits));
+        const shown = Math.min(fits, arch.length - from);
+        if(arch.length > fits) range = ' (' + (from + 1) + '-' + (from + shown) + ' OF ' + arch.length + ')';
+        // The head line IS the column header: the section is named in the column it
+        // names, so the block costs one line rather than two. Every column is short
+        // enough to sit in its own -- the winner alone rather than a sentence about
+        // them, because a sentence is what ran through the column to its left.
+        _tableRow([[EV_STATS.DATE_X, 'left', 'PLAYED HERE'],
+                   [EV_STATS.FIELD_X, 'left', 'FIELD'],
+                   [EV_STATS.WON_R, 'right', 'WINNER']], aTop, '#4a7a4a');
+        let y = aTop + EV_STATS.ARCH_ROW;
+        for(const a of arch.slice(from, from + shown)){
+            const r = eventStatsRow(a);
+            _tableRow([[EV_STATS.DATE_X, 'left', r.day],
+                       [EV_STATS.FIELD_X, 'left', r.field],
+                       [EV_STATS.WON_R, 'right', clipName(r.won, EV_STATS.NAME_MAX)]], y, '#888');
+            y += EV_STATS.ARCH_ROW;
+        }
+    }
+    if(ui.msg) drawStatus(ui.msg);
+    // Where in the list the reader is belongs with the key that moves them.
+    ct(arch.length > fits ? 'UP/DN:scroll' + range + '  ESC:back' : 'ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // Two confirms, and both of them are terminal for somebody else: ending freezes
 // the event for every member, leaving gives up a row only a code can replace.

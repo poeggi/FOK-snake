@@ -914,6 +914,20 @@ let _netFriendsPlaying = {};
 // same way ours does, i.e. the people in this room. Asked for only while a screen that
 // shows them is open, and empty on a pre-4.1 server.
 let _netTourneys = [];
+// THE ONE LANDING PLACE for the announce, whichever request brought it -- the hello
+// or the poll's tl. The tournament screens read the list as a list of rooms; an
+// EVENT PAGE reads it as NEWS, because an event's open lobbies are served to its
+// members regardless of network, and that is the only thing that tells a page
+// already on screen that a tournament has opened.
+function _netTtApply(v){
+    _netTourneys = Array.isArray(v) ? v : [];
+    if(typeof eventTourneySeen === 'function') eventTourneySeen(_netTourneys);
+}
+// Who wants it. The lobby lists it; the event page needs it as news and rides the
+// poll it is already sending for `ev`, so it costs no request of its own.
+function _netTlWant(){
+    return phase === 'tourneyLobby' || (typeof eventTlWant === 'function' && eventTlWant());
+}
 // The server's contract MINOR, or -1 before the first hello. Features that need a newer
 // server than 4.0 gate on this rather than on a failed POST.
 let _netSrvMin = -1;
@@ -1088,7 +1102,7 @@ async function _netHello(){
     _netSrvSays(r);
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
     _netFrApply(r);   // the counters, and the presence delta where one was asked for
-    if(body.tourneys) _netTourneys = Array.isArray(r.tourneys) ? r.tourneys : [];
+    if(body.tourneys) _netTtApply(r.tourneys);
     if(body.events) _netEvApply(r.events);
     // FEATURE-DETECTED, never version-gated: the roster on hello is a re-release of 4.4,
     // so a server answering "4.4" may or may not carry it. It answered once = it answers,
@@ -1254,7 +1268,7 @@ async function _netPollOnce(){
     // auto-accept early stays hello's, and the window lapses on its own either way.
     const de = (_netPoll49() && _netDuelEnd) ? _netDuelEnd : '';
     const fl = _netFlWant;
-    const tl = phase === 'tourneyLobby' && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
+    const tl = _netTlWant() && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
     const ev = _netEvWant() && Date.now() - _netEvAt >= NET_EVENTS_MS;
     const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
     const q = fs + (de ? '&de=' + de : '')
@@ -1275,7 +1289,7 @@ async function _netPollOnce(){
         // these -- a rollback, a re-released minor -- puts its fallback back, the same way
         // _netSrvSays un-latches the minor rather than trusting what it saw before.
         if(fl){ _netFlWant = false; _netFrPoll = Array.isArray(r.friends); if(_netFrPoll) _netFrAdopt(r.friends, false); }
-        if(tl){ _netTlAt = Date.now(); _netTtPoll = Array.isArray(r.tourneys); if(_netTtPoll) _netTourneys = r.tourneys; }
+        if(tl){ _netTlAt = Date.now(); _netTtPoll = Array.isArray(r.tourneys); if(_netTtPoll) _netTtApply(r.tourneys); }
         if(ev){ _netEvAt = Date.now(); _netEvApply(r.events); }
     }
     // The mailbox was down and is back. A push may have died in between (the server drops an

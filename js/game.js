@@ -236,7 +236,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventConfirm'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventStats','eventConfirm'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -935,6 +935,7 @@ const SCREENS = {
     eventChooser:    { d:()=>drawEventChooser(),    hud:false, freeze:true },
     eventPage:       { d:()=>drawEventPage(),       hud:false, freeze:true, anim:()=> !!eventUi().msg && _msgNow()-eventUi().msgAt < 2600 },
     eventMembers:    { d:()=>drawEventMembers(),    hud:false, freeze:true, anim:()=> !!eventUi().msg && _msgNow()-eventUi().msgAt < 2600 },
+    eventStats:      { d:()=>drawEventStats(),      hud:false, freeze:true, anim:()=> !!eventUi().msg && _msgNow()-eventUi().msgAt < 2600 },
     // The only event screen that animates on its own: the code on it expires while
     // you look at it, so the bar under it has to move whether anything arrives or not.
     eventQr:         { d:()=>drawEventQr(),         hud:false, freeze:true, anim:()=> true },

@@ -388,7 +388,7 @@ const DRIVER = `
         const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); return _u||''; };
         const hello=(ph)=>{ _body=null; _netHelloBusy=false; phase=ph; _netHello(); return _body||{}; };
 
-        for(const ph of ['multiplayer','eventChooser','eventPage','eventMembers','eventQr','eventMonitor']){
+        for(const ph of ['multiplayer','eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventStats']){
             due();
             if(!/[?&]ev=1(&|$)/.test(poll(ph))) throw 'the poll must ask for events on '+ph;
             if(hello(ph).events !== true) throw 'the hello must ask for events on '+ph;
@@ -414,7 +414,27 @@ const DRIVER = `
         _netGet=_oGet; _netPost=_oPost; globalThis.fetch=_oFetch;
         _netPace=_oPace; _netPollHoldEnd=_oHold; _netPollBusy=false; _netHelloBusy=false; phase='menu';
     }
-    log('request shape ok: events rides the hello, and a poll tick of its own, on the six screens that show it');
+    // ...AND THE ANNOUNCE RIDES THE PAGE. The contract's {event:'tourney'} signal is
+    // what should say a lobby opened, and the live server does not send that payload,
+    // so a page already on screen never heard. An event's open lobbies reach its
+    // members through the ordinary announce, which is why the page asks for it -- on
+    // the poll it is already sending for 'ev', so it costs no request of its own.
+    {
+        const _oGet=_netGet, _oFetch=globalThis.fetch, _oPace=_netPace, _oHold=_netPollHoldEnd;
+        globalThis.fetch=()=>({});
+        let _u=null; _netGet=async(pth)=>{ _u=pth; return null; };
+        _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netPollHoldEnd=0;
+        const poll=(ph)=>{ _u=null; _netPollBusy=false; _netTlAt=0; _netEvAt=Date.now(); phase=ph; _netPollOnce(); return _u||''; };
+        _evEid='K7QM';
+        if(!/[?&]tl=1(&|$)/.test(poll('eventPage'))) throw 'the event page must ask for the announce';
+        if(!/[?&]tl=1(&|$)/.test(poll('tourneyLobby'))) throw 'the tournament lobby still asks for it';
+        if(/[?&]tl=/.test(poll('eventMonitor'))) throw 'a monitor reads its own call, not the announce';
+        _evEid='';
+        if(/[?&]tl=/.test(poll('eventPage'))) throw 'with no event open there is nothing to watch for';
+        _netGet=_oGet; globalThis.fetch=_oFetch; _netPace=_oPace; _netPollHoldEnd=_oHold;
+        _netPollBusy=false; phase='menu';
+    }
+    log('request shape ok: events rides the hello, a poll tick of its own on the seven screens that show it, and the announce rides the page');
 
     // ---- the page offers only what the server would allow -----------------
     // A screen that offers what the next request will refuse is a screen that
@@ -447,7 +467,7 @@ const DRIVER = `
     // it. A MEMBER is never offered CREATE -- a permanently dark row they can never
     // press teaches them only that there is something they may not do. They get the
     // way IN instead, dark while there is nothing to join.
-    if(gos(mem()).join(',') !== 'tourney,monitor,pass,members,leave')
+    if(gos(mem()).join(',') !== 'tourney,monitor,pass,members,stats,leave')
         throw 'a member gets the JOIN row, never the create: '+gos(mem());
     if(live(mem()).indexOf('tourney') >= 0) throw 'with nothing running it cannot be pressed';
     if(!/NO TOURNAMENT/.test(rowOf(mem(),'tourney').note||'')) throw 'and it says why';
@@ -461,7 +481,7 @@ const DRIVER = `
     // THE ORGANIZER gets CREATE while there is none, dark where the event is not
     // active -- that reason IS temporary, which is why this one is shown dark
     // rather than hidden.
-    if(gos(org()).join(',') !== 'newtourney,monitor,pass,members,pause,end,access')
+    if(gos(org()).join(',') !== 'newtourney,monitor,pass,members,stats,pause,end,access')
         throw 'active organizer rows: '+gos(org());
     if(live(org()).indexOf('newtourney') < 0) throw 'the organizer of an active event CAN press it';
     if(live(org({state:'paused'})).indexOf('newtourney') >= 0) throw 'a paused event opens no tournament';
@@ -484,32 +504,37 @@ const DRIVER = `
     // The organizer cannot leave the room it runs; a scheduled event takes the hand
     // verbs and keeps the door; an ended one is still readable.
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
-    if(gos(org({starts:1})).join(',') !== 'newtourney,monitor,pass,members,access')
+    if(gos(org({starts:1})).join(',') !== 'newtourney,monitor,pass,members,stats,access')
         throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
-    if(gos(org({state:'paused'})).join(',') !== 'newtourney,monitor,members,run,end,access')
+    if(gos(org({state:'paused'})).join(',') !== 'newtourney,monitor,members,stats,run,end,access')
         throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
-    if(gos(org({state:'ended'})).join(',') !== 'newtourney,monitor,members')
+    if(gos(org({state:'ended'})).join(',') !== 'newtourney,monitor,members,stats')
         throw 'an ended event is still readable and still screenable: '+gos(org({state:'ended'}));
-    if(gos(mem({state:'ended'})).join(',') !== 'tourney,monitor,members,leave')
+    if(gos(mem({state:'ended'})).join(',') !== 'tourney,monitor,members,stats,leave')
         throw 'an ended event mints no pass, and stays readable: '+gos(mem({state:'ended'}));
     _ev = null; _evEid = '';
     log('page rows ok: a member gets JOIN and never CREATE, a reserved monitor gets its screen, the organizer cannot leave');
 
     // ---- AND THE PAGE HAS TO FIT VERTICALLY TOO ---------------------------
-    // Found on an iPad: with the full organizer row set the archive was drawn on
-    // top of the last row AND of the status line, and the note under the selected
-    // row landed on the row below it. Rows are MENU_ROW apart -- there is no gap
-    // between them to put a line in, which is why every other menu puts the note
-    // in the STATUS BAND (drawMenuRows). These numbers are EV_PAGE, what the draw
-    // uses.
+    // Found on an iPad: the archive was drawn on top of the last row AND of the
+    // status line, and the note under the selected row landed on the row below it.
+    // Rows are a pitch apart -- there is no gap between them to put a line in,
+    // which is why every other menu puts the note in the STATUS BAND. The archive
+    // has its own screen now, and what is left has to fit on its own: the organizer
+    // carries EIGHT rows, and the menu pitch does not hold eight in that room.
     {
         const src = String(drawEventPage);
-        for(const k of ['EV_PAGE.ROWS_TOP','EV_PAGE.ARCH_GAP','EV_PAGE.ARCH_ROW','EV_PAGE.ARCH_KEEP'])
-            if(src.indexOf(k) < 0) throw 'the page draw does not use '+k+', so this lane checks nothing';
+        if(src.indexOf('EV_PAGE.ROWS_TOP') < 0) throw 'the page draw does not use EV_PAGE.ROWS_TOP, so this lane checks nothing';
+        if(src.indexOf('_evRowH(') < 0) throw 'the page draw does not use the pitch this lane checks';
         // The note is in the band, not under the row: nothing may be drawn at a y
         // derived from the selected row's own position.
         if(src.indexOf('ui.sel*MENU_ROW') >= 0) throw 'a line is still placed under the selected row, where the next row is';
         if(src.indexOf('drawStatus(') < 0) throw 'the page must put its note in the status band';
+        // The archive belongs to the statistics screen now, and to nothing else.
+        // The reference, not the word: the page's own comment names the archive as
+        // one of the things a pending row may not see, and always will.
+        if(/e[.]archive|eventArchiveLine|PLAYED HERE/.test(src)) throw 'the page still draws the archive';
+        if(!/PLAYED HERE/.test(String(drawEventStats))) throw 'the statistics screen must be the one that draws it';
 
         // The widest row set the page can actually produce, measured rather than
         // assumed -- a row added later has to be counted by this lane too.
@@ -517,31 +542,159 @@ const DRIVER = `
         for(const o of [org(), org({state:'paused'}), org({state:'ended'}), org({starts:1}),
                         org({tourney:TT}), mem(), mem({tourney:TT}), mem({state:'paused'})])
             widest = Math.max(widest, gos(o).length);
-        if(widest < 7) throw 'expected the organizer row set to be the widest, got '+widest;
+        if(widest < 8) throw 'expected the organizer row set to be the widest, got '+widest;
 
-        // Rows must not reach the status band, at any count the page can produce.
-        const lastRow = EV_PAGE.ROWS_TOP + (widest - 1) * MENU_ROW;
-        if(lastRow + 10 > STATUS_Y) throw 'the row block reaches the status band: last row at '+lastRow;
-        if(lastRow >= BACK_Y) throw 'the row block reaches BACK';
-
-        // ...and the archive takes only what is left, which at the widest is none.
-        const roomAt = (n) => (STATUS_Y - EV_PAGE.ARCH_KEEP) - (EV_PAGE.ROWS_TOP + (n-1)*MENU_ROW + EV_PAGE.ARCH_GAP);
-        const fitsAt = (n) => Math.max(0, Math.floor(roomAt(n) / EV_PAGE.ARCH_ROW) - 1);
-        if(fitsAt(widest) !== 0) throw 'the widest row set must leave no room for the archive, got '+fitsAt(widest);
-        if(fitsAt(5) < 1) throw 'a member row set should still show some archive';
-        // ...and it has to START clear of the last ROW, not just end above the band.
-        // Both are centred text, so the gap has to hold half of each glyph.
-        const need = FONT.MENU/2 + FONT.HINT/2 + 2;
-        if(EV_PAGE.ARCH_GAP < need) throw 'the archive starts on top of the last row: gap '+EV_PAGE.ARCH_GAP+' needs '+need;
-        // Whatever it draws has to end above the band.
-        for(const n of [1,3,5,7]){
-            const f = fitsAt(n);
-            if(!f) continue;
-            const bottom = EV_PAGE.ROWS_TOP + (n-1)*MENU_ROW + EV_PAGE.ARCH_GAP + f*EV_PAGE.ARCH_ROW;
-            if(bottom > STATUS_Y - EV_PAGE.ARCH_KEEP) throw 'archive at '+n+' rows runs into the status band: '+bottom;
+        // Rows must clear the status band and BACK at EVERY count the page produces,
+        // and the pitch is what pays for that -- so it is read from the draw's own
+        // rule rather than restated here.
+        for(let n = 1; n <= widest; n++){
+            const last = EV_PAGE.ROWS_TOP + (n - 1) * _evRowH(n);
+            if(last + FONT.MENU/2 > STATUS_Y) throw n+' rows reach the status band: last row at '+last;
+            if(last >= BACK_Y) throw n+' rows reach BACK';
+            // ...and a shrunk pitch still has to be readable: glyphs may not touch.
+            if(_evRowH(n) < FONT.MENU + 4) throw 'the pitch at '+n+' rows is '+_evRowH(n)+', which stacks the glyphs';
         }
+        // A SMALL SET IS NOT COMPRESSED. The pitch only yields where it has to, or
+        // every page in the game would quietly stop matching every other menu.
+        if(_evRowH(4) !== MENU_ROW) throw 'a four-row page must keep the menu pitch, got '+_evRowH(4);
     }
-    log('page rows fit ok: the block clears the status band, and the archive takes only what is left');
+    log('page rows fit ok: every row set clears the status band, and the pitch yields only where it must');
+
+    // ---- THE STATISTICS SCREEN --------------------------------------------
+    // What the room knows about itself, all of it DERIVED from the state answer the
+    // page already holds. The archive used to be three clipped lines squeezed under
+    // the page's rows; here it is a board with the standings the room has produced
+    // over its whole life, which is what an archive is actually for.
+    {
+        const P = (id, name) => ({ id:id, name:name });
+        const A = (fin, seats, played, pod) => ({ tid:'t'+fin, finished:fin, seats:seats, played:played, podium:pod });
+        // KAI wins two, JO wins one and is second twice, MAX is third once.
+        const ev = { eid:'K7QM', name:'n', state:'active', members:14,
+                     you:{ state:'member', organizer:false },
+                     archive:[ A(1780000000, 8, 7, [P('c0ffee42','KAI'), P('dddddddd','JO'), P('eeeeeeee','MAX')]),
+                               A(1770000000, 4, 3, [P('dddddddd','JO'), P('c0ffee42','KAI')]),
+                               A(1760000000, 6, 5, [P('c0ffee42','KAI'), P('dddddddd','JO')]) ] };
+        const st = eventStatsView(ev);
+        if(st.tourneys !== 3) throw 'three archived tournaments, got '+st.tourneys;
+        if(st.played !== 15) throw 'the matches are summed, got '+st.played;
+        if(st.seats !== 8) throw 'the biggest field is the biggest, not the last, got '+st.seats;
+        if(st.last !== 1780000000) throw 'the last night is the newest, got '+st.last;
+        if(st.members !== 14) throw 'the member count rides the same answer';
+        if(st.live) throw 'nothing is running in this one';
+        // WINS FIRST, then podiums. JO never wins a night and is still second best,
+        // which is the whole reason both are counted.
+        const nm = st.top.map(x=>x.name).join(',');
+        if(nm !== 'KAI,JO,MAX') throw 'wins then podiums then name: '+nm;
+        if(st.top[0].wins !== 2 || st.top[0].podiums !== 3) throw 'KAI: 2 wins of 3 podiums, got '+JSON.stringify(st.top[0]);
+        if(st.top[1].wins !== 1 || st.top[1].podiums !== 3) throw 'JO: 1 win of 3 podiums, got '+JSON.stringify(st.top[1]);
+        if(st.top[2].wins !== 0 || st.top[2].podiums !== 1) throw 'MAX: a single third place, got '+JSON.stringify(st.top[2]);
+        // A TIE IS ORDERED, not left to the object: two players level on both counts
+        // must not swap places between two draws of the same screen.
+        const tie = eventStatsView({ archive:[ A(1, 2, 1, [P('bbbbbbbb','BEA')]), A(2, 2, 1, [P('aaaaaaaa','ABE')]) ] });
+        if(tie.top.map(x=>x.name).join(',') !== 'ABE,BEA') throw 'a tie breaks on the name: '+tie.top.map(x=>x.name);
+        // An empty room reads as empty rather than throwing on the way in.
+        const none = eventStatsView({ eid:'K7QM' });
+        if(none.tourneys || none.played || none.top.length) throw 'a room that has played nothing has no numbers';
+        // One archived row, in columns rather than one long centred line.
+        const row = eventStatsRow(ev.archive[0]);
+        if(row.field !== '7/8') throw 'the field reads played of seats, got '+row.field;
+        if(row.won !== 'KAI') throw 'the winner is the top of the podium, got '+row.won;
+        if(!row.day) throw 'the date is rendered from SECONDS, and this one is a date';
+        // ...and that date is the seconds trap: eventDay is the only converter, and a
+        // value fed to Date() unmultiplied renders 1970 without throwing.
+        if(/19[67][0-9]/.test(row.day)) throw 'finished is SECONDS and was read as milliseconds: '+row.day;
+
+        // THE SCREEN'S GEOMETRY, from the draw's own numbers. The standings are capped
+        // and the archive takes what is left -- and what is left has to end above the
+        // status band at every count, or this repeats the iPad bug on a new screen.
+        const sSrc = String(drawEventStats);
+        for(const k of ['EV_STATS.ROW0','EV_STATS.ROW_H','EV_STATS.TOP_MAX','eventStatsFits('])
+            if(sSrc.indexOf(k) < 0) throw 'the statistics draw does not use '+k+', so this lane checks nothing';
+        _ev = ev; _evEid = 'K7QM';
+        const fits = eventStatsFits();
+        if(fits < 1) throw 'a three-row archive must have somewhere to go, got '+fits;
+        const bottom = _evStatsArchTop(Math.min(st.top.length, EV_STATS.TOP_MAX)) + (fits + 1) * EV_STATS.ARCH_ROW;
+        if(bottom > STATUS_Y) throw 'the archive block runs into the status band: '+bottom;
+        const lastTop = EV_STATS.ROW0 + (EV_STATS.TOP_MAX - 1) * EV_STATS.ROW_H;
+        if(lastTop + FONT.HINT >= _evStatsArchTop(EV_STATS.TOP_MAX)) throw 'the standings run into the archive head';
+        // THE COLUMNS HAVE TO CLEAR EACH OTHER AT THEIR WIDEST, and EVERY adjacent
+        // pair of them -- both tables, headers included. Checking three pairs of four
+        // is how the winner ended up drawn through the field beside it: the lane
+        // agreed with itself and the screen did not.
+        const w = (n) => n * FONT.HINT * 1.3;             // one glyph is about 1.3 of the size
+        // left-anchored cell, right-anchored cell, and what each holds at its widest
+        const L = (x, n) => ({ from:x, to:x + w(n) });
+        const Rc = (x, n) => ({ from:x - w(n), to:x });
+        const clear = (a, b, what) => { if(a.to > b.from) throw what+': '+Math.round(a.to)+' runs past '+Math.round(b.from); };
+        // the standings, header row and widest data row alike
+        for(const cells of [[L(EV_STATS.NAME_X, 6), Rc(EV_STATS.WIN_R, 4), Rc(EV_STATS.POD_R, 7)],
+                            [Rc(EV_STATS.RANK_X, 1), L(EV_STATS.NAME_X, EV_STATS.NAME_MAX), Rc(EV_STATS.WIN_R, 3), Rc(EV_STATS.POD_R, 3)]])
+            for(let i = 0; i + 1 < cells.length; i++) clear(cells[i], cells[i+1], 'standings column '+i);
+        // ...and the archive, whose head line IS its column header
+        for(const cells of [[L(EV_STATS.DATE_X, 11), L(EV_STATS.FIELD_X, 5), Rc(EV_STATS.WON_R, 6)],
+                            [L(EV_STATS.DATE_X, 8), L(EV_STATS.FIELD_X, 5), Rc(EV_STATS.WON_R, EV_STATS.NAME_MAX)]])
+            for(let i = 0; i + 1 < cells.length; i++) clear(cells[i], cells[i+1], 'archive column '+i);
+        if(EV_STATS.POD_R > CW - 8 || EV_STATS.WON_R > CW - 8) throw 'a right column falls off the screen';
+        if(EV_STATS.RANK_X - w(1) < 8 || EV_STATS.DATE_X < 8) throw 'a left column falls off the screen';
+
+        // SCROLLING IS BOUNDED BY WHAT IS DRAWN -- one number, read by both, so a
+        // list can never be scrolled past its own last page.
+        const many = { eid:'K7QM', name:'n', state:'active', members:2, you:{state:'member'},
+                       archive:[] };
+        for(let i = 0; i < 30; i++) many.archive.push(A(1700000000 + i, 4, 3, [P('c0ffee42','KAI')]));
+        _ev = many;
+        const f2 = eventStatsFits();
+        _evStatsTop = 0;
+        for(let i = 0; i < 60; i++) eventStatsScroll(1);
+        if(eventStatsTop() !== 30 - f2) throw 'the scroll stops on the last page, got '+eventStatsTop()+' of '+(30-f2);
+        for(let i = 0; i < 60; i++) eventStatsScroll(-1);
+        if(eventStatsTop() !== 0) throw 'and it comes back to the top, got '+eventStatsTop();
+        if(eventStatsScroll(-1)) throw 'a scroll that moves nothing must report so, or it sounds a key that did nothing';
+        _ev = null; _evEid = ''; _evStatsTop = 0;
+    }
+    log('statistics ok: wins and podiums derived from the podiums, columns clear, and the scroll stops where the draw does');
+
+    // ---- A TOURNAMENT THAT OPENS WHILE THE PAGE IS UP ---------------------
+    // The contract signals it -- {event:'tourney'} to every member -- and the live
+    // server does not send that payload, so the row stayed dark until the player left
+    // the screen and came back. The ANNOUNCE carries the same news and needs no
+    // server change: an event's open lobbies are served to its members regardless of
+    // network. Noticing is not adopting: the page re-reads state, which is the one
+    // place the tournament it shows comes from.
+    {
+        const _oRead = eventRead;
+        let reads = 0;
+        eventRead = async () => { reads++; return true; };
+        _evEid = 'K7QM'; phase = 'eventPage';
+        _ev = { eid:'K7QM', name:'n', state:'active', members:2, you:{state:'member'} };
+        // Somebody else's lobby is somebody else's business.
+        if(eventTourneySeen([{ tid:'x1', code:'AAA', eid:'ZZZZ' }])) throw 'a lobby from another event is not our news';
+        if(eventTourneySeen([{ tid:'x1', code:'AAA' }])) throw 'an ordinary lobby carries no eid and is not our news';
+        if(reads) throw 'and neither of those may cost a read';
+        // Ours, and we are not showing it: read.
+        if(!eventTourneySeen([{ tid:'x1', code:'AAA', eid:'K7QM' }])) throw 'an event lobby we do not show is news';
+        if(reads !== 1) throw 'and it is answered by ONE re-read, got '+reads;
+        // The one we already show is not news, however often it is announced.
+        _ev.tourney = { tid:'x1', code:'AAA', state:'open' };
+        if(eventTourneySeen([{ tid:'x1', code:'AAA', eid:'K7QM' }])) throw 'the tournament already on the page is not news';
+        if(reads !== 1) throw 'and it must not re-read on every announce, got '+reads;
+        // A DIFFERENT one is: the first ended and the organizer opened another.
+        if(!eventTourneySeen([{ tid:'x2', code:'BBB', eid:'K7QM' }])) throw 'a second tournament is news again';
+        if(reads !== 2) throw 'and that one reads once too, got '+reads;
+        // Nowhere near the screen: nothing to refresh and nothing to spend.
+        phase = 'menu'; reads = 0;
+        if(eventTourneySeen([{ tid:'x3', code:'CCC', eid:'K7QM' }])) throw 'a page nobody is looking at reads nothing';
+        if(reads) throw 'and it costs nothing either';
+        // ...and the announce has to be ASKED for, which is what makes the rest of
+        // this reachable at all.
+        phase = 'eventPage';
+        if(!eventTlWant()) throw 'the page must ask for the announce';
+        phase = 'eventMonitor';
+        if(eventTlWant()) throw 'the monitor reads its own call and asks for nothing else';
+        eventRead = _oRead; _ev = null; _evEid = ''; phase = 'eventPage';
+    }
+    log('new tournament ok: the announce is the second way it arrives, one read per tournament rather than per announce');
+
 
 
     R.ok = true;
@@ -866,6 +1019,14 @@ const DRIVER = `
         tourneySetupOpen('K7QM');
         if(_ttUi.home !== 'eventPage') throw 'a create started from an event page belongs back on it';
         if(press() !== 'eventPage') throw 'BACK off the event create dialog went to '+phase;
+        // ...and the room survives the create itself: the tournament that comes out of
+        // this dialog is the event's, and it is the exit off ITS screens that has to
+        // lead back. Nothing between the dialog and the lobby may quietly clear it.
+        tourneySetupOpen('K7QM');
+        _tt = { tid:'t1', state:'open', host:HOST, players:[] };
+        if(_ttUi.home !== 'eventPage') throw 'a created event tournament must still know its room';
+        if(press() !== 'eventPage') throw 'and leaving the room it made must land there, got '+phase;
+        _tt = null;
         tourneySetupOpen();
         if(_ttUi.home !== '') throw 'an ordinary create must not inherit the room';
         if(press() !== 'tourneyLobby') throw 'BACK off the ordinary create dialog went to '+phase;
@@ -898,6 +1059,60 @@ const DRIVER = `
       }
       R.steps.push('tournament exits ok: every exit gives back the door it came in by, and a join holds the page until it lands');
 
+      // ---- KEEPING A TV AWAKE ----------------------------------------------
+      // Nothing is ever pressed on the monitor, so the platform blanks the panel. The
+      // Screen Wake Lock API is the only thing a page can do about that -- held ONLY
+      // while that screen is up, re-taken when the page comes back, and absent without
+      // complaint on a TV whose browser predates it.
+      {
+          const _oNav = globalThis.navigator, _oDoc = globalThis.document;
+          const tick = async () => { for(let i = 0; i < 6; i++) await Promise.resolve(); };
+          let asked = 0, released = 0, listeners = {}, lock = null;
+          globalThis.navigator = { wakeLock: { request: async (kind) => {
+              if(kind !== 'screen') throw new Error('wrong lock kind: '+kind);
+              asked++;
+              lock = { release(){ released++; }, addEventListener(k, fn){ this['on_'+k] = fn; } };
+              return lock;
+          } } };
+          globalThis.document = { hidden:false, addEventListener:(k, fn)=>{ listeners[k] = fn; } };
+          // Entering the screen takes one.
+          eventWakeSet(true); await tick();
+          if(asked !== 1) throw 'exactly one lock is asked for, got '+asked;
+          if(!eventWakeHeld()) throw 'and it has to be HELD, not merely asked for';
+          if(!listeners.visibilitychange) throw 'a lock that is not re-taken on visibilitychange is gone the first time the TV switches input';
+          // A second arm while one stands asks for nothing: a screen redraw is not a reason.
+          eventWakeSet(true); await tick();
+          if(asked !== 1) throw 'a standing lock is not re-asked, got '+asked;
+          // Leaving gives it back. A lock outliving its screen is a promise nobody asked for.
+          eventWakeSet(false);
+          if(released !== 1) throw 'leaving the screen must release the lock, got '+released;
+          if(eventWakeHeld()) throw 'and nothing may still read as held';
+          // THE BROWSER DROPS IT BY ITSELF when the page hides, and never returns it.
+          // That re-take is the half a naive implementation leaves out, and the half
+          // that matters on a device switched between inputs.
+          eventWakeSet(true); await tick();
+          lock.on_release();                                  // the browser let go
+          if(eventWakeHeld()) throw 'a released lock must not still read as held';
+          globalThis.document.hidden = true; listeners.visibilitychange(); await tick();
+          if(asked !== 2) throw 'a hidden page cannot take one, got '+asked+' asks';
+          globalThis.document.hidden = false; listeners.visibilitychange(); await tick();
+          if(asked !== 3 || !eventWakeHeld()) throw 'coming back has to take it again, got '+asked+' asks';
+          eventWakeSet(false);
+          // A TV WITHOUT THE API is the ordinary case, not an error: nothing throws,
+          // nothing is held, and the screen works exactly as it does today.
+          globalThis.navigator = {};
+          eventWakeSet(true); await tick();
+          if(eventWakeHeld()) throw 'an absent API must leave nothing held';
+          eventWakeSet(false);
+          // ...and one that REFUSES is the same thing: refused is not crashed.
+          globalThis.navigator = { wakeLock: { request: async () => { throw new Error('denied'); } } };
+          eventWakeSet(true); await tick();
+          if(eventWakeHeld()) throw 'a refusal must leave nothing held';
+          eventWakeSet(false);
+          globalThis.navigator = _oNav; globalThis.document = _oDoc;
+      }
+      log('wake lock ok: held only while the monitor is up, re-taken after a hidden page, and absent without complaint');
+
       _evPost=_oPost; eventRead=_oRead; globalThis.fetch=_oFetch; cfg.offline=_oOff;
       _ev=null; _evEid=''; _evUi.busy=false; _evUi.msg=''; _evList=[];
       R.steps.push('page verbs ok: the door flips to the other state, every verb re-reads, a refusal names itself, leaving drops the row');
@@ -912,5 +1127,10 @@ const DRIVER = `
     try { await S.__async; } catch (e) { if (R) R.err = String(e && e.stack || e); }
     if (R && R.steps) console.log(R.steps.join('\n'));
     if (!R || R.err) { console.log('\nSMOKE-EVENTS FAIL: ' + (R ? R.err : 'no result')); process.exit(1); }
+    // THE FIRST DRIVER BLOCK IS SYNCHRONOUS BY CONSTRUCTION -- the runner reads
+    // __async off the end of it -- so an await placed in there defers everything
+    // after it, the second block included, while the banner still reads PASSED.
+    // R.ok is set on that block's last line, so a missing one names the mistake.
+    if (!R.ok) { console.log('\nSMOKE-EVENTS FAIL: the synchronous block did not finish -- an await in it defers the rest'); process.exit(1); }
     console.log('\nSMOKE-EVENTS PASSED');
 })();

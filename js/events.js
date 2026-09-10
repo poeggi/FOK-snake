@@ -55,7 +55,7 @@ var _eventBack = 'multiplayer';
 // roster and the tournament announce follow, and for the same reason: the flag
 // rides a request that was going out anyway, so a screen nobody is looking at
 // costs the server nothing.
-const _EV_SCREENS = { eventChooser:1, eventPage:1, eventMembers:1, eventQr:1, eventMonitor:1 };
+const _EV_SCREENS = { eventChooser:1, eventPage:1, eventMembers:1, eventQr:1, eventMonitor:1, eventStats:1 };
 // An event screen is open. It is a MATCHMAKING screen like the lobby and the tournament
 // ones: the four `event` signals arrive in the ordinary mailbox, and the monitor's watch
 // handshake has nowhere else to land -- so net-api.js polls and HOLDS on these too.
@@ -349,6 +349,11 @@ function eventRows(){
     // The roster, read fresh every time it is opened. A member sees who is in the
     // room; the organizer sees the door as well.
     rows.push({ t:'MEMBERS', go:'members' });
+    // WHAT THE ROOM HAS DONE, on a screen of its own. It used to be three archive
+    // lines squeezed under the rows on the page, which is where they were least
+    // readable and most in the way -- a date, two counts and a run of clipped names
+    // with no room to say what any of it meant.
+    rows.push({ t:'EVENT STATISTICS', go:'stats' });
     if(org && !scheduled && st !== 'ended'){
         // RUN and PAUSE are the same row wearing the state it would move to. END
         // is its own, and it is behind a confirm because it is terminal for
@@ -669,6 +674,80 @@ function eventDay(secs){
 // it was played, and who stood on the podium. The page and the monitor both show the
 // archive, so they show it the same way -- and podium ids carry their names, so an
 // id is only ever the fallback.
+// ---- what the event knows about itself -------------------------------------
+// ALL OF IT IS DERIVED from the `state` answer already in hand -- the archive rows
+// and the member count -- so the statistics screen costs no request of its own
+// beyond the ordinary re-read on the way in. There is no per-player event table on
+// the server and this does not ask for one: what a room knows about its players is
+// who stood on its podiums, and that is what the archive carries.
+function eventStatsView(e){
+    e = e || _ev;
+    const arch = (e && Array.isArray(e.archive)) ? e.archive : [];
+    let played = 0, seats = 0, last = 0;
+    const by = Object.create(null);
+    for(const a of arch){
+        played += a.played | 0;
+        if((a.seats | 0) > seats) seats = a.seats | 0;
+        const f = +a.finished || 0;
+        if(f > last) last = f;
+        // The podium is in FINISHING ORDER, so index 0 is the win and being on it at
+        // all is the second thing worth counting: a player who is always second never
+        // wins a night and is still the best player in the room.
+        const pod = Array.isArray(a.podium) ? a.podium : [];
+        for(let i = 0; i < pod.length; i++){
+            const id = String((pod[i] && pod[i].id) || '');
+            if(!id) continue;
+            const r = by[id] || (by[id] = { id:id, name:'', wins:0, podiums:0 });
+            if(pod[i].name) r.name = String(pod[i].name);
+            r.podiums++;
+            if(i === 0) r.wins++;
+        }
+    }
+    const top = [];
+    for(const k in by) top.push(by[k]);
+    // Wins, then podiums, then the name -- a TOTAL order, so two players who are level
+    // do not swap places under a reader every time the screen redraws.
+    top.sort((a, b) => (b.wins - a.wins) || (b.podiums - a.podiums)
+                    || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return { tourneys:arch.length, played:played, seats:seats, last:last,
+             members:(e && e.members != null) ? (e.members | 0) : null,
+             live:!!(e && e.tourney && e.tourney.tid), top:top, archive:arch };
+}
+// One archived tournament as a row: when, how much of the field turned up, and who
+// won it. The three podium names the page used to print ran off both sides of the
+// screen at this font; the standings above the list are where the rest of the
+// podium is answered now.
+function eventStatsRow(a){
+    if(!a) return { day:'', field:'', won:'' };
+    const pod = Array.isArray(a.podium) ? a.podium : [];
+    const w = pod[0];
+    return { day:eventDay(a.finished),
+             field:(a.played | 0) + (a.seats ? '/' + (a.seats | 0) : ''),
+             won:w ? String(w.name || fmtFriendId(String(w.id))) : '' };
+}
+// The archive is however long the room has been running, so it is the part that
+// scrolls. The window is what the SCREEN says it can show -- one number, read by
+// the draw and by the scroll alike, so a list cannot be scrolled past what is drawn.
+var _evStatsTop = 0;
+function eventStatsTop(){ return _evStatsTop; }
+async function eventStatsEnter(){
+    _evStatsTop = 0;
+    phase = 'eventStats';
+    _uiDirty = true;
+    // Fresh on the way in like every other event screen: the archive grows a row
+    // every time a tournament in this room finishes.
+    return eventRead();
+}
+function eventStatsLeave(){ _evStatsTop = 0; phase = 'eventPage'; _uiDirty = true; }
+function eventStatsScroll(d){
+    const n = eventStatsView().archive.length;
+    const fits = (typeof eventStatsFits === 'function') ? eventStatsFits() : n;
+    const max = Math.max(0, n - Math.max(1, fits));
+    const was = _evStatsTop;
+    _evStatsTop = Math.min(max, Math.max(0, _evStatsTop + d));
+    if(_evStatsTop !== was) _uiDirty = true;
+    return _evStatsTop !== was;
+}
 function eventArchiveLine(a){
     if(!a) return '';
     const pod = (a.podium || []).slice(0, 3)
@@ -770,6 +849,7 @@ function _evMonTick(){
 function eventMonitorEnter(){
     _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonAskAt = 0;
     phase = 'eventMonitor';
+    eventWakeSet(true);
     eventMonitorRead();
     if(_evMonT == null && typeof setInterval === 'function') _evMonT = setInterval(_evMonTick, EV_MON_MS);
     _uiDirty = true;
@@ -778,6 +858,7 @@ function eventMonitorEnter(){
 // nobody to tell. `keep` holds the screen up to show a refusal that has just
 // been read; everything else walks off it.
 function eventMonitorStop(keep){
+    eventWakeSet(false);
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
     if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
         specStop('');
@@ -831,6 +912,86 @@ function _evOnSignal(d){
         _uiDirty = true;
     }
 }
+
+// A TOURNAMENT THAT OPENED WHILE THE PAGE WAS UP. The contract has a signal for
+// exactly this -- {event:'tourney'} to every member -- and _evOnSignal takes it.
+// The live server does not send that payload today (only the 'state' one), so a
+// member standing on the page never heard, and the row stayed dark until they left
+// the screen and came back.
+//
+// The ANNOUNCE is the second way the same news arrives, and it needs no server
+// change: an event's open lobbies are served to its MEMBERS regardless of network,
+// so a row carrying our eid IS the tournament. Noticing is not adopting -- the page
+// re-reads `state`, which is the one place the tournament it shows comes from.
+function eventTourneySeen(list){
+    if(!_evEid || !_ev || !eventScreen()) return false;
+    const held = String((_ev.tourney && _ev.tourney.tid) || '');
+    for(const l of (list || [])){
+        if(String((l && l.eid) || '') !== _evEid) continue;
+        if(String(l.tid || '') === held) return false;   // the one we are already showing
+        eventRead();
+        return true;
+    }
+    return false;
+}
+// ...which means the announce has to be ASKED for while the page is up. It rides
+// the poll the page already sends for `ev`, so it costs no request of its own.
+function eventTlWant(){ return !!_evEid && (phase === 'eventPage' || phase === 'eventStats'); }
+
+// ---- keeping a TV awake ----------------------------------------------------
+// NOTHING IS EVER PRESSED ON THE MONITOR -- that is the point of it -- so the
+// platform sees an idle input and blanks the panel. The Screen Wake Lock API is
+// the one thing a page can do about that, and it is FEATURE DETECTED rather than
+// assumed: a TV browser is pinned to whatever engine its firmware shipped with,
+// and the older ones predate the API entirely. A lock that cannot be taken is a
+// TV that dims, which is what happens today, so nothing here fails loudly.
+//
+// HELD ONLY WHILE THE MONITOR IS UP. A wake lock on a menu is a promise nobody
+// asked for. The browser also drops it whenever the page is hidden and never
+// returns it by itself, which is why it is re-taken on visibilitychange -- that
+// is the half a naive implementation leaves out, and it is the half that matters
+// on a device that is switched between inputs.
+var _evWake = null, _evWakeOn = false, _evWakeBound = false;
+function _evWakeApi(){
+    try { return (typeof navigator !== 'undefined' && navigator.wakeLock) || null; }
+    catch(e){ return null; }
+}
+function _evHidden(){ return typeof document !== 'undefined' && !!document.hidden; }
+async function _evWakeTake(){
+    const api = _evWakeApi();
+    if(!api || !_evWakeOn || _evWake || _evHidden()) return false;
+    try {
+        const w = await api.request('screen');
+        // A lock we no longer want: the screen was left while the request was in
+        // flight. Give it straight back rather than leaving it standing.
+        if(!_evWakeOn){ try { w.release(); } catch(e){} return false; }
+        _evWake = w;
+        // The browser releases it on its own (a hidden page, a system decision), so
+        // drop our handle when it does or the re-take believes it still holds one.
+        if(w && typeof w.addEventListener === 'function')
+            w.addEventListener('release', () => { if(_evWake === w) _evWake = null; });
+        return true;
+    } catch(e){ _evWake = null; return false; }
+}
+function _evWakeDrop(){
+    const w = _evWake; _evWake = null;
+    if(w && typeof w.release === 'function'){ try { w.release(); } catch(e){} }
+}
+function _evWakeVis(){ if(_evWakeOn && !_evHidden()) _evWakeTake(); }
+function eventWakeSet(on){
+    _evWakeOn = !!on;
+    if(!_evWakeOn){ _evWakeDrop(); return false; }
+    if(!_evWakeBound && typeof document !== 'undefined' && document.addEventListener){
+        document.addEventListener('visibilitychange', _evWakeVis);
+        _evWakeBound = true;
+    }
+    _evWakeTake();
+    return true;
+}
+// Whether a lock is actually STANDING, not whether one was asked for: on a TV that
+// has no such API the answer is false for ever, and that is a fact worth being able
+// to read rather than assume.
+function eventWakeHeld(){ return !!_evWake; }
 
 // ---- the achievement -------------------------------------------------------
 // Server-carried: the id, name, description and (optionally) the 8x8 icon all
