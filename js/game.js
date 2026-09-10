@@ -206,7 +206,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage','eventConfirm'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -904,6 +904,7 @@ const SCREENS = {
     // server says something did, except the derived state word, which needs no redraw.
     eventChooser:    { d:()=>drawEventChooser(),    hud:false, freeze:true },
     eventPage:       { d:()=>drawEventPage(),       hud:false, freeze:true, anim:()=> !!eventUi().msg && _msgNow()-eventUi().msgAt < 2600 },
+    eventConfirm:    { d:()=>drawEventConfirm(),    hud:false, freeze:true },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },
     duelPaused:   { d:()=>drawDuelBoard(simNow), hud:true, freeze:true },

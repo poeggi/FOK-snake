@@ -157,6 +157,7 @@ function _evAdopt(o){
 // -- an event before its start is `upcoming`, a member row before approval is
 // `pending`, and they meet in one answer.
 function _evYou(){ return (_ev && _ev.you && String(_ev.you.state)) || ''; }
+function eventYou(){ return _evYou(); }
 function eventIsOrganizer(){ return !!(_ev && _ev.you && _ev.you.organizer); }
 function eventIsMember(){ return _evYou() === 'member'; }
 
@@ -176,6 +177,21 @@ function eventState(e){
     if(e.starts != null && now < +e.starts) return 'upcoming';
     if(e.starts != null) return 'active';
     return mode;
+}
+// The schedule, in the reader's OWN time. starts/ends are unix milliseconds on
+// the server clock; a person in the room reads a wall clock, so the conversion
+// is the whole job. An event with no schedule has no line -- its organizer drives
+// it by hand and there is nothing to announce.
+function eventWhen(e){
+    e = e || _ev;
+    if(!e || (e.starts == null && e.ends == null)) return '';
+    const p2 = n => ('0' + n).slice(-2);
+    const at = ms => {
+        const d = new Date(+ms);
+        return p2(d.getDate()) + '.' + p2(d.getMonth()+1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    };
+    if(e.starts != null && e.ends != null) return at(e.starts) + ' - ' + at(e.ends);
+    return e.starts != null ? 'FROM ' + at(e.starts) : 'UNTIL ' + at(e.ends);
 }
 // The server clock, which is what starts/ends are stated against. netPts() is
 // the synced reading; without one there is nothing to derive against and the
@@ -252,6 +268,84 @@ function eventPageLeave(to){
     _ev = null; _evUi.msg = ''; _evUi.busy = false;
     phase = to || 'multiplayer';
     _uiDirty = true;
+}
+
+// ---- what the page can do --------------------------------------------------
+// THE ROWS, in one place because most of them come and go -- with the door, the
+// schedule, the state and who we are. The draw and the input both read this, for
+// the same reason the multiplayer menu does: a list whose length changes is
+// exactly what makes two hard-coded index sets drift apart.
+//
+// A PENDING row gets none of them. It sees the public face and nothing else, and
+// the server would refuse every one of these anyway -- but a screen that offers
+// what it knows will be refused is a screen that lies.
+function eventRows(){
+    const e = _ev, rows = [];
+    if(!e || _evYou() === 'pending') return rows;
+    const st = eventState(e), org = eventIsOrganizer(), scheduled = e.starts != null || e.ends != null;
+    // A MONITOR may call state and monitor and nothing else, so it is offered
+    // nothing else. Its own screen arrives with the monitor itself.
+    if(_evYou() === 'monitor') return rows;
+    if(org && !scheduled && st !== 'ended'){
+        // RUN and PAUSE are the same row wearing the state it would move to. END
+        // is its own, and it is behind a confirm because it is terminal for
+        // everybody, not just for the organizer.
+        rows.push(st === 'active' ? { t:'PAUSE THE EVENT', go:'pause' } : { t:'START THE EVENT', go:'run' });
+        rows.push({ t:'END THE EVENT', go:'end' });
+    }
+    if(org && st !== 'ended') rows.push({ t:e.closed ? 'DOOR: CLOSED' : 'DOOR: OPEN', go:'access' });
+    // The organizer cannot leave its own event: leaving would abandon the room it
+    // is running, and the server refuses it. Nobody else is kept.
+    if(!org) rows.push({ t:'LEAVE EVENT', go:'leave' });
+    return rows;
+}
+// One shape for every organizer verb: ask, then re-read. Nothing here adopts its
+// own optimistic answer -- the server is the truth about the room, and a verb
+// that half-worked would otherwise leave the page saying it fully did.
+async function _evVerb(action, extra, working){
+    if(_evUi.busy || !_evOk()) return false;
+    _evUi.busy = true; _evMsg(working || 'WORKING...');
+    const r = await _evPost(action, extra);
+    _evUi.busy = false;
+    if(!r.json){
+        const err = String((r.body && r.body.error) || '');
+        _evMsg(err === 'scheduled' ? 'THIS EVENT RUNS ON ITS SCHEDULE'
+             : err === 'not the organizer' ? 'ONLY THE ORGANIZER CAN DO THAT'
+             : err === 'ended' ? 'THIS EVENT HAS ENDED'
+             : 'THAT DID NOT WORK', true);
+        return false;
+    }
+    _evMsg('');
+    await eventRead();
+    return true;
+}
+function eventRun(){ return _evVerb('run', null, 'STARTING...'); }
+function eventPause(){ return _evVerb('pause', null, 'PAUSING...'); }
+function eventEnd(){ return _evVerb('end', null, 'ENDING...'); }
+// The door decides what a scanned code does and nothing else about the event
+// changes with it. Flipping a closed event open does NOT approve what is already
+// pending -- the organizer still decides those, and new scans go straight in.
+function eventAccess(){
+    if(!_ev) return false;
+    return _evVerb('access', { closed: !_ev.closed }, 'CHANGING THE DOOR...');
+}
+// A member removes its own row, and a pending caller withdraws the same way. The
+// row goes and the person may scan again -- leaving is not a resignation somebody
+// processes. The list carries the disappearance; there is nothing local to clear.
+async function eventLeave(){
+    if(_evUi.busy || !_evOk()) return false;
+    _evUi.busy = true; _evMsg('LEAVING...');
+    const r = await _evPost('leave');
+    _evUi.busy = false;
+    if(!r.json){ _evMsg('COULD NOT LEAVE', true); return false; }
+    const gone = _evEid;
+    _ev = null; _evEid = '';
+    _evList = _evList.filter(x => String(x.eid) !== String(gone));
+    if(typeof _netHello === 'function' && _netOk()) _netHello();   // the list is the record: read it again
+    phase = eventAny() ? 'eventChooser' : 'multiplayer';
+    _evUi.sel = 0; _evMsg('YOU HAVE LEFT');
+    _uiDirty = true;
+    return true;
 }
 
 // ---- the reserved 'event' signal -------------------------------------------

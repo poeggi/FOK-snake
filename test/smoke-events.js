@@ -2,10 +2,10 @@
 // budget, and the derived event state. Everything here is the CLIENT half of
 // FOK-server docs/API.md "Events (4.11)".
 // Run: node test/smoke-events.js
-const { runTest } = require('./harness');
+const { runInGame } = require('./harness');
 
-runTest('SMOKE-EVENTS', `
-;(function(){
+const DRIVER = `
+;(async function(){
   const R = globalThis.__R = { steps: [], err: null, ok: false };
   const log = (m) => R.steps.push(m);
   const U = 'https://poeggi.github.io/FOK-snake/';
@@ -221,7 +221,91 @@ runTest('SMOKE-EVENTS', `
     }
     log('request shape ok: events rides the hello, and a poll tick of its own, on the six screens that show it');
 
+    // ---- the page offers only what the server would allow -----------------
+    // A screen that offers what the next request will refuse is a screen that
+    // lies, so the rows are derived from the same three facts the server checks:
+    // the row state, who the organizer is, and whether the event runs on a clock.
+    const gos = (o) => { _ev = o; _evEid = o && o.eid || ''; return eventRows().map(r=>r.go); };
+    const ME = getPlayerId();
+    const mem = (x) => Object.assign({ eid:'K7QM', name:'n', state:'active',
+                                       you:{ state:'member', organizer:false } }, x||{});
+    // A PENDING row gets nothing at all -- it sees the public face and no more.
+    if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing';
+    // A MONITOR may call state and monitor and NOTHING else, so it is offered nothing else.
+    if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
+    // An ordinary member: leave, and nothing that is the organizer's.
+    if(gos(mem()).join(',') !== 'leave') throw 'a member gets leave and no verbs: '+gos(mem());
+    // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
+    // its own room, because leaving would abandon what it is running.
+    const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
+    if(gos(org()).join(',') !== 'pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(gos(org({state:'paused'})).join(',') !== 'run,end,access') throw 'paused organizer rows: '+gos(org({state:'paused'}));
+    if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
+    // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
+    // are not offered. The door still is -- it is not on the clock.
+    if(gos(org({starts:1})).join(',') !== 'access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
+    // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
+    if(gos(org({state:'ended'})).length) throw 'an ended event offers the organizer nothing';
+    if(gos(mem({state:'ended'})).join(',') !== 'leave') throw 'a member may still leave an ended event';
+    _ev = null; _evEid = '';
+    log('page rows ok: pending and monitor get nothing, the organizer cannot leave, a schedule takes the hand verbs');
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
+
+  // THE LANES THAT TALK TO THE WIRE. Kept apart and handed to the runner as a
+  // promise, because a suite whose async body is not awaited prints its banner
+  // before it has asserted anything -- which is the whole reason the runner
+  // demands a banner in the first place.
+  globalThis.__async = (async function(){
+    if(R.err) return;
+    try {
+      const mem = (x) => Object.assign({ eid:'K7QM', name:'n', state:'active',
+                                         you:{ state:'member', organizer:false } }, x||{});
+      // _evOk() is the same gate every other online path uses, and the harness is
+      // a dead browser: with no fetch at all every verb below would no-op and each
+      // assertion would pass by never running. Make it online first.
+      const _oFetch=globalThis.fetch, _oOff=cfg.offline;
+      globalThis.fetch=()=>({}); cfg.offline=false;
+      if(!_evOk()) throw 'the suite must be online or every verb check is vacuous';
+      const _oPost=_evPost, _oRead=eventRead;
+      let sent=null, reads=0;
+      _evPost=async(a,x)=>{ sent={a,x}; return { json:{ok:true}, status:200, body:{ok:true} }; };
+      eventRead=async()=>{ reads++; return true; };
+      _ev = mem({ closed:false }); _evEid='K7QM'; _evUi.busy=false;
+      await eventAccess();
+      if(!sent || sent.a!=='access' || sent.x.closed !== true) throw 'the door flips to the OTHER state: '+JSON.stringify(sent);
+      if(reads !== 1) throw 'a verb must re-read rather than adopt its own answer';
+      _ev = mem({ closed:true }); await eventAccess();
+      if(sent.x.closed !== false) throw 'and back again';
+      // A refusal names the reason in the event's own words and changes nothing.
+      _evPost=async()=>({ json:null, status:409, body:{error:'scheduled'} });
+      _ev = mem(); reads=0;
+      await eventRun();
+      if(reads !== 0) throw 'a refused verb must not re-read';
+      if(!/SCHEDULE/.test(_evUi.msg)) throw 'a 409 scheduled must say so: '+_evUi.msg;
+      // LEAVING drops the row and the page with it. There is nothing local to
+      // clear afterwards, because there was never anything local to begin with.
+      _evPost=async()=>({ json:{ok:true}, status:200, body:{ok:true} });
+      _netEvApply([{ eid:'K7QM', name:'n', state:'active', you:{state:'member'} }]);
+      _ev = mem(); _evEid='K7QM'; _evUi.busy=false;
+      await eventLeave();
+      if(_ev !== null) throw 'leaving must drop the page';
+      if(eventAny()) throw 'leaving must drop the row from the list';
+      if(phase !== 'multiplayer') throw 'the last event left lands on MULTIPLAYER, got '+phase;
+      _evPost=_oPost; eventRead=_oRead; globalThis.fetch=_oFetch; cfg.offline=_oOff;
+      _ev=null; _evEid=''; _evUi.busy=false; _evUi.msg=''; _evList=[];
+      R.steps.push('page verbs ok: the door flips to the other state, every verb re-reads, a refusal names itself, leaving drops the row');
+    } catch(e) { R.err = String(e && e.stack || e); }
+  })();
 })();
-`);
+`;
+
+(async () => {
+    const S = runInGame(DRIVER);
+    const R = S.__R;
+    try { await S.__async; } catch (e) { if (R) R.err = String(e && e.stack || e); }
+    if (R && R.steps) console.log(R.steps.join('\n'));
+    if (!R || R.err) { console.log('\nSMOKE-EVENTS FAIL: ' + (R ? R.err : 'no result')); process.exit(1); }
+    console.log('\nSMOKE-EVENTS PASSED');
+})();

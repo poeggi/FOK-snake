@@ -294,11 +294,38 @@ const UI_INPUT = {
         },
         back(){ Snd.sfxPlay('nav',cfg.music); phase='multiplayer'; _uiDirty=true; },
     },
-    // The event page. One row for now (BACK) -- the page's own actions arrive with the
-    // rest of it; what this commit owes is somewhere for a scanned code to land.
     eventPage: {
-        confirm(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+        nav(key){ _evUi.sel=_navStep(key, _evUi.sel, eventRows().length+1); },
+        confirm(){
+            const rows=eventRows();
+            if(_evUi.sel>=rows.length){ this.back(); return; }
+            const go=rows[_evUi.sel].go;
+            // The two that cannot be taken back ask first. Everything else is a verb
+            // the same press can undo -- the door flips both ways, a pause runs again.
+            if(go==='end'||go==='leave'){
+                Snd.sfxPlay('nav',cfg.music); _evUi.ask=go; quitConfirmSel=1; phase='eventConfirm'; return;
+            }
+            Snd.sfxPlay('select',cfg.music);
+            if(go==='run') eventRun();
+            else if(go==='pause') eventPause();
+            else if(go==='access') eventAccess();
+        },
         back(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+    },
+    eventConfirm: {
+        nav: _navQC,
+        confirm(){
+            const ask=_evUi.ask; _evUi.ask=''; phase='eventPage';
+            if(quitConfirmSel!==0){ Snd.sfxPlay('nav',cfg.music); return; }
+            Snd.sfxPlay('select',cfg.music);
+            if(ask==='end') eventEnd(); else if(ask==='leave') eventLeave();
+        },
+        back(){ _evUi.ask=''; phase='eventPage'; Snd.sfxPlay('nav',cfg.music); },
+        other(key){
+            if(key==='y'||key==='Y'){ quitConfirmSel=0; this.confirm(); return true; }
+            if(key==='n'||key==='N'){ quitConfirmSel=1; this.confirm(); return true; }
+            return false;
+        },
     },
     friends: {
         nav(key){

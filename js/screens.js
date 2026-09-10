@@ -2166,20 +2166,45 @@ function drawEventPage(){
         return;
     }
     const [word, wcol] = _evStateLine(e);
-    if(word) ct(word, CW/2, 50, wcol, FONT.HINT);
-    let y = 78;
-    if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += 20; }
-    // A PENDING row sees the public face and nothing else -- no count, no members, no
-    // tournament, no archive, no pass. That is the server's rule and the screen keeps it.
+    // The state and the schedule read as one line: the word is what is true NOW,
+    // the times are why -- and both are derived here rather than pushed, so a
+    // scheduled event flips on this frame with nothing having arrived.
+    const when = eventWhen(e);
+    if(word) ct(when ? word + '  ' + when : word, CW/2, 50, wcol, FONT.HINT);
+    let y = 72;
+    if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += 18; }
+    // A PENDING row sees the public face and NOTHING else -- no count, no members,
+    // no tournament, no archive, no pass. That is the server's rule, and a screen
+    // that showed more would only be showing what the next request will refuse.
     if(eventIsMember() && e.members != null){
-        ct((e.members|0) + ' JOINED', CW/2, y, '#7fff7f', FONT.HINT); y += 20;
-    } else if(!eventIsMember()){
-        ct('WAITING FOR APPROVAL', CW/2, y, '#ffd700', FONT.HINT); y += 20;
+        ct((e.members|0) + ' JOINED', CW/2, y, '#7fff7f', FONT.HINT); y += 18;
+    } else if(eventYou() === 'pending'){
+        ct('WAITING FOR THE ORGANIZER TO LET YOU IN', CW/2, y, '#ffd700', FONT.HINT); y += 18;
     }
     if(e.organizer_name) ct('HOSTED BY ' + String(e.organizer_name).substring(0, 15), CW/2, y, '#888', FONT.HINT);
-    menuItem('BACK', BACK_Y, true);
+    const rows = eventRows();
+    rows.forEach((r,i)=>menuItem(r.t, MENU_TOP + 40 + i*MENU_ROW, ui.sel===i));
+    // The line under the door row, because "closed" is a word people read two ways
+    // and the wrong reading is that the event itself has shut.
+    const door = rows[ui.sel];
+    if(door && door.go === 'access')
+        ct(e.closed ? 'A SCAN HAS TO BE APPROVED BY YOU' : 'A SCAN GETS IN STRAIGHT AWAY',
+           CW/2, MENU_TOP + 40 + ui.sel*MENU_ROW + 16, '#888', FONT.HINT);
+    menuItem('BACK', BACK_Y, ui.sel===rows.length);
     if(ui.msg) drawStatus(ui.msg);
-    ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// Two confirms, and both of them are terminal for somebody else: ending freezes
+// the event for every member, leaving gives up a row only a code can replace.
+function drawEventConfirm(){
+    const e = eventView(), ask = eventUi().ask;
+    drawConfirm({
+        title: ask === 'end' ? 'END IT FOR EVERYONE?' : 'LEAVE THIS EVENT?',
+        note:  ask === 'end' ? 'NO MORE JOINS, PASSES OR TOURNAMENTS - AND NO WAY BACK'
+                             : 'YOU WILL NEED THE CODE AGAIN TO COME BACK',
+        sel: quitConfirmSel, danger: true,
+        behind: () => drawEventPage(),
+    });
 }
 // The chooser, shown only when the list holds more than one room. The rows are the
 // server's answer verbatim -- a pending row says so and opens the public face only.
