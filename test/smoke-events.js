@@ -266,15 +266,22 @@ const DRIVER = `
     // A MONITOR may call state and monitor and NOTHING else, so it is offered nothing else.
     if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
     // An ordinary member: leave, and nothing that is the organizer's.
-    if(gos(mem()).join(',') !== 'pass,members,leave') throw 'an active member gets the QR, the roster and leave: '+gos(mem());
+    if(gos(mem()).join(',') !== 'monitor,pass,members,leave') throw 'an active member gets the screen, the QR, the roster and leave: '+gos(mem());
+    // ASKING IS NOT TAKING: the row is decided on monitor_allowed, never by calling
+    // 'monitor' to find out -- that call CLAIMS the slot, and would take the screen
+    // off a TV that is merely switched off.
+    if(gos(mem({monitor_allowed:false})).indexOf('monitor') >= 0) throw 'an event that offers no screen must not offer the row';
+    if(gos(mem({monitor_allowed:true})).indexOf('monitor') < 0) throw 'an event that offers one must';
+    // ABSENT reads as allowed: an older server that never says is not saying no.
+    if(gos(mem()).indexOf('monitor') < 0) throw 'an absent monitor_allowed is not a refusal';
     // A live tournament is a way IN for anybody in the room; opening one is the organizer's.
     const TT = { tid:'t1', code:'K7QMX2', state:'open', players:3, max:8 };
-    if(gos(mem({tourney:TT})).join(',') !== 'tourney,pass,members,leave') throw 'a member gets a way into the live one: '+gos(mem({tourney:TT}));
+    if(gos(mem({tourney:TT})).join(',') !== 'tourney,monitor,pass,members,leave') throw 'a member gets a way into the live one: '+gos(mem({tourney:TT}));
     if(gos(mem()).indexOf('newtourney') >= 0) throw 'only the organizer opens one';
     // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
     // its own room, because leaving would abandon what it is running.
     const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
-    if(gos(org()).join(',') !== 'newtourney,pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(gos(org()).join(',') !== 'newtourney,monitor,pass,members,pause,end,access') throw 'active organizer rows: '+gos(org());
     // ...and not a SECOND one while the first stands: the cap is the server's, and one
     // live per host is the same cap an ordinary tournament has.
     if(gos(org({tourney:TT})).indexOf('newtourney') >= 0) throw 'no second tournament while one is live';
@@ -285,14 +292,14 @@ const DRIVER = `
     // ...but a tournament RUNNING at the moment of the end plays on and is still
     // reachable: it began while the event was live, and a clock must not stop it.
     if(gos(org({state:'ended', tourney:TT})).indexOf('tourney') < 0) throw 'a running tournament survives the end';
-    if(gos(org({state:'paused'})).join(',') !== 'members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
+    if(gos(org({state:'paused'})).join(',') !== 'monitor,members,run,end,access') throw 'a paused event mints no pass: '+gos(org({state:'paused'}));
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
     // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
     // are not offered. The door still is -- it is not on the clock.
-    if(gos(org({starts:1})).join(',') !== 'newtourney,pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
+    if(gos(org({starts:1})).join(',') !== 'newtourney,monitor,pass,members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
     // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
-    if(gos(org({state:'ended'})).join(',') !== 'members') throw 'an ended event is still readable, and nothing else: '+gos(org({state:'ended'}));
-    if(gos(mem({state:'ended'})).join(',') !== 'members,leave') throw 'an ended event mints no pass, and stays readable';
+    if(gos(org({state:'ended'})).join(',') !== 'monitor,members') throw 'an ended event is still readable and still screenable: '+gos(org({state:'ended'}));
+    if(gos(mem({state:'ended'})).join(',') !== 'monitor,members,leave') throw 'an ended event mints no pass, and stays readable';
     _ev = null; _evEid = '';
     log('page rows ok: pending and monitor get nothing, the organizer cannot leave, a schedule takes the hand verbs');
 
@@ -339,6 +346,63 @@ const DRIVER = `
       if(_ev !== null) throw 'leaving must drop the page';
       if(eventAny()) throw 'leaving must drop the row from the list';
       if(phase !== 'multiplayer') throw 'the last event left lands on MULTIPLAYER, got '+phase;
+      // ---- THE MONITOR IS A SPECTATOR -------------------------------------
+      // It goes through the spectator path that already exists: the ordinary
+      // 'watch' signal, the same P2P feed, the same renderer. What this lane
+      // guards is that nothing else was invented -- every follow below has to
+      // come out as a specWatch and nothing more.
+      {
+        const _oWatch=specWatch, _oStop=specStop, _oSpec=netSpectating;
+        let watches=[], stops=0, on=false;
+        specWatch=(peer,tid,nid)=>{ watches.push(peer+'/'+tid+'/'+nid); on=true; };
+        specStop=()=>{ stops++; on=false; };
+        netSpectating=()=>on;
+        const roles=(nid,feeder)=>({ nid, feeder, players:[feeder,'22222222'], names:{} });
+        _evEid='K7QM'; _evMonNid=''; _evMonAskAt=0;
+        // NOTHING RUNNING: nothing is asked for, and nothing is held.
+        _evMon={ tourney:null }; _evMonFollow();
+        if(watches.length) throw 'no match, no ask';
+        // A MATCH IN FLIGHT: one ask, to the feeder the projection names.
+        _evMon={ tourney:{ tid:'t1', roles:roles('n1','11111111') } }; _evMonFollow();
+        if(watches.join(',') !== '11111111/t1/n1') throw 'one watch to the feeder: '+watches;
+        // ...and not a second one while it stands.
+        _evMonFollow(); _evMonFollow();
+        if(watches.length !== 1) throw 'a standing feed is not re-asked: '+watches.length;
+        // THE CURSOR MOVES: let the old feed go before asking for the next, because
+        // the two are different timelines and a watcher boots off a checkpoint.
+        _evMon={ tourney:{ tid:'t1', roles:roles('n2','22222222') } }; _evMonFollow();
+        if(stops !== 1) throw 'the old feed must be let go first: '+stops;
+        if(watches.length !== 2 || watches[1] !== '22222222/t1/n2') throw 'follow the cursor: '+watches;
+        // THE ROUND ENDS: the feed is let go and nothing is asked for.
+        _evMon={ tourney:{ tid:'t1', roles:null } }; _evMonFollow();
+        if(stops !== 2) throw 'a finished match releases the feed';
+        if(watches.length !== 2) throw 'nothing is asked for when nothing is played';
+        if(_evMonNid !== '') throw 'and no match is held';
+        // A refusal is said once and then STOPS: a screen nobody attends must not
+        // sit retrying forever.
+        const _oPost3=_evPost;
+        _evPost=async()=>({ json:null, status:409, body:{error:'monitor taken'} });
+        _evMonBusy=false; _evMonErr='';
+        _evMonT = 1;                                   // as if the tick were armed
+        await eventMonitorRead();
+        if(eventMonitorErr() !== 'monitor taken') throw 'a 409 must say the screen is taken';
+        if(_evMonT !== null) throw 'a refusal must stop the asking';
+        _evPost=async()=>({ json:null, status:403, body:{error:'no monitor'} });
+        _evMonBusy=false; _evMonErr=''; _evMonT = 1;
+        await eventMonitorRead();
+        if(eventMonitorErr() !== 'no monitor') throw 'a 403 must say there is no screen';
+        if(_evMonT !== null) throw 'and must stop too';
+        // A feed ending under a monitor returns to the SCREEN, not the 1vs1 menu --
+        // the match finished, the screen did not.
+        _evMonT = 1;
+        if(eventExitPhase() !== 'eventMonitor') throw 'a running monitor owns the way back';
+        eventMonitorStop();
+        if(eventExitPhase() !== '') throw 'a stopped one owns nothing';
+        _evPost=_oPost3; specWatch=_oWatch; specStop=_oStop; netSpectating=_oSpec;
+        _evMon=null; _evMonErr=''; _evMonNid=''; _evMonBusy=false;
+      }
+      R.steps.push('monitor ok: one specWatch per match, the cursor followed, a refusal said once and then stopped');
+
       // ---- an event tournament is an ORDINARY tournament ------------------
       // eid is a tag on it and a membership check on the way in. There is no
       // second state machine here and there must never be one.

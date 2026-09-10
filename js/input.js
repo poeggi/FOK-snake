@@ -306,7 +306,8 @@ const UI_INPUT = {
                 Snd.sfxPlay('nav',cfg.music); _evUi.ask=go; quitConfirmSel=1; phase='eventConfirm'; return;
             }
             Snd.sfxPlay('select',cfg.music);
-            if(go==='tourney') eventTourneyGo();
+            if(go==='monitor') eventMonitorEnter();
+            else if(go==='tourney') eventTourneyGo();
             else if(go==='newtourney') eventTourneyNew();
             else if(go==='pass') eventPassEnter();
             else if(go==='members') eventMembersEnter();
@@ -315,6 +316,12 @@ const UI_INPUT = {
             else if(go==='access') eventAccess();
         },
         back(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+    },
+    // Nothing is ever pressed on the monitor -- that is the point of it -- so the
+    // only input it takes is the one that walks off it.
+    eventMonitor: {
+        confirm(){},
+        back(){ Snd.sfxPlay('nav',cfg.music); eventMonitorStop(); },
     },
     eventQr: {
         confirm(){ Snd.sfxPlay('nav',cfg.music); eventPassLeave(); },

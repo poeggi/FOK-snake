@@ -2324,3 +2324,67 @@ function drawEventQr(){
     menuItem('BACK', BACK_Y, true);
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
+// THE EVENT MONITOR -- a screen somebody puts on a TV in the room. Nothing on it
+// is ever pressed and it never times out; it shows whatever is interesting at that
+// moment. While a match is running the SPECTATOR path owns the canvas instead
+// (drawDuelBoard, via the ordinary feed), so this draws the room between matches.
+//
+// Built so a section can be added without rearranging it: a stack of bands from
+// the top, each drawing only if it has something to say.
+function drawEventMonitor(){
+    drawGrid(); drawOvBg(0.92);
+    const m = eventMonitorView(), err = eventMonitorErr();
+    if(err){
+        ctg('EVENT MONITOR',CW/2,CH/2-40,'#ff8888',FONT.TITLE, GLOW.TITLE);
+        ct(err === 'monitor taken' ? 'ANOTHER SCREEN IS SHOWING THIS EVENT'
+                                   : 'THIS EVENT HAS NO SCREEN',
+           CW/2, CH/2, '#aaa', FONT.MENU);
+        ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    if(!m){
+        ctg('EVENT MONITOR',CW/2,CH/2-20,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+        ct('CONNECTING...', CW/2, CH/2+20, '#4a7a4a', FONT.HINT);
+        ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    ctg(String(m.name || 'EVENT').toUpperCase().substring(0, 22), CW/2, 30, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const [word, wcol] = _evStateLine(m);
+    const when = eventWhen(m);
+    ct(when ? word + '  ' + when : word, CW/2, 58, wcol, FONT.HINT);
+    // The figures an operator wants visible across a room: who is in, and who is
+    // still at the door. Big, because this is read from the far side of one.
+    ctg(String(m.members|0), CW/2-90, 110, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
+    ct('JOINED', CW/2-90, 140, '#888', FONT.HINT);
+    if((m.pending|0) > 0){
+        ctg(String(m.pending|0), CW/2+90, 110, '#ffd700', FONT.DISPLAY, GLOW.TITLE);
+        ct('WAITING', CW/2+90, 140, '#888', FONT.HINT);
+    }
+    const t = m.tourney, roles = t && t.roles;
+    let y = 180;
+    if(t){
+        ct('TOURNAMENT ' + String(t.state || '').toUpperCase(), CW/2, y, '#7fff7f', FONT.MENU); y += 26;
+        if(roles && roles.names){
+            const nm = id => String((roles.names || {})[id] || fmtFriendId(String(id))).substring(0, 12);
+            const ps = roles.players || [];
+            ct(nm(ps[0]) + '  VS  ' + nm(ps[1]), CW/2, y, '#ffd700', FONT.MENU); y += 24;
+            // What the screen is doing about it, in the words net-spec.js already
+            // uses for a tournament spectator -- there is one feed path and one
+            // vocabulary for how far along it is.
+            const st = (typeof specStatus === 'function') ? specStatus() : '';
+            if(st) ct(st, CW/2, y, '#888', FONT.HINT);
+        } else {
+            ct('WAITING FOR THE NEXT MATCH', CW/2, y, '#888', FONT.HINT);
+        }
+    } else {
+        ct('NO TOURNAMENT RUNNING', CW/2, y, '#555', FONT.HINT); y += 22;
+        const arch = Array.isArray(m.archive) ? m.archive : [];
+        for(const a of arch.slice(0, 3)){
+            const pod = (a.podium || []).slice(0, 3)
+                .map(x => String(x.name || fmtFriendId(String(x.id))).substring(0, 8));
+            ct((a.played|0) + ' PLAYED   ' + (pod.join(', ') || '-'), CW/2, y, '#888', FONT.HINT);
+            y += 16;
+        }
+    }
+    ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}

@@ -225,7 +225,7 @@ let _wasMenuPhase = false;   // menu-entry edge, so the sync-wait re-arms on EVE
 // Music-routing phase sets, hoisted to module scope: loop() checks these EVERY frame, so
 // building the arrays inline allocated two literals per frame. indexOf (ES5) rather than
 // .includes (ES2016) keeps the hot path parseable + working on old smart-TV engines.
-const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage','eventMembers','eventQr','eventConfirm'];
+const _MENU_PHASES = ['menu','settings','scores','credits','nameEntry','achievements','shop','resetConfirm','multiplayer','duelMenu','myId','duelInvite','duelLobby','friends','eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventConfirm'];
 const _GAME_PHASES = ['playing','dying','levelDone','duel','duelOver'];
 function menuTrack() { return cfg.musicStyle === 0 ? 'ambient'     : 'classicMenu'; }
 function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGame'; }
@@ -927,6 +927,9 @@ const SCREENS = {
     // The only event screen that animates on its own: the code on it expires while
     // you look at it, so the bar under it has to move whether anything arrives or not.
     eventQr:         { d:()=>drawEventQr(),         hud:false, freeze:true, anim:()=> true },
+    // Left alone on a TV: it animates so a feed opening, a cursor moving or a
+    // schedule flipping shows without anything having to arrive to wake it.
+    eventMonitor:    { d:()=>drawEventMonitor(),    hud:false, freeze:true, anim:()=> true },
     eventConfirm:    { d:()=>drawEventConfirm(),    hud:false, freeze:true },
     duelReady:    { d:()=>drawDuelBoard(simNow), hud:true },
     duel:         { d:()=>drawDuelBoard(simNow), hud:true },

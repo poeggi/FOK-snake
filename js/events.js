@@ -292,6 +292,10 @@ function eventRows(){
     // ...and the organizer is the one who may open it. The create is the NORMAL
     // dialog: same settings, same screen, posting an eid too.
     if(org && st === 'active' && !(e.tourney && e.tourney.tid)) rows.push({ t:'CREATE TOURNAMENT', go:'newtourney' });
+    // THE SCREEN FOR A TV. Offered only where the event says it has one -- asking
+    // is not taking, and `monitor_allowed` exists so this row can be decided
+    // without claiming the slot off a TV that is merely switched off.
+    if(eventMonitorOffered(e)) rows.push({ t:'EVENT MONITOR', go:'monitor' });
     // Any member may pass the event on while it is ACTIVE -- that is what makes it
     // spread in a room. Not before it starts, not while it is paused, and never
     // once it has ended: the server mints no pass then, so nothing here offers one.
@@ -576,10 +580,122 @@ function eventPassEnter(){
 // The codes go with the screen. They are minted from the server's clock and
 // nothing here is worth keeping for a screen that is closed.
 function eventPassLeave(){
-    if(_evPassT != null){ clearInterval(_evPassT); _evPassT = null; }
+    if(_evPassT != null){ if(typeof clearInterval === 'function') clearInterval(_evPassT); _evPassT = null; }
     _evPass = null;
     if(phase === 'eventQr'){ phase = 'eventPage'; _uiDirty = true; }
 }
+
+// ---- the monitor: a screen for a TV ----------------------------------------
+// THE MONITOR IS A SPECTATOR. It goes through the spectator path this client
+// already has -- the ordinary 'watch' signal, the same P2P feed a tournament
+// spectator gets, the same renderer. There is NO second transport here, no
+// second feed format and no monitor-only netcode branch, and there must never
+// be one. The only new thing is the screen.
+//
+// It is meant to be left alone: nothing on it is ever pressed, it never times
+// out, and it always shows whatever is interesting at that moment. ONE request
+// does everything -- `monitor` takes or renews the slot AND answers the whole
+// screen -- so it polls that and nothing else.
+//
+// The lease lapses within the online window (120 s, a contract constant), so it
+// is renewed at the same half-of-the-window rule the heartbeat uses: a missed
+// renewal never reads as an unplugged TV.
+const EV_MON_MS = 30000;         // renew well inside the window, and follow the bracket
+const EV_MON_WATCH_MS = 4000;    // how often an unanswered watch ask is put out again
+var _evMon = null;               // the last `monitor` answer -- the whole screen
+var _evMonT = null;
+var _evMonBusy = false;
+var _evMonErr = '';              // 'no monitor' | 'monitor taken' | '' -- said, then stopped
+var _evMonNid = '';              // the match we are watching, so a moved cursor is noticed
+var _evMonAskAt = 0;
+function eventMonitorView(){ return _evMon; }
+function eventMonitorErr(){ return _evMonErr; }
+// Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`
+// on `state` and on every `events` row precisely so this can be asked without
+// touching the slot -- the `monitor` call is the one that CLAIMS it, and using
+// it to find out would take the screen off a TV that is merely switched off.
+// ABSENT reads as allowed: an older server that never says is not saying no,
+// and the 403 settles it in that case.
+function eventMonitorOffered(e){
+    e = e || _ev;
+    return !!e && e.monitor_allowed !== false;
+}
+async function eventMonitorRead(){
+    if(_evMonBusy || !_evEid || !_evOk()) return false;
+    _evMonBusy = true;
+    const r = await _evPost('monitor');
+    _evMonBusy = false;
+    if(!r.json){
+        const err = String((r.body && r.body.error) || '');
+        // Two refusals, and they mean different things: somebody else has the
+        // screen, or this event does not offer one. Say which, and STOP -- a
+        // screen nobody attends must not sit retrying a refusal forever.
+        if(r.status === 409 || err === 'monitor taken'){ _evMonErr = 'monitor taken'; eventMonitorStop(true); }
+        else if(err === 'no monitor'){ _evMonErr = 'no monitor'; eventMonitorStop(true); }
+        return false;
+    }
+    _evMonErr = '';
+    _evMon = r.json;
+    _evMonFollow();
+    _uiDirty = true;
+    return true;
+}
+// FOLLOW THE CURSOR. `tourney` is the whole projection a participant reads, so
+// `roles` names the two players of the match in flight and `roles.you` is idle,
+// because a monitor has no seat. Ask one of them to watch, exactly as a
+// tournament spectator does -- and when the cursor moves, follow it to the next
+// pair. Every line of this hands over to net-spec.js.
+function _evMonFollow(){
+    if(typeof specWatch !== 'function' || typeof netSpectating !== 'function') return;
+    const t = _evMon && _evMon.tourney, roles = t && t.roles;
+    const nid = roles ? String(roles.nid || '') : '';
+    if(!nid){
+        // Nothing is being played. Let go of a feed for a match that has ended,
+        // so the next one starts clean.
+        if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
+        _evMonNid = ''; _evMonAskAt = 0;
+        return;
+    }
+    if(nid !== _evMonNid){
+        // A NEW match. Drop the old feed before asking for the next: the two are
+        // different timelines and a spectator boots from a checkpoint off the feed.
+        if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
+        _evMonNid = nid; _evMonAskAt = 0;
+    }
+    if(netSpectating()) return;                       // already watching this one
+    const now = _msgNow();
+    if(_evMonAskAt && now - _evMonAskAt < EV_MON_WATCH_MS) return;
+    _evMonAskAt = now;
+    // players[0] is the feeder, exactly as it is for a tournament spectator.
+    const feeder = String(roles.feeder || (roles.players || [])[0] || '');
+    if(/^[0-9a-f]{8}$/.test(feeder)) specWatch(feeder, String(t.tid || ''), nid);
+}
+function _evMonTick(){
+    if(phase !== 'eventMonitor'){ eventMonitorStop(); return; }
+    eventMonitorRead();
+}
+function eventMonitorEnter(){
+    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonAskAt = 0;
+    phase = 'eventMonitor';
+    eventMonitorRead();
+    if(_evMonT == null && typeof setInterval === 'function') _evMonT = setInterval(_evMonTick, EV_MON_MS);
+    _uiDirty = true;
+}
+// Stop asking and the slot frees itself -- there is nothing to give back and
+// nobody to tell. `keep` holds the screen up to show a refusal that has just
+// been read; everything else walks off it.
+function eventMonitorStop(keep){
+    if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
+    if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
+        specStop('');
+    _evMonNid = ''; _evMonAskAt = 0;
+    if(!keep){ _evMon = null; _evMonErr = ''; if(phase === 'eventMonitor') phase = 'eventPage'; }
+    _uiDirty = true;
+}
+// Where a feed that ends puts us back. net-session.js asks this the same way it
+// asks tourneyExitPhase, so a match ending under a monitor returns to the screen
+// rather than to the 1vs1 menu.
+function eventExitPhase(){ return _evMonT != null ? 'eventMonitor' : ''; }
 
 // ---- the reserved 'event' signal -------------------------------------------
 // Four payloads, and NOT ONE of them is a state change to apply on its own word.

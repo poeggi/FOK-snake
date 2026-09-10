@@ -1149,7 +1149,12 @@ function _netSessionEnd(msg, remoteBye){
     _netTeardown();
     if(wasGame && inGame){   // only while the online duel is actually still on screen
         inGame = false; _wsend({ t:'phase', phase:'menu' });
-        phase = (typeof tourneyExitPhase === 'function' && tourneyExitPhase()) || 'duelMenu';
+        // Where a duel that ended puts us back. A tournament answers with its own board;
+        // an event MONITOR answers with its screen, because a feed ending under one is the
+        // match finishing, not the screen being done with. The 1vs1 menu is the default.
+        phase = (typeof tourneyExitPhase === 'function' && tourneyExitPhase())
+             || (typeof eventExitPhase === 'function' && eventExitPhase())
+             || 'duelMenu';
         showHUD(false); Snd.musicStop();
         _duelMsg = msg; _duelMsgAt = _msgNow();
         Snd.sfxPlay('fail', cfg.music); _uiDirty = true;
