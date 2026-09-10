@@ -234,19 +234,19 @@ const DRIVER = `
     // A MONITOR may call state and monitor and NOTHING else, so it is offered nothing else.
     if(gos(mem({ you:{state:'monitor'} })).length) throw 'a monitor must be offered nothing else';
     // An ordinary member: leave, and nothing that is the organizer's.
-    if(gos(mem()).join(',') !== 'leave') throw 'a member gets leave and no verbs: '+gos(mem());
+    if(gos(mem()).join(',') !== 'members,leave') throw 'a member gets the roster and leave, no verbs: '+gos(mem());
     // The organizer of an UNSCHEDULED event drives it by hand -- and cannot leave
     // its own room, because leaving would abandon what it is running.
     const org = (x) => mem(Object.assign({ you:{state:'member',organizer:true} }, x||{}));
-    if(gos(org()).join(',') !== 'pause,end,access') throw 'active organizer rows: '+gos(org());
-    if(gos(org({state:'paused'})).join(',') !== 'run,end,access') throw 'paused organizer rows: '+gos(org({state:'paused'}));
+    if(gos(org()).join(',') !== 'members,pause,end,access') throw 'active organizer rows: '+gos(org());
+    if(gos(org({state:'paused'})).join(',') !== 'members,run,end,access') throw 'paused organizer rows: '+gos(org({state:'paused'}));
     if(gos(org()).indexOf('leave') >= 0) throw 'the organizer cannot leave its own event';
     // A SCHEDULED event walks itself: run/pause/end are 409 'scheduled', so they
     // are not offered. The door still is -- it is not on the clock.
-    if(gos(org({starts:1})).join(',') !== 'access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
+    if(gos(org({starts:1})).join(',') !== 'members,access') throw 'a scheduled event offers no hand verbs: '+gos(org({starts:1}));
     // ENDED is frozen and terminal. Nothing is offered to anybody but the way out.
-    if(gos(org({state:'ended'})).length) throw 'an ended event offers the organizer nothing';
-    if(gos(mem({state:'ended'})).join(',') !== 'leave') throw 'a member may still leave an ended event';
+    if(gos(org({state:'ended'})).join(',') !== 'members') throw 'an ended event is still readable, and nothing else: '+gos(org({state:'ended'}));
+    if(gos(mem({state:'ended'})).join(',') !== 'members,leave') throw 'a member may still read and leave an ended event';
     _ev = null; _evEid = '';
     log('page rows ok: pending and monitor get nothing, the organizer cannot leave, a schedule takes the hand verbs');
 
@@ -293,6 +293,46 @@ const DRIVER = `
       if(_ev !== null) throw 'leaving must drop the page';
       if(eventAny()) throw 'leaving must drop the row from the list';
       if(phase !== 'multiplayer') throw 'the last event left lands on MULTIPLAYER, got '+phase;
+      // ---- the roster is a VIEW, never a list this client keeps -----------
+      // Read on every open, re-read after every verb, dropped when the screen
+      // closes. Pending rows sort to the top because they are the only ones
+      // waiting on a decision.
+      const ROSTER = [
+        { id:'aaaaaaaa', name:'ANNA',  state:'member',  organizer:true,  friend:'accepted' },
+        { id:'bbbbbbbb', name:'BEN',   state:'banned',  organizer:false, friend:'none' },
+        { id:'cccccccc', name:'CARA',  state:'member',  organizer:false, friend:'none' },
+        { id:'dddddddd', name:'DIRK',  state:'pending', organizer:false, friend:'pending' },
+      ];
+      let asked=null;
+      _evPost=async(a,x)=>{ asked={a,x};
+        return a==='members' ? { json:{ok:true, members:ROSTER}, status:200, body:{} }
+                             : { json:{ok:true}, status:200, body:{} }; };
+      _ev = mem({ you:{state:'member',organizer:true} }); _evEid='K7QM'; _evUi.busy=false;
+      _evMem=null;
+      await eventMembersRead();
+      if(!_evMem || _evMem.length !== 4) throw 'the roster did not land';
+      const order = eventMemberRows().map(m=>m.name).join(',');
+      if(order !== 'DIRK,ANNA,CARA,BEN') throw 'pending first, banned last: '+order;
+      // The row's own 'friend' field picks the label, and disables the button
+      // where the server has already answered the question.
+      if(eventFriendLabel(ROSTER[0]) !== 'FRIENDS') throw 'an accepted friendship reads FRIENDS';
+      if(eventFriendLabel(ROSTER[3]) !== 'REQUEST SENT') throw 'a pending request reads REQUEST SENT';
+      if(eventFriendLabel(ROSTER[2]) !== 'ASK TO BE FRIENDS') throw 'a stranger can be asked';
+      if(eventFriendCan(ROSTER[0]) || eventFriendCan(ROSTER[3])) throw 'an answered question must not be askable again';
+      if(!eventFriendCan(ROSTER[2])) throw 'a stranger must be askable';
+      // ...and never ourselves, whatever the field says.
+      if(eventFriendCan({ id:getPlayerId(), friend:'none' })) throw 'nobody asks themselves to be friends';
+      // ONE verb over a row, and it re-reads rather than patching what it hoped for.
+      asked=null; _evUi.busy=false;
+      await eventRoster('dddddddd','member');
+      if(!asked || asked.a!=='members') throw 'a roster verb must be followed by a re-read, got '+(asked&&asked.a);
+      // Leaving the screen drops the view: there is nothing local to go stale.
+      eventMembersLeave();
+      if(_evMem !== null) throw 'the roster must not outlive its screen';
+      if(phase !== 'eventPage') throw 'the roster returns to the page';
+      _evMem=null; _evMemSel=0; _evMemAsk=null;
+      R.steps.push('roster ok: a view not a copy, pending first, the friend field picks the label, every verb re-reads');
+
       _evPost=_oPost; eventRead=_oRead; globalThis.fetch=_oFetch; cfg.offline=_oOff;
       _ev=null; _evEid=''; _evUi.busy=false; _evUi.msg=''; _evList=[];
       R.steps.push('page verbs ok: the door flips to the other state, every verb re-reads, a refusal names itself, leaving drops the row');

@@ -2225,3 +2225,42 @@ function drawEventChooser(){
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
+// The roster. The friends list is the model for the LOOK and nothing else: this is
+// a view of the server's rows, read on every open, and there is no local copy to
+// go stale. NO ONLINE STATE -- presence is friendship-gated and none is sent.
+function drawEventMembers(){
+    drawGrid(); drawOvBg(0.92);
+    ctg('MEMBERS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    const rows = eventMemberRows(), sel = eventMemberSel(), ui = eventUi(), org = eventIsOrganizer();
+    const ask = eventMemberAsk();
+    ct(org ? 'A: APPROVE / DECLINE / REMOVE   ESC: BACK' : 'A: ASK TO BE FRIENDS   ESC: BACK',
+       CW/2, 50, '#4a7a4a', FONT.HINT);
+    const startY = 80, rowH = 24;
+    rows.forEach((m,i)=>{
+        const y = startY + i*rowH, on = sel===i, st = String(m.state || 'member');
+        menuItem(String(m.name || fmtFriendId(String(m.id))).substring(0, 15), y, on);
+        // The right-hand column says what this row IS, and for a member that is the
+        // friendship -- which is the only thing anyone can do about it from here.
+        let tag, col;
+        if(st === 'pending'){ tag = 'WAITING'; col = '#ffd700'; }
+        else if(st === 'banned'){ tag = 'BANNED'; col = '#ff5555'; }
+        else if(m.organizer){ tag = 'ORGANIZER'; col = '#7fff7f'; }
+        else if(String(m.id) === getPlayerId()){ tag = 'YOU'; col = '#888'; }
+        else { tag = eventFriendLabel(m); col = eventFriendCan(m) ? '#888' : '#4a7a4a'; }
+        ct(tag, CW/2+180, y, col, FONT.HINT);
+    });
+    if(!rows.length) ct(ui.busy ? 'READING...' : 'NOBODY YET', CW/2, startY, '#555', FONT.HINT);
+    menuItem('BACK', BACK_Y, sel===rows.length);
+    if(ui.msg) drawStatus(ui.msg);
+    if(ask){
+        ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
+        drawGrid(); drawOvBg(0.92);
+        ctg(ask.title,CW/2,CH/2-84,'#ff8888',FONT.TITLE, GLOW.TITLE);
+        ct(String(ask.name || '').substring(0,15), CW/2, CH/2-48, '#aaa', FONT.MENU);
+        ct(ask.note, CW/2, CH/2-22, '#888', FONT.HINT);
+        _drawModalYesNo(ask.sel);
+        ct('L/R:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
+    }
+    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}

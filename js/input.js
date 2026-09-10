@@ -306,11 +306,79 @@ const UI_INPUT = {
                 Snd.sfxPlay('nav',cfg.music); _evUi.ask=go; quitConfirmSel=1; phase='eventConfirm'; return;
             }
             Snd.sfxPlay('select',cfg.music);
-            if(go==='run') eventRun();
+            if(go==='members') eventMembersEnter();
+            else if(go==='run') eventRun();
             else if(go==='pause') eventPause();
             else if(go==='access') eventAccess();
         },
         back(){ Snd.sfxPlay('nav',cfg.music); eventPageLeave(_eventBack); },
+    },
+    eventMembers: {
+        nav(key){
+            const a=eventMemberAsk();
+            if(a){ const t=_navLR(key); if(t>=0) a.sel=t; return; }
+            _evMemSel=_navStep(key, _evMemSel, eventMemberRows().length+1);
+        },
+        confirm(){
+            const a=eventMemberAsk();
+            if(a){
+                Snd.sfxPlay(a.sel===0?'select':'nav',cfg.music);
+                _evMemAsk=null;
+                if(a.sel===0) eventRoster(a.peer, a.set);
+                return;
+            }
+            const rows=eventMemberRows();
+            if(_evMemSel>=rows.length){ this.back(); return; }
+            const m=rows[_evMemSel], st=String(m.state||'member');
+            // THE ORGANIZER'S VERBS COME FIRST on a row that has one: a pending row
+            // is waiting on a decision, and a banned one on being let go. Only a
+            // plain member row is somebody you might want to know.
+            if(eventIsOrganizer() && st==='pending'){
+                // Approve is not destructive and goes straight through; declining
+                // drops the row and tells nobody, so it is the one that asks.
+                Snd.sfxPlay('select',cfg.music); eventRoster(m.id,'member'); return;
+            }
+            if(eventIsOrganizer() && st==='banned'){
+                Snd.sfxPlay('nav',cfg.music);
+                _evMemAsk={ peer:m.id, set:'none', sel:1, name:m.name||fmtFriendId(String(m.id)),
+                            title:'LIFT THE BAN?', note:'THE ROW GOES AND THEY MAY SCAN AGAIN' };
+                return;
+            }
+            if(eventIsOrganizer() && String(m.id)!==getPlayerId()){
+                Snd.sfxPlay('nav',cfg.music);
+                _evMemAsk={ peer:m.id, set:'none', sel:1, name:m.name||fmtFriendId(String(m.id)),
+                            title:'REMOVE FROM THE EVENT?', note:'THEY MAY SCAN AGAIN - BAN INSTEAD WITH B' };
+                return;
+            }
+            if(eventFriendCan(m)){ Snd.sfxPlay('select',cfg.music); eventAskFriend(m); return; }
+            Snd.sfxPlay('fail',cfg.music);
+        },
+        back(){
+            if(eventMemberAsk()){ _evMemAsk=null; Snd.sfxPlay('nav',cfg.music); _uiDirty=true; return; }
+            Snd.sfxPlay('nav',cfg.music); eventMembersLeave();
+        },
+        other(key){
+            const a=eventMemberAsk();
+            if(a){
+                if(key==='y'||key==='Y'){ a.sel=0; this.confirm(); return true; }
+                if(key==='n'||key==='N'){ a.sel=1; this.confirm(); return true; }
+                return false;
+            }
+            // BAN is its own key rather than its own row: it is rare, it is the
+            // organizer's answer to a pest, and it must never be one press away
+            // from REMOVE on a list somebody is scrolling.
+            if((key==='b'||key==='B') && eventIsOrganizer()){
+                const rows=eventMemberRows();
+                if(_evMemSel>=rows.length) return false;
+                const m=rows[_evMemSel];
+                if(String(m.id)===getPlayerId()||String(m.state||'')==='banned') return false;
+                Snd.sfxPlay('nav',cfg.music);
+                _evMemAsk={ peer:m.id, set:'banned', sel:1, name:m.name||fmtFriendId(String(m.id)),
+                            title:'BAN FROM THE EVENT?', note:'EVERY SCAN OF THEIRS IS REFUSED FROM NOW ON' };
+                return true;
+            }
+            return false;
+        },
     },
     eventConfirm: {
         nav: _navQC,

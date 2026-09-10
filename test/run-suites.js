@@ -66,6 +66,7 @@ const FAST = [
     ['test/check-compat.js',       200, 'shipped sources stay on the supported browser floor', false],
     ['test/duel-sync.js',         1700, 'P2P boundary clock burst: both sides agree on the peer offset and nudge to the shared midpoint'],
     ['test/check-ascii.js',        200, 'ASCII-only sources', false],
+    ['test/check-drivers.js',      200, 'suite driver bodies survive template-literal insertion', false],
     ['test/box-odds.js',          1600, 'mystery-box economy'],
     ['test/duel-warn.js',         1700, 'duel banners: CONNECTION LOST is pure silence, OUT OF SYNC tracks a hash divergence'],
     ['test/sim-invariants.js',    1600, 'sim invariants'],

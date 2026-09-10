@@ -286,6 +286,9 @@ function eventRows(){
     // A MONITOR may call state and monitor and nothing else, so it is offered
     // nothing else. Its own screen arrives with the monitor itself.
     if(_evYou() === 'monitor') return rows;
+    // The roster, read fresh every time it is opened. A member sees who is in the
+    // room; the organizer sees the door as well.
+    rows.push({ t:'MEMBERS', go:'members' });
     if(org && !scheduled && st !== 'ended'){
         // RUN and PAUSE are the same row wearing the state it would move to. END
         // is its own, and it is behind a confirm because it is terminal for
@@ -345,6 +348,105 @@ async function eventLeave(){
     phase = eventAny() ? 'eventChooser' : 'multiplayer';
     _evUi.sel = 0; _evMsg('YOU HAVE LEFT');
     _uiDirty = true;
+    return true;
+}
+
+// ---- the members screen ----------------------------------------------------
+// A VIEW OF THE SERVER'S ROWS, never a list this client keeps. Read on every
+// open, re-read after every verb, and dropped when the screen closes. The
+// friends list is the model for the LOOK and for nothing else -- its local copy
+// plus its startup reconciliation is precisely what this must not have.
+//
+// NO ONLINE STATE, and none is asked for: presence is friendship-gated in this
+// API and being in the same room does not make two people friends.
+var _evMem = null;       // the last `members` answer, or null before the first
+var _evMemSel = 0;
+var _evMemAsk = null;    // the roster verb awaiting a confirm: {peer, set, label}
+function eventMembers(){ return _evMem || []; }
+function eventMemberSel(){ return _evMemSel; }
+function eventMemberAsk(){ return _evMemAsk; }
+// Pending rows FIRST, because they are the only ones that need a decision -- and
+// they reach us at all only when we are the organizer. Everything else keeps the
+// server's order.
+function eventMemberRows(){
+    const all = _evMem || [];
+    const pend = [], rest = [], banned = [];
+    for(const m of all){
+        const st = String(m.state || 'member');
+        if(st === 'pending') pend.push(m);
+        else if(st === 'banned') banned.push(m);
+        else rest.push(m);
+    }
+    return pend.concat(rest, banned);
+}
+async function eventMembersEnter(){
+    _evMemSel = 0; _evMemAsk = null;
+    phase = 'eventMembers';
+    _uiDirty = true;
+    return eventMembersRead();
+}
+async function eventMembersRead(){
+    if(!_evEid || !_evOk()) return false;
+    const r = await _evPost('members');
+    if(!r.json){
+        if(r.status === 403 || r.status === 404){ _evMem = []; _evMsg('YOU CANNOT SEE THIS ROSTER', true); }
+        return false;
+    }
+    _evMem = Array.isArray(r.json.members) ? r.json.members : [];
+    if(_evMemSel >= eventMemberRows().length + 1) _evMemSel = 0;
+    _uiDirty = true;
+    return true;
+}
+function eventMembersLeave(){
+    _evMem = null; _evMemAsk = null; _evMemSel = 0;
+    phase = 'eventPage';
+    _uiDirty = true;
+}
+// The organizer's ONE verb over a row. 'none' is decline, remove and unban all
+// at once: the row is dropped and the person may scan again. The organizer
+// APPROVES, never adds -- a peer with no row is a 404, and there is no screen
+// here that could produce one.
+async function eventRoster(peer, set){
+    if(_evUi.busy || !_evOk()) return false;
+    _evUi.busy = true; _evMsg('...');
+    const r = await _evPost('roster', { peer:String(peer), set:String(set) });
+    _evUi.busy = false;
+    if(!r.json){
+        const err = String((r.body && r.body.error) || '');
+        _evMsg(err === 'not the organizer' ? 'ONLY THE ORGANIZER CAN DO THAT' : 'THAT DID NOT WORK', true);
+        return false;
+    }
+    _evMsg('');
+    // Re-read rather than patch: the roster is the server's, and a verb that
+    // half-worked would otherwise leave this screen showing what we hoped for.
+    await eventMembersRead();
+    return true;
+}
+// ASK TO BE FRIENDS is the ordinary friend.php request, unchanged. The row's own
+// `friend` field picks the label and disables the button where a request is
+// already out or the friendship exists -- the server has already answered the
+// question, so nothing here has to guess at it.
+function eventFriendLabel(m){
+    const f = String((m && m.friend) || 'none');
+    if(f === 'accepted') return 'FRIENDS';
+    if(f === 'pending') return 'REQUEST SENT';
+    return 'ASK TO BE FRIENDS';
+}
+function eventFriendCan(m){ return String((m && m.friend) || 'none') === 'none'
+                                && String(m.id) !== getPlayerId(); }
+async function eventAskFriend(m){
+    if(!eventFriendCan(m) || _evUi.busy) return false;
+    if(typeof netFriendRequest !== 'function'){ _evMsg('NOT RIGHT NOW', true); return false; }
+    _evUi.busy = true; _evMsg('ASKING...');
+    // netFriendRequest declines with null where it already holds the answer -- a
+    // request out, a friendship, a ban, its own 30 s retry gap. That is not a
+    // failure and must not be reported as one; the re-read below says what is true.
+    const r = await netFriendRequest(String(m.id));
+    _evUi.busy = false;
+    _evMsg(r && r.state === 'accepted' ? 'YOU ARE FRIENDS' : 'REQUEST SENT');
+    // The roster carries the `friend` field, so the answer to "did that land"
+    // is the same read as everything else on this screen.
+    await eventMembersRead();
     return true;
 }
 
