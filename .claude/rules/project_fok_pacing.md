@@ -7,12 +7,12 @@ requests per client - and each half is useless without the other.
 ## The measurement that drives everything
 
 - Every queue wait over a millisecond in live snapshots was served by an ALREADY
-  WARM worker: PHP-FPM child spawn is dead as an explanation. Contention sits
+  WARM worker: worker spawn is dead as an explanation. Contention sits
   ABOVE the pool (connection / HTTP2-stream layer, where a static file also
   sits), and the cost is a ~51 ms slice paid PER REQUEST IN FLIGHT, not per
   byte. Coalescing N requests into one saves (N-1) slices; a bytes argument was
   never the case.
-- The host serves ~20-21 concurrent PHP requests; a HELD long poll owns a worker
+- The host serves ~20-21 concurrent requests; a HELD long poll owns a worker
   for its whole wait (one 8-player lobby holds ~8). The steady heartbeat is
   not the problem; bursts on top of it are (a round board wakes 8 clients in the
   same ms).
@@ -25,24 +25,43 @@ requests per client - and each half is useless without the other.
 
 - ONE background gate: every background request queues behind _netGate(); pure
   rule _netGapWait(now, flight) - anything of ours in flight beats any elapsed
-  time, otherwise the wait is what is left of the gap. A HELD poll deliberately
-  does NOT count (parked server-side; counting it would park every heartbeat
-  behind the poll a lobby holds open by design).
-- THREE lanes: `true` = paced background; NET_BG_IDLE = also stands aside for a
-  held poll, priority low (items.php); NET_BG_SOLO = never beside another
-  request of ours, NO spacing (signal.php, an unheld poll - what a player is
-  actively waiting for).
+  time, otherwise the wait is what is left of the gap.
+- ONE AT A TIME (API 4.10): a PARKED HOLD of ours counts as traffic for every
+  lane but the exempt one (_netGapFlight). A hold owns a server worker for its
+  whole wait, so the request sent beside it is the one that can take the host to
+  a concurrency it has not served - and TWO beside it race each other and BOTH
+  pay the full wait, which is the thing the second one was sent to avoid. Both
+  kinds of hold count: the poll (_netPollHeld) and DEPRECATED(relay)'s held GET
+  (_netRelayHeld). A THIRD is never right.
+- THREE lanes: `true` = paced background, and it waits a hold out (the beat, the
+  roster, a score); NET_BG_IDLE = the same plus priority low, nobody is waiting
+  at all (items.php); NET_BG_SOLO = the EXEMPT lane - never beside another
+  request of ours, NO spacing, and it may go beside a parked hold because a
+  player is waiting on it right now: signal.php, start.php, an unheld poll,
+  tournament.php, friend.php `request`/`accept`, match.php seek/cancel.
+- THE SLOT: what is due goes out AFTER the poll answers and BEFORE the next one
+  is armed - one hold at most. A screen holds its poll for as long as it is
+  open, so without the slot the background lane would starve behind it. The poll
+  re-arms through _netPollArm, which lets the gate drain first; what it owes is
+  the pure rule _netArmHold(gapN, flight), testable without a clock exactly like
+  _netGapWait. Bounded on NET_GAP_TRIES: a request that never settles must not
+  cost the mailbox its arm.
+- Ordering, from the contract: folding a request into the poll beats sending it
+  beside the poll, and waiting for the poll to answer beats both.
 - An ABORTED held poll is still parked on its server worker until its own
-  deadline (PHP learns of a gone client only when it writes; the hold loop
-  writes nothing). So the client never arms a held poll while the last one
+  deadline (the server learns of a gone client only when it writes; the hold
+  loop writes nothing). So the client never arms a held poll while the last one
   it aborted may still be parked (_netPollHoldEnd / _netPollNotBefore, set
   on foreground by _netPollResume), and neither the DataChannel opening nor
   a reconnect aborts the poll in flight any more: it returns by itself, and
   a held one wakes on the first re-handshake signal. Two workers for one
   client was the shape a 27 ms queue wait on an empty server had.
 - Ungated on purpose: the HELD poll (it IS the parked slot the contract allows)
-  and time.php in _netClockMs (a gate wait would land inside the measured RTT,
-  hence in the clock offset).
+  and t.txt in _netClockMs. A request that never starts work on the server is
+  not a request for the rule at all - the contract says so in as many words -
+  and a gate wait there would land inside the measured RTT, hence in the clock
+  offset. The probe still COUNTS as flight while it runs, so nothing of ours
+  goes out beside it.
 - ONE EVENT, ONE CALL: a roles sheet carries the whole match, so it IS a state
   read, and NOTHING reads state on a timer: the server runs its own deadlines on
   the poll every participant sends (server 1.4.16+), so `state` is only ever a
@@ -121,8 +140,17 @@ requests per client - and each half is useless without the other.
   different targets (the server's clock vs the pair's midpoint). They never
   overlap in time - the sync refuses during play - but do not add a sync site
   that can run mid-match.
+- The burst does NOT stamp `_netSync.at`. That field says when the SERVER was
+  last measured, and the burst aligns onto a different clock; stamping it there
+  let a match's boundaries postpone the age-based sweep for as long as the
+  boundaries kept coming, and a tournament evening is nothing but boundaries.
+- An outgoing `pts` is the reading we hold, never backdated. The server allows
+  `pts_ahead_max_ms` (200 ms), warns at half of it and refuses past it, and it
+  LOGS what it sees - so a backdated stamp would only hide our own anchor drift
+  from the one diagnostic that reports it. The 400 on a refusal still forces a
+  re-sync (signal.php and the relay envelope both read it).
 - ALREADY SAFE, do not "fix": the clock SOURCE is the server's static t.txt
-  stamped by mod_headers, so the stamp never queues for an FPM worker. The
+  stamped by the web server itself, so the stamp never queues for a worker. The
   residual risk is only the RTT sample around it.
 
 ## The beat is a contract constant

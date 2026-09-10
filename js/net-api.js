@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 10;   // built against 4.10 = ONE AT A TIME: nothing of ours leaves beside a PARKED POLL unless a player is waiting on it right now -- the duel handshake (signal, start), a tournament action, a friend request, a seek -- and never two of them, because two beside the hold race each other and BOTH pay the full queue wait; everything nobody is waiting for (the beat, the roster, a score) waits for the poll to answer, one hold at most. t.txt is not a request for the rule: it is static, starts no PHP, and the clock sweep must never queue behind a hold. A pts is refused only past pts_ahead_max_ms (200 ms), warned at half of it, so what we send is the reading we hold -- unbackdated, which is what makes the server's log evidence about our anchor; 4.9 = the poll is a COMPLETE beat: it carries `api` and the server's `debug` instruction on every body it sends (the two things a client cannot know are due, so it can never be its job to ask), and takes `aa` / `fl` / `tl` / `de` / `db` -- the hello answers a screen holding a poll used to send a second request for. A client on such a screen sends nothing beside its poll at all, not even the 60 s beat, because the poll is one; what stays hello's is what the CLIENT knows is due and the server cannot (a rename, a latency reading, its nets, and duel_with during a game, where nothing holds a poll anyway). Why it is worth a minor: a request sent beside a parked poll can be the one that takes the host to a concurrency its PHP-FPM pool has not served before, and pays ~130 ms for the fork; 4.8 = a host may REPLACE the tournament it holds: a create answered 409 (already hosting) is re-sent with replace:true after the player confirms, ending the old one exactly as their own leave would and opening the new one in the same call, so a client never ends up holding neither (the old lobby is told 'host opened a new one'); 4.7 = a duel is ANNOUNCED as it begins: start.php records it (both peers call it at the match-identity moments), the heartbeat's duel_with refreshes it and hello's duel_end clears it at teardown, with duel_private marking a duel that counts everywhere but is never attributed to a person; 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 10;   // built against 4.10 = ONE AT A TIME: nothing of ours leaves beside a PARKED POLL unless a player is waiting on it right now -- the duel handshake (signal, start), a tournament action, a friend request, a seek -- and never two of them, because two beside the hold race each other and BOTH pay the full queue wait; everything nobody is waiting for (the beat, the roster, a score) waits for the poll to answer, one hold at most. t.txt is not a request for the rule: it is static, starts no work on the server, and the clock sweep must never queue behind a hold. A pts is refused only past pts_ahead_max_ms (200 ms), warned at half of it, so what we send is the reading we hold -- unbackdated, which is what makes the server's log evidence about our anchor; 4.9 = the poll is a COMPLETE beat: it carries `api` and the server's `debug` instruction on every body it sends (the two things a client cannot know are due, so it can never be its job to ask), and takes `aa` / `fl` / `tl` / `de` / `db` -- the hello answers a screen holding a poll used to send a second request for. A client on such a screen sends nothing beside its poll at all, not even the 60 s beat, because the poll is one; what stays hello's is what the CLIENT knows is due and the server cannot (a rename, a latency reading, its nets, and duel_with during a game, where nothing holds a poll anyway). Why it is worth a minor: a request sent beside a parked poll can be the one that takes the host to a concurrency its worker pool has not served before, and pays ~130 ms for the fork; 4.8 = a host may REPLACE the tournament it holds: a create answered 409 (already hosting) is re-sent with replace:true after the player confirms, ending the old one exactly as their own leave would and opening the new one in the same call, so a client never ends up holding neither (the old lobby is told 'host opened a new one'); 4.7 = a duel is ANNOUNCED as it begins: start.php records it (both peers call it at the match-identity moments), the heartbeat's duel_with refreshes it and hello's duel_end clears it at teardown, with duel_private marking a duel that counts everywhere but is never attributed to a person; 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -176,7 +176,7 @@ function _netSigLog(line){ _netDbg.sigLog.unshift(line); if(_netDbg.sigLog.lengt
 // ---- OUR OWN TRAFFIC, and the server's own queue (API 4.4) ----
 // The clock offset is this device's ONE binding onto the shared clock, and HALF of any
 // delay a sample meets lands straight in it. Measured on the live server through a single
-// duel: five requests waited exactly 51ms before any PHP ran, on workers that were already
+// duel: five requests waited exactly 51ms before any work ran, on workers that were already
 // warm -- so they had queued behind EACH OTHER, and most of them were this client's own
 // signal.php burst. A clock sample taken beside that burst inherits the same wait, which
 // is why a sample only counts when nothing of ours is in flight.
@@ -189,7 +189,7 @@ var _netFlight = 0;
 // queueing behind itself; the same wait against a 1 is a genuinely busy host, and they
 // are different problems. Never reset -- it is the worst moment of the session.
 var _netFlightMax = 0;
-// q_ms is how long a request waited for a PHP worker BEFORE any PHP ran. It is the one
+// q_ms is how long a request waited for a worker BEFORE any work ran. It is the one
 // figure no client can measure for itself: the wait is over before our code starts, and
 // inside our round trip it is indistinguishable from network delay. A non-trivial reading
 // means the host is queueing in this very instant.
@@ -219,7 +219,7 @@ var _netResync = false;
 const NET_HELLO_MS = 60000;   // between heartbeats: half the 120 s online window, so one missed beat never reads as offline
 const NET_POLL_S   = 5;       // the longest hold poll.php serves, in whole seconds (`wait=`)
 // One thing does depend on the moment, and it is the biggest lever there is: a held poll
-// owns a PHP worker for its whole duration, so a server under pressure withdraws `hold`
+// owns a server worker for its whole duration, so a server under pressure withdraws `hold`
 // first, by tier. A 4.3 server sends none of this and this default -- exactly what the
 // client did before -- stands.
 var _netPace = { hold:true };
@@ -228,8 +228,8 @@ var _netPace = { hold:true };
 // where one held poll used to sit.
 const NET_UNHELD_EVERY = NET_POLL_S;
 // ---- the background gate (the contract's 100ms request gap, 4.4) ----
-// What a request costs this host is not its bytes: it is the slice it waits for a PHP
-// worker before any PHP runs, and that slice is paid PER REQUEST IN FLIGHT. Two of ours
+// What a request costs this host is not its bytes: it is the slice it waits for a
+// worker before any work runs, and that slice is paid PER REQUEST IN FLIGHT. Two of ours
 // leaving in the same instant pay it twice -- which is what a 135ms hello and a 127ms
 // friend list from one client in one second are a picture of.
 //
@@ -254,7 +254,7 @@ const NET_GAP_TRIES = 100;     // ~2s of patience, counted in steps rather than 
 // heartbeat, the roster, the scores -- and may go out beside a poll parked server-side.
 // NET_BG_IDLE is the tier nobody is waiting for at all (items, the cloud backup), and it
 // stands aside for a HELD poll as well: parked or not, that poll owns a connection the
-// whole time, and the slice is paid per request in flight up there, not per running PHP.
+// whole time, and the slice is paid per request in flight up there, not per running worker.
 // Bounded like every other wait here, so an idle-tier request is delayed, never dropped.
 const NET_BG_IDLE = 'idle';
 // ...and NET_BG_SOLO is the third: a request that must not go out BESIDE another of ours,
@@ -289,7 +289,7 @@ function _netGapWait(now, flight, tier){
     return Math.max(0, _netSentAt + NET_GAP_MS - now);
 }
 // What the gate hands the rule above: our own requests in flight, plus a PARKED HOLD of ours
-// for every lane but the exempt one. A hold owns a PHP worker for its whole wait, so a request
+// for every lane but the exempt one. A hold owns a worker for its whole wait, so a request
 // sent beside it is the one that can take the host to a concurrency it has not served -- and
 // two beside it race each other and BOTH pay the full wait, which is why nothing but the
 // exempt lane may. The exempt lane is what a player is waiting on right now, where waiting
@@ -297,7 +297,7 @@ function _netGapWait(now, flight, tier){
 // worker does not know which endpoint parked it.
 // ...and a RUNNING clock sweep counts as traffic on every lane, probes and the gaps between
 // them alike: the contract's sweep is exclusive, nothing of ours leaves until its last sample
-// is back. The sweep itself is not gated: t.txt starts no PHP, so it is not a request for
+// is back. The sweep itself is not gated: t.txt starts no work, so it is not a request for
 // this rule at all and has nothing to gain by queueing behind a hold.
 function _netGapFlight(tier){ return _netFlight + (_netSyncBusy ? 1 : 0) + ((tier !== NET_BG_SOLO && (_netPollHeld || _netRelayHeld)) ? 1 : 0); }
 // How many callers are waiting at the gate right now. The poll reads it: it must not park a
@@ -543,7 +543,7 @@ var _netSync = { ofs:null, rtt:-1, at:0 };
 // far past any crystal error, which is exactly the "not normal wall drift" the field reported.
 // performance.now() is a monotonic clock: it never decreases and is not subject to adjustments;
 // timeOrigin pins it to a wall reading captured ONCE at context start, so this reads like a wall
-// clock but cannot be nudged afterward. Whole ms (PHP is_int rejects a fractional pts). The
+// clock but cannot be nudged afterward. Whole ms (the server rejects a fractional pts). The
 // staleness/silence timers below stay on Date.now() -- those genuinely want adjustable wall time.
 function _wall(){
     return (typeof performance !== 'undefined' && performance.now && performance.timeOrigin != null)
@@ -569,8 +569,8 @@ function _netLatFromSamples(rtts){
 }
 let _netSyncBusy = false;
 // The clock source, in PTS milliseconds. PREFERRED: a header on a STATIC file, so
-// Apache stamps it without PHP ever running. That matters because the wait for a
-// PHP-FPM worker happens BEFORE php starts -- php cannot see it, cannot subtract it,
+// the web server stamps it without a worker ever running. That matters because the wait
+// for a worker happens BEFORE it starts -- it cannot see it, cannot subtract it,
 // and it would otherwise land in our offset as if it were network delay, exactly
 // when the server is busiest. time.php stays as the fallback for when the header is
 // unreadable (a proxy stripping it, CORS).
@@ -1160,7 +1160,7 @@ let _netPollDown = false;   // the last poll failed: the next success is the mai
 // that loop so the gate's own inputs are all in one file.
 let _netPollHeld = false, _netRelayHeld = false;
 // When the server lets the worker of the last HELD poll go, and before when no held poll
-// may be armed. An abort closes the socket on our side and nothing else: PHP learns of a
+// may be armed. An abort closes the socket on our side and nothing else: the server learns of a
 // gone client only when it writes, and the hold loop writes nothing until it answers, so
 // an aborted hold stays parked on its worker until its own deadline. Arming another one
 // before then puts this client on two workers, which on a small pool is the next request
@@ -1197,7 +1197,7 @@ async function _netPollOnce(){
     const _held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId'
                || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyRound' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
     // ...and only while the server still lets us. `hold:false` withdraws holding outright
-    // (a held poll owns a PHP worker for its whole duration -- the single biggest thing one
+    // (a held poll owns a worker for its whole duration -- the single biggest thing one
     // idle client costs a busy host); the 1 Hz tick below then carries the mailbox instead,
     // which is slower per signal but costs the server a worker only while it answers.
     const held = _netPace.hold && _held;

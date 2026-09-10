@@ -114,7 +114,7 @@ async function _netRelayPost(s, o){
     try {
         const _t0 = performance.now();
         // pull (API 3.2): piggyback our OWN inbound onto this reply, so receive survives a
-        // saturated FPM pool that stalls the held GET. Harmless on a 3.1 server (ignored),
+        // saturated worker pool that stalls the held GET. Harmless on a 3.1 server (ignored),
         // but the reply is DRAINED, so we MUST consume messages[] below -- which we do.
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
@@ -201,7 +201,7 @@ async function _netRelayLoop(s){
         // (leaving a match, or unload), long after we stopped caring about it.
         s.relayAbort = (typeof AbortController === 'function') ? new AbortController() : null;
         // Held: parked server-side, so not traffic the clock sync has to wait out -- but it
-        // owns a PHP worker exactly as a held poll does, and the gate is told so.
+        // owns a worker exactly as a held poll does, and the gate is told so.
         _netRelayHeld = true;
         const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=' + NET_POLL_S,
                                 s.relayAbort ? s.relayAbort.signal : undefined, true);

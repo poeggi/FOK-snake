@@ -420,7 +420,7 @@ runTest('SMOKE-NET', `
 
     // ---- the hold decision + the queue gauge (hello pace, q_ms; API 4.4) ----
     // What one idle client costs a contended host is dominated by the HELD poll: it owns a
-    // PHP worker for its whole duration. That is why hold is a lever of its own and the only
+    // worker for its whole duration. That is why hold is a lever of its own and the only
     // thing left in the pace block -- and why withdrawing it has to fall back to reading the mailbox
     // on the tick, never to reading nothing.
     {
@@ -490,7 +490,7 @@ runTest('SMOKE-NET', `
         _netPaceOf({pace:{}});
         if(_netPace.hold!==false) throw 'an empty pace block must leave the hold in force alone';
         _netPaceOf({pace:{hold:true}});
-        // q_ms is the server's own report of how long this request queued before PHP ran.
+        // q_ms is the server's own report of how long this request queued before any work ran.
         // Half of that wait lands straight in the clock offset, so a fresh reading over the
         // floor is what marks a sample unclean -- and it must EXPIRE, not latch: a host that
         // recovered would otherwise keep this client on the degraded path for ever.
@@ -650,7 +650,7 @@ runTest('SMOKE-NET', `
         if(_netFlight!==1) throw 'an unheld request must count as in flight, got ' + _netFlight;
         if(!(_netFlightMax>=1)) throw 'the field readout must keep the high-water mark of our own concurrency';
         // (c2) ...for the GATE, which is a different question from the wire being busy. A poll
-        // parked server-side owns a PHP worker for its whole wait, so a request sent beside it
+        // parked server-side owns a worker for its whole wait, so a request sent beside it
         // is the one that can take the host to a concurrency it has not served -- and two beside
         // it race each other and BOTH pay the full wait. So every lane stands aside for a held
         // poll except the exempt one, which is what a player is waiting on right now. Bounded by
@@ -1216,7 +1216,7 @@ runTest('SMOKE-NET', `
     _netSend({ t:'pi' });                     // any peer message: every one stamps PTS
     const _pk=JSON.parse(sent[sent.length-1]);
     if(typeof _pk.pts!=='number') throw 'synced peers must stamp PTS on every message';
-    if(!Number.isInteger(_pk.pts)) throw 'pts must be whole ms: PHP is_int() rejects a fraction';
+    if(!Number.isInteger(_pk.pts)) throw 'pts must be whole ms: the server rejects a fraction';
     _netHandleMsg(JSON.stringify({t:'pi', pts:netPts()-42}));
     if(Math.round(_netDbg.lag)<40||Math.round(_netDbg.lag)>50) throw 'lag estimate broken: '+_netDbg.lag;
     // The peer PTS delta, averaged: a separate figure from the server-RTT latency we

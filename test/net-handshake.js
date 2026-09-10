@@ -1030,7 +1030,7 @@ try {
   });
 
   // ------------------------------------------------------------- the PTS contract
-  // pts is unix MILLISECONDS and the server checks it with PHP's strict is_int().
+  // pts is unix MILLISECONDS and the server checks it with a strict integer test.
   // The offset is derived from rtt/2, so it carries a fraction: an un-rounded pts
   // serialises as 1784190294971.8 and is rejected 400 'invalid pts' -- silently
   // killing the signal. Intermittent, because rtt/2 sometimes lands whole.
@@ -1041,7 +1041,7 @@ try {
       const body = await A.__realSignalBody(B_ID, 'invite');
       if(body.pts === undefined) throw new Error('no pts stamped at all');
       if(!Number.isInteger(body.pts))
-        throw new Error('fractional pts (PHP is_int() rejects this with 400): ' + JSON.stringify(body.pts) + ' from offset ' + ofs);
+        throw new Error('fractional pts (the server rejects this with 400): ' + JSON.stringify(body.pts) + ' from offset ' + ofs);
       if(JSON.stringify(body).indexOf('.') >= 0)
         throw new Error('a decimal point reached the wire: ' + JSON.stringify(body));
     }

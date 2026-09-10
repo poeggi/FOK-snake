@@ -1,9 +1,9 @@
 // What one hello.php round trip costs against the REAL server, in the shapes the client
-// sends it, next to two controls that separate the wire from the PHP from hello's own work:
+// sends it, next to two static controls that separate the wire from what hello costs on it:
 //
 //   t.txt            a static file, the clock source: connection + HTTP cost only
-//   version.php      PHP that touches nothing: FPM + PHP start-up on top of that
-//   hello            the heartbeat ({id, name})
+//   version.txt      the other static file: the same wire cost, no work behind it
+//   hello            the heartbeat ({id, name}): worker start-up plus hello's own work
 //   hello +tourneys  the tournament lobby's 5 s shape (asks for the announce list)
 //   hello +held poll the same, while this id's own 5 s poll is parked server-side
 //
@@ -17,7 +17,7 @@
 // Every lane sends its samples one at a time, past the contract's 100 ms gap, so nothing of
 // ours stacks except the parked poll in the last lane. Per lane: min / median / max of the
 // client-measured round trip, the largest q_ms the server reports (what a request waited for
-// a worker before any PHP ran), and the raw samples in order.
+// a worker before any of its work ran), and the raw samples in order.
 //
 // Then the rounds: hello alone, then a poll parked and a hello 200 ms into it, the poll
 // waited out. A q_ms that shows up only beside the poll is the pool finding a second worker.
@@ -113,7 +113,7 @@ async function main() {
     console.log('[hello-live] ' + BASE + '   ' + proto + ' in ' + Math.round(performance.now() - t0) + ' ms   as ' + NAME
         + ', ' + N + ' samples per lane, ' + GAP_MS + ' ms apart   (* = first request on the connection)');
     const tTxt = await lane('t.txt', () => timed('GET', '/api/t.txt'));
-    const ver = await lane('version.php', () => timed('GET', '/api/version.php'));
+    const ver = await lane('version.txt', () => timed('GET', '/api/version.txt'));
     const plain = await lane('hello', () => hello());
     await lane('hello +tourneys', () => hello({ tourneys: true }));
 
@@ -125,8 +125,8 @@ async function main() {
     check('held poll', [p], [200, 204]);
     console.log('  held poll        came back after ' + Math.round(p.ms) + ' ms (' + p.status + ')');
 
-    console.log('  medians: wire ' + Math.round(tTxt) + '  +php ' + Math.round(ver - tTxt)
-        + '  +hello work ' + Math.round(plain - ver) + '  (ms)');
+    console.log('  medians: wire ' + Math.round(tTxt) + '  wire noise ' + Math.round(ver - tTxt)
+        + '  +server work ' + Math.round(plain - tTxt) + '  (ms)');
 
     console.log('[hello-live] rounds: hello alone, then one hello 200 ms into a parked poll');
     for (let i = 0; i < ROUNDS; i++) {

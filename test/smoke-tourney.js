@@ -2,7 +2,7 @@
 // a client is allowed to have in flight at the one moment it is busiest -- the millisecond a
 // match is dealt. The server measured the old behaviour on a live 3-client tournament: ONE
 // client had three requests open, tournament.php and start.php left in the SAME millisecond,
-// and both waited 128ms for a PHP worker while the pool mean over that window was 2.5ms. The
+// and both waited 128ms for a worker while the pool mean over that window was 2.5ms. The
 // host was idle; the client was queueing behind itself.
 //
 // Three rules come out of that, and every one of them fails SILENTLY -- the match still
