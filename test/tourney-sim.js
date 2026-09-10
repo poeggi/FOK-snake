@@ -36,7 +36,7 @@
 // winner to walk up the bracket -- so the two pilots that routinely end 0:0 fly only in the
 // round-robin, where a draw is worth half a point to each; a knockout that still draws is
 // REPLAYED on a fresh seed, which is what the real server does with one too.
-const { mkWorld, MAX_DIRECT, BREAK_MS, TT_OVER_MS } = require('./tourney-world');
+const { mkWorld, MAX_DIRECT, BREAK_MS, TT_OVER_MS, TT_READ_MS } = require('./tourney-world');
 const { runSpec } = require('./spec-driver');
 const { autopilot, jouster, collider } = require('./duel-driver');
 const DIRS = { auto:autopilot, joust:jouster, kill:collider };
@@ -315,7 +315,9 @@ async function passBreak(seen){
         C[i].draw();
     }
     srv.mute(IDS[deaf], true);
-    clock(BREAK_MS + 100);
+    // The longer of the two waits: the server's deadline and the client's own reading floor
+    // (TT_READ_MS -- the standings the whole field is reading, ended for everybody by one press).
+    clock(Math.max(BREAK_MS, TT_READ_MS) + 100);
     await C[hi].pick('CONTINUE');
     await settleAsync();
     await pump(1);

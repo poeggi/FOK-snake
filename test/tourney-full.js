@@ -21,7 +21,7 @@
 // The world -- the scripted server and the harness clients -- is test/tourney-world.js,
 // the same one tourney-e2e.js drives. The clients are the shipping client.
 const { mkWorld, MAX_LEVEL, BREAK_MS, BREAK_TTL_MS,
-        TT_OVER_MS } = require('./tourney-world');
+        TT_OVER_MS, TT_READ_MS } = require('./tourney-world');
 
 const IDS   = ['aaaa0001', 'aaaa0002', 'aaaa0003', 'aaaa0004',
                'aaaa0005', 'aaaa0006', 'aaaa0007', 'aaaa0008'];
@@ -173,7 +173,10 @@ async function passBreak(mode){
     const early = C[hi].rows().filter(r => r.t === 'CONTINUE')[0];
     A(early && !early.en && /^[0-9]+S$/.test(early.note),
       'break ' + done + ': CONTINUE was live immediately, note "' + (early ? early.note : '-') + '"');
-    clock(BREAK_MS + 100);
+    // The board is held for the LONGER of the two waits: the server's own deadline and the
+    // client's reading floor (TT_READ_MS -- the standings are what the whole field is reading,
+    // and the host's press ends it for everybody). Which one binds is a question about numbers.
+    clock(Math.max(BREAK_MS, TT_READ_MS) + 100);
     A(C[hi].rows().filter(r => r.t === 'CONTINUE')[0].en,
       'break ' + done + ': CONTINUE stayed dark after the wait ran out');
 

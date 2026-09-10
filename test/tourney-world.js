@@ -454,9 +454,13 @@ function driverSrc(id){
         + '    sel: function(){ return tourneySel(); },\n'
         // LEFT/RIGHT on the armed row, through the real handler: a value row dials,
         // a command row refuses and hands the key back.
-        + '    lr: function(right){ var h = UI_INPUT[phase];\n'
-        + '                         if(!h || !h.other) throw "no other on " + phase;\n'
-        + '                         return h.other(right ? "ArrowRight" : "ArrowLeft"); },\n'
+        // Through the REAL dispatcher, never straight into a handler: the horizontal arrows are
+        // GDIRS keys, so handleKey routes them to nav() and marks them handled -- a hook calling
+        // other() directly would happily validate a dial the game can never reach (it did, for
+        // exactly that long). Consumed = the row list actually changed.
+        + '    lr: function(right){ var b = tourneyRows().map(function(r){ return r.t; }).join("|");\n'
+        + '                         handleKey(right ? "ArrowRight" : "ArrowLeft", null);\n'
+        + '                         return tourneyRows().map(function(r){ return r.t; }).join("|") !== b; },'
         + '    arm: function(t){ var rs = tourneyRows(); for(var i = 0; i < rs.length; i++) if(rs[i].t.indexOf(t) === 0){ _ttUi.sel = i; return i; } throw "no row " + t; },\n'
         + '    pick: function(t){ C.arm(t); return tourneyRows()[_ttUi.sel].act(); },\n'
         + '    has: function(t){ return tourneyRows().some(function(r){ return r.t.indexOf(t) === 0; }); },\n'

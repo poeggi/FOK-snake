@@ -199,6 +199,18 @@ function _ttUiInput(escTo){
         // end of the list it came from, exactly as if the cursor had been sitting off it.
         nav(key){
             const rows = tourneyRows(), n = rows.length, i = tourneySel(rows);
+            // LEFT/RIGHT dials the armed value row, the way a multi-value SETTINGS row dials --
+            // and it belongs HERE rather than in other(), because the dispatcher routes every
+            // GDIRS key to nav() and marks it handled, and GDIRS holds the horizontal pair too.
+            // An arrow therefore NEVER reaches other() in the real path, so a dial written there
+            // is dead code that only a test calling other() directly can see. A horizontal menu
+            // swipe funnels through the same handleKey (_menuHDir), so key and gesture stay one
+            // rule and one place.
+            if(key === 'ArrowLeft' || key === 'ArrowRight'){
+                const r = i >= 0 ? rows[i] : null;
+                if(!r || !r.adj || r.en === false) return;
+                r.adj(key === 'ArrowRight'); Snd.sfxPlay('nav', cfg.music); return;
+            }
             if(i >= 0){ _ttUi.sel = _navStep(key, i, n); return; }
             if(key !== 'ArrowUp' && key !== 'ArrowDown') return;
             _ttUi.sel = key === 'ArrowUp' ? n - 1 : 0; Snd.sfxPlay('nav', cfg.music);
@@ -211,14 +223,6 @@ function _ttUiInput(escTo){
             if(p.i < 0){ _ttUi.sel = 0; Snd.sfxPlay('nav', cfg.music); return; }
             if(!r || r.en === false){ Snd.sfxPlay('fail', cfg.music); return; }
             _ttUi.sel = p.i; r.act();
-        },
-        // A value row dials either way, the way a multi-value SETTINGS row does: the row
-        // owns the value, the handler owns the blip. Everything else ignores LEFT/RIGHT.
-        other(key){
-            if(key !== 'ArrowLeft' && key !== 'ArrowRight') return false;
-            const p = pick(), r = p.i >= 0 ? p.rows[p.i] : null;
-            if(!r || !r.adj || r.en === false) return false;
-            r.adj(key === 'ArrowRight'); Snd.sfxPlay('nav', cfg.music); return true;
         },
         // ESC presses the BACK row rather than going around it. On the lobby that row also
         // cancels or leaves, and an ESC that quietly slipped past it would strand a room of
