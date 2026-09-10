@@ -466,6 +466,55 @@ const DRIVER = `
     _ev = null; _evEid = '';
     log('page rows ok: a member gets JOIN and never CREATE, a reserved monitor gets its screen, the organizer cannot leave');
 
+    // ---- AND THE PAGE HAS TO FIT VERTICALLY TOO ---------------------------
+    // Found on an iPad: with the full organizer row set the archive was drawn on
+    // top of the last row AND of the status line, and the note under the selected
+    // row landed on the row below it. Rows are MENU_ROW apart -- there is no gap
+    // between them to put a line in, which is why every other menu puts the note
+    // in the STATUS BAND (drawMenuRows). These numbers are EV_PAGE, what the draw
+    // uses.
+    {
+        const src = String(drawEventPage);
+        for(const k of ['EV_PAGE.ROWS_TOP','EV_PAGE.ARCH_GAP','EV_PAGE.ARCH_ROW','EV_PAGE.ARCH_KEEP'])
+            if(src.indexOf(k) < 0) throw 'the page draw does not use '+k+', so this lane checks nothing';
+        // The note is in the band, not under the row: nothing may be drawn at a y
+        // derived from the selected row's own position.
+        if(src.indexOf('ui.sel*MENU_ROW') >= 0) throw 'a line is still placed under the selected row, where the next row is';
+        if(src.indexOf('drawStatus(') < 0) throw 'the page must put its note in the status band';
+
+        // The widest row set the page can actually produce, measured rather than
+        // assumed -- a row added later has to be counted by this lane too.
+        let widest = 0;
+        for(const o of [org(), org({state:'paused'}), org({state:'ended'}), org({starts:1}),
+                        org({tourney:TT}), mem(), mem({tourney:TT}), mem({state:'paused'})])
+            widest = Math.max(widest, gos(o).length);
+        if(widest < 7) throw 'expected the organizer row set to be the widest, got '+widest;
+
+        // Rows must not reach the status band, at any count the page can produce.
+        const lastRow = EV_PAGE.ROWS_TOP + (widest - 1) * MENU_ROW;
+        if(lastRow + 10 > STATUS_Y) throw 'the row block reaches the status band: last row at '+lastRow;
+        if(lastRow >= BACK_Y) throw 'the row block reaches BACK';
+
+        // ...and the archive takes only what is left, which at the widest is none.
+        const roomAt = (n) => (STATUS_Y - EV_PAGE.ARCH_KEEP) - (EV_PAGE.ROWS_TOP + (n-1)*MENU_ROW + EV_PAGE.ARCH_GAP);
+        const fitsAt = (n) => Math.max(0, Math.floor(roomAt(n) / EV_PAGE.ARCH_ROW) - 1);
+        if(fitsAt(widest) !== 0) throw 'the widest row set must leave no room for the archive, got '+fitsAt(widest);
+        if(fitsAt(5) < 1) throw 'a member row set should still show some archive';
+        // ...and it has to START clear of the last ROW, not just end above the band.
+        // Both are centred text, so the gap has to hold half of each glyph.
+        const need = FONT.MENU/2 + FONT.HINT/2 + 2;
+        if(EV_PAGE.ARCH_GAP < need) throw 'the archive starts on top of the last row: gap '+EV_PAGE.ARCH_GAP+' needs '+need;
+        // Whatever it draws has to end above the band.
+        for(const n of [1,3,5,7]){
+            const f = fitsAt(n);
+            if(!f) continue;
+            const bottom = EV_PAGE.ROWS_TOP + (n-1)*MENU_ROW + EV_PAGE.ARCH_GAP + f*EV_PAGE.ARCH_ROW;
+            if(bottom > STATUS_Y - EV_PAGE.ARCH_KEEP) throw 'archive at '+n+' rows runs into the status band: '+bottom;
+        }
+    }
+    log('page rows fit ok: the block clears the status band, and the archive takes only what is left');
+
+
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }
 

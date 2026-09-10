@@ -506,6 +506,10 @@ function _drawScoreTabs(){
 // At 15 characters it ran straight through the date on one side and the tag on
 // the other. These are the numbers the friends list uses for the same problem.
 const EV_ROSTER = { NAME_MAX: 10, DATE_R: 180, TAG_C: 470 };
+// THE EVENT PAGE'S VERTICAL BUDGET. The header runs to 108, the rows start below
+// it, and everything under them has to fit between the last row and the status
+// band at STATUS_Y. Named here so the guard reads the same numbers the draw does.
+const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, ARCH_GAP: 20, ARCH_ROW: 14, ARCH_KEEP: 12 };
 // A name clipped to fit its column, with the tail marked rather than silently cut.
 // Shared by the friends list and the event roster: same font, same problem.
 function clipName(nm, max){
@@ -2210,26 +2214,32 @@ function drawEventPage(){
     }
     if(e.organizer_name) ct('HOSTED BY ' + String(e.organizer_name).substring(0, 15), CW/2, y, '#888', FONT.HINT);
     const rows = eventRows();
-    // The ARCHIVE, at the foot: every tournament this room has finished, newest
-    // first, with who stood on the podium. It is the record an evening leaves
-    // behind, and ending the event freezes it rather than clearing it.
-    const arch = Array.isArray(e.archive) ? e.archive : [];
-    if(arch.length){
-        let ay = BACK_Y - 16 - Math.min(2, arch.length) * 14;
-        ct('PLAYED HERE', CW/2, ay - 14, '#4a7a4a', FONT.HINT);
-        for(const a of arch.slice(0, 2)){ ct(eventArchiveLine(a), CW/2, ay, '#888', FONT.HINT); ay += 14; }
-    }
-    rows.forEach((r,i)=>menuItem(r.t, MENU_TOP + 40 + i*MENU_ROW, ui.sel===i, ctx, !eventRowOk(r)));
-    // The line under the SELECTED row: why a dark row is dark, or what the door
-    // would do -- "closed" is a word people read two ways, and the wrong reading is
-    // that the event itself has shut.
+    rows.forEach((r,i)=>menuItem(r.t, EV_PAGE.ROWS_TOP + i*MENU_ROW, ui.sel===i, ctx, !eventRowOk(r)));
+    // THE NOTE GOES IN THE STATUS BAND, where every other menu puts it
+    // (drawMenuRows). Under the row it sat between two rows MENU_ROW apart and
+    // overlapped the next one -- there is no gap there to put a line in.
     const cur = rows[ui.sel];
-    const line = !cur ? ''
+    const note = !cur ? ''
         : cur.go === 'access' ? (e.closed ? 'A SCAN HAS TO BE APPROVED BY YOU' : 'A SCAN GETS IN STRAIGHT AWAY')
         : (!eventRowOk(cur) && cur.note) ? cur.note : '';
-    if(line) ct(line, CW/2, MENU_TOP + 40 + ui.sel*MENU_ROW + 16, '#888', FONT.HINT);
+    // THE ARCHIVE gets what is left between the last row and that band, and NOTHING
+    // if that is not a line's worth. It is the least important thing on the page --
+    // the monitor screen shows it too -- so it is the one that yields. A full
+    // organizer row set leaves no room at all, which is how it came to be drawn on
+    // top of both the last row and the status line.
+    const arch = Array.isArray(e.archive) ? e.archive : [];
+    if(arch.length){
+        const top = EV_PAGE.ROWS_TOP + Math.max(0, rows.length - 1) * MENU_ROW + EV_PAGE.ARCH_GAP;
+        const room = (STATUS_Y - EV_PAGE.ARCH_KEEP) - top;
+        const fits = Math.min(arch.length, Math.floor(room / EV_PAGE.ARCH_ROW) - 1);
+        if(fits > 0){
+            ct('PLAYED HERE', CW/2, top, '#4a7a4a', FONT.HINT);
+            let ay = top + EV_PAGE.ARCH_ROW;
+            for(const a of arch.slice(0, fits)){ ct(eventArchiveLine(a), CW/2, ay, '#888', FONT.HINT); ay += EV_PAGE.ARCH_ROW; }
+        }
+    }
     menuItem('BACK', BACK_Y, ui.sel===rows.length);
-    if(ui.msg) drawStatus(ui.msg);
+    drawStatus(ui.msg || note);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // Two confirms, and both of them are terminal for somebody else: ending freezes
