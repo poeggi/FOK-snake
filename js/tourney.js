@@ -44,7 +44,7 @@ var _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, eid:'', busy:false, contAt:0, from:'', to:'', ask:null };
+var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, eid:'', home:'', busy:false, contAt:0, from:'', to:'', ask:null };
 // stakes and lvl are what the CREATE screen collects before there is a tournament to put
 // them on. They live here rather than in cfg because they describe one tournament, not
 // this device: the next one is configured from its own screen.
@@ -189,6 +189,13 @@ function _ttRealName(id){
 }
 // Where _duelExit / _netSessionEnd should land while a tournament is held: back to the
 // picture, never to the 1vs1 menu. '' means "not ours, keep your default".
+// WHERE STEPPING OFF THE TOURNAMENT SCREENS LANDS -- the door we came in by. A
+// tournament reached from an EVENT belongs to that event's page, and that is the screen
+// to give back; one reached through the multiplayer door gives back what the caller
+// names. The fallback is the caller's because the two exits are at different heights:
+// off the boards is off tournaments altogether (MULTIPLAYER), off a running one is back
+// to the list of rooms, where there is something else to do.
+function tourneyHome(fallback){ return _ttUi.home || fallback || 'multiplayer'; }
 function tourneyExitPhase(){
     if(!_tt) return '';
     if(_tt.state === 'done') return 'tourneyPodium';
@@ -381,7 +388,7 @@ function _ttDrop(msg){
     if(typeof specGrant === 'function') specGrant([]);
     _ttDisarm();
     _ttUi.sel = -1; _ttUi.contAt = 0;
-    if(_TT_PHASES[phase]) phase = 'tourneyLobby';
+    if(_TT_PHASES[phase]) phase = tourneyHome('tourneyLobby');
     if(msg) _ttMsg(msg, true); else _uiDirty = true;
 }
 
@@ -730,6 +737,7 @@ function tourneyMailboxLost(){
 // ---- lobby actions -------------------------------------------------------------------
 function tourneyEnter(){
     _ttUi.sel = -1; _ttUi.msg = '';
+    _ttUi.home = '';   // the multiplayer door: this is the room to give back
     // A tournament link parked a code at boot and this is the first screen that can spend it.
     // It waits for the hello, because the join is gated on the server's minor version and an
     // unanswered hello reads exactly like an old server. Unspent, it STAYS parked: a code is
@@ -789,6 +797,9 @@ function tourneySetupOpen(eid){
     // standing: a create started from the ordinary tournament screen after one
     // started from an event page must not inherit the room.
     _ttUi.eid = String(eid || '');
+    // ...and it is the same fact that says where the exits lead: a create carrying an
+    // event was started from that event's page and belongs back on it.
+    _ttUi.home = _ttUi.eid ? 'eventPage' : '';
     _ttUi.sel = 0;   // an ordinary list, top row armed -- and the top row is CREATE, which is what this screen is for
     phase = 'tourneySetup';
     Snd.sfxPlay('select', cfg.music);
@@ -920,7 +931,7 @@ async function tourneyLeave(to){
     if(!_tt) return;
     const tid = _tt.tid;
     _ttDrop('');
-    phase = to || 'tourneyLobby'; _ttUi.sel = -1;
+    phase = to || tourneyHome('tourneyLobby'); _ttUi.sel = -1;
     Snd.sfxPlay('nav', cfg.music);
     await _ttPost('leave', { tid });
 }
@@ -976,7 +987,7 @@ function tourneyRows(){
         // freely. Fixed at create, like the stakes -- there is no turning it on later.
         rows.push(_ttDial('SPEED TOURNAMENT: ' + (_ttUi.speed ? 'ON' : 'OFF'),
                           _ttUi.speed ? 1 : 0, 2, v => { _ttUi.speed = !!v; }));
-        rows.push({ t:'BACK', en:true, act:() => { phase = 'tourneyLobby'; Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        rows.push({ t:'BACK', en:true, act:() => { phase = tourneyHome('tourneyLobby'); Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
         return rows;
     }
     if(!_tt){
@@ -1025,7 +1036,7 @@ function tourneyRows(){
         // Acknowledging it and stepping off it are the same press, so they are one row -- and
         // it is the one exit that IS pre-selected, because there is nothing left to lose by
         // pressing it and nobody still playing behind it.
-        rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = 'multiplayer'; Snd.sfxPlay('nav', cfg.music); } });
+        rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = tourneyHome(); Snd.sfxPlay('nav', cfg.music); } });
     } else {
         // A board opened from a ceremony has to lead back to it. ESC off the ceremony is how
         // a spectator gets here -- reading the standings while the match they are watching is
@@ -1061,9 +1072,9 @@ function tourneyRows(){
     // says what leaving actually costs: a lobby you walk away from is a lobby other people are
     // still sitting in, waiting for a start that is never coming, so walking away IS cancelling
     // it. Off a tournament altogether, BACK is just BACK.
-    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { phase = 'multiplayer'; Snd.sfxPlay('nav', cfg.music); } });
+    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { phase = tourneyHome(); Snd.sfxPlay('nav', cfg.music); } });
     else if(_tt.state === 'open')
         rows.push({ t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
-                    en:true, act:() => tourneyAsk('multiplayer') });
+                    en:true, act:() => tourneyAsk(tourneyHome()) });
     return rows;
 }

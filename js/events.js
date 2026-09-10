@@ -518,15 +518,34 @@ async function eventAskFriend(m){
 // same deadlines, same caps, same screens. `eid` is a tag on it and a membership
 // check on the way in, and that is the whole of the difference. Nothing here is a
 // second implementation of anything -- both of these hand over to tourney.js.
-function eventTourneyGo(){
+async function eventTourneyGo(){
     const t = _ev && _ev.tourney;
     if(!t || !t.tid || typeof tourneyJoin !== 'function'){ _evMsg('NO TOURNAMENT RIGHT NOW', true); return false; }
+    if(_evUi.busy) return false;
+    // THE PAGE HOLDS UNTIL THE JOIN LANDS. Moving to the tournament screen first shows
+    // the room-PICKING screen -- CREATE TOURNAMENT, JOIN BY CODE, the list of open
+    // lobbies -- for as long as the request takes: a menu nobody asked for, in front of
+    // a player who is already in the room they wanted, and pressable while it stands.
+    // The join says what happened; until it does, this page says JOINING.
+    _ttUi.home = 'eventPage';   // ...and this is the room the tournament gives back
+    if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });   // a tournament door like any other
+    _evUi.busy = true; _evMsg('JOINING...');
     // By tid, which is what the state answer names it by. A non-member is refused
     // 403 by the server -- that refusal IS the secrecy, and it is the server's to
     // make, not this screen's to anticipate.
-    phase = 'tourneyLobby';
-    if(typeof tourneyEnter === 'function') tourneyEnter();
-    tourneyJoin(t.tid);
+    await tourneyJoin(t.tid);
+    _evUi.busy = false;
+    if(typeof tourneyActive !== 'function' || !tourneyActive()){
+        // tourneyJoin has already worked out what went wrong and sounded it. This puts
+        // the same words where the player is actually looking, without a second sound.
+        uiMsg(_evUi, (tourneyUi() && tourneyUi().msg) || 'COULD NOT JOIN', ''); _evUi.bad = true;
+        return false;
+    }
+    // Whatever it turned out to be: a lobby waiting to start, or a bracket already
+    // moving. tourneyExitPhase answers the second, and an open lobby is the first.
+    const v = tourneyView();
+    phase = (v && v.state !== 'open' && tourneyExitPhase()) || 'tourneyLobby';
+    _uiDirty = true;
     return true;
 }
 // The NORMAL create dialog, carrying the room it was opened from. The event page

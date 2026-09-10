@@ -1638,7 +1638,15 @@ function drawDuelBoard(now) {
         // so the vote is replaced by what is actually about to happen. Offering it anyway
         // invited a vote that could not be honoured, on a screen the tournament takes back
         // by itself a moment later.
-        if(typeof tourneyActive === 'function' && tourneyActive()){
+        // A WATCHER NEVER VOTES. It is not in this duel and has no rematch to offer,
+        // so the vote is replaced by what is actually happening. The old gate was
+        // tourneyActive(), which covered a tournament spectator only because that
+        // one IS in the tournament -- an event MONITOR is deliberately in no
+        // participant list, fell straight through, and was asked to PLAY AGAIN.
+        if(typeof netSpectating === 'function' && netSpectating()){
+            ctg('WATCHING' + _ttDots(), CW/2, CH/2-18, '#ff9900', FONT.MENU, GLOW.TITLE);
+            ctx.save(); ctx.shadowBlur=0; ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT); ctx.restore();
+        } else if(typeof tourneyActive === 'function' && tourneyActive()){
             ctg('BACK TO THE TOURNAMENT' + _ttDots(), CW/2, CH/2-18, '#ff9900', FONT.MENU, GLOW.TITLE);
             ctx.save(); ctx.shadowBlur=0; ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT); ctx.restore();
         } else {
@@ -1844,9 +1852,8 @@ function drawTourneyCode(){
 }
 // Round 1 is a table of points; every round after it is a tree of nodes. Both are the
 // server's own words -- standings rows and bracket nodes, rendered, never recomputed.
-function drawTourneyBracket(){
-    const t = tourneyView(), ui = tourneyUi();
-    if(!t){ drawTourneyLobby(); return; }
+// ...and the same seam on the standings/bracket board, for the same reason.
+function _ttBracketBoard(t){
     drawGrid(); drawOvBg(0.92);
     const ko = (t.round | 0) >= 2;
     _ttHead(_ttBoard(t), t.round | 0, t);
@@ -1906,6 +1913,11 @@ function drawTourneyBracket(){
         });
         if(!(t.bracket || []).length) ct('THE BRACKET IS BEING DEALT' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
     }
+}
+function drawTourneyBracket(){
+    const t = tourneyView(), ui = tourneyUi();
+    if(!t){ drawTourneyLobby(); return; }
+    _ttBracketBoard(t);
     _ttDrawRows(296, 26);
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -1995,9 +2007,12 @@ function _ttBreakName(b, id){
     for(const r of ((b && b.rows) || [])) if(r && String(r.id) === String(id)) return _ttRowName(r);
     return _ttName(id);
 }
-function drawTourneyRound(){
-    const t = tourneyView(), b = t && tourneyBreak();
-    if(!b){ drawTourneyBracket(); return; }
+// THE BOARD ITSELF -- the head, the line about what is coming, and the standings --
+// with NO action rows and no status line. Split out because the EVENT MONITOR shows
+// exactly this and may show nothing else: _ttDrawRows reads _tt, which a monitor does
+// not have (it is deliberately in no participant list), so the screen could not be
+// reused whole. The picture is the shared part; who may press what is not.
+function _ttRoundBoard(t, b){
     drawGrid(); drawOvBg(0.92);
     // The headline is what is ABOUT to be played, not what just finished: the table below
     // already says how the last round went, and the thing everybody wants first is whether
@@ -2044,6 +2059,11 @@ function drawTourneyRound(){
         if(r.gone) _ttCol('GONE', CW/2 + 231, y, '#555', FONT.HINT);
     });
     if(!rows.length) ct('NO STANDINGS' + _ttDots(), CW/2, 110, '#555', FONT.HINT);
+}
+function drawTourneyRound(){
+    const t = tourneyView(), b = t && tourneyBreak();
+    if(!b){ drawTourneyBracket(); return; }
+    _ttRoundBoard(t, b);
     _ttDrawRows(284, 26);
     const ui = tourneyUi();
     if(ui.msg) drawStatus(ui.msg);
@@ -2401,26 +2421,32 @@ function drawEventMonitor(){
     // screen; without it this is whoever asked first, and it keeps the slot only
     // while it keeps asking. Worth saying on the wall: the two fail differently.
     ct(m.reserved ? "THIS EVENT'S OWN SCREEN" : 'HOLDING THE SCREEN', CW/2, 160, '#4a7a4a', FONT.HINT);
-    const t = m.tourney, roles = t && t.roles;
-    let y = 180;
-    if(t){
-        ct('TOURNAMENT ' + String(t.state || '').toUpperCase(), CW/2, y, '#7fff7f', FONT.MENU); y += 26;
-        if(roles && roles.names){
-            const nm = id => String((roles.names || {})[id] || fmtFriendId(String(id))).substring(0, 12);
-            const ps = roles.players || [];
-            ct(nm(ps[0]) + '  VS  ' + nm(ps[1]), CW/2, y, '#ffd700', FONT.MENU); y += 24;
-            // What the screen is doing about it, in the words net-spec.js already
-            // uses for a tournament spectator -- there is one feed path and one
-            // vocabulary for how far along it is.
-            const st = (typeof specStatus === 'function') ? specStatus() : '';
-            if(st) ct(st, CW/2, y, '#888', FONT.HINT);
-        } else {
-            ct('WAITING FOR THE NEXT MATCH', CW/2, y, '#888', FONT.HINT);
-        }
-    } else {
-        ct('NO TOURNAMENT RUNNING', CW/2, y, '#555', FONT.HINT); y += 22;
-        const arch = Array.isArray(m.archive) ? m.archive : [];
-        for(const a of arch.slice(0, 3)){ ct(eventArchiveLine(a), CW/2, y, '#888', FONT.HINT); y += 16; }
+    const t = m.tourney;
+    // WHILE A TOURNAMENT RUNS, THE SCREEN IS THE TOURNAMENT'S. The monitor answer
+    // carries the WHOLE projection a participant reads, so it draws the participant's
+    // own boards -- the standings between rounds, the bracket during one -- rather
+    // than a second, poorer rendering of the same numbers. What it does not draw is
+    // the action rows: a monitor presses nothing and is in no participant list.
+    if(t && (t['break'] || t.roles || t.state === 'running')){
+        if(t['break']) _ttRoundBoard(t, t['break']);
+        else _ttBracketBoard(t);
+        // ...and one line saying whose screen this is, since the boards above are
+        // written for somebody who is playing.
+        const roles = t.roles;
+        const nm = id => String(((roles && roles.names) || {})[id] || fmtFriendId(String(id))).substring(0, 12);
+        const ps = (roles && roles.players) || [];
+        const feed = (typeof specStatus === 'function') ? specStatus() : '';
+        drawStatus(ps.length === 2
+            ? (nm(ps[0]) + '  VS  ' + nm(ps[1]) + (feed ? '   ' + feed : ''))
+            : ('EVENT MONITOR' + (feed ? '   ' + feed : '')));
+        ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+        return;
     }
+    // NOTHING RUNNING: the room itself, and what it has already played.
+    let y = 190;
+    ct('NO TOURNAMENT RUNNING', CW/2, y, '#555', FONT.HINT); y += 24;
+    const arch = Array.isArray(m.archive) ? m.archive : [];
+    if(arch.length) ct('PLAYED HERE', CW/2, y, '#4a7a4a', FONT.HINT), y += 18;
+    for(const a of arch.slice(0, 4)){ ct(eventArchiveLine(a), CW/2, y, '#888', FONT.HINT); y += 16; }
     ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

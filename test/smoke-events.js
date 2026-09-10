@@ -67,7 +67,36 @@ const DRIVER = `
     let over = false;
     try { qrMatrix(payload + 'X'); } catch(e){ over = true; }
     if(!over) throw '54 bytes must not encode: the budget has no spare';
-    log('53-byte budget ok: the pass QR renders at version 3, 54 bytes is refused');
+    // ...AND THE CAMERA READS THEM BACK. Rendering is only half of it: the printed
+    // poster is rendered by the SERVER, at version 3 / level L / mask 0 -- the one
+    // shape this decoder reads -- and its encoder is unit-pinned to this one, so a
+    // round trip through OUR encoder covers the same matrix without needing a
+    // fixture from the other repo.
+    //
+    // This is what the 4.11 poster could not do: 63 bytes is version 5, and the
+    // decoder is fixed at 3. The whole point of printing a poster is scanning it in
+    // the app, so if this lane goes red the poster is decoration.
+    const paint = (q, mod) => {
+        const quiet = 4, W = (q.size + quiet*2) * mod;
+        const data = new Uint8ClampedArray(W*W*4).fill(255);
+        for(let r = 0; r < q.size; r++) for(let c = 0; c < q.size; c++) if(q.m[r][c])
+            for(let y = 0; y < mod; y++) for(let x = 0; x < mod; x++){
+                const px = ((quiet+r)*mod + y)*W + ((quiet+c)*mod + x);
+                data[px*4] = 0; data[px*4+1] = 0; data[px*4+2] = 0;
+            }
+        return { data, width:W, height:W };
+    };
+    for(const url of [payload, keyload]){
+        for(const mod of [3, 5, 8]){
+            const got = qrDecodeImage(paint(qrMatrix(url), mod));
+            if(got !== url) throw 'the camera cannot read our own '+mod+'px QR: '+JSON.stringify(got);
+        }
+        // ...and what it reads has to reach the scanner as the code to join with,
+        // from any camera window. A decode nobody acts on is not a scan.
+        const m2 = EVENT_HASH_RE.exec(url);
+        if(!m2) throw 'a decoded event URL must parse: '+url;
+    }
+    log('53-byte budget ok: both codes render at version 3 AND read back, 54 bytes is refused');
 
     // ---- the state is DERIVED, never read ----------------------------------
     // starts/ends are unix ms on the same clock as now, and nothing is pushed
@@ -799,6 +828,75 @@ const DRIVER = `
       if(phase !== 'eventPage') throw 'the roster returns to the page';
       _evMem=null; _evMemSel=0; _evMemAsk=null;
       R.steps.push('roster ok: a view not a copy, pending first, the friend field picks the label, every verb re-reads');
+
+      // ---- THE DOOR YOU CAME IN BY IS THE DOOR YOU LEAVE BY ---------------
+      // An event tournament is an ORDINARY tournament, so it runs on the ordinary
+      // screens -- and those were wired to one fixed exit, the multiplayer menu. A
+      // player who joined from an event page and then left was put two rooms away
+      // from where they had been standing. tourneyHome is the whole of the fix, and
+      // every exit off the boards asks it, so this lane presses each of them from
+      // BOTH doors: a rule that only ever answers 'eventPage' is not a rule.
+      {
+        const _oJoin=tourneyJoin, _oTtPost=_ttPost, _oAnch=_netAnchorRefresh;
+        _netAnchorRefresh=()=>{};
+        _ttPost=async()=>({ json:{ok:true}, status:200, body:{ok:true} });
+        // Pressing the LAST row is what ESC and BACK both do on every one of them.
+        const press=()=>{ const r=tourneyRows(); r[r.length-1].act(); return phase; };
+        const HOST='ffffffff';   // somebody else's room, so leaving it is a real leave
+        if(getPlayerId()===HOST) throw 'the guest cases need a host that is not us';
+
+        for(const c of [{ home:'', want:'multiplayer' }, { home:'eventPage', want:'eventPage' }]){
+          const say=' with home '+JSON.stringify(c.home)+', got ';
+          // off the room list, which is off tournaments altogether
+          _tt=null; _ttUi.home=c.home; phase='tourneyLobby';
+          if(press() !== c.want) throw 'BACK off the room list'+say+phase;
+          // ...off one that is OVER, which is a different row on a different screen
+          _tt={ tid:'t1', state:'done', host:HOST, players:[] };
+          _ttUi.home=c.home; phase='tourneyPodium';
+          if(press() !== c.want) throw 'DONE off the podium'+say+phase;
+          // ...and out of a lobby somebody else is hosting, which leaves for real
+          _tt={ tid:'t1', state:'open', host:HOST, players:[] };
+          _ttUi.home=c.home; phase='tourneyLobby';
+          if(press() !== c.want) throw 'LEAVE off an open lobby'+say+phase;
+        }
+
+        // The CREATE dialog carries the same fact: the event it was opened from is
+        // both the room its tournament belongs to and the screen its BACK gives back.
+        _tt=null;
+        tourneySetupOpen('K7QM');
+        if(_ttUi.home !== 'eventPage') throw 'a create started from an event page belongs back on it';
+        if(press() !== 'eventPage') throw 'BACK off the event create dialog went to '+phase;
+        tourneySetupOpen();
+        if(_ttUi.home !== '') throw 'an ordinary create must not inherit the room';
+        if(press() !== 'tourneyLobby') throw 'BACK off the ordinary create dialog went to '+phase;
+
+        // JOINING FROM THE PAGE DOES NOT FLASH THE ROOM-PICKING SCREEN. Moving to the
+        // tournament screen before the join lands puts CREATE TOURNAMENT and JOIN BY
+        // CODE in front of somebody who is already in the room they want, for as long
+        // as the request takes -- and every row on it is pressable while it stands.
+        let seen=[];
+        _tt=null; _ttUi.home=''; _ttUi.msg=''; phase='eventPage';
+        tourneyJoin=async(tid)=>{ seen.push(phase); _tt={ tid:String(tid), state:'open', host:HOST, players:[] }; };
+        _ev={ eid:'K7QM', name:'n', state:'active', you:{state:'member'}, tourney:{ tid:'t9' } };
+        _evEid='K7QM'; _evUi.busy=false;
+        if(await eventTourneyGo() !== true) throw 'a join that lands must report true';
+        if(seen[0] !== 'eventPage') throw 'the page must still be up while the join is in flight, was '+seen[0];
+        if(phase !== 'tourneyLobby') throw 'a joined lobby lands on the lobby screen, got '+phase;
+        if(_ttUi.home !== 'eventPage') throw 'a tournament joined from an event page must give that page back';
+        if(press() !== 'eventPage') throw 'and leaving it must land there, got '+phase;
+        // A join that does not land leaves the player where they were standing, with
+        // the reason the join worked out -- not a second opinion on it.
+        _tt=null; _ttUi.home=''; phase='eventPage'; _evUi.msg=''; _evUi.busy=false;
+        tourneyJoin=async()=>{ _ttUi.msg='TOURNAMENT IS FULL'; };
+        if(await eventTourneyGo() !== false) throw 'a join that fails must report false';
+        if(phase !== 'eventPage') throw 'a failed join must not move the screen, got '+phase;
+        if(_evUi.msg !== 'TOURNAMENT IS FULL') throw 'the page must say what the join said, got '+_evUi.msg;
+        if(_evUi.busy) throw 'a failed join must give the page back';
+
+        tourneyJoin=_oJoin; _ttPost=_oTtPost; _netAnchorRefresh=_oAnch;
+        _tt=null; _ttUi.home=''; _ttUi.msg=''; _ev=null; _evEid=''; phase='eventPage';
+      }
+      R.steps.push('tournament exits ok: every exit gives back the door it came in by, and a join holds the page until it lands');
 
       _evPost=_oPost; eventRead=_oRead; globalThis.fetch=_oFetch; cfg.offline=_oOff;
       _ev=null; _evEid=''; _evUi.busy=false; _evUi.msg=''; _evList=[];

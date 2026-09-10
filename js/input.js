@@ -227,10 +227,12 @@ function _ttUiInput(escTo){
         // ESC presses the BACK row rather than going around it. On the lobby that row also
         // cancels or leaves, and an ESC that quietly slipped past it would strand a room of
         // people in a tournament whose host had already walked out. escTo is the fallback for
-        // a row list that somehow has no last row at all.
+        // a row list that somehow has no last row at all -- named where a screen has one
+        // fixed way back, and asked for otherwise, because a tournament entered from an
+        // event page leaves through that page rather than through the multiplayer menu.
         back(){
             const rows = tourneyRows(), r = rows[rows.length - 1];
-            if(r && r.act) r.act(); else { phase = escTo; Snd.sfxPlay('nav', cfg.music); }
+            if(r && r.act) r.act(); else { phase = escTo || tourneyHome(); Snd.sfxPlay('nav', cfg.music); }
         },
     };
 }
@@ -484,16 +486,16 @@ const UI_INPUT = {
     // ESC off the settings goes back to the list CREATE was pressed on, never past it to
     // the multiplayer menu: nothing has been created yet, so there is nothing to leave.
     tourneySetup: _ttUiInput('tourneyLobby'),
-    tourneyLobby: _ttUiInput('multiplayer'),
+    tourneyLobby: _ttUiInput(),
     tourneyCode: {
         // Nothing to choose: the screen is one number and the link that carries it.
         nav(){},
         confirm(){ phase='tourneyLobby'; Snd.sfxPlay('nav',cfg.music); },
         back(){ phase='tourneyLobby'; Snd.sfxPlay('nav',cfg.music); },
     },
-    tourneyBracket: _ttUiInput('multiplayer'),
-    tourneyRound: _ttUiInput('multiplayer'),
-    tourneyPodium: _ttUiInput('multiplayer'),
+    tourneyBracket: _ttUiInput(),
+    tourneyRound: _ttUiInput(),
+    tourneyPodium: _ttUiInput(),
     tourneyQuit: {
         nav: _navQC,
         confirm(){
