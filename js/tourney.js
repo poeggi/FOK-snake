@@ -28,6 +28,7 @@ const TT_REPORT_MAX = 24;      // ~1 minute of retries, well inside the 3-min wa
 const TT_AFTER_MAX  = 1000;
 const TT_OVER_MS    = 4000;    // how long the duelOver banner holds before the next match
 const TT_CONNECT_MS = 20000;   // a sheet that has not become a match by now is engaged again
+const TT_WALK_GRACE_MS = 10000; // no walkover clock for the first 10 s of a deal: a peer still connecting is not a no-show
 const TT_MSG_MS     = 6000;
 // The floor under a break's own wait. A round board is not a button with a table
 // behind it: it is the standings the whole field is reading, and the host's press ends
@@ -196,6 +197,22 @@ function _ttRealName(id){
 // off the boards is off tournaments altogether (MULTIPLAYER), off a running one is back
 // to the list of rooms, where there is something else to do.
 function tourneyHome(fallback){ return _ttUi.home || fallback || 'multiplayer'; }
+// THE WALKOVER CLOCK. The sheet carries `walkover_at` (server API 4.15, unix ms on the
+// shared clock): the instant the server may first hand the node to whoever is still there.
+// Everybody waiting on a dealt match -- the player called up, the watchers, the event's
+// screen -- reads it off the same field, so everybody sees the same clock ticking. Seconds
+// left (0 once due), or -1 for nothing to show: no field (an older server), no synced
+// clock, or a sheet younger than the grace -- a peer that is merely connecting must not
+// be shown a clock running against it. `sinceMs` is when the sheet landed HERE.
+function tourneyWalkoverLeft(roles, sinceMs){
+    const at = roles ? +roles.walkover_at : 0;
+    if(!(at > 0)) return -1;
+    if(!sinceMs || _msgNow() - sinceMs < TT_WALK_GRACE_MS) return -1;
+    const now = (typeof netPts === 'function') ? netPts() : null;
+    if(now == null) return -1;
+    return Math.max(0, Math.ceil((at - now) / 1000));
+}
+function tourneyRolesAt(){ return _ttRolesAt; }
 function tourneyExitPhase(){
     if(!_tt) return '';
     if(_tt.state === 'done') return 'tourneyPodium';

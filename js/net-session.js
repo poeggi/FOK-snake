@@ -176,7 +176,13 @@ function _netOnSignal(sig){
             if(typeof _ttOnSignal === 'function') _ttOnSignal(_netJson(pl));
             return;
         }
+        // An ask older than its own ladder is dead at BOTH ends (SPEC_ASK_TTL_MS): the
+        // asker has stopped waiting for this one. A client coming back from the
+        // background drains a mailbox holding every ask sent while it was away, and
+        // answering each of them 'no' was a burst of signals into the asker's mailbox
+        // -- the same flood the other way round.
         if(sig.type === 'watch'){
+            if(_netSigStale(sig)){ _netSigLog('< watch STALE'); return; }
             if(typeof _spOnWatch === 'function') _spOnWatch(from, _netJson(pl));
             return;
         }
@@ -246,6 +252,11 @@ function _netOnSignal(sig){
                 if(_netHs.sent === from){ _netHs.sent = null; _netLb.msg = 'DECLINED'; _uiDirty = true; }
                 break;
             case 'offer': {
+                // The offerer re-sends for 6 s and gives up (_netHsTick); an offer that sat
+                // in the mailbox past NET_INVITE_STALE_MS belongs to a pc its sender has
+                // torn down. Answered, it minted a session against nothing -- and a client
+                // back from the background answered every one of them in the drain.
+                if(_netSigStale(sig)){ _netSigLog('< offer STALE'); break; }
                 const od = _netJson(pl);
                 if(od.rc){
                     // A reconnect offer only makes sense against a live game with this peer.

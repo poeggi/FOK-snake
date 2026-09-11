@@ -1484,6 +1484,60 @@ const DRIVER = `
       }
       log('monitor sheet ok: dealt like a spectator, followed at once, the stagger owed, the re-ask goes to the other player, every other transition re-reads');
 
+      // ---- THE WALKOVER CLOCK (server API 4.15) -------------------------------
+      // A player who closed the app leaves the other on YOU ARE UP until the server's
+      // walkover; the sheet now carries walkover_at, and everybody waiting on the
+      // node -- the player called up, the watchers, the event's screen -- shows the
+      // same seconds off it. Not for the first 10 s of a deal (a peer still connecting
+      // is not a no-show), not without the field, not without a synced clock.
+      {
+        const _oPts = netPts, _oNow = _msgNow, _oCt = ct, _oCtg = ctg, _oCol = _ttCol, _oTt = _tt, _oRolesAt = _ttRolesAt, _oPh = phase, _oMon = _evMon, _oMonAt = _evMonRolesAt;
+        const now = Date.now(), here = 100000;   // the harness's performance clock stands at 0; a sheet stamped 0 is one that never landed
+        netPts = () => now; _msgNow = () => here;
+        if(tourneyWalkoverLeft(null, here - 20000) !== -1) throw 'no sheet, no clock';
+        if(tourneyWalkoverLeft({ nid:'n1' }, here - 20000) !== -1) throw 'no field (an older server), no clock';
+        if(tourneyWalkoverLeft({ walkover_at: now + 45000 }, here - 5000) !== -1) throw 'inside the grace there is no clock yet';
+        if(tourneyWalkoverLeft({ walkover_at: now + 45000 }, 0) !== -1) throw 'a sheet that never landed here shows nothing';
+        const left = tourneyWalkoverLeft({ walkover_at: now + 45000 }, here - 20000);
+        if(left < 44 || left > 46) throw 'past the grace it counts the seconds down, got ' + left;
+        if(tourneyWalkoverLeft({ walkover_at: now - 5000 }, here - 20000) !== 0) throw 'past the deadline it reads 0, never negative';
+        netPts = () => null;
+        if(tourneyWalkoverLeft({ walkover_at: now + 45000 }, here - 20000) !== -1) throw 'no synced clock, no clock';
+        netPts = () => now;
+        if(_ttWalkText(65, false) !== 'WALKOVER IN 1:05' || _ttWalkText(7, true) !== 'WALKOVER IN 0:07') throw 'the clock reads m:ss, got ' + _ttWalkText(65, false);
+        if(_ttWalkText(-1, true) !== '') throw 'nothing to show draws nothing';
+        if(_ttWalkText(0, false) !== '') throw 'a watcher goes quiet at zero: its feed may simply be late';
+        if(!/^WALKOVER DUE/.test(_ttWalkText(0, true))) throw 'the player waited for is told it is due, got ' + _ttWalkText(0, true);
+        // ON THE SCREENS. The ceremony, for the player called up and for a watcher; the
+        // bracket, for a player sitting the node out; the monitor's board.
+        const drawn = [];
+        ct = (t) => { drawn.push(String(t)); }; ctg = (t) => { drawn.push(String(t)); }; _ttCol = (t) => { drawn.push(String(t)); };
+        const sheet = { tid:'t1', nid:'n1', round:2, stage:'final', match:1, of:1, players:['c0ffee42', getPlayerId()], names:{ c0ffee42:'KAI MOBIL' }, you:'play', hm:3, lvl:2, walkover_at: now + 45000 };
+        _tt = { tid:'t1', state:'running', host:'c0ffee42', players:[], round:2, cursor:'n1', schedule:[], bracket:[{ nid:'n1', round:2, players:['c0ffee42', getPlayerId()], state:'pending' }], standings:[], advancers:[], roles:sheet, brk:null, you:'play', podium:null, frozen:'', reason:'' };
+        _ttRolesAt = here - 20000;
+        drawTourneyCeremony();
+        if(!drawn.some(t => /^WALKOVER IN 0:4[4-6]$/.test(t))) throw 'the player called up sees the clock: ' + JSON.stringify(drawn);
+        drawn.length = 0; sheet.you = 'spectate'; drawTourneyCeremony();
+        if(!drawn.some(t => /^WALKOVER IN 0:4[4-6]$/.test(t))) throw 'a watcher sees the same clock: ' + JSON.stringify(drawn);
+        drawn.length = 0; sheet.you = 'idle'; drawTourneyBracket();
+        if(!drawn.some(t => /WALKOVER IN 0:4[4-6]$/.test(t))) throw 'the bracket says it in its subtitle: ' + JSON.stringify(drawn);
+        drawn.length = 0; _ttRolesAt = here - 2000; drawTourneyBracket();
+        if(drawn.some(t => /WALKOVER/.test(t))) throw 'not inside the grace: ' + JSON.stringify(drawn);
+        // ...and the monitor, whose sheet lands by another road: the stamp is the follow's.
+        _evMon = { name:'E', state:'active', members:2, tourney:Object.assign({}, _tt, { roles:sheet }) };
+        _evMonNid = ''; _evMonRolesAt = 0; _evMonFollow();
+        if(!_evMonRolesAt) throw 'a new match stamps when its sheet reached the monitor';
+        const stamped = _evMonRolesAt; _evMonFollow();
+        if(_evMonRolesAt !== stamped) throw 'the same match re-read does not restamp (the grace would never end)';
+        _evMonRolesAt = here - 20000; drawn.length = 0; drawEventMonitor();
+        if(!drawn.some(t => /WALKOVER IN 0:4[4-6]$/.test(t))) throw 'the monitor shows the clock on its board: ' + JSON.stringify(drawn);
+        _evMon.tourney.roles = null; _evMonFollow();
+        if(_evMonRolesAt) throw 'no match, no stamp';
+        ct = _oCt; ctg = _oCtg; _ttCol = _oCol; _msgNow = _oNow; _tt = _oTt; _ttRolesAt = _oRolesAt; phase = _oPh; _evMon = _oMon; _evMonRolesAt = _oMonAt; netPts = _oPts;
+        _evMonNid = ''; _evMonAskAt = 0; _evMonTry = 0;
+      }
+      log('walkover clock ok: off the sheet and the synced clock, after a 10 s grace, on the ceremony, the bracket and the monitor');
+
       // ---- AND THE FEEDER SERVES IT ON A SLOT OF ITS OWN --------------------
       // Invisible means it costs nobody anything: the two direct slots are counted
       // over everyone but the monitor, it always has room, and it is never handed out

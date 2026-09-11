@@ -1812,6 +1812,16 @@ function _ttCol(t, x, y, col, size, align){
 }
 function _ttClock(){ return (typeof performance !== 'undefined') ? performance.now() : 0; }
 function _ttDots(){ return '.'.repeat(1 + Math.floor(_ttClock() / 200) % 5); }
+// The walkover clock as words. `left` is tourneyWalkoverLeft's answer; nothing below zero,
+// and nothing at zero unless `due` says this screen is the one still waiting -- from the
+// outside a clock that ran out and a match that got going look the same, and the server
+// says which on its next look.
+function _ttWalkText(left, due){
+    if(left < 0) return '';
+    if(left === 0) return due ? 'WALKOVER DUE' + _ttDots() : '';
+    const m = Math.floor(left / 60), sec = left % 60;
+    return 'WALKOVER IN ' + m + ':' + (sec < 10 ? '0' : '') + sec;
+}
 // The row strip every tournament screen ends with: the list from tourneyRows(), drawn from
 // startY, with its last entry (always BACK) parked at the bottom like every other menu.
 function _ttDrawRows(startY, rowH){
@@ -1933,15 +1943,20 @@ function drawTourneyCode(){
 // Round 1 is a table of points; every round after it is a tree of nodes. Both are the
 // server's own words -- standings rows and bracket nodes, rendered, never recomputed.
 // ...and the same seam on the standings/bracket board, for the same reason.
-function _ttBracketBoard(t){
+function _ttBracketBoard(t, walk){
     drawGrid(); drawOvBg(0.92);
     const ko = (t.round | 0) >= 2;
     _ttHead(_ttBoard(t), t.round | 0, t);
     const cur = t.cursor ? String(t.cursor) : '';
     // The subtitle is now free to say only what is happening RIGHT NOW, in two voices: the
     // label grey, the fact gold. Where in the tournament this is has moved to the corner it
-    // keeps on every board.
-    if(cur) _ttRun([['NOW PLAYING: ', '#888'], [_ttMatchLine(t, cur), '#ffd700']], 46, FONT.HINT);
+    // keeps on every board. The walkover clock, when one runs, is a third: everybody
+    // reading this board sees the same seconds the player being waited for has left.
+    if(cur){
+        const segs = [['NOW PLAYING: ', '#888'], [_ttMatchLine(t, cur), '#ffd700']];
+        if(walk) segs.push(['  -  ' + walk, '#ffaa44']);
+        _ttRun(segs, 46, FONT.HINT);
+    }
     else ct('WAITING FOR THE NEXT MATCH' + _ttDots(), CW/2, 46, '#888', FONT.HINT);
     if(t.frozen) ct('A MATCH IS FROZEN - THE TWO REPORTS DISAGREED', CW/2, 60, '#ff5555', FONT.HINT);
     if(!ko){
@@ -1997,7 +2012,7 @@ function _ttBracketBoard(t){
 function drawTourneyBracket(){
     const t = tourneyView(), ui = tourneyUi();
     if(!t){ drawTourneyLobby(); return; }
-    _ttBracketBoard(t);
+    _ttBracketBoard(t, _ttWalkText(tourneyWalkoverLeft(t.roles, tourneyRolesAt()), false));
     _ttDrawRows(296, 26);
     if(ui.msg) drawStatus(ui.msg);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -2220,6 +2235,11 @@ function drawTourneyCeremony(){
     } else {
         ctg('SIT THIS ONE OUT', CW/2, 228, '#888', FONT.JUMBO, GLOW.TEXT);
     }
+    // THE WALKOVER CLOCK, once the sheet is old enough for the wait to mean something. The
+    // player called up is the one it is running FOR, so that screen says so past zero
+    // too; a watcher's screen goes quiet at zero, since its feed may simply be late.
+    const walk = _ttWalkText(tourneyWalkoverLeft(r, tourneyRolesAt()), you === 'play');
+    if(walk) ct(walk, CW/2, 290, '#ffaa44', FONT.HINT);
     // A watch that has not started is one of five different situations with five different
     // causes, and CONNECTING is what every one of them used to look like from here. Say
     // which: a watcher staring at one word cannot tell anyone what they are looking at.
@@ -2636,7 +2656,7 @@ function drawEventMonitor(){
     // the action rows: a monitor presses nothing and is in no participant list.
     if(t && (t['break'] || t.roles || t.state === 'running')){
         if(t['break']) _ttRoundBoard(t, t['break']);
-        else _ttBracketBoard(t);
+        else _ttBracketBoard(t, _ttWalkText(tourneyWalkoverLeft(t.roles, eventMonitorRolesAt()), false));
         // ...and one line saying whose screen this is, since the boards above are
         // written for somebody who is playing.
         const roles = t.roles;

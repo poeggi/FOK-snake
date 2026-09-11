@@ -108,7 +108,8 @@ var _spBootT = null;    // the pending boot timer
 var _spRole = '';       // '' | 'feeder' | 'primary' | 'secondary'
 var _spTid = '', _spNid = '';
 var _spGrant = {};      // peer id -> ms when we authorised it to open a spectator link
-var _spWant = [];       // MY outstanding watch requests: [{to, at, last}] -- a secondary asks BOTH primaries
+var _spWant = [];       // MY outstanding watch requests: [{to, at, last, heard, sparse}] -- a secondary asks BOTH primaries
+var _spSilent = {};     // peer id -> ladders that ran out without ONE word back from it (see _spWantPump)
 var _spAsk = [];        // asks PARKED on me, waiting for a match to serve: [{from, at}]
 var _spMonitor = '';    // the event MONITOR the roles sheet names: served on a slot of its own, listed nowhere
 var _spOkAt = 0;        // when we last answered 'ok' -- an offer is owed to us until it lands
@@ -189,9 +190,11 @@ function _spWantDrop(peer){
 // have a source -- a booted spectator chases nothing.
 function _spWantKeep(w){
     if(!w || _spOn || _spCtx || _spBootT != null) return;
-    _spWant.push({ to:w.to, at:w.at, last:_spNow() });
+    _spWant.push({ to:w.to, at:w.at, last:_spNow(), heard:true });
     _spArm();
 }
+// A WORD FROM THE PEER, of any kind: it is there, so the next ladder to it may be dense.
+function _spHeard(peer){ delete _spSilent[peer]; }
 function _spGrantOk(peer){ const g = _spGrant[peer] || 0; return !!g && _spNow() - g <= SPEC_GRANT_MS; }
 // Have we got a timeline to hand out? A feeder builds one from its live session; a relaying
 // primary hands on the context it was given. Room is deliberately NOT part of it -- the two
@@ -385,6 +388,7 @@ function _spIceAdd(l, c){
 // Routed here from _netOnSignal BEFORE the duel's own offer/answer/ice cases: a
 // spectator link must never be mistaken for a reconnect of the match.
 function _spOnSignal(type, from, d){
+    _spHeard(from);
     if(type === 'offer'){ _spAnswer(from, d); return; }
     const l = _spFind(_spIn, from) || _spFind(_spOut, from);
     if(!l || !l.pc) return;
@@ -406,6 +410,7 @@ function _spOnSignal(type, from, d){
 // out when nobody assigned roles (a plain "watch a friend", no tournament).
 function _spOnWatch(from, d){
     const k = d && d.k;
+    _spHeard(from);
     if(k === 'req'){
         // MAKE DUELS PRIVATE. A GRANTED peer is not an ordinary watcher: a roles sheet
         // introduced it (specGrant), and a bracket nobody may watch is a broken bracket --
@@ -484,13 +489,17 @@ function specGrant(ids){
 // Declare which match we are serving/watching, so both ends of a watch name the
 // same node. '' outside a tournament (the doc allows a bare watch: a request the
 // recipient may honour or ignore).
-function specNode(tid, nid){ _spTid = String(tid || ''); _spNid = String(nid || ''); }
+function specNode(tid, nid){
+    tid = String(tid || ''); nid = String(nid || '');
+    if(tid !== _spTid || nid !== _spNid) _spSilent = {};   // a new match: every peer gets one dense ladder again
+    _spTid = tid; _spNid = nid;
+}
 // Ask `peer` for a feed.
 function specWatch(peer, tid, nid){
     if(!/^[0-9a-f]{8}$/.test(String(peer || ''))) return;
     if(tid !== undefined || nid !== undefined) specNode(tid, nid);
     _spWantDrop(peer);
-    _spWant.push({ to:peer, at:_spNow() });
+    _spWant.push({ to:peer, at:_spNow(), sparse:(_spSilent[peer] | 0) > 0 });
     // The feed's startPts is on the shared clock, and a watcher applies none of the players'
     // P2P burst -- this is its ONLY correction, so it gets the same age rule as a match start.
     _netAnchorRefresh({ n:3, nudge:true });
@@ -936,11 +945,26 @@ function _spAskPump(now){
 // few: 'watch' carries no receipt, so a lost one is simply a feed that never starts; and the
 // node we are asking may be seconds from having a match at all. Silence stops the instant we
 // have a source, so this never runs alongside a working feed.
+// THE LADDER IS DENSE ONLY TOWARDS A PEER THAT SPEAKS. The re-ask every SPEC_ASK_RETRY_MS
+// exists for a peer that is there and not ready -- an ask lost on the way, a bare 'no'
+// from a node still minting its timeline -- and a peer that answered once is kept on
+// it. A ladder that runs its whole TTL without ONE word back is a peer that is not
+// draining its mailbox (a player who closed the app mid-tournament), and every ask
+// sent into that mailbox stays there for the server's whole signal TTL: fourteen a
+// ladder, from every watcher and the event's screen, is what filled a mailbox to the
+// server's cap and had it log the watcher as spam. So the ladders AFTER a silent one
+// send their first ask and no re-asks -- the ask is parked at a feeder that has it and
+// the sheet re-engages every TT_CONNECT_MS anyway -- until the peer says anything
+// (_spHeard) or the match changes (specNode).
 function _spWantPump(now){
     for(let i = _spWant.length - 1; i >= 0; i--){
         const w = _spWant[i];
-        if(now - w.at > SPEC_ASK_TTL_MS){ _spWant.splice(i, 1); continue; }
-        if(_spOn || _spCtx || _spBootT != null) continue;
+        if(now - w.at > SPEC_ASK_TTL_MS){
+            _spWant.splice(i, 1);
+            if(!w.heard) _spSilent[w.to] = (_spSilent[w.to] | 0) + 1;
+            continue;
+        }
+        if(w.sparse || _spOn || _spCtx || _spBootT != null) continue;
         if(now - (w.last || w.at) < SPEC_ASK_RETRY_MS) continue;
         w.last = now;
         _spWatchSig(w.to, 'req');

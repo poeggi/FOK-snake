@@ -1230,7 +1230,59 @@ runTest('SMOKE-NET', `
     _netOnSignal({from:'00ff00aa', type:'invite', payload:'{}', created:_nowS});
     if(!_netLb.invite) throw 'a fresh stamped invite must still open the dialog';
     _netLb.invite=null; _netSignal=_oSigS;
-    log('stale invite ok: refused on arrival by its stamp, fresh and unstamped ones unaffected');
+    // ...and the same for a WATCH ask and an OFFER. A client back from the background drains
+    // a mailbox holding every ask and offer sent while it was away -- an ask's own ladder is
+    // 20 s at either end, an offer is re-sent for 6 s and given up on -- and answering each
+    // of them was a burst of no's and answers into mailboxes at the other end.
+    {
+        const _oW=_spOnWatch, _oA=_netRtcAnswer, _oSess=_netSess, _oTt=_tt, _oP2P=cfg.noP2P;
+        let asks=0, answers=0;
+        _spOnWatch=()=>{ asks++; }; _netRtcAnswer=()=>{ answers++; };
+        _netSess=null; _tt=null; cfg.noP2P=false;
+        _netOnSignal({from:'00ff00aa', type:'watch', payload:'{"k":"req"}', created:_nowS-1000});
+        if(asks) throw 'a stale watch ask must be dropped, not answered';
+        _netOnSignal({from:'00ff00aa', type:'watch', payload:'{"k":"req"}', created:_nowS});
+        if(asks!==1) throw 'a fresh watch ask must still reach the spectator code';
+        _netOnSignal({from:'00ff00aa', type:'offer', payload:'{"sdp":{"type":"offer","sdp":"v=0"},"seed":1}', created:_nowS-1000});
+        if(answers) throw 'a stale offer must not be answered';
+        _netOnSignal({from:'00ff00aa', type:'offer', payload:'{"sdp":{"type":"offer","sdp":"v=0"},"seed":1}', created:_nowS});
+        if(answers!==1) throw 'a fresh offer must still be answered';
+        _spOnWatch=_oW; _netRtcAnswer=_oA; _netSess=_oSess; _tt=_oTt; cfg.noP2P=_oP2P;
+    }
+    log('stale invite ok: refused on arrival by its stamp, fresh and unstamped ones unaffected; a stale watch ask and a stale offer are dropped the same way');
+
+    // ---- the ask ladder goes SPARSE towards a peer that never answered ----
+    // Fourteen asks a ladder, from every watcher and the event's screen, into the mailbox
+    // of a player who closed the app is what filled it to the server's cap. A ladder that
+    // ran its whole TTL without one word back marks the peer; the ladders after it send
+    // their first ask and no re-asks, until the peer says anything or the match changes.
+    {
+        const _oSig=_spWatchSig, _oWant=_spWant.slice(), _oAnch=_netAnchorRefresh, _oSil=_spSilent, _oTid=_spTid, _oNid=_spNid;
+        let sent=[];
+        _spWatchSig=(to,k)=>{ sent.push(to+':'+k); }; _netAnchorRefresh=()=>{};
+        _spSilent={}; specNode('t1','n1');
+        const T0=_spNow();
+        const ladder=(base)=>{ _spWant[_spWant.length-1].at=base; for(let ms=0; ms<=SPEC_ASK_TTL_MS+1000; ms+=250) _spWantPump(base+ms); };
+        specWatch('aaaa1111'); ladder(T0);
+        if(sent.length < 10) throw 'the first ladder must be dense, sent '+sent.length;
+        if(_spWant.length) throw 'the ladder must have run out';
+        if(!(_spSilent['aaaa1111']>0)) throw 'a ladder with no word back must mark the peer silent';
+        sent=[]; specWatch('aaaa1111'); ladder(T0+60000);
+        if(sent.length !== 1) throw 'the next ladder to a silent peer is ONE ask, sent '+sent.length;
+        // a word from it -- a refusal will do -- and the ladder is dense again
+        _spOnWatch('aaaa1111', {k:'no'});
+        if(_spSilent['aaaa1111']) throw 'a peer that answered is not silent';
+        sent=[]; specWatch('aaaa1111'); ladder(T0+120000);
+        if(sent.length < 10) throw 'a peer that spoke gets the dense ladder back, sent '+sent.length;
+        // ...and so is the first ladder of the NEXT match
+        specWatch('aaaa1111'); ladder(T0+180000);
+        if(!(_spSilent['aaaa1111']>0)) throw 'silent again after a ladder with no answer';
+        specNode('t1','n2');
+        if(_spSilent['aaaa1111']) throw 'a new match forgets who was silent in the last one';
+        _spWatchSig=_oSig; _netAnchorRefresh=_oAnch; _spSilent=_oSil; _spTid=_oTid; _spNid=_oNid;
+        _spWant=_oWant; netP2POnlySet(false);
+    }
+    log('sparse ladder ok: a peer that never answered a whole ladder gets one ask per ladder until it speaks or the match changes');
 
     // ---- undelivered receipt: an attempt the peer never collected fails FAST ----
     phase='duelLobby'; _netHsClear(); _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netLb.msg='';

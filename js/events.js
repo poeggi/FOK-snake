@@ -894,11 +894,13 @@ var _evMonBusy = false;
 var _evMonAt = 0;                // when the lease was last renewed
 var _evMonErr = '';              // 'no monitor' | 'monitor taken' | '' -- said, then stopped
 var _evMonNid = '';              // the match we are watching, so a moved cursor is noticed
+var _evMonRolesAt = 0;           // when that match's sheet landed here: the walkover clock's grace runs from it
 var _evMonAskAt = 0;
 var _evMonTry = 0;               // asks made for _evMonNid: the feeder first, then the other player
 var _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the same stagger as a player
 var _evMonAgain = false;         // a read asked for while one was in flight
 function eventMonitorView(){ return _evMon; }
+function eventMonitorRolesAt(){ return _evMonRolesAt; }
 function eventMonitorErr(){ return _evMonErr; }
 // Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`
 // on `state` and on every `events` row precisely so this can be asked without
@@ -949,14 +951,14 @@ function _evMonFollow(){
         // Nothing is being played. Let go of a feed for a match that has ended,
         // so the next one starts clean.
         if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
-        _evMonNid = ''; _evMonAskAt = 0;
+        _evMonNid = ''; _evMonAskAt = 0; _evMonRolesAt = 0;
         return;
     }
     if(nid !== _evMonNid){
         // A NEW match. Drop the old feed before asking for the next: the two are
         // different timelines and a spectator boots from a checkpoint off the feed.
         if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
-        _evMonNid = nid; _evMonAskAt = 0; _evMonTry = 0;
+        _evMonNid = nid; _evMonAskAt = 0; _evMonTry = 0; _evMonRolesAt = _msgNow();
     }
     if(netSpectating()) return;                       // already watching this one
     // An ask still on net-spec's own ladder is being re-sent and waited on there; asking
@@ -1032,7 +1034,7 @@ function _evMonTick(){
     _evMonFollow();
 }
 function eventMonitorEnter(){
-    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
+    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
     phase = 'eventMonitor';
     eventWakeSet(true);
     eventMonitorRead();
@@ -1047,7 +1049,7 @@ function eventMonitorStop(keep){
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
     if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
         specStop('');
-    _evMonNid = ''; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
+    _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
     if(!keep){ _evMon = null; _evMonErr = ''; if(phase === 'eventMonitor') phase = 'eventPage'; }
     _uiDirty = true;
 }
