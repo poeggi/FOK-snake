@@ -57,6 +57,22 @@ assets -> audio -> sim -> storage -> game -> text -> render -> screens -> input
   through the L1->L2 boundary into an L2 speed round, doubleEvery:2; noburst
   RED twin minRb:1): do not shorten, reseed or relax.
 
+## Service worker (sw.js): the cached bundle IS the app
+Cache-first from this version's cache, at once, on any link; the network never
+answers a running version's request (a miss = eviction, backfilled; a URL
+outside the bundle passes through; API traffic is never touched). The network
+only delivers the NEXT version: the browser's update check on sw.js (fresh,
+`updateViaCache:'none'`, fired at script start on a controlled page) finds a
+new CACHE name; install copies every asset whose blob id is unchanged from the
+previous cache, fetches only the rest (`no-store`, six in flight, each stored
+as it lands; the manifest last, as the completion mark), deletes the cache on
+any failure or an assets.js without CACHE's APP_VERSION, and only then
+skipWaiting -> activate -> old caches deleted -> one auto-reload on the
+splash. Genuine network Responses are stored, never re-wrapped. NEVER a per-request
+network-first race: the sim worker's five serial script loads paid it and the
+3 s first-frame watchdog killed a healthy worker on every slow link (measured:
+demoted above ~0.5 s per request). Guard: test/sw-cache.js.
+
 ## LG OLED TV render rules (do not relitigate)
 - The TV's canvas plane is 50 Hz; anything that draws pins at 50. Target a
   steady 50; only dips below are real load.

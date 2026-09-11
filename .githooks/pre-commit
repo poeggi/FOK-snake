@@ -52,8 +52,20 @@ fi
 
 TS=$(date "+%Y-%m-%d %H:%M %z")
 
-# Build ASSETS from tracked runtime files (exclude sw.js and the test/CI dirs)
-ASSETS="'./'$(git ls-files | grep -E '\.(js|css|json|svg|woff2|woff|ttf)$' | grep -v '^sw\.js$' | grep -vE '^(test/|\.github/)' | sort | while IFS= read -r f; do printf ", './%s'" "$f"; done)"
+# Mirror the version into the bundled APP_VERSION constant (assets.js) so the running code --
+# not the lagging service-worker cache name -- is what the UI displays. Kept in lockstep here,
+# and staged BEFORE the bundle table below is built, so its blob id is the stamped file's.
+if [ -f js/assets.js ]; then
+    sed -i "s|^const APP_VERSION = '[^']*';|const APP_VERSION = '${NEW_VER#snake-}';|" js/assets.js
+    git add js/assets.js
+fi
+
+# Build ASSETS from the tracked runtime files (exclude sw.js and the test/CI dirs): path -> the
+# first 12 hex of the STAGED blob id. The service worker copies an asset whose id is unchanged
+# from the previous version's cache and downloads only what really differs. './' is index.html.
+ASSETS="'./': '$(git ls-files -s -- index.html | awk '{print substr($2,1,12)}')'"
+ASSETS="$ASSETS$(git ls-files -s | awk -F'\t' -v q="'" \
+    '$2 ~ /\.(js|css|json|svg|woff2|woff|ttf)$/ && $2 != "sw.js" && $2 !~ /^(test|\.github)\// { split($1, m, " "); printf ", %s./%s%s: %s%s%s", q, $2, q, q, substr(m[2], 1, 12), q }')"
 
 # Enforce auto-managed header on line 1
 sed -i "1s|.*|// AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually|" "$SW"
@@ -65,15 +77,8 @@ sed -i "s|^// version snake-.*|// version ${NEW_VER}, released ${TS}|" "$SW"
 sed -i "s|const CACHE = 'snake-[^']*';|const CACHE = '${NEW_VER}';|" "$SW"
 
 # Update ASSETS line
-awk -v assets="const ASSETS = [${ASSETS}];" \
-    '/^const ASSETS = \[/{print assets; next} {print}' "$SW" > "${SW}.tmp" && mv "${SW}.tmp" "$SW"
-
-# Mirror the version into the bundled APP_VERSION constant (assets.js) so the running code --
-# not the lagging service-worker cache name -- is what the UI displays. Kept in lockstep here.
-if [ -f js/assets.js ]; then
-    sed -i "s|^const APP_VERSION = '[^']*';|const APP_VERSION = '${NEW_VER#snake-}';|" js/assets.js
-    git add js/assets.js
-fi
+awk -v assets="const ASSETS = {${ASSETS}};" \
+    '/^const ASSETS = \{/{print assets; next} {print}' "$SW" > "${SW}.tmp" && mv "${SW}.tmp" "$SW"
 
 git add "$SW"
 printf "[pre-commit] SW cache -> %s\n" "$NEW_VER"

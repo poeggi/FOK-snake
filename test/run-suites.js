@@ -71,7 +71,7 @@ const FAST = [
     ['test/duel-warn.js',         1700, 'duel banners: CONNECTION LOST is pure silence, OUT OF SYNC tracks a hash divergence'],
     ['test/sim-invariants.js',    1600, 'sim invariants'],
     ['test/sim-events.js',        1600, 'sim side-effect sequence'],
-    ['test/sw-cache.js',           100, 'service-worker fetch policy: a slow uplink falls back to cache, API traffic never does'],
+    ['test/sw-cache.js',           100, 'service-worker policy: cache-first bundle, incremental all-or-nothing install, API traffic never cached'],
     ['test/check-syntax.js',       100, 'JS syntax', false],
     ['test/check-snapshot.js',     100, 'worker snapshot mirrors all sim state', false],
     ['test/sim-purity.js',         100, 'sim headless purity', false],

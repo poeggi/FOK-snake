@@ -1660,11 +1660,9 @@ if (document.fonts && document.fonts.ready && document.fonts.ready.then) documen
 window.addEventListener('load', _relayout);
 
 // The version of the CODE that is actually running -- stamped into APP_VERSION (assets.js)
-// by the pre-commit hook alongside sw.js, so a page shows the fresh number the instant its
-// fresh JS loads, whatever service worker is active. The old cache-name read LAGGED: it
-// reported the ACTIVE worker's cache, which stays on the previous version until the new
-// worker installs and claims -- so a hard-reloaded page read stale even though the
-// network-first fetch had already served current code. Cache name kept only as a fallback.
+// by the pre-commit hook alongside sw.js, so the display names the bundle this page was
+// served from, whatever worker is active (a hard reload bypasses the worker and runs newer
+// code than the active cache name says). Cache name kept only as a fallback.
 let _swVersion = (typeof APP_VERSION === 'string' && APP_VERSION) ? APP_VERSION : '?';
 if (_swVersion === '?' && 'caches' in window) {
     caches.keys().then(keys => {
@@ -1674,8 +1672,8 @@ if (_swVersion === '?' && 'caches' in window) {
 }
 
 if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        const wasControlled = !!navigator.serviceWorker.controller;
+    const wasControlled = !!navigator.serviceWorker.controller;
+    const _swStart = () => {
         // Update checks: once per minute, plus immediately on regaining focus when
         // the last check is over a minute old -- but ONLY on screens where the
         // resulting auto-reload (controllerchange below) cannot kill anything:
@@ -1710,5 +1708,10 @@ if ('serviceWorker' in navigator) {
             _reloading = true;
             window.location.reload();
         });
-    });
+    };
+    // A controlled page boots from its bundle and touches no network, so the update check
+    // leaves at once and a fresh deploy is on screen within the splash. An uncontrolled first
+    // visit is still downloading: registering then would set the precache against the page's
+    // own boot, so it waits for load.
+    if (wasControlled) _swStart(); else window.addEventListener('load', _swStart);
 }

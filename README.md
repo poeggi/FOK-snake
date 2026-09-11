@@ -191,8 +191,13 @@ pre-commit hook. Enable it once after cloning:
     git config core.hooksPath .githooks
 
 The hook derives MAJOR.MINOR from the latest git tag and bumps the PATCH on every
-commit, so installed PWA clients always pick up fresh assets. Do not edit the
-version/CACHE/ASSETS lines in sw.js by hand.
+commit. The asset list carries each file's blob id, so an installed client
+downloads only the files a version changed and copies the rest from its
+previous cache. Do not edit the version/CACHE/ASSETS lines in sw.js by hand.
+
+A client runs from its cached bundle and never waits for the network. The
+service worker update check (a 4 KB file) finds a new version, the new bundle is
+fetched whole before it goes live, and the game reloads once on the splash.
 
 ## License
 
