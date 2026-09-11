@@ -229,6 +229,14 @@ var _netPace = { hold:true };
 // have landed, so withdrawing the hold does not cost the server a request per second
 // where one held poll used to sit.
 const NET_UNHELD_EVERY = NET_POLL_S;
+// A tab hidden longer than this, with nothing of ours in flight and no seek running, reads
+// the mailbox UNHELD on the cadence above instead of holding: a hold owns a worker for its
+// whole wait, and a tab nobody is looking at is the one client that never needs the answer
+// at once. Inside the grace a hidden tab holds exactly as a visible one, so a quick switch
+// away -- an alt-tab at deal time -- costs nothing. Desktop in practice: a phone freezes
+// the page, and a frozen page arms nothing.
+const NET_HIDE_HOLD_MS = 30000;
+function _netHiddenLong(){ return _netHiddenAt > 0 && Date.now() - _netHiddenAt > NET_HIDE_HOLD_MS; }
 // ---- the background gate (the contract's 100ms request gap, 4.4) ----
 // What a request costs this host is not its bytes: it is the slice it waits for a
 // worker before any work runs, and that slice is paid PER REQUEST IN FLIGHT. Two of ours
@@ -1133,6 +1141,11 @@ let _netEvAt = 0;          // when the caller's event rows last came back
 // rows, so riding every poll would cut every hold short and spin an event screen into a hot
 // loop. It gets a tick of its own for the same reason the announce does.
 const NET_EVENTS_MS = 5000;
+// The MULTIPLAYER door only needs to know whether there is an event at all (the entry shows
+// while the list is non-empty), and every `ev` cuts the hold it rides short, so the door
+// reads it at a fraction of the screens' cadence. The screens keep NET_EVENTS_MS.
+const NET_EVENTS_DOOR_MS = 15000;
+function _netEvEvery(){ return phase === 'multiplayer' ? NET_EVENTS_DOOR_MS : NET_EVENTS_MS; }
 // aa, de and db cannot be seen in a 204, so a client only stops beating for them against a
 // server that states 4.9. fl and tl are read off the answer instead (see the latches above).
 function _netPoll49(){ return netSrvMinor() >= 9; }
@@ -1229,24 +1242,27 @@ async function _netPollOnce(){
     const _held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId'
                || (typeof eventScreen === 'function' && eventScreen())
                || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyRound' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
+    // ONLY while merely browsing is the hold ever given up below, which is also the only
+    // tier the server withdraws it from first. Anything with a handshake in flight keeps
+    // the 1s tick: the offer ladder retries every 2s and gives up after three, so a mailbox
+    // read that lands seconds late would answer an offer that has already been abandoned at
+    // the other end.
+    const _idle = !_netSess && !netForming()
+               && !(typeof tourneyActive === 'function' && tourneyActive());
     // ...and only while the server still lets us. `hold:false` withdraws holding outright
     // (a held poll owns a worker for its whole duration -- the single biggest thing one
     // idle client costs a busy host); the 1 Hz tick below then carries the mailbox instead,
     // which is slower per signal but costs the server a worker only while it answers.
-    const held = _netPace.hold && _held;
+    // A tab hidden past NET_HIDE_HOLD_MS gives the hold up the same way, browsing only. A
+    // seek is not a handshake yet, but its answer starts one: the offer the pairing sends
+    // rides the 6 s ladder, so a seeking tab keeps its hold.
+    const held = _netPace.hold && _held && !(_idle && !_netLb.seeking && _netHiddenLong());
     // Withdrawing the hold must not COST the server requests. Falling back to the 1s tick
     // sends five unheld polls where the 5 s held one sent a single request: cheaper per
     // request, five times as many of them, and the count in flight is the thing the whole
     // pacing contract is about. So when we wanted to hold and were not allowed to, read the
     // mailbox where the hold's answer would have landed instead -- "poll without waiting and
     // lean on the heartbeat", still well inside an undelivered signal's life.
-    //
-    // ONLY while merely browsing, which is also the only tier the server withdraws the hold
-    // from first. Anything with a handshake in flight keeps the 1s tick: the offer ladder
-    // retries every 2s and gives up after three, so a mailbox read that lands seconds late
-    // would answer an offer that has already been abandoned at the other end.
-    const _idle = !_netSess && !netForming()
-               && !(typeof tourneyActive === 'function' && tourneyActive());
     if(_held && !held && _idle && (_netPollTick % NET_UNHELD_EVERY)) return;
     if(held && Date.now() < _netPollNotBefore) return;   // the aborted hold is still parked on its worker
     _netPollBusy = true; _netPollBusyAt = Date.now();
@@ -1269,7 +1285,7 @@ async function _netPollOnce(){
     const de = (_netPoll49() && _netDuelEnd) ? _netDuelEnd : '';
     const fl = _netFlWant;
     const tl = _netTlWant() && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
-    const ev = _netEvWant() && Date.now() - _netEvAt >= NET_EVENTS_MS;
+    const ev = _netEvWant() && Date.now() - _netEvAt >= _netEvEvery();
     const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
     const q = fs + (de ? '&de=' + de : '')
                  + (_netPoll49() ? '&db=' + ((cfg.debug|0) > 0 ? 1 : 0) : '')   // REPORT what is true: a poll that never says is never woken with an instruction
@@ -1299,7 +1315,7 @@ async function _netPollOnce(){
     if(!r) _netPollDown = true;
     else if(_netPollDown){ _netPollDown = false; if(typeof tourneyMailboxLost === 'function') tourneyMailboxLost(); }
     // Straight back in, through the slot below. Only on a SUCCESSFUL reply: a failure (or an
-    // abort from backgrounding) falls through to the 1s tick, which is the backoff that
+    // abort from foregrounding) falls through to the 1s tick, which is the backoff that
     // stops a broken server from spinning this into a hot loop.
     if(held && r && _netOk() && !(typeof document !== 'undefined' && document.hidden)) _netPollArm();
 }
@@ -1340,17 +1356,22 @@ function _netTick(){
     _netPollOnce();
 }
 
-// ---- Connection lifecycle across focus loss. A backgrounded tab has its held
+// ---- Connection lifecycle across focus loss. A backgrounded tab can have its held
 // long-poll frozen or killed by the OS: the fetch may never settle, leaving
 // _netPollBusy latched forever and the client deaf to every signal until a
-// reload. So: drop the connection on blur, build a FRESH one on focus. ----
+// reload. So: on focus, drop whatever is in flight and build a FRESH one; the
+// zombie cut in _netTick frees a latch meanwhile. On blur nothing is dropped: an
+// abort closes only OUR socket, the server keeps the worker until its own
+// deadline and delivers the next signal into the dead socket. The hold in flight
+// answers on its own, and _netPollOnce decides whether the next one holds
+// (NET_HIDE_HOLD_MS). ----
 function _netPollAbortNow(){
     if(_netPollAbort){ try{ _netPollAbort.abort(); }catch(e){} _netPollAbort = null; }
     _netPollBusy = false; _netPollHeld = false;
 }
 if(typeof document !== 'undefined' && document.addEventListener){
     document.addEventListener('visibilitychange', ()=>{
-        if(document.hidden){ _netHiddenAt = Date.now(); _netPollAbortNow(); return; }   // backgrounded: note when, to measure how long
+        if(document.hidden){ _netHiddenAt = Date.now(); return; }   // backgrounded: note when, to measure how long
         // Foregrounded: nothing from before is trustworthy -- start over.
         const awayMs = _netHiddenAt ? Date.now() - _netHiddenAt : 0; _netHiddenAt = 0;
         _netPollResume();   // drop the latch, and no held poll before the aborted one's worker is free

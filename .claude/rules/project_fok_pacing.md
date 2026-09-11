@@ -1,5 +1,9 @@
 # Request pacing (client half; server half: FOK-server docs/API.md Pacing)
 
+THE SERVER HAS A LOW PHP WORKER LIMIT. Every request in flight and every held
+connection (poll, relay) is a worker; the budget is concurrent connections per
+client, never bytes. Weigh every new request site and every cadence against it.
+
 One idea: fewer simultaneous requests per client. The cost is a ~51 ms slice
 paid PER REQUEST IN FLIGHT on the shared host (connection/HTTP2 layer, not
 worker spawn, not bytes); a held long poll owns a worker for its whole wait;
@@ -24,14 +28,19 @@ leaving in the same ms still both pay the slice.
 - An aborted held poll stays parked on its server worker until its deadline,
   so never arm a held poll while the last aborted one may still be parked
   (`_netPollHoldEnd` / `_netPollNotBefore`); neither DataChannel open nor a
-  reconnect aborts the poll in flight.
+  reconnect aborts the poll in flight. Hiding the tab aborts nothing either:
+  the hold answers on its own. Past NET_HIDE_HOLD_MS (30 s) a hidden, merely
+  browsing tab reads unheld on NET_UNHELD_EVERY; a seek, a forming handshake
+  or a held tournament keeps the hold (their answers ride a ladder).
 - Ungated: the HELD poll and t.txt in `_netClockMs` (both still COUNT as flight).
 - ONE EVENT, ONE CALL: a roles sheet IS a state read; nothing reads state on a
   timer (the server runs its deadlines on the poll). `state` is only a screen
   entry, a transition, a shape-changing event, a doubtful sheet, or a mailbox
   that was down and is back (`tourneyMailboxLost`). A `result` with `rows` is
   the standings, no read. after_ms is honoured on the CALL (TT_AFTER_MAX 1 s).
-  Entering the 1vs1 screen: hello + friend list first, then `_netTimeSync`.
+  Entering the 1vs1 screen: hello first, the roster on the lobby's own poll
+  (`fl`; friend.php only until the poll has served it once), then
+  `_netTimeSync`.
 - PRESENCE is a cursor and deltas (server 4.6): `friends_since` on hello /
   `fs` on the poll, `friends_delta` whole states, `friends_at` next cursor,
   `friends_more` continue at once (solo lane, NET_FR_PAGES). One landing

@@ -540,6 +540,48 @@ runTest('SMOKE-NET', `
     }
     log('pacing ok: hold alone drives the poll, a retired interval field moves nothing, an unheld poll costs the contract cadence and not 1 Hz (a handshake excepted), q_ms flags a busy host and expires');
 
+    // A HIDDEN TAB. Hiding drops nothing: the hold in flight answers on its own (an abort
+    // closes only our socket, and the server delivers the next signal into it). Inside
+    // NET_HIDE_HOLD_MS a hidden tab holds exactly as a visible one; past it, merely
+    // browsing, it reads the mailbox unheld on the contract cadence. A seek, a forming
+    // handshake or a held tournament keeps the hold: their answers ride a ladder that
+    // cannot wait a cadence out.
+    {
+        const _oGetH=_netGet, _oFetchH=globalThis.fetch, _oHelloH=_netHello, _oSyncH=_netTimeSync, _oNetsH=netNetsRefresh;
+        const _oHidAt=_netHiddenAt, _oSeekH=_netLb.seeking, _oSessH=_netSess, _oTickH=_netPollTick, _oPhH=phase;
+        globalThis.fetch=()=>({});
+        let _u=null; _netGet=async (p)=>{ _u=p; return null; };
+        _netHello=()=>Promise.resolve(); _netTimeSync=async ()=>{}; netNetsRefresh=()=>{};
+        const poll=()=>{ _u=null; _netPollBusy=false; _netPollOnce(); };
+        const heldRe=new RegExp('wait=' + NET_POLL_S);
+        _netPace={hold:true}; _netPollNotBefore=0; _netPollHoldEnd=0; _netSess=null; _netHsClear(); _netLb.seeking=false; phase='duelLobby';
+        let _aborted=false; _netPollBusy=true; _netPollAbort={ abort(){ _aborted=true; } };
+        document.hidden=true; document.__emit('visibilitychange');
+        if(_aborted || !_netPollBusy) throw 'hiding must leave the hold in flight to answer on its own';
+        if(!_netHiddenAt) throw 'hiding must note when';
+        _netPollBusy=false; _netPollAbort=null;
+        _netHiddenAt=Date.now()-1000; poll();
+        if(!heldRe.test(_u||'')) throw 'a tab hidden for a moment still holds, got ' + _u;
+        _netHiddenAt=Date.now()-NET_HIDE_HOLD_MS-1;
+        let _hits=0, _heldHits=0;
+        for(let i=0;i<3*NET_UNHELD_EVERY;i++){ _netPollTick=i; poll(); if(_u){ _hits++; if(/wait=/.test(_u)) _heldHits++; } }
+        if(_hits!==3 || _heldHits!==0) throw 'a long-hidden browsing tab reads unheld on the contract cadence, got ' + _hits + ' reads, ' + _heldHits + ' held';
+        _netPollTick=0;
+        _netLb.seeking=true; poll();
+        if(!heldRe.test(_u||'')) throw 'a seeking tab keeps its hold while hidden, got ' + _u;
+        _netLb.seeking=false; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); poll();
+        if(!heldRe.test(_u||'')) throw 'a forming handshake keeps its hold while hidden, got ' + _u;
+        _netHsClear();
+        _netPollHoldEnd=0;   // the last hold answered
+        document.hidden=false; document.__emit('visibilitychange');
+        if(_netHiddenAt!==0) throw 'showing must clear the away stamp';
+        poll();
+        if(!heldRe.test(_u||'')) throw 'a shown tab holds again, got ' + _u;
+        _netGet=_oGetH; globalThis.fetch=_oFetchH; _netHello=_oHelloH; _netTimeSync=_oSyncH; netNetsRefresh=_oNetsH;
+        _netHiddenAt=_oHidAt; _netLb.seeking=_oSeekH; _netSess=_oSessH; _netPollTick=_oTickH; _netPollBusy=false; _netPollNotBefore=0; _netPollHoldEnd=0; phase=_oPhH;
+    }
+    log('hidden tab ok: hiding drops nothing, the hold survives the grace, a long-hidden browsing tab reads unheld on the cadence, a seek or a handshake keeps it');
+
     // 4.9: a poll is a COMPLETE beat, so a screen holding one sends nothing beside it. What
     // used to travel alongside -- the 60 s hello, the friends screen's roster read and the
     // tournament lobby's 5 s hello -- rides the poll's own query string, because a request
@@ -802,6 +844,16 @@ runTest('SMOKE-NET', `
         if(_refs!==1 || _hellos!==0) throw 'without the roster on hello the screen must read friend.php';
         _netFrHello=true; _refs=0; _hellos=0; netFriendsEnter();
         if(_hellos!==1 || _refs!==0) throw 'with the roster on hello the screen must ask for the heartbeat, not a second request';
+        // ...and the 1vs1 lobby takes the poll route: the roster rides the poll it holds
+        // (fl) once the poll has served it, friend.php until then. The hello stays either
+        // way -- it is what says the server is unreachable the moment the screen opens.
+        const _oFrPollL=_netFrPoll, _oAnchorL=_netAnchorRefresh, _oFetchL=globalThis.fetch, _oWantL=_netFlWant;
+        globalThis.fetch=()=>({}); _netAnchorRefresh=async ()=>{};
+        _netFrPoll=false; _netFlWant=false; _refs=0; _hellos=0; phase='duelLobby'; netLobbyEnter();
+        if(_refs!==1 || _hellos!==1 || !_netFlWant) throw 'until the poll has served the roster, lobby entry reads friend.php beside the hello and asks the poll, got ' + _refs + '/' + _hellos + '/' + _netFlWant;
+        _netFrPoll=true; _netFlWant=false; _refs=0; _hellos=0; netLobbyEnter();
+        if(_refs!==0 || _hellos!==1 || !_netFlWant) throw 'with the roster on the poll, lobby entry sends the hello alone and asks the poll, got ' + _refs + '/' + _hellos + '/' + _netFlWant;
+        _netAnchorRefresh=_oAnchorL; globalThis.fetch=_oFetchL; _netFrPoll=_oFrPollL; _netFlWant=_oWantL;
         _netFrRefresh=_oRefG; _netHello=_oHelloG; phase=_oPh2;
         _netFrHello=_oFrHelloG;
         // (f) 'a duel is being set up' is ONE predicate, because three schedulers ask it: the

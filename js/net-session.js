@@ -42,11 +42,15 @@ function netLobbyEnter(){
     _netLb.sel = 0; _netLb.msg = ''; _netLb.err = false;
     netPresenceOpen();
     if(_netOk()){
-        _netHello();                                // presence/friends right away
-        _netFrRefresh(false);                       // notice peer-side removals here too
-        // Last of the three: every sample waits for our own wire to go quiet, so the
-        // two above clear it first. By AGE only -- a deep link lands here without passing
-        // the MULTIPLAYER entry, so the same refresh sits on both doors.
+        _netHello();                                // presence right away, and the unreachable notice
+        // The roster rides the poll this screen holds anyway (`fl`, 4.9): peer-side
+        // removals are noticed off it just as friend.php noticed them. Until the poll has
+        // served it once, friend.php stands, exactly as on the friends screen.
+        _netFlWant = true;
+        if(!_netFrPoll) _netFrRefresh(false);
+        // Last: every sample waits for our own wire to go quiet, so the requests above
+        // clear it first. By AGE only -- a deep link lands here without passing the
+        // MULTIPLAYER entry, so the same refresh sits on both doors.
         _netAnchorRefresh({ nudge:true });
     }
 }

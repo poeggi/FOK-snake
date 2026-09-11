@@ -542,17 +542,17 @@ const DRIVER = `
         _netGet=async (p)=>{ _u=p; return null; };
         _netPost=async (p,b)=>{ _body=b; return null; };
         _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now(); _netPollHoldEnd=0;
-        const due=()=>{ _netEvAt=Date.now()-NET_EVENTS_MS-1; };
+        const due=(ph)=>{ _netEvAt=Date.now()-(ph==='multiplayer'?NET_EVENTS_DOOR_MS:NET_EVENTS_MS)-1; };
         const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); return _u||''; };
         const hello=(ph)=>{ _body=null; _netHelloBusy=false; phase=ph; _netHello(); return _body||{}; };
 
         for(const ph of ['multiplayer','eventChooser','eventPage','eventMembers','eventQr','eventMonitor','eventStats']){
-            due();
+            due(ph);
             if(!/[?&]ev=1(&|$)/.test(poll(ph))) throw 'the poll must ask for events on '+ph;
             if(hello(ph).events !== true) throw 'the hello must ask for events on '+ph;
         }
         for(const ph of ['menu','friends','duelLobby','tourneyLobby','settings']){
-            due();
+            due(ph);
             if(/[?&]ev=/.test(poll(ph))) throw 'the poll must NOT ask for events on '+ph;
             if('events' in hello(ph)) throw 'the hello must NOT ask for events on '+ph;
         }
@@ -562,8 +562,15 @@ const DRIVER = `
         // loop -- the same trap the tournament announce is spaced for.
         _netEvAt = Date.now();
         if(/[?&]ev=/.test(poll('eventPage'))) throw 'the event rows must not ride every poll';
-        due();
+        due('eventPage');
         if(!/[?&]ev=1(&|$)/.test(poll('eventPage'))) throw 'the event tick must ask once it is due';
+        // ...and the DOOR reads it slower still: it only needs to know there is an event
+        // at all, and every ev cuts the hold it rides short.
+        _netEvAt=Date.now()-NET_EVENTS_MS-1;
+        if(/[?&]ev=/.test(poll('multiplayer'))) throw "the door must not read on the screens' cadence";
+        if(!/[?&]ev=1(&|$)/.test(poll('eventPage'))) throw 'a screen reads at its own cadence';
+        due('multiplayer');
+        if(!/[?&]ev=1(&|$)/.test(poll('multiplayer'))) throw 'the door reads once its own cadence is due';
         // The tick is spent only when an answer actually came back: a failed poll
         // must not cost the screen its next read.
         _netEvAt=0; _netGet=async(p)=>{ _u=p; return null; };

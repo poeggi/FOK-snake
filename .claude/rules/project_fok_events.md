@@ -75,9 +75,10 @@ every `tourneySetupOpen`.
 - `eventState()` is DERIVED from `starts`, `ends` and the synced clock (ended
   > schedule > mode; no synced clock -> the server's word). Nothing polls on
   a timer; the four `event` signals mean "something moved, ask".
-- `events` rides a poll tick of its own (`NET_EVENTS_MS`; `ev` answers at
-  once, so riding every poll spins a hot loop), asked for on the six screens
-  that show it. Event screens poll and hold like the lobby.
+- `events` rides a poll tick of its own (`NET_EVENTS_MS` on the six screens
+  that show it, `NET_EVENTS_DOOR_MS` 15 s on the MULTIPLAYER door, which only
+  needs to know there is an event at all; `ev` answers at once, so riding
+  every poll spins a hot loop). Event screens poll and hold like the lobby.
 - The achievement `ev_<eid>` is server-carried (id, name, desc, icon); only
   the DEFINITION is kept locally (`ACH_EV_KEY`, outside the backup
   manifest); the unlock rides the backup. Renders on the hidden EGGS page.
