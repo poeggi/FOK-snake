@@ -1355,6 +1355,18 @@ const DRIVER = `
           if(!/YOU ARE IN/.test(_evUi.msg || '')) throw 'and it says the scan worked, got '+JSON.stringify(_evUi.msg);
           if(!hellos) throw 'the list must be re-asked for, or the new row never appears';
           if(_evEid !== 'U9QM') throw 'the answer still says which event it was';
+        // ...and the LIST has its own way out. It cannot read _eventBack at the time
+        // -- that is the PAGE's, and a row opening one overwrites it with
+        // 'eventChooser', which would make BACK from the list return to the list.
+        UI_INPUT.eventChooser.back();
+        if(phase !== 'multiplayer') throw 'a scan from the multiplayer camera goes back there, got '+phase;
+        // A deep link spent at BOOT walked through no submenu, so it owes none.
+        _eventBack = 'menu'; _evUi.busy = false; _ev = null; _evEid = ''; phase = 'eventPage';
+        await eventJoin('ABCDEFGHJKM');
+        if(phase !== 'eventChooser') throw 'a boot link to an upcoming event still lands on the list';
+        UI_INPUT.eventChooser.back();
+        if(phase !== 'menu') throw 'and its BACK owes the menu, not a submenu nobody walked through, got '+phase;
+        _eventBack = 'multiplayer';
           // THE ACHIEVEMENT IS NOT GRANTED EARLY. The server omits ach while the
           // event is upcoming and sends it on the first answer after it starts, so the
           // only thing owed here is that an absent one is a no-op -- and that the

@@ -358,7 +358,14 @@ function eventChooserFirst(){
 // THE MENU ENTRY. It always opens the LIST, even for one room: which events you
 // are in is itself worth seeing -- when the next one starts, what is over -- and
 // a door that sometimes opens a list and sometimes a page is two doors.
+// Where the LIST's own way out goes, captured on the way IN. It cannot just read
+// _eventBack at the time: that is the PAGE's way out, and it is overwritten with
+// 'eventChooser' the moment a row opens one -- so BACK from the list would return
+// to the list. Captured here, a scan that lands on the list at boot goes back to
+// the MENU rather than to a submenu nobody walked through.
+var _evListBack = 'multiplayer';
 function eventsEnter(){
+    if(_eventBack && _eventBack !== 'eventChooser') _evListBack = _eventBack;
     _evUi.msg = '';
     phase = 'eventChooser';
     _evUi.sel = eventChooserFirst();

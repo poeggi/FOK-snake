@@ -310,7 +310,7 @@ const UI_INPUT = {
             if(!eventChooserOk(r)){ Snd.sfxPlay('fail',cfg.music); _evMsg(r.note||'NOT STARTED YET', true); return; }
             Snd.sfxPlay('select',cfg.music); _eventBack='eventChooser'; eventOpen(r.eid);
         },
-        back(){ Snd.sfxPlay('nav',cfg.music); phase='multiplayer'; _uiDirty=true; },
+        back(){ Snd.sfxPlay('nav',cfg.music); phase=_evListBack||'multiplayer'; _uiDirty=true; },
     },
     eventPage: {
         nav(key){ _evUi.sel=_navStep(key, _evUi.sel, eventRows().length+1); },
