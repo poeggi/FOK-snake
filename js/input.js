@@ -291,19 +291,10 @@ const UI_INPUT = {
         back(){ phase=_myIdBack; Snd.sfxPlay('nav',cfg.music); },
     },
     eventChooser: {
-        // The list is GROUPED, so it carries headings -- and a cursor that can sit on
-        // one is a cursor that can be pressed on nothing. Step until it lands on a
-        // room or on BACK; bounded by the list length, so a list of nothing but
-        // headings cannot spin here.
-        nav(key){
-            const rows=eventChooserRows(), n=rows.length+1;
-            let i=_evUi.sel;
-            for(let k=0;k<n;k++){ i=_navStep(key, i, n); if(eventChooserPickable(rows,i)) break; }
-            _evUi.sel=i;
-        },
+        nav(key){ _evUi.sel=_navStep(key, _evUi.sel, eventChooserRows().length+1); },
         confirm(){
             const rows=eventChooserRows();
-            if(_evUi.sel>=rows.length || !rows[_evUi.sel] || !rows[_evUi.sel].eid){ this.back(); return; }
+            if(_evUi.sel>=rows.length || !rows[_evUi.sel]){ this.back(); return; }
             const r=rows[_evUi.sel];
             // A dark row is shown so it can be READ, not pressed. Say when it opens
             // and stop -- the same answer the event page gives its own dark rows.

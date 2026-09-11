@@ -2309,15 +2309,20 @@ function drawEventPage(){
     if(word) ct(when ? word + '  ' + when : word, CW/2, 50, wcol, FONT.HINT);
     let y = 72;
     if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += 18; }
-    // A PENDING row sees the public face and NOTHING else -- no count, no members,
-    // no tournament, no archive, no pass. That is the server's rule, and a screen
-    // that showed more would only be showing what the next request will refuse.
-    if(eventIsMember() && e.members != null){
-        ct((e.members|0) + ' JOINED', CW/2, y, '#7fff7f', FONT.HINT); y += 18;
-    } else if(eventYou() === 'pending'){
-        ct('WAITING FOR THE ORGANIZER TO LET YOU IN', CW/2, y, '#ffd700', FONT.HINT); y += 18;
+    // WHO IS IN IT AND WHOSE IT IS, on ONE line. They are two halves of the same
+    // fact -- the size of the room and the person running it -- and a line each
+    // pushed the rows down for nothing. A PENDING row sees neither: it gets the
+    // public face and nothing else -- no count, no members, no tournament, no
+    // archive, no pass -- because that is the server's rule, and a screen that
+    // showed more would only be showing what the next request will refuse.
+    if(eventYou() === 'pending'){
+        ct('WAITING FOR THE ORGANIZER TO LET YOU IN', CW/2, y, '#ffd700', FONT.HINT);
+    } else {
+        const bits = [];
+        if(eventIsMember() && e.members != null) bits.push((e.members|0) + ' JOINED');
+        if(e.organizer_name) bits.push('HOSTED BY ' + String(e.organizer_name).substring(0, 15));
+        if(bits.length) ct(bits.join('   '), CW/2, y, '#7fff7f', FONT.HINT);
     }
-    if(e.organizer_name) ct('HOSTED BY ' + String(e.organizer_name).substring(0, 15), CW/2, y, '#888', FONT.HINT);
     const rows = eventRows(), rh = _evRowH(rows.length);
     rows.forEach((r,i)=>menuItem(r.t, EV_PAGE.ROWS_TOP + i*rh, ui.sel===i, ctx, !eventRowOk(r)));
     // THE NOTE GOES IN THE STATUS BAND, where every other menu puts it
@@ -2439,9 +2444,6 @@ function drawEventChooser(){
                           : 'PICK A ROOM', CW/2, 52, '#4a7a4a', FONT.HINT);
     for(let k = 0; k < shown; k++){
         const r = rows[from + k], y = EV_CHOOSE.TOP + k*EV_CHOOSE.ROW;
-        // A HEADING IS NOT A ROW. It says what the block under it is, in the left
-        // column where the eyes already are, and nothing sits beside it.
-        if(r.head){ _tableRow([[EV_CHOOSE.ID_R - 80, 'left', r.head]], y, '#4a7a4a'); continue; }
         const e = r.e;
         menuItem(clipName(String(e.name || e.eid).toUpperCase(), EV_CHOOSE.NAME_MAX), y,
                  sel === from + k, ctx, !eventChooserOk(r));

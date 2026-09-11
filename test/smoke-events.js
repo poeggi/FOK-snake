@@ -301,10 +301,12 @@ const DRIVER = `
     _evList=[]; _ev=null; _evEid=''; phase='menu'; multiSel=0;
     log('menu row ok: EVENTS always opens the list, a row opens its page, every screen has an input row');
 
-    // ---- THE LIST IS GROUPED, AND THE CURSOR SKIPS THE HEADINGS -----------
+    // ---- THE LIST IS ORDERED, AND THE ORDER IS THE GROUPING ---------------
     // Live first: that is the room you are standing in and the only one with
     // anything to press tonight. Then what is coming, soonest first. Then what is
-    // over, freshest first -- a record rather than a door.
+    // over, freshest first -- a record rather than a door. NO HEADINGS: every row
+    // already says what it is in its right-hand column, so a heading would say it
+    // twice and cost a row of screen each time.
     {
         // _evNow() reads the synced clock; without one eventState takes the server's
         // word, which is what the state field carries here.
@@ -315,28 +317,26 @@ const DRIVER = `
                       E('P1','HELD','paused'),           E('E2','FRESH','ended',{ends:8000}),
                       E('A2','ARENA','active') ]);
         const rows = eventChooserRows();
-        const shape = rows.map(r => r.head ? '#'+r.head : r.eid).join(',');
-        if(shape !== '#LIVE NOW,A2,P1,A1,#COMING UP,U2,U1,#FINISHED,E2,E1')
-            throw 'the grouping or the order inside it moved: '+shape;
-        // EVERY room is reachable -- a list that quietly drops one is worse than a
-        // list with an odd heading on it.
-        if(rows.filter(r=>r.eid).length !== _evList.length) throw 'a room fell out of the list';
-        // THE CURSOR NEVER SITS ON A HEADING, in either direction, all the way round.
-        _evUi.sel = eventChooserFirst();
-        if(rows[_evUi.sel].eid !== 'A2') throw 'the list opens on the first live room, got '+rows[_evUi.sel].eid;
+        const shape = rows.map(r => r.eid).join(',');
+        if(shape !== 'A2,P1,A1,U2,U1,E2,E1')
+            throw 'the order the groups are laid out in, or the order inside one, moved: '+shape;
+        // EVERY room is in it. A list that quietly drops one is the bug this screen
+        // exists to fix, and the catch-all for a state we do not know is what keeps
+        // a future word from making a room disappear.
+        if(rows.length !== _evList.length) throw 'a room fell out of the list';
+        // ...and it is a PLAIN list: every stop is a room, and one walk round reaches
+        // all of them plus the way out.
+        _evUi.sel = 0;
+        if(rows[0].eid !== 'A2') throw 'the list opens on the first live room, got '+rows[0].eid;
         const seenSel = {};
         for(let k = 0; k < rows.length + 4; k++){
             UI_INPUT.eventChooser.nav('ArrowDown');
-            if(!eventChooserPickable(rows, _evUi.sel)) throw 'DOWN landed on a heading at '+_evUi.sel;
             seenSel[_evUi.sel] = 1;
         }
-        for(let k = 0; k < rows.length + 4; k++){
-            UI_INPUT.eventChooser.nav('ArrowUp');
-            if(!eventChooserPickable(rows, _evUi.sel)) throw 'UP landed on a heading at '+_evUi.sel;
-        }
-        // ...and going all the way round reaches every room AND the way out.
         const reach = Object.keys(seenSel).length;
         if(reach !== _evList.length + 1) throw 'a walk down the list reaches '+reach+' stops, not every room plus BACK';
+        for(let k = 0; k < rows.length + 4; k++) UI_INPUT.eventChooser.nav('ArrowUp');
+        if(_evUi.sel < 0 || _evUi.sel > rows.length) throw 'walking back up left the cursor off the list: '+_evUi.sel;
         // A list longer than the screen scrolls rather than drawing off the bottom.
         const fits = eventChooserFits();
         if(fits < 6) throw 'the list window is too small to be useful: '+fits;
@@ -395,7 +395,12 @@ const DRIVER = `
         // THE CURSOR STILL LANDS ON IT. A row nobody can arm is a row whose reason
         // nobody can read -- dark is not the same as absent, and that is the whole
         // point of showing it.
-        if(!eventChooserPickable(rows, rows.indexOf(upRow))) throw 'a dark row must still take the cursor';
+        // A DARK ROW STILL TAKES THE CURSOR -- that is how its note gets read. Being
+        // unpressable is not the same as being unreachable.
+        _evUi.sel = 0;
+        const want = rows.indexOf(upRow);
+        for(let k = 0; k < rows.length + 2 && _evUi.sel !== want; k++) UI_INPUT.eventChooser.nav('ArrowDown');
+        if(_evUi.sel !== want) throw 'the cursor cannot reach the dark row at all';
         // Pressing it refuses, says why, and goes nowhere.
         _evUi.sel = rows.indexOf(upRow); _evUi.msg = ''; phase = 'eventChooser';
         UI_INPUT.eventChooser.confirm();

@@ -277,18 +277,19 @@ function eventOpen(eid){
     eventRead();
     _uiDirty = true;
 }
-// THE ROOMS YOU ARE IN, grouped by what is happening in them. LIVE first --
-// that is the room you are standing in and the only one with anything to press
-// tonight -- then what is coming, then what is over, which is a record rather
-// than a door.
+// THE ROOMS YOU ARE IN, in the order they matter. LIVE first -- that is the room
+// you are standing in and the only one with anything to press tonight -- then what
+// is coming, then what is over, which is a record rather than a door.
 //
-// ONE FLAT LIST, headings and rows together, because the draw and the input have
-// to agree about what is where: a heading the cursor can land on is a row that
-// can be pressed on nothing. A heading is an entry with `head` and no `eid`.
+// The ORDER is the grouping, and there are no headings: every row already says
+// what it is in its right-hand column (LIVE, PAUSED, the start time, ENDED), so a
+// heading above it would say the same thing twice and cost a row of screen each
+// time. Without them the list is a plain list again -- no entry the cursor has to
+// step over, and nothing that can be pressed on nothing.
 const _EV_GROUPS = [
-    { t:'LIVE NOW',  has:st => st === 'active' || st === 'paused' },
-    { t:'COMING UP', has:st => st === 'upcoming' },
-    { t:'FINISHED',  has:st => st === 'ended' },
+    { has:st => st === 'active' || st === 'paused' },
+    { has:st => st === 'upcoming' },
+    { has:st => st === 'ended' },
 ];
 function eventChooserRows(){
     const out = [], left = _evList.slice();
@@ -305,7 +306,6 @@ function eventChooserRows(){
             const an = String(a.name || a.eid), bn = String(b.name || b.eid);
             return an < bn ? -1 : an > bn ? 1 : 0;
         });
-        out.push({ head:g.t });
         for(const e of rows) out.push(_evChooserRow(e));
     }
     // An event whose state is a word we do not know still has to be reachable: it
@@ -314,10 +314,7 @@ function eventChooserRows(){
     const seen = {};
     for(const r of out) if(r.eid) seen[r.eid] = 1;
     const rest = left.filter(e => !seen[String(e.eid || '')]);
-    if(rest.length){
-        out.push({ head:'EVENTS' });
-        for(const e of rest) out.push(_evChooserRow(e));
-    }
+    for(const e of rest) out.push(_evChooserRow(e));
     return out;
 }
 // ONE ROW. A room you cannot walk into yet is SHOWN so it can be read -- when it
@@ -340,21 +337,11 @@ function _evChooserRow(e){
     return row;
 }
 // Whether a row can be OPENED, as opposed to merely sat on. A dark row keeps the
-// cursor -- that is how its note gets read -- so this is not the same question as
-// eventChooserPickable, and conflating the two is what would make the row silently
-// unreachable instead of visibly not-yet.
+// cursor -- that is how its note gets read -- so being unpressable is not the same
+// as being unreachable, and conflating the two would make the row silently absent
+// instead of visibly not-yet.
 function eventChooserOk(r){ return !!(r && r.eid && r.en !== false); }
-// Where the cursor may sit: never a heading, and BACK (the index past the end)
-// when there is nothing else at all.
-function eventChooserPickable(rows, i){
-    rows = rows || eventChooserRows();
-    return i >= rows.length || !!(rows[i] && rows[i].eid);
-}
-function eventChooserFirst(){
-    const rows = eventChooserRows();
-    for(let i = 0; i < rows.length; i++) if(rows[i].eid) return i;
-    return rows.length;                                  // nothing to pick: BACK
-}
+
 // THE MENU ENTRY. It always opens the LIST, even for one room: which events you
 // are in is itself worth seeing -- when the next one starts, what is over -- and
 // a door that sometimes opens a list and sometimes a page is two doors.
@@ -368,7 +355,7 @@ function eventsEnter(){
     if(_eventBack && _eventBack !== 'eventChooser') _evListBack = _eventBack;
     _evUi.msg = '';
     phase = 'eventChooser';
-    _evUi.sel = eventChooserFirst();
+    _evUi.sel = 0;
     // The list is a picture of the last answer, so freshen it on the way in: a row
     // that has gone is a room we have been removed from, and the chooser is where
     // that shows.
