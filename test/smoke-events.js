@@ -1333,6 +1333,50 @@ const DRIVER = `
       log('monitor feed ok: watching is not leaving, the lease and the re-ask keep their own rates, and the way back stays its own screen');
 
 
+      // ---- AND SCANNING A POSTER EARLY LANDS ON THE LIST --------------------
+      // Server 4.13: a printed KEY admits while the event is upcoming (a live pass
+      // does not -- there is no clock to mint one from before it starts). The scan is
+      // a deliberate act with a result, and the result the user asked for is the ROW:
+      // opening a page that the same scan cannot reopen a moment later would say the
+      // opposite of what the dark row says.
+      {
+          const _oPostJoin = _evPostJoin, _oHello = _netHello;
+          let hellos = 0;
+          _netHello = () => { hellos++; return null; };
+          const now4 = (typeof netPts === 'function' && netPts() != null) ? netPts() : Date.now();
+          const answer = (x) => ({ json:Object.assign({ ok:true, eid:'U9QM', name:'NEXT WEEK',
+                                     state:'upcoming', starts:now4 + 9e8, now:now4,
+                                     you:{ state:'member', organizer:false } }, x||{}),
+                                   status:200, body:{} });
+          _evPostJoin = async () => answer();
+          _evList = []; _ev = null; _evEid = ''; _evUi.busy = false; phase = 'eventPage';
+          if(await eventJoin('ABCDEFGHJKM') !== true) throw 'a key must admit before the start';
+          if(phase !== 'eventChooser') throw 'an early join lands on the LIST, got '+phase;
+          if(!/YOU ARE IN/.test(_evUi.msg || '')) throw 'and it says the scan worked, got '+JSON.stringify(_evUi.msg);
+          if(!hellos) throw 'the list must be re-asked for, or the new row never appears';
+          if(_evEid !== 'U9QM') throw 'the answer still says which event it was';
+          // THE ACHIEVEMENT IS NOT GRANTED EARLY. The server omits ach while the
+          // event is upcoming and sends it on the first answer after it starts, so the
+          // only thing owed here is that an absent one is a no-op -- and that the
+          // unlock is not faked from anything else in the answer.
+          if(achEventDefs()['ev_U9QM']) throw 'an upcoming event must grant nothing yet';
+          // ...and once it HAS started, the ordinary read grants it exactly as before.
+          _evPostJoin = async () => answer({ state:'active', starts:now4 - 1000,
+                                             ach:{ id:'ev_U9QM', name:'EARLY BIRD', desc:'Joined NEXT WEEK' } });
+          _ev = null; _evEid = ''; _evUi.busy = false; phase = 'eventPage';
+          if(await eventJoin('ABCDEFGHJKM') !== true) throw 'and a live event still joins';
+          if(phase !== 'eventPage') throw 'a join into a RUNNING event still opens its page, got '+phase;
+          if(!achEventDefs()['ev_U9QM']) throw 'a started event grants the achievement on the way in';
+          // A PENDING row is neither: it waits, wherever the event is in its schedule.
+          _evPostJoin = async () => answer({ you:{ state:'pending' } });
+          _ev = null; _evEid = ''; _evUi.busy = false; phase = 'eventPage';
+          await eventJoin('ABCDEFGHJKM');
+          if(!/APPROVAL/.test(_evUi.msg || '')) throw 'a pending row still says it is waiting';
+          _evPostJoin = _oPostJoin; _netHello = _oHello;
+          _evList = []; _ev = null; _evEid = ''; _evUi.msg = ''; phase = 'eventPage';
+      }
+      log('early join ok: a key admits before the start, lands on the list, and grants nothing until the night');
+
       _evPost=_oPost; eventRead=_oRead; globalThis.fetch=_oFetch; cfg.offline=_oOff;
       _ev=null; _evEid=''; _evUi.busy=false; _evUi.msg=''; _evList=[];
       R.steps.push('page verbs ok: the door flips to the other state, every verb re-reads, a refusal names itself, leaving drops the row');

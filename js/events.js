@@ -145,10 +145,27 @@ async function eventJoin(code){
     // what _evAdopt already does with every eid it is handed, so it does it here.
     _evAdopt(r.json);
     const pending = _evYou() === 'pending';
-    _evMsg(pending ? 'WAITING FOR APPROVAL' : 'YOU ARE IN');
+    // A JOIN AHEAD OF THE START LANDS ON THE LIST, not on a page. Being able to see
+    // that you registered is the entire point of scanning a poster days early, and
+    // the list is where that shows -- opening a page the same scan cannot reopen a
+    // moment later would say the opposite. The list is re-asked for on the way in,
+    // so the new row arrives with the next answer rather than being invented here:
+    // the server is the roster, and a row we made up is a row that can be wrong.
+    const early = !pending && eventState(_ev) === 'upcoming';
+    const when = early ? eventWhen(_ev) : '';
+    _evMsg(pending ? 'WAITING FOR APPROVAL'
+         : early ? ('YOU ARE IN' + (when ? '  ' + when : '')) : 'YOU ARE IN');
     if(!pending){
         Snd.sfxPlay('select', cfg.music);
+        // Absent while an event is upcoming, and on the first member answer once it
+        // has started -- so this is already the no-op it needs to be, and the unlock
+        // happens on the read that opens the page on the night.
         _evGrantAch(r.json.ach);
+    }
+    if(early && typeof eventsEnter === 'function'){
+        const msg = _evUi.msg;
+        eventsEnter();
+        _evUi.msg = msg;               // eventsEnter clears it, and this one is the answer
     }
     return true;
 }
