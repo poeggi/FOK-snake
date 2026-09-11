@@ -246,7 +246,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
                 case 'SOLO PLAY':    beginGame(); break;
-                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; if(typeof _netAnchorRefresh==='function') _netAnchorRefresh({ nudge:true }); break;   // the multiplayer door: refresh the clock anchor by age
+                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; if(typeof _netAnchorRefresh==='function') _netAnchorRefresh({ nudge:true }); if(typeof netFriendsNudge==='function') netFriendsNudge(); break;   // the multiplayer door: refresh the clock anchor by age, and re-read the roster -- a signal that arrived while this client was elsewhere for over its TTL is gone, and the badge has to come from the rows
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;
@@ -442,14 +442,14 @@ const UI_INPUT = {
                 _netFr.confirm=null; return;
             }
             const rows=_netFrRows();
-            if(_netFr.sel>=rows.length){ phase='multiplayer'; Snd.sfxPlay('nav',cfg.music); return; }
+            if(_netFr.sel>=rows.length){ netFriendsLeave(); Snd.sfxPlay('nav',cfg.music); return; }
             const r=rows[_netFr.sel];
             if(r.state==='pending' && !r.outgoing){ Snd.sfxPlay('select',cfg.music); _netFrAccept(r.id); }   // incoming request: accept
             else { Snd.sfxPlay('nav',cfg.music); _netFr.confirm=r.id; _netFr.confirmSel=1; }                  // remove: local confirm (NO preselected)
         },
         back(){
             if(_netFr.confirm){ _netFr.confirm=null; Snd.sfxPlay('nav',cfg.music); }
-            else { phase='multiplayer'; Snd.sfxPlay('nav',cfg.music); }
+            else { netFriendsLeave(); Snd.sfxPlay('nav',cfg.music); }
         },
         other(key){
             if(!_netFr.confirm) return false;

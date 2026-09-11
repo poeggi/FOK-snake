@@ -1449,6 +1449,65 @@ runTest('SMOKE-NET', `
     confetti.length=0; localStorage.removeItem('fok-snake-friends'); _netFr.msg=''; _duelMsg='';
     log('friend notifications ok: request + accepted celebrate, bogus ignored');
 
+    // ---- WHAT IS NEW ON THE FRIENDS LIST, until you look -----------------------
+    // The signal above celebrates for 2.6 s and then nothing remembers it. The badge
+    // remembers: each row's state as it was the last time the FRIENDS screen was left,
+    // per device and persisted, diffed against the roster as it stands. It is a record
+    // of what was SEEN, never a copy of the roster.
+    {
+        localStorage.removeItem('fok-snake-fr-seen'); _netFrSeen=null; localStorage.removeItem('fok-snake-friends');
+        const roster=(rows)=>{ _netFrAdopt(rows, false); };
+        // THE FIRST ROSTER SEEDS THE RECORD SILENTLY: what is there is what will be
+        // seen, and calling all of it new would badge every existing friend once.
+        roster([{id:'00ff0001', state:'accepted', online:false}, {id:'00ff0002', state:'pending', outgoing:true}]);
+        if(netFriendsNew().length) throw 'the first roster on a device is not news: '+JSON.stringify(netFriendsNew());
+        if(!localStorage.getItem('fok-snake-fr-seen')) throw 'the first look must be written down';
+        // A request FOR you that you have not seen is news; a friend that was always there is not.
+        roster([{id:'00ff0001', state:'accepted', online:false}, {id:'00ff0002', state:'pending', outgoing:true},
+                {id:'00ff0003', state:'pending', outgoing:false}]);
+        let fresh=netFriendsNew();
+        if(fresh.length!==1 || fresh[0].id!=='00ff0003' || fresh[0].kind!=='request') throw 'an unseen incoming request is the news: '+JSON.stringify(fresh);
+        // ...and the MULTIPLAYER row carries it: a dot, and the reason while armed.
+        let row=multiRows().filter(r=>r.go==='friends')[0];
+        if(row.badge!==1) throw 'the FRIENDS row must carry the count, got '+row.badge;
+        if(!/FRIEND REQUEST FROM/.test(row.note||'')) throw 'and say what it is, got '+JSON.stringify(row.note);
+        // Your request accepted since you saw it pending is the other kind of news.
+        roster([{id:'00ff0001', state:'accepted', online:false}, {id:'00ff0002', state:'accepted', online:true},
+                {id:'00ff0003', state:'pending', outgoing:false}]);
+        fresh=netFriendsNew();
+        if(fresh.length!==2) throw 'two things changed: '+JSON.stringify(fresh);
+        if(!fresh.some(f=>f.id==='00ff0002' && f.kind==='accepted')) throw 'an accepted request of yours is news: '+JSON.stringify(fresh);
+        row=multiRows().filter(r=>r.go==='friends')[0];
+        if(row.badge!==2 || !/2 NEW/.test(row.note||'')) throw 'two changes read as two: '+row.badge+' / '+row.note;
+        // A friendship that appears WITHOUT you having asked from this device is not
+        // "they said yes" -- it is simply a friend, and there is nothing to announce.
+        roster([{id:'00ff0001', state:'accepted', online:false}, {id:'00ff0002', state:'accepted', online:true},
+                {id:'00ff0003', state:'pending', outgoing:false}, {id:'00ff0004', state:'accepted', online:false}]);
+        if(netFriendsNew().some(f=>f.id==='00ff0004')) throw 'a friend you never asked for from here is not news';
+        // LEAVING THE SCREEN IS THE LOOK. Nothing is news afterwards, and the record
+        // survives a reload.
+        phase='friends'; netFriendsLeave();
+        if(phase!=='multiplayer') throw 'leaving lands on the multiplayer menu';
+        if(netFriendsNew().length) throw 'nothing is news once it has been looked at: '+JSON.stringify(netFriendsNew());
+        _netFrSeen=null;                                              // a reload forgets memory, not storage
+        if(netFriendsNew().length) throw 'the look must survive a reload';
+        if(multiRows().filter(r=>r.go==='friends')[0].badge) throw 'and the dot must be gone';
+        // THE SIGNAL RE-READS. The toast is 2.6 s; the badge derives from the ROWS, so a
+        // signal has to fetch them rather than be believed on its own.
+        _netFlWant=false;
+        _netOnSignal({from:'', type:'friend', payload:JSON.stringify({event:'request', from:'00ff0005'})});
+        if(!_netFlWant) throw 'a friend signal must ask for the roster on the next poll';
+        // ...and so does entering the menu that shows the dot: a signal that arrived while
+        // this client was elsewhere for over its TTL is gone, and only the rows can say.
+        _netFlWant=false; phase='menu'; menuSel=MENU_ITEMS.indexOf('MULTIPLAYER');
+        UI_INPUT.menu.confirm();
+        if(phase!=='multiplayer') throw 'the MULTIPLAYER row still opens the menu';
+        if(!_netFlWant) throw 'entering the menu must ask for the roster once';
+        _netFlWant=false; localStorage.removeItem('fok-snake-fr-seen'); _netFrSeen=null; localStorage.removeItem('fok-snake-friends');
+        _netFr.list=null; _netFr.msg=''; _duelMsg=''; confetti.length=0; phase='menu';
+    }
+    log('friends badge ok: a request for you or a yes to yours is news until you look, the look survives a reload, and both the signal and the menu re-read the rows');
+
     // ---- ONE status notice, identical on every online screen; the api gate
     // re-evaluates instead of latching forever ----
     cfg.offline=true;

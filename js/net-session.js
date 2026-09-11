@@ -332,6 +332,10 @@ function _netOnSignal(sig){
                 const who = String(d.from || from || '');
                 if(!/^[0-9a-f]{8}$/.test(who)) return;
                 const nm = netFriendName(who) || fmtFriendId(who);
+                // ...and the roster is re-read on the next poll, so the badge on the
+                // MULTIPLAYER menu can derive what changed from the rows themselves --
+                // the toast below lasts 2.6 s, the badge lasts until you look.
+                if(typeof netFriendsNudge === 'function') netFriendsNudge();
                 if(d.event === 'accepted'){
                     const fresh = !_netFrOk[who];
                     _netFrOkMark(who);

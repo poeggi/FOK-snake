@@ -45,13 +45,16 @@ let multiSel = 0;   // MULTIPLAYER submenu selection -- an index into multiRows(
 // draw and the input would drift apart the first time that row appeared, so both read this.
 function multiRows(){
     const tt = typeof _ttMenuOk === 'function' && _ttMenuOk();
+    // What changed on the friends list since you last looked: a dot on the row, and
+    // the one-line reason in the band while the row is armed.
+    const fresh = (typeof netFriendsNew === 'function') ? netFriendsNew() : [];
     const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
     const rows = [
         { t:'1vs1 DUEL',  en:true, go:'duel' },
         { t:'TOURNAMENT', en:tt, note:tt ? null : (notice || 'TOURNAMENTS NEED A CONNECTION'), go:'tourney' },
         { t:'MY ID',      en:true, go:'myid' },
         { t:'ADD FRIEND', en:true, go:'addfriend' },
-        { t:'FRIENDS',    en:true, go:'friends' },
+        { t:'FRIENDS',    en:true, go:'friends', badge:fresh.length, note:fresh.length ? netFriendsNewNote(fresh) : null },
     ];
     if(typeof eventAny === 'function' && eventAny()) rows.push({ t:'EVENTS', en:true, go:'events' });
     return rows;

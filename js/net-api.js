@@ -1592,8 +1592,64 @@ function _netFrMigArm(){
         _netFrMigArm();
     }, NET_FR_MIG_MS);
 }
+// ---- what is NEW on the friends list ------------------------------------------
+// The server already pushes a `friend` signal on both edges -- a request for you, and
+// your request accepted -- and this client already celebrates it for 2.6 seconds. What
+// nothing kept was the fact that you had not LOOKED yet. This is that fact: each row's
+// state as it was the last time the FRIENDS screen was left, per device and persisted,
+// so a badge can say "something changed since you looked" and survive a reload. It is a
+// record of what was SEEN and never a copy of the roster, which is still read from the
+// server exactly as before. Per device is the right scope: a second phone has not seen
+// it either.
+const FR_SEEN_KEY = 'fok-snake-fr-seen';
+var _netFrSeen = null;   // { id: 'in' | 'out' | 'ok' } as last seen; null until the first roster
+function _netFrSeenLoad(){
+    if(_netFrSeen) return;
+    try{ _netFrSeen = JSON.parse(localStorage.getItem(FR_SEEN_KEY) || 'null'); }catch(e){ _netFrSeen = null; }
+}
+function _netFrKind(r){ return r.state === 'accepted' ? 'ok' : r.state === 'pending' ? (r.outgoing ? 'out' : 'in') : ''; }
+// The rows that changed since the last look, each with what changed. Two kinds and
+// only two: a request for you that you have not seen, and a request of yours that
+// has been accepted since you saw it pending. A decline is invisible by design (the
+// server tells nobody), and a friendship that was simply always there is not news.
+function netFriendsNew(){
+    _netFrSeenLoad();
+    const out = [];
+    if(!_netFrSeen) return out;
+    for(const r of _netFrRows()){
+        const k = _netFrKind(r), was = _netFrSeen[r.id] || '';
+        if(k === 'in' && was !== 'in') out.push({ id:r.id, kind:'request' });
+        else if(k === 'ok' && was === 'out') out.push({ id:r.id, kind:'accepted' });
+    }
+    return out;
+}
+// The one line the badge says when its row is armed.
+function netFriendsNewNote(fresh){
+    fresh = fresh || netFriendsNew();
+    if(!fresh.length) return null;
+    if(fresh.length > 1) return fresh.length + ' NEW ON YOUR FRIENDS LIST';
+    const f = fresh[0], nm = netFriendName(f.id) || fmtFriendId(f.id);
+    return f.kind === 'accepted' ? nm + ' IS NOW YOUR FRIEND' : 'FRIEND REQUEST FROM ' + nm;
+}
+// LEAVING the FRIENDS screen is the look. Written then and not on entry, so the marks
+// stand for the whole visit. Also written ONCE when the very first roster lands on a
+// device that has no record yet: what is there then is what will be seen, and calling
+// all of it new would badge every existing friend for nothing.
+function netFriendsSeen(){
+    const m = {};
+    for(const r of _netFrRows()){ const k = _netFrKind(r); if(k) m[r.id] = k; }
+    _netFrSeen = m;
+    try{ localStorage.setItem(FR_SEEN_KEY, JSON.stringify(m)); }catch(e){}
+}
+function netFriendsLeave(){ netFriendsSeen(); phase = 'multiplayer'; }
+// Something about the roster moved -- a `friend` signal landed, or the menu that shows
+// the badge was entered after time away. Ask for the roster on the poll that screen is
+// holding anyway; the badge derives from the answer, never from the nudge.
+function netFriendsNudge(){ _netFlWant = true; }
 function _netFrAdopt(list, migrate){
     _netFr.list = list; _netFr.at = Date.now();
+    _netFrSeenLoad();
+    if(!_netFrSeen) netFriendsSeen();
     const seen = {};
     for(const f of list){
         seen[f.id] = true;

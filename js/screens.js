@@ -37,11 +37,21 @@ function drawStatus(msg, y){
 // of the list. A note parked a fixed number of rows down IS the last row the moment the list
 // grows one, which is how MULTIPLAYER ended up printing its reason on top of FRIENDS. A live
 // message outranks the reason: what just happened is newer news than why a row is grey.
+// The UNREAD dot, on any row that has something the player has not looked at. The
+// same mark the main menu puts on NEWS, so one shape means one thing everywhere. It
+// sits just past the row's right end -- past the '<' when the row is armed, so it
+// does not jump when the cursor arrives.
+function _drawRowBadge(text, y, on){
+    const x = CW/2 + ((text.length + (on ? 4 : 0)) / 2) * FONT.MENU + 10;
+    ctx.save(); ctx.fillStyle='#ff3355'; ctx.shadowColor='#ff3355'; ctx.shadowBlur=8;
+    ctx.beginPath(); ctx.arc(x, y - 6, 3.5 + Math.sin(_msgNow()/220), 0, Math.PI*2); ctx.fill(); ctx.restore();
+}
 function drawMenuRows(items, sel, msg){
     items.forEach((it,i)=>{
         const y=MENU_TOP+i*MENU_ROW, on=sel===i;
         if(it.en) menuItem(it.t, y, on);
         else ct(on?('> '+it.t+' <'):it.t, CW/2, y, on?'#777':'#555', FONT.MENU);
+        if(it.badge) _drawRowBadge(it.t, y, on);
     });
     menuItem('BACK', BACK_Y, sel===items.length);   // BACK toward the bottom, like drawSettings
     drawStatus(msg || (items[sel] && items[sel].note) || '');
@@ -946,6 +956,19 @@ function drawCredits() {
 // by one on the dial (see _entryInField). The returned box is the SLOTS only: the pill is
 // a control to press, not somewhere to type.
 const ENTRY_SLOT={ w:30, h:40, gap:5, y:122, dash:18, okW:46, okGap:22 };
+// THE RETURN ARROW, DRAWN RATHER THAN TYPED. Press Start 2P has no U+21B5, so the
+// glyph came from whatever font the device fell back to: small, thin, and a
+// different shape on every screen -- on a TV it was barely a mark. Three strokes
+// are the same everywhere and can fill the pill: down the right, left along the
+// bottom, and the head at the left end.
+function _drawReturnArrow(cx, cy, w, h, col){
+    const l=cx-w/2, r=cx+w/2, t=cy-h/2, b=cy+h/2, head=7;
+    ctx.save();
+    ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=3; ctx.lineCap='butt'; ctx.lineJoin='miter';
+    ctx.beginPath(); ctx.moveTo(r,t); ctx.lineTo(r,b); ctx.lineTo(l+head,b); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(l,b); ctx.lineTo(l+head+1,b-6); ctx.lineTo(l+head+1,b+6); ctx.closePath(); ctx.fill();
+    ctx.restore();
+}
 function _entryFieldBox(){
     const max=_entryMax(), isFixed=_entryFixed();
     const dashW=entryMode==='friend'?ENTRY_SLOT.dash:0;
@@ -1013,7 +1036,7 @@ function drawNameEntry(now) {
         ctx.fillStyle=on?'#7fff7f':ready?'#2c5c2c':'#151520'; ctx.strokeStyle=on?'#bfffbf':ready?'#4a8a4a':'#26263a'; ctx.lineWidth=on?2:1;
         if(on){ ctx.shadowColor='#7fff7f'; ctx.shadowBlur=GLOW.TEXT; }
         rr(ox,oy,okW,okH,okH/2); ctx.fill(); ctx.shadowBlur=0; ctx.stroke();
-        ct('\u21B5',ox+okW/2,oy+okH/2,on?'#0a1a0a':ready?'#cfeccf':'#3a3a4a',FONT.MENU);
+        _drawReturnArrow(ox+okW/2,oy+okH/2,24,16,on?'#0a1a0a':ready?'#cfeccf':'#3a3a4a');
     }
     const selY=sy+sh+90,ci=nameCharIdx;
     const dialX=_scanFor()?190:CW/2;   // with a camera: dial left, viewfinder right -> pair centered
@@ -1568,20 +1591,28 @@ function _drawRowName(nm, y, sel, col){
 function drawFriends(){
     drawGrid(); drawOvBg(0.92);
     ctg('FRIENDS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-    let stat, statCol='#4a7a4a';
+    // The line under the title is for what is HAPPENING -- a notice, a load -- and
+    // nothing else. Which key does what belongs in the one key line every screen
+    // ends on, where the eye already looks for it; a second copy up here was a
+    // second place to keep in step.
     const notice=(typeof netStatusNotice==='function')?netStatusNotice():null;
-    if(notice){ stat=notice; statCol='#ff8888'; }
-    else if(_netFr.loading && !_netFr.list){ stat='LOADING...'; }
-    else stat='A: ACCEPT REQUEST / REMOVE   ESC: BACK';
-    ct(stat, CW/2, 50, statCol, FONT.HINT);
+    if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
+    else if(_netFr.loading && !_netFr.list) ct('LOADING...', CW/2, 50, '#4a7a4a', FONT.HINT);
     const rows=_netFrRows();
+    // What changed since the last look, for the WHOLE visit: the mark is written when
+    // the screen is left, so a row that was news on the way in stays news until then.
+    const fresh={};
+    if(typeof netFriendsNew==='function') for(const f of netFriendsNew()) fresh[f.id]=f.kind;
     const startY=80, rowH=26;
     rows.forEach((r,i)=>{
         const y=startY+i*rowH;
         menuItem(fmtFriendId(r.id), y, _netFr.sel===i);   // the ID stays centered + selected
         _drawRowName((typeof netFriendName==='function')?netFriendName(r.id):null, y, _netFr.sel===i);
         let st, col='#555';
-        if(r.state==='accepted'){ st=r.online?('ONLINE'+(r.latency!=null?' '+r.latency+'ms':'')):'OFF'; col=r.online?'#7fff7f':'#555'; }
+        // A request of yours that was accepted since you looked says so, in place of the
+        // presence it would otherwise show -- that it is a friendship at all is the news.
+        if(fresh[r.id]==='accepted'){ st='NOW FRIENDS'; col='#7fff7f'; }
+        else if(r.state==='accepted'){ st=r.online?('ONLINE'+(r.latency!=null?' '+r.latency+'ms':'')):'OFF'; col=r.online?'#7fff7f':'#555'; }
         else if(r.state==='pending' && !r.outgoing){ st='WANTS TO JOIN'; col='#ffd700'; }
         else if(r.state==='pending'){ st='REQUEST SENT'; col='#888'; }
         else { st='NOT SYNCED'; col='#888'; }
@@ -1603,7 +1634,7 @@ function drawFriends(){
         ct('L/R:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:accept/remove  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 
 // Invite landing (iOS Safari only, see the boot hash parse): the scanned friend code
@@ -2474,8 +2505,6 @@ function drawEventMembers(){
     ctg('MEMBERS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
     const rows = eventMemberRows(), sel = eventMemberSel(), ui = eventUi(), org = eventIsOrganizer();
     const ask = eventMemberAsk();
-    ct(org ? 'A: APPROVE / DECLINE / REMOVE   ESC: BACK' : 'A: ASK TO BE FRIENDS   ESC: BACK',
-       CW/2, 50, '#4a7a4a', FONT.HINT);
     const startY = 80, rowH = 24;
     rows.forEach((m,i)=>{
         const y = startY + i*rowH, on = sel===i, st = String(m.state || 'member');
@@ -2519,7 +2548,11 @@ function drawEventMembers(){
         ct('L/R:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+    // What A does depends on who is looking: the organizer works the door, a member
+    // asks to be friends, and B is the organizer's ban. One line, at the height every
+    // screen keeps its keys, rather than a copy under the title.
+    ct(org ? 'UP/DN:nav  A:approve/remove  B:ban  ESC:back' : 'UP/DN:nav  A:friend  ESC:back',
+       CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The pass QR. Same geometry as MY ID and the tournament code, down to the module
 // size: all three do the same job -- hold a phone up to this -- and somebody who
