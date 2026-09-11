@@ -1235,6 +1235,40 @@ const DRIVER = `
         if(_evUi.msg !== 'TOURNAMENT IS FULL') throw 'the page must say what the join said, got '+_evUi.msg;
         if(_evUi.busy) throw 'a failed join must give the page back';
 
+        // A RUNNING TOURNAMENT IS A DOOR BACK. The server answers a join 409 once a
+        // tournament runs, so the row reads the tournament instead (state, which is
+        // 403 to anybody not in it): a participant who closed the app and comes back
+        // through the room lands on its boards, exactly as the tournament menu's
+        // REJOIN does; anybody else is told it has started.
+        {
+          const _oSrv=netSrvMinor, _oNetOk=_netOk;
+          netSrvMinor=()=>99; _netOk=()=>true;
+          const posts=[];
+          let joins=0;
+          tourneyJoin=async()=>{ joins++; };
+          _ev={ eid:'K7QM', name:'n', state:'active', you:{state:'member'}, tourney:{ tid:'a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4', state:'running', players:2 } };
+          _evEid='K7QM';
+          const rows=eventRows();
+          if(!rows[0] || rows[0].t !== 'REJOIN TOURNAMENT' || rows[0].go !== 'tourney')
+              throw 'a running event tournament must offer REJOIN, got '+JSON.stringify(rows[0]);
+          _tt=null; _ttUi.home=''; _ttUi.msg=''; _ttUi.busy=false; phase='eventPage'; _evUi.msg=''; _evUi.busy=false;
+          _ttPost=async(a,b)=>{ posts.push(a); return { json:{ ok:true, tid:b.tid, state:'running', host:HOST, players:[{id:HOST},{id:getPlayerId()}], round:1, cursor:'r1.1', schedule:[], bracket:[], standings:[] }, status:200, body:{ok:true} }; };
+          if(await eventTourneyGo() !== true) throw 'a rejoin that lands must report true';
+          if(joins) throw 'a running tournament must not be JOINED';
+          if(posts[0] !== 'state') throw 'the way back is the state read, sent '+posts.join(',');
+          if(!_tt || _tt.tid !== 'a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4') throw 'the state answer must be adopted';
+          if(phase !== 'tourneyBracket') throw 'a running tournament lands on its board, got '+phase;
+          if(_ttUi.home !== 'eventPage') throw 'a tournament rejoined from an event page must give that page back';
+          // ...and the refusal: not a participant.
+          _tt=null; _ttUi.home=''; _ttUi.msg=''; _ttUi.busy=false; phase='eventPage'; _evUi.msg=''; _evUi.busy=false;
+          _ttPost=async()=>({ json:null, status:403, body:{ok:false, error:'not a participant'} });
+          if(await eventTourneyGo() !== false) throw 'a refused rejoin must report false';
+          if(phase !== 'eventPage') throw 'a refused rejoin must not move the screen, got '+phase;
+          if(_evUi.msg !== 'ALREADY STARTED') throw 'a non-participant is told it has started, got '+_evUi.msg;
+          if(_tt) throw 'a refusal adopts nothing';
+          netSrvMinor=_oSrv; _netOk=_oNetOk;
+        }
+
         tourneyJoin=_oJoin; _ttPost=_oTtPost; _netAnchorRefresh=_oAnch;
         _tt=null; _ttUi.home=''; _ttUi.msg=''; _ev=null; _evEid=''; phase='eventPage';
       }

@@ -801,6 +801,35 @@ function tourneyRejoin(){
     Snd.sfxPlay('select', cfg.music);
     _ttSync();
 }
+// THE WAY BACK BY ID, for a door that names the tournament rather than holding it:
+// an event's page knows its running tournament's tid and nothing else. `join` is
+// answered 409 once a tournament runs, so a participant who closed the app and
+// comes back through the room gets in the way the probe above does -- by reading
+// the tournament -- and the server says whether we are in it: `state` is 403 to
+// anybody who is not a participant, so nothing here has to judge that.
+async function tourneyResume(tid){
+    if(_tt || _ttUi.busy) return false;
+    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return false; }
+    tid = String(tid || '');
+    _ttUi.busy = true; _ttMsg('REJOINING...');
+    const r = await _ttPost('state', { tid });
+    _ttUi.busy = false;
+    if(_tt) return true;                              // we joined something else meanwhile
+    if(!r.json){
+        if(r.status === 404)      _ttMsg('NO SUCH TOURNAMENT', true);
+        else if(r.status === 403) _ttMsg('ALREADY STARTED', true);
+        else _ttMsg('COULD NOT REJOIN', true);
+        return false;
+    }
+    const st = String(r.json.state || '');
+    if(st === 'done' || st === 'abandoned'){ _ttHold(''); _ttMsg('TOURNAMENT IS OVER', true); return false; }
+    r.json.tid = r.json.tid || tid;
+    _ttBack = null;
+    _ttAdopt(r.json);
+    _ttUi.sel = -1; _ttMsg('BACK IN');
+    _ttSync();
+    return true;
+}
 // A host holds one tournament at a time: a create while hosting is answered 409. Since
 // server 4.8 the same create sent again with replace:true ends the one we host -- exactly
 // as our own leave would -- and opens the new one in the same call, so we can never end

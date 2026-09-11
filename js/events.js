@@ -432,7 +432,9 @@ function eventRows(){
     // something they may not do.
     const live = !!(e.tourney && e.tourney.tid);
     if(live){
-        rows.push({ t:'JOIN EVENT TOURNAMENT', go:'tourney' });
+        // A running one is a door BACK: a participant who closed the app rejoins
+        // through it (tourneyResume), anybody else is told it has started.
+        rows.push({ t: e.tourney.state === 'running' ? 'REJOIN TOURNAMENT' : 'JOIN EVENT TOURNAMENT', go:'tourney' });
     } else if(org){
         // Dark rather than absent HERE, because this row is the organizer's own and
         // the reason it cannot be pressed is temporary: the event is paused, or has
@@ -645,8 +647,10 @@ async function eventTourneyGo(){
     _evUi.busy = true; _evMsg('JOINING...');
     // By tid, which is what the state answer names it by. A non-member is refused
     // 403 by the server -- that refusal IS the secrecy, and it is the server's to
-    // make, not this screen's to anticipate.
-    await tourneyJoin(t.tid);
+    // make, not this screen's to anticipate. A tournament already RUNNING takes no
+    // join; the same row is then the way back in for a player who dropped out of it.
+    if(t.state === 'running') await tourneyResume(t.tid);
+    else await tourneyJoin(t.tid);
     _evUi.busy = false;
     if(typeof tourneyActive !== 'function' || !tourneyActive()){
         // tourneyJoin has already worked out what went wrong and sounded it. This puts

@@ -2619,18 +2619,15 @@ function drawEventMonitor(){
     const [word, wcol] = _evStateLine(m);
     const when = eventWhen(m);
     ct(when ? word + '  ' + when : word, CW/2, 58, wcol, FONT.HINT);
-    // The figures an operator wants visible across a room: who is in, and who is
-    // still at the door. Big, because this is read from the far side of one.
-    ctg(String(m.members|0), CW/2-90, 110, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
-    ct('JOINED', CW/2-90, 140, '#888', FONT.HINT);
-    if((m.pending|0) > 0){
-        ctg(String(m.pending|0), CW/2+90, 110, '#ffd700', FONT.DISPLAY, GLOW.TITLE);
-        ct('WAITING', CW/2+90, 140, '#888', FONT.HINT);
-    }
-    // Which kind of slot this screen holds. `reserved` is the event naming its own
-    // screen; without it this is whoever asked first, and it keeps the slot only
-    // while it keeps asking. Worth saying on the wall: the two fail differently.
-    ct(m.reserved ? "THIS EVENT'S OWN SCREEN" : 'HOLDING THE SCREEN', CW/2, 160, '#4a7a4a', FONT.HINT);
+    // The motto, exactly where the page puts it: it is the one line the organizer
+    // wrote for the room, so the room's screen says it.
+    if(m.descr) ct(String(m.descr).substring(0, 46), CW/2, 78, '#aaa', FONT.HINT);
+    // The figure an operator wants visible across a room: who is in. Big, because
+    // this is read from the far side of one, and centred, because it is alone.
+    ctg(String(m.members|0), CW/2, 120, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
+    ct('JOINED', CW/2, 150, '#888', FONT.HINT);
+    // Who is still at the door is the organizer's cue, so it is on the wall too.
+    if((m.pending|0) > 0) ct((m.pending|0) + ' WAITING AT THE DOOR', CW/2, 168, '#ffd700', FONT.HINT);
     const t = m.tourney;
     // WHILE A TOURNAMENT RUNS, THE SCREEN IS THE TOURNAMENT'S. The monitor answer
     // carries the WHOLE projection a participant reads, so it draws the participant's
@@ -2652,11 +2649,28 @@ function drawEventMonitor(){
         ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    // NOTHING RUNNING: the room itself, and what it has already played.
-    let y = 190;
-    ct('NO TOURNAMENT RUNNING', CW/2, y, '#555', FONT.HINT); y += 24;
+    let y = 196;
+    if(t && t.state === 'open'){
+        // A TOURNAMENT IS FORMING. The lobby is what the room is waiting on, so the
+        // screen shows how full it is and who is in: a player looking up from a
+        // phone sees whether the field is complete without asking.
+        const ps = Array.isArray(t.players) ? t.players : [];
+        const n = ps.length, max = (t.max|0) || TT_MAX;
+        ct('TOURNAMENT FORMING - ' + n + ' OF ' + max + (n === 1 ? ' PLAYER' : ' PLAYERS')
+           + (t.speed ? ' - SPEED' : '') + (t.stakes ? ' - ITEM STAKES ON' : ''),
+           CW/2, y, '#7fff7f', FONT.HINT); y += 18;
+        const names = ps.map(p => String((p && p.name) || fmtFriendId(String((p && p.id) || ''))).toUpperCase().substring(0, 8));
+        for(let i = 0; i < names.length; i += 4){ ct(names.slice(i, i + 4).join(', '), CW/2, y, '#888', FONT.HINT); y += 16; }
+        y += 8;
+    } else {
+        ct('NO TOURNAMENT RUNNING', CW/2, y, '#555', FONT.HINT); y += 24;
+    }
+    // ...and what the room has already played, in whatever room is left above the band.
     const arch = Array.isArray(m.archive) ? m.archive : [];
-    if(arch.length) ct('PLAYED HERE', CW/2, y, '#4a7a4a', FONT.HINT), y += 18;
-    for(const a of arch.slice(0, 4)){ ct(eventArchiveLine(a), CW/2, y, '#888', FONT.HINT); y += 16; }
+    const fit = Math.min(4, Math.floor((BAND_Y - 8 - (y + 18)) / 16));
+    if(arch.length && fit > 0){
+        ct('PLAYED HERE', CW/2, y, '#4a7a4a', FONT.HINT); y += 18;
+        for(const a of arch.slice(0, fit)){ ct(eventArchiveLine(a), CW/2, y, '#888', FONT.HINT); y += 16; }
+    }
     ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
