@@ -1,19 +1,32 @@
-# Versioning is fully automated by the pre-commit hook
+# Versioning is automated by the pre-commit hook; the gate is load-bearing
 
-Versioning is AUTOMATED. Never hand-edit sw.js or any in-game version string.
+- Tracked hook `.githooks/pre-commit` (local `core.hooksPath=.githooks`) runs
+  on every commit: runs the FAST checks, then rewrites sw.js (AUTO-MANAGED
+  header, `// version` comment, `const CACHE`, `const ASSETS` from `git
+  ls-files` js/css/json/svg/woff2/woff/ttf minus sw.js and ^(test/|.github/))
+  and `git add sw.js`. Checks run BEFORE the bump. Needs Git Bash on Windows.
+- Version `snake-vMAJOR.MINOR.PATCH`: MAJOR.MINOR from the latest `v[0-9]*`
+  tag, PATCH auto-increments and resets to 0 when MAJOR.MINOR changes vs
+  sw.js. The in-game version is read at runtime from the cache key.
+- NEVER hand-edit sw.js or any version string. New assets appear in ASSETS
+  only if tracked/staged.
+- To bump MINOR: annotated tag `vX.Y.0` -> commit (hook resets PATCH) ->
+  `git tag -f vX.Y.0 HEAD` -> push branch+tag. Squash into X.Y.0: restore the
+  base stamps (`git checkout <base> -- sw.js js/assets.js`) and put the
+  annotated tag on the base commit BEFORE committing, then `git tag -fa` after.
 
-## How it works
-- Tracked hook at `.githooks/pre-commit`, wired via local `core.hooksPath = .githooks`. Runs on EVERY commit.
-- Version = semantic `snake-vMAJOR.MINOR.PATCH`:
-  - MAJOR.MINOR is derived from the latest git tag (`git describe --tags --abbrev=0`, strips leading `v`). Tag `v1.3.0` -> `1.3`.
-  - PATCH auto-increments each commit; resets to 0 when MAJOR.MINOR changes vs what is in sw.js.
-- The hook rewrites sw.js: line-1 AUTO-MANAGED header, `// version ...` comment (duplicated with CACHE for bogus-update detection), `const CACHE`, and `const ASSETS` (rebuilt from `git ls-files` of js/css/json/svg/woff2/woff/ttf, minus sw.js). Then `git add sw.js`.
-- The in-game version string is read at RUNTIME from the cache key: `_swVersion` = the caches.keys() entry starting `snake-` (game.js), rendered in drawMenu bottom-left.
+## THE VERSION GATE
+Clients matchmake on MAJOR.MINOR only, so patches interop. ANY sim rule change
+(one two clients can DISAGREE about mid-match: movement, collision, spawn,
+scoring maths) MUST bump MINOR or old+new clients silently desync. A change
+that only alters emitted side effects (achievement thresholds, cosmetics) is
+not one: regoldening sim-events is not evidence a minor is owed; regoldening
+sim-determinism is.
 
-## How to apply (CRITICAL)
-- Never hand-edit sw.js version/CACHE/ASSETS -- the hook overwrites them; manual edits are pointless.
-- Never hand-edit an in-game version string -- there is none to edit; it derives from the cache key.
-- To bump MAJOR.MINOR: create a git tag (e.g. `git tag v1.4.0`); the next commit's hook picks it up and resets PATCH to 0.
-- New asset files auto-appear in ASSETS on commit, but only if tracked/staged -- `git add` them.
-- The hook needs bash + sed/awk/date (Git Bash on Windows). Commits trigger it automatically since core.hooksPath is set locally.
-- No non-ASCII in source; run git with an explicit repo path (`git -C`).
+Deliberate overrides exist (2.6.9 dirQueue, two 2.7.x lockstep changes shipped
+as patches). Accepted; do not re-litigate or retag. When an override is asked
+for: state the cost once, then ship it.
+
+APP_VERSION carries a leading `v` on the wire. Version tests pin the FORMAT of
+APP_VERSION (accept optional v, force its major), never a number: the hook
+rewrites the number after checks run.

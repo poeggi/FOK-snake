@@ -1,72 +1,146 @@
-# Duel recovery invariants (desync, outage, epoch split)
+# Duel recovery + housekeeping invariants (js/duel-core.js, net-session.js)
 
-How a 1vs1 recovers when the pair falls out of step, and what must not be
-changed while doing it. Every line here was paid for by a field report or a
-measurement. Do not relitigate any of it without a NEW field report.
+Every line here was paid for by a field report or a measurement. Do not
+relitigate without a new one.
 
-## Epoch mirror invariant (worker-hosted runtime)
+## 2.6 protocol
+Wire transitions: go {why: match|rematch|level|respawn|resume} (ONE
+host-authored timeline opener), req {why: level|again|resume} (joiner ask,
+epoch-pinned), bye. bsync/sched/rst/reship/epq are DELETED; do not
+reintroduce the `epq` peer-ask (the acknowledged go/req exchange re-agrees
+the epoch from either role). Echo-ack from the receive handler (+a:1,
+duplicates re-echo, effects epoch-deduped); ONE pending tx with a retry
+ladder; an unanswered go kills at 4 s, req never. Every boundary runs the
+bilateral clock burst first; `bth` rides the echoed go; a starved burst ships
+NO bth (both log `! BURST SYNC FAILED`) and keeps the prior clock; recovery
+is never lethal (`netPts()==null` -> skip).
 
-The wire stamps + gates epochs on MAIN (`_netSend` writes `o.ep` from `_rbEpoch`; `_netHandleMsg` compares), but the worker cannot compute the epoch (`netEpoch()` needs `_netSess`, main-only). So main MUST run `_rbReset()` in BOTH worker branches (beginOnlineDuel/-Level) at the same instant the worker rebases, or main's `_rbEpoch` mirror freezes for the whole match and the pair splits unrepairably at the first boundary against a peer whose epoch advances (in-process home: FORCE SINGLE THREADED toggle, file://, demoted worker). Worker-vs-worker pairs "work" only because both stamp a frozen 0 -- the gate is then dead code. `_netTeardown` must reset the mirror AFTER nulling `_netSess` (mirror -> 0), or the dead session's final epoch leaks into the next match.
+The go carries the per-match parameters both sims agree on BEFORE tick 0:
+`hm` (heart cap), `lvl` (opening level), `sk` (item stakes), `sp` (speed
+tournament), each absent-reads-as-default, echoed back byte-exact, and each
+ending the match MATCH SETUP MISMATCH when it contradicts a roles-sheet
+preset. duel-hearts.js statically demands all four in both go builders.
 
-Why no duel suite caught it: every duel suite boots the in-process home (the headless harness has no Worker); smoke-worker drives only the worker realm, never main's stamp/gate seam. FAST-tier guard `test/smoke-epoch-mirror.js` (recording Worker stub, red-then-green) pins the mirror invariant in both homes + the outbound stamp + the teardown clear.
+Level number rides the wire: the board is a pure function of (gameSeed,
+level), so `level` is never a private counter. The host owns s.lvl (authored
+in `_netStartNextLevel`, reset to 1 on match/rematch, clamped MAX_LEVELS),
+ships it as `lvl`, both sims adopt it via startDuelLevel's m.level;
+duplicate begins are idempotent. Guard: smoke-level-wire.js.
 
-Why all three detectors go blind at once under an epoch split (do not re-derive): the hash never reaches `_rbCheckHash` (gated one layer above it); CONNECTION LOST cannot fire because `_netMarkRecv` stamps on RECEIPT, before dispatch, so a link whose packets are all discarded still reads perfectly alive; the >600t `_netBreakRecover` abort cannot fire because neither sim is frozen -- each is internally consistent against its own clock.
+## Epoch mirror (worker-hosted runtime)
+The wire stamps and gates epochs on MAIN (`_netSend` writes `o.ep` from
+`_rbEpoch`, `_netHandleMsg` compares); the worker cannot compute it. Main
+MUST run `_rbReset()` in BOTH worker branches (beginOnlineDuel/-Level) when
+the worker rebases, and `_netTeardown` resets the mirror AFTER nulling
+`_netSess`. Under an epoch split all three detectors go blind (hash gated
+above `_rbCheckHash`; `_netMarkRecv` stamps on receipt; neither sim is
+frozen). Repair: `_netLiveCheck` fires an overdue begin off `netPts() >=
+s.beginAt`, `_netEpochSplit` times the mismatch, `_netEpochRecover` ends the
+match OUT OF SYNC past RB_PERSIST_KILL_MS. Guards: smoke-epoch-mirror.js,
+duel-epoch.js.
 
-Repair design: `_netArmBegin`/`_netFireBegin` keep the begin on the session and `_netLiveCheck` fires it off `netPts() >= s.beginAt` (the timer is only a fast path); `_netEpochSplit` TIMES the mismatch instead of dropping it silently; `_netEpochRecover` (js/net-session.js) runs one pass per liveness tick -- fire an overdue begin off the shared clock (an entirely LOCAL repair needing no peer cooperation), and past RB_PERSIST_KILL_MS end the match as OUT OF SYNC on the same deadline as an unhealed desync. Guard: `test/duel-epoch.js` (REGRESSION tier) swallows the one-shot on either role.
+## Resume boundary + death halt
+- A reconnect or peer-a-full-ring-behind arms a FULL resync burst
+  (`_rbArmFullResync`; routine single-rs repair does not). Its settle opens
+  an adopt-only clock re-anchor: startPts = round(netPts()-simTick*TICK_MS),
+  epoch bump, NO rebuild/tick-reset/ring-clear; host authors go{resume},
+  joiner sends req{resume}. Guard: smoke-recovery-resume.js.
+- Death is a halt: duelHalt -> host answers ONE go{respawn} (duplicates fold
+  via lvlPending), full burst + rebuild at tick 0. The dying hold
+  re-announces duelHalt every _HALT_RE=6 ticks until answered (a one-shot
+  edge wedged the host under a pending resume boundary, or after a
+  full-resync adoption past the DEATH_DUR crossing). Emits are side effects,
+  never hashed. Escape works in 'dying'. Guard: smoke-respawn-halt.js.
 
-DO NOT REINTRODUCE the `epq` peer-ask. An early cut had `_netEpochRecover` ask the peer with an `epq` signal after 1000ms, because reship was host-only and covered 1 of the 4 role/direction combinations. The 2.6 protocol DELETED the constant, the function and the `epq` branch: the acknowledged go/req boundary exchange re-agrees the epoch from either role at every boundary, so the ask has nothing left to ask for. Anyone looking for the joiner-side ask wants go/req, not `epq`.
+## Backgrounding / recovery band (product choice, leave as is)
+Ending the match after a long absence IS the chosen behaviour; no pause
+mode. The worker keeps the duel running ~3-4 s after backgrounding, then
+silence. Ladder on the awake side: banner RB_WARN_MS ~533 ms silence ->
+transport rebuild RB_RECONNECT_MS ~1067 ms -> kill RB_PERSIST_KILL_MS 4000
+(from the last RECEIVED packet, unconditional). Independent limits: frozen
+side >600 ticks, unanswered go 4 s, unhealed desync 4 s. Keepalives every
+NET_KEEPALIVE_MS=300 carry the input log. A wire cut with BOTH sides running
+is unrecoverable by design (duel-outage's 6 s control).
 
-## Level number rides the wire (boundary world-rebuild)
+## Resync ownership: your snake is yours for the ticks you ACTUALLY RAN
+`_rbApplyResync` splits on `catchUp = T > simTick + RB_DEPTH`:
+- CATCH-UP (we froze while the sender ran): adopt the sender's ENTIRE
+  frontier, both snakes, anchor T-1. Role-agnostic. The frozen side snaps its
+  own head ONCE here, legitimately.
+- ORDINARY (host-authoritative, only the joiner adopts): KEEP YOUR OWN SNAKE.
+  In-ring: keep the ring copy at T, `_rbRollback(T)` replays logged inputs.
+  Aged out: keep geometry, take the shared world + lives/alive/score, never
+  rewind the tick, push one 'st'. That `_rbSendState` is DUAL-PURPOSE (also
+  the frozen client's proof-of-life packet): never make it conditional.
+Do not make the ordinary branch adopt (measured lateral trade); any future
+attempt must key on un-acked local input tracking, not tick direction.
+Guard: duel-respawn.js, PER-SIDE assertion (live side liveJumps == 0, frozen
+side at most one snap).
 
-The board is a pure function of (gameSeed, level) via _duelLevelSeed, so `level` must never be a private per-client counter advanced by side effect -- purity AMPLIFIES a counter disagreement into maximally different boards, and any path running a begin a different number of times on the two clients silently builds two different worlds. The host owns the target level exactly like the epoch (s.lvl authored in _netStartNextLevel, reset to 1 on match/rematch begin, clamped at MAX_LEVELS), ships it in the boundary packet's `lvl` field, and BOTH sims adopt it via startDuelLevel's m.level input. Duplicate/stray begins are idempotent (same number -> identical board). No legacy lvl-flag fallback exists (2.6 kept no 2.5 interop). Guard: FAST-tier test/smoke-level-wire.js (perturbed counter must lose to the wire number; idempotent duplicate begin; main->worker seam carries it; host authors 2,3,...).
+## netTickPre repair ordering
+All input records apply only via netTickPre's log-feed for t=simTick+1. The
+three repair paths (parked-'rs' drain, `_rbHashSettle`, `_rbStateSettle`)
+rebuild from a ring entry and replay only up to simTick, so a repair AFTER
+the log-feed silently drops the records just fed for t and the worlds split
+unhealably. RULE: netTickPre runs drain + both settles BEFORE
+`_rbEnsureSnap(t)` + the log-feed, then `_rbEnsureSnap(t)` again (a settle
+rollback truncates the ring). Guard: 3 pinned seeds in duel-suspend.js;
+never chase a seed, pin it.
 
-## 2.6 protocol (holes closed by DELETING the trigger, not hardening it)
+## Tick schedule + ring
+- t mod 64: 0 pinned snapshot, 1 hash freeze+emit (hk = t-65), 2 verdict
+  (RB_SETTLE), 17 prune. t mod 16: 5 heartbeat. t mod 4: 0 warm ping (the
+  radio-warm keepalive that fixed iOS WiFi power-save lag; keep it). Only the
+  0-mod-64 grid has a wire contract.
+- RB_SNAP_EVERY = LEVEL_CFG[9].normal (3). 64 % 3 != 0, so `_rbEnsureSnap`
+  PINS the 64-grid ticks and `_rbRollback`'s re-record uses the same
+  condition; the freeze looks its tick up exactly (`_rbRingFind`).
+- Ring convention: an entry stamped tk=T holds the state at simTick T-1; a
+  resync adopting it anchors T-1, never T.
+- An ordinary rs stamped AHEAD of our sim is an EARLY packet: it parks in
+  `_rbResyncQ` (newest wins) and drains once `_rbFromWire(tk) <= simTick`.
+  A catch-up adoption clears the park.
+- Only an AGREEING verdict clears `_rbBadSince`; a quiet wire leaves the
+  OUT OF SYNC clock running.
 
-`bsync`/`sched`/`rst`/`reship`/`epq` no longer exist. Wire vocabulary is go/req/bye (packet shapes in project_fok_snake.md).
-- The joiner's burst is armed by the ACKNOWLEDGED go itself (echo-ack from the receive handler + sender retry ladder + unanswered-go 4s kill), so no single datagram is a SPOF.
-- bth rides the echoed go atomically; a starved burst ships NO bth at all (both sides log `! BURST SYNC FAILED`) and falls back to the prior burst-verified clock instead of killing the match (recovery is NEVER lethal: `netPts()==null` -> skip); bth:0 is an ordinary zero residual.
-- Resume boundary (go why:'resume'): a reconnect or peer-a-full-ring-behind arms a FULL resync burst (`_rbArmFullResync`; routine single-rs repair does NOT); its settle (netTickPre decrement site -> `_rbRecovered` -> `_netResyncSettled`) opens an adopt-only clock re-anchor: startPts = round(netPts()-simTick*TICK_MS) maps the CURRENT tick, epoch bump, NO rebuild/tick-reset/ring-clear. Host settles -> authors go; joiner settles -> req{why:'resume'}. Worker adopt rides the ordinary duelClock push. An outage therefore ends with a fresh clock anchor instead of resuming on the drifted pre-outage one.
-- Death is a halt: duelHalt event -> host answers ONE go{why:'respawn'} (duplicates fold), full burst + rebuild at tick 0, level-wire number carried. The halt is LEVEL-triggered: the dying hold re-announces duelHalt every _HALT_RE=6 ticks (100ms) until answered.
-Guards: smoke-recovery-resume.js (8 lanes), smoke-respawn-halt.js, net-handshake protocol lanes (echo/dedupe/retry/kill).
+## Cloner byte-identity contract
+`_rbCloneSnap/_rbClonePlayer/_rbCloneFlat` must serialize byte-identical to
+the source (key ORDER and PRESENCE): pinned snapshots feed the hash. Fixed
+shapes: cells/dir/dirQueue/boostDir/powerPellet/heart = {x,y}; players =
+`_mkDuelPlayer`'s keys in order. SHAPE-VARIANT via `_rbCloneFlat`, never a
+literal: bars and the gem (tier/spawnAt appended). Keep in sync with
+`_rbDuelSnap` / `_mkDuelPlayer`.
 
-## Death-freeze wedges (why the halt re-announces)
+## Five hand-synced duel field lists
+RB_HASH_DUEL (also the wire contract, positional), `_rbDuelSnap()`,
+`simApplyDuel()`, `_rbFullState()/_rbApplyResync()`, the cloners. Miss one =
+desync. Every hashed field must be JSON-transparent (a Set stringifies to
+`{}`; sim-duel.js asserts this). Adding a field to RB_HASH_DUEL obliges a
+reset in startDuel/_duelBeginLevel, or two devices arrive with different
+last classic games and disagree at tick 0 (the determinism lane catches it).
+FX routing: ONE FX_DEFER set in assets.js feeds drainSimEvents,
+_applyDuelEvents and the worker replay filter; never a per-home list.
 
-Two wedge mechanisms, both = the host missing the ONE-SHOT duelHalt edge: (1) a halt landing while a recovery-RESUME boundary holds lvlPending makes _netStartRespawn silently refuse, and a one-shot refusal is final (resume is adopt-only, no rebuild rescue; the joiner cannot ask -- req whys have no respawn); (2) a host healed by a full resync adopts a state already past the DEATH_DUR crossing, never runs the crossing tick, never emits; the joiner's halt is refused by the host-only gate. A one-shot hold also has NO deadline (the 4s unanswered-go kill only arms once a go ships). Principle: EVERY transition is retried until answered -- the hold re-announces duelHalt every _HALT_RE=6 engine ticks while it stands (sim.js dying hold); repeats are free (netDuelHalt host-gated, folded into the one open boundary via lvlPending) and local-only (no wire cost -- still exactly one go per death). Also: Escape routes in 'dying' (quit overlay; wasDuel uses the players marker so quit returns to the 1vs1 menu). Emits are side effects, never hashed -- cannot desync. Guard: smoke-respawn-halt re-announce cadence + the halt-refused-under-pending-boundary regression.
+## Banners + the second CONNECTION LOST trigger
+CONNECTION LOST = silence (every inbound datagram refreshes `_netMarkRecv`; a
+refused input never warns) OR a wedged peer sim: the proof of a live peer is
+the `tk` every packet stamps MOVING, taken only in `_netHandleMsg` (never
+from forwarded spectator packets). `_netSimStalled` suppresses where a sim
+may sit still (s.tx, lvlPending, reconnecting, relay, spectating, no
+baseline); RB_SIM_STALL_MS = RB_PERSIST_KILL_MS (banner), RB_SIM_KILL_MS =
+2x; no reconnect rung. Amber OUT OF SYNC = unhealed hash divergence; silence
+outranks it; both share RB_PERSIST_KILL_MS. Debouncing the amber banner was
+rejected. 'st' carries the WHOLE player (`_rbPackPlayer`). Guard:
+duel-warn.js cases 10-14.
 
-## Backgrounding / recovery band (product choice: leave as is)
-
-Ending the match after a long absence IS the chosen behavior. Do not build a pause mode or reopen long-background handling. On-device shape: the WORKER keeps the duel genuinely running ~3-4s after backgrounding (worker setTimeout escapes iOS main-thread throttling; sends via postMessage) until WebKit suspends the page; silence then starts and the peer banners at RB_WARN_MS ~533ms of silence. Recovery: the DataChannel/NAT binding survives, keepalives every NET_KEEPALIVE_MS=300 carry the input log, frozen-side catch-up adoption + resume boundary + burst re-anchor heal on wake.
-
-RECOVERY BAND (reference): ~4s of SILENCE, ~8s from backgrounding. `RB_PERSIST_KILL_MS = 4000` counts from the last RECEIVED packet on the wall clock (kill unconditional, net-rtc.js), NOT from the backgrounding gesture -- the worker's ~3-4s of background execution sits in front of it. Ladder on the awake side: banner 533ms silence -> transport rebuild RB_RECONNECT_MS ~1067ms -> kill 4000ms; visible banner band before the kill ~3.5s. Independent limits: frozen side >600 ticks (~10s) = timeline-break kill; unanswered go 4s; unhealed desync 4s. duel-outage.js's 6s control proves the kill fires when BOTH sides run (wire cut) -- that case is unrecoverable by design (inputs older than RB_DEPTH refused).
-
-## netTickPre repair ordering (deep-doze residual)
-
-All input records apply ONLY via netTickPre's log-feed for tick t=simTick+1 (nothing sets _live). The three repair paths (parked-'rs' drain, _rbHashSettle verdict repair, _rbStateSettle peer-'st' patch) each rebuild from a ring entry and replay the log only up to simTick -- tick t's records are never in any replay. Running a repair AFTER the log-feed silently discards the records just fed for t: the pass steps t without them while they stay in the log, so BOTH logs match while the worlds split -- unhealably, because every later repair eats that pass's fresh records the same way. Doze trigger: the RESYNC_BURST catch-up's TRAILING 'rs' is no longer a full ring ahead, takes the ORDINARY path, PARKS (T > simTick), drains 1-2 passes later -- exactly onto a tick just fed a boost. Session-end came from repair asymmetry: the split field was owned by the side that never flagged desync; the flagging side's 'st' pushes only its OWN player = no-op.
-
-THE RULE: netTickPre runs drain + both settles BEFORE _rbEnsureSnap(t) + the log-feed. Safe because rx-time rebuilds land between whole passes (DataChannel onmessage is a macrotask) and live-applied records (tk==simTick shortcut) are covered by any replay. Guards: 3 PINNED seeds in test/duel-suspend.js; the driver has mk(extra)/hookA/hookB injection + sig/clients in runMatch's return. Seed alignment shifts with the tree, so never chase a seed -- pin it.
-
-## DO NOT RETRY (measured lateral trades)
-
-- An ownership rule on the ORDINARY aged-out branch keyed on `const fwd = T > simTick` (adopt the sender's copy of OUR snake when the sender is ahead, keep-own when at/behind): fixes one doze seed, breaks another that was pristine -- a pure lateral trade. Why it cannot work as framed: every failing case has fwd=1, and at fwd=1 `anchor = T-1 = simTick`, i.e. the clock does not move, so the "out-of-phase stepAccum/dirQueue" rationale is wrong there. What the adopt actually does at fwd=1 is a straight bug-C swap of our live snake for the sender's copy, which can be fresher OR staler than ours. The real discriminator is the SENDER'S FRESHNESS w.r.t. inputs we authored, NOT tick direction -- any future attempt must key on un-acked local input tracking.
-- `T > simTick && !_rbRing.length` (adopt only post-wipe): diverges on _gDue instead. Every variant relocates the failure.
-- Suppressing the aged-out branch's `_rbSendState(anchor, simSnapshot())` as "redundant": it is DUAL-PURPOSE -- besides pushing our snake to the host it is the frozen client's PROOF-OF-LIFE packet. Suppressing it produces a pure RB_PERSIST_KILL_MS silence kill, not a sync fault. NEVER make that send conditional.
-
-## Architecture that must not be relitigated
-
-- Ring convention: an entry stamped tk=T holds the state at simTick T-1 (the snapshot is taken in netTickPre BEFORE tick T runs). A resync adopting it anchors T-1, NEVER T -- anchoring at T leaves `_gDue` one decrement ahead = permanent 1-tick game-phase divergence.
-- Banner semantics: CONNECTION LOST = pure silence only (every inbound datagram, incl. the `pi` ping, refreshes via `_netMarkRecv`; a refused input NEVER warns -- the packet arrived). Amber OUT OF SYNC = unhealed hash divergence. Silence outranks divergence. Both share RB_PERSIST_KILL_MS. REJECTED: debouncing the amber banner (~1.5s delay to hide self-healing start-window flashes) -- a workaround, do not re-propose.
-- 'st' carries the WHOLE player via `_rbPackPlayer` (cells+dir+boost+accrual+score+lives), not just cells. Carrying only cells was the old recovery cliff: the host re-stepped the joiner's snake with a stale direction and re-diverged 'players' forever.
-- Clock sync is a symmetric per-boundary BURST, not continuous NTP-style align (that subsystem is retired). Since 2.6 the burst measures on the RAW clock: every bs probe stamps `rts` = netRawPts() (the ONLY place raw time crosses the wire; everything else is NET pts), sq 0 is the pre-warm (delivery counts, timing does not), per-sample sanity is finiteness only (raw stamps span arbitrary device epochs -- the rttMin in [0,5000] check at the verdict is the real sanity; epochs cancel there). pts-rts on any probe = sender's clock correction (bsPeerC). The HOST low-passes the raw offset across boundaries (bsPrev: first verdict unmodified, then (prev+raw)/2; dies with the session + at a resume boundary), converts to the SHARED-clock residual R = raw + (own ofs - peer ofs) role-mapped, applies -R/2 slew-capped (NET_BURST_SLEW_MS 200), ships bth = round(R); the joiner applies +R/2. Gate: MIN 5 of 6 per direction; WAIT 200ms window past the last send == max verifiable RTT; probes created on absolute per-tick deadlines (GAP_TICKS=1, a late timer never stretches the schedule); TRIES 10 (~290ms/try stays inside RB_PERSIST_KILL_MS 4000). Starved -> go ships NO bth, both sides sigLog `! BURST SYNC FAILED`, prior clock kept. In the test harness the residual degenerates to the old theta (ofs=0, peerC=0), which is why duel-sync's strict equality assertions hold. `_netSend` stamps pts (and rts on bs) as the FINAL act after every drop/divert decision, and owns the universal oversize-packet drop. The first start bursts too.
-- The burst measures netPts on the MAIN thread; the per-tick in-flush runs in the sim WORKER, so the burst cannot ride the worker send path -- it is paced to the tick interval and stays on main.
-- duel-boundary has no load-bearing pair, and cannot (proven exhaustively -- do not retry): a single boundary cannot isolate the burst, because a constant offset that survives level 1 survives level 2 unchanged, and drift big enough to compound already blows level 1. The burst's load-bearing-ness lives in duel-sync (mechanism) + duel-rematch (drop-based).
-
-## Wedged peer sim is the SECOND CONNECTION LOST trigger
-
-CONNECTION LOST is not a pure silence detector, and could never have been a complete one. The wall-clock keepalives (the radio-warm `warmT` interval and the 250ms liveness ping) are TIMERS, not sim work -- they exist to chirp when the sim is NOT ticking -- so a peer whose sim wedged (the sim-worker hardening in js/sim-worker.js) keeps `lastRecvWall` fresh ~15x/s forever while its world stands still. In the worker home its beat is a bare `pi` with no tick, so nothing reacts at all; in the other home it is an `in` with a FROZEN tk, which feeds `_rbNoteBehindPeer` and arms an unbounded resync burst at a corpse.
-
-INVARIANT: the proof of a live peer sim is the `tk` every packet stamps MOVING -- movement, not increase, because a boundary rebases to 0 and a rebase is a sim doing something. `_netNotePeerSim` takes it ONLY in `_netHandleMsg` (the real-wire path); a spectator's forwarded packets reach `_netHandleParsed` directly and must never vouch for a peer they did not come from. `_netSimStalled(s, ms)` suppresses wherever a sim is entitled to sit still -- `s.tx`, `s.lvlPending`, reconnecting, relay, spectating, or no baseline yet -- and `_netLiveCheck` pushes `s.simSeenWall` forward through those windows so the deadline starts at the END of a legitimate pause. RB_SIM_STALL_MS = RB_PERSIST_KILL_MS (banner), RB_SIM_KILL_MS = 2x (match ends). The ladder has NO reconnect rung: the transport is healthy, so rebuilding it repairs nothing.
-
-Discriminator worth keeping: a BACKGROUNDED peer freezes its timers too, so it takes the ordinary silence path. "Timers alive, sim dead" is the only shape this trigger claims. Regression: `test/duel-warn.js` cases 10-14 (two fault shapes + three controls); reverting the predicate fails exactly the fault checks, dropping the `tx || lvlPending` guard fails exactly that control.
-
-Related: project_fok_duel_resync_ownership.md, project_fok_netcode_housekeeping.md,
-project_fok_headroom_shortcut.md, project_fok_clock_drift_fix.md.
+## Clock burst
+Symmetric per-boundary BURST on the RAW clock (`rts` = netRawPts(), the only
+raw time on the wire); sq 0 pre-warm; sanity = finiteness per sample, rttMin
+in [0,5000] at the verdict. HOST low-passes across boundaries (bsPrev),
+converts to the shared-clock residual R, applies -R/2 slew-capped
+(NET_BURST_SLEW_MS 200), ships bth = round(R); joiner applies +R/2. Gate MIN
+5 of 6 per direction, WAIT 200 ms, GAP_TICKS=1 absolute deadlines, TRIES 10.
+`_netSend` stamps pts/rts LAST and owns the oversize drop. The burst runs on
+MAIN (paced to the tick), never the worker send path. duel-boundary has no
+load-bearing pair and cannot; the burst's load-bearing-ness is duel-sync +
+duel-rematch.
