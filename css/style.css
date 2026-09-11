@@ -67,10 +67,13 @@ body {
        (--stage-w is a plain px value set by layout() within the first frame.) */
     width: var(--stage-w, 600px); max-width: 100vw;
     font-size: var(--fs-menu-px, 14px); letter-spacing: 0;
-    opacity: 1; transition: opacity 0.15s;
+    opacity: 1; transition: opacity 0.15s, visibility 0s;
     order: 1;
 }
-#hud.hidden { opacity: 0; pointer-events: none; }
+/* visibility, not just opacity: an opacity-0 element still holds a paint slot, and iOS
+   WebKit leaves stale tiles of the faded HUD in the landscape side panel. Delayed so the
+   fade still plays; the layout box stays (layout() measures hud.offsetHeight). */
+#hud.hidden { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.15s, visibility 0s 0.15s; }
 .hud-cell { display: inline-flex; align-items: center; gap: 4px; }
 #hud-b, #hud-d { justify-self: end; }
 .hl { color: #888; } .hv { color: #7fff7f; }
