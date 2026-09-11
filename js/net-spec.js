@@ -110,6 +110,7 @@ var _spTid = '', _spNid = '';
 var _spGrant = {};      // peer id -> ms when we authorised it to open a spectator link
 var _spWant = [];       // MY outstanding watch requests: [{to, at, last}] -- a secondary asks BOTH primaries
 var _spAsk = [];        // asks PARKED on me, waiting for a match to serve: [{from, at}]
+var _spMonitor = '';    // the event MONITOR the roles sheet names: served on a slot of its own, listed nowhere
 var _spOkAt = 0;        // when we last answered 'ok' -- an offer is owed to us until it lands
 var _spBootTry = 0;     // boots deferred waiting for the shared clock
 var _spT = null;        // the 250ms housekeeping timer
@@ -133,6 +134,8 @@ function netSpecDbg(){ return _spDbg; }
 // The spectator's equivalent of the duel's silence detector -- and the only thing its
 // banner needs, because a spectator has no second measure of "is this working".
 function netSpecFeedAge(){ return (_spOn && _spFeedAt) ? (_spNow() - _spFeedAt) : 0; }
+// An ask of ours is still on the ladder: re-sent every SPEC_ASK_RETRY_MS until SPEC_ASK_TTL_MS.
+function specAsking(){ return _spWant.length > 0; }
 // The sim-origin offset in ms: how far behind the live edge we deliberately run. Hop
 // count is deliberately NOT part of it (see the header) -- every spectator of a match
 // sits on the same tick, whichever tier of the tree it landed on.
@@ -197,6 +200,26 @@ function _spGrantOk(peer){ const g = _spGrant[peer] || 0; return !!g && _spNow()
 function _spServable(){
     return _spOn ? !!_spCtx : (netGameActive() && inGame && !!_spCtxBuild());
 }
+// THE MONITOR'S SLOT IS ITS OWN. An event's screen is a spectator nobody sees: the roles
+// sheet names it in a field of its own (server API 4.14), outside the tree, so no client
+// lists or counts it -- and it must not cost a human a direct slot either. So the two
+// direct slots are counted over everyone BUT the monitor, and the monitor always has
+// room: one id, one link, a re-ask replaces it. Never an alt: it feeds nobody.
+function specMonitor(id){ _spMonitor = /^[0-9a-f]{8}$/.test(String(id || '')) ? String(id) : ''; }
+function _spIsMonitor(peer){ return !!_spMonitor && peer === _spMonitor; }
+function _spRoomNow(peer){
+    if(_spIsMonitor(peer)) return true;
+    let n = 0; for(const l of _spOut) if(!_spIsMonitor(l.peer)) n++;
+    return n < SPEC_MAX_DIRECT;
+}
+function _spRoomLater(peer){
+    if(_spIsMonitor(peer)) return true;
+    let n = 0;
+    for(const l of _spOut) if(!_spIsMonitor(l.peer)) n++;
+    for(const a of _spAsk) if(!_spIsMonitor(a.from)) n++;
+    return n < SPEC_MAX_DIRECT;
+}
+function _spAlts(){ const out = []; for(const l of _spOut) if(!_spIsMonitor(l.peer)) out.push(l.peer); return out; }
 // Whatever we were holding for this peer, we are past it: the list says "not answered yet",
 // so an entry that outlives its answer is fan-out room held for a spectator already served.
 function _spAskDrop(from){
@@ -334,7 +357,7 @@ async function _spAnswer(peer, d){
     // so every grant would read as stale and no spectator link would ever open.
     const g = _spGrant[peer] || 0;
     if(!g || _spNow() - g > SPEC_GRANT_MS) return;
-    if(_spOut.length >= SPEC_MAX_DIRECT && !_spFind(_spOut, peer)) return;
+    if(!_spFind(_spOut, peer) && !_spRoomNow(peer)) return;
     _spDrop(_spOut, peer);
     const l = _spMkPc(peer, _spOut, 'out');
     l.ver = String(d.v || '');   // named in the offer, so this side may batch from the first candidate
@@ -390,7 +413,7 @@ function _spOnWatch(from, d){
         // a BARE no: the alts below name the nodes we serve, which would route the asker
         // straight back into the match being hidden.
         if(cfg.privateDuels && !_spGrantOk(from)){ _spWatchSig(from, 'no'); return; }
-        if(_spServable() && _spOut.length < SPEC_MAX_DIRECT){
+        if(_spServable() && _spRoomNow(from)){
             _spAskDrop(from);   // answered now: the copy we were holding has served its purpose
             _spGrant[from] = _spNow();
             _spWatchSig(from, 'ok');
@@ -403,14 +426,15 @@ function _spOnWatch(from, d){
         // grant is the gate: only a peer the sheet introduced can make us hold state, and
         // that is exactly the set with a reason to be early. A FULL fan-out is a different
         // answer and keeps the redirect below: room is what it is short of, not time.
-        if(_spOut.length + _spAsk.length < SPEC_MAX_DIRECT && _spGrantOk(from)){
+        if(_spRoomLater(from) && _spGrantOk(from)){
             _spAskPark(from);
             return;
         }
         // Refused, but not turned away: hand back EVERY node we are already serving.
         // The asker takes the first as its feed and the rest as warm standbys, which
         // is what makes a primary's death cost one flag instead of a fresh connect.
-        _spWatchSig(from, 'no', { alt:(_spOut.length ? _spOut[0].peer : ''), alts:_spOut.map(l => l.peer) });
+        const alts = _spAlts();
+        _spWatchSig(from, 'no', { alt:(alts.length ? alts[0] : ''), alts });
         return;
     }
     if(k === 'ok'){
@@ -902,7 +926,7 @@ function _spAskPump(now){
     for(let i = _spAsk.length - 1; i >= 0; i--){
         const a = _spAsk[i];
         if(now - a.at > SPEC_ASK_TTL_MS){ _spAsk.splice(i, 1); continue; }
-        if(!servable || _spOut.length >= SPEC_MAX_DIRECT) continue;
+        if(!servable || !_spRoomNow(a.from)) continue;
         _spAsk.splice(i, 1);
         _spGrant[a.from] = now;
         _spWatchSig(a.from, 'ok');

@@ -1,4 +1,4 @@
-# Events - the client half (server API 4.12)
+# Events - the client half (server API 4.14)
 
 An EVENT is a room an operator opens on the server: a LAN party, a club night, a
 stand at a fair. You get in by scanning its QR, straight in when it is OPEN and
@@ -64,10 +64,31 @@ contains no part of the feed -- no RTCPeerConnection, no signalling, no envelope
 handling -- and `js/net-spec.js` was not touched to build it. The only new thing
 is the screen. Never write a second transport here.
 
-Following the bracket is one rule: the projection names the match in flight, and
-a new one is asked for only AFTER the old feed is let go, because the two are
+Following the bracket is one rule: the sheet names the match in flight, and a
+new one is asked for only AFTER the old feed is let go, because the two are
 different timelines and a watcher boots from a checkpoint off the feed. A
 standing feed is never re-asked; a finished round releases it.
+
+THE MONITOR IS DEALT THE SHEET (server API 4.14). The event's monitor holder
+receives every `tourney` signal of the event's tournament, in the same drain as
+the players. `_ttOnSignal` hands a signal for a tid it does not hold to
+`eventMonitorSignal`: `roles` is adopted and followed at once, exactly as a
+participant treats it (a sheet IS the state read, and its `after_ms` is owed by
+a watcher too); `roles-patch` re-wires the sheet held; everything else is a hint
+to re-read `monitor`. The 30 s lease is now only the lease. Before 4.14 the
+monitor learned of a match at its next lease read, so it joined every round up
+to 30 s late.
+
+INVISIBLE MEANS IT COSTS NOBODY ANYTHING. The sheet names the monitor in a field
+of its own, `monitor`, outside `players`, `primaries`, `secondaries` and `names`,
+so no client lists, draws or counts it. Every client grants the feed off that
+field (`specGrant`), which is what lets a MAKE DUELS PRIVATE player feed it, and
+the feeder serves it on a slot of its own beside the two primaries
+(`specMonitor` / `_spRoomNow` in net-spec.js): the two direct slots are counted
+over everyone but the monitor, it always has room, and it is never handed out as
+an alt because it feeds nobody. A monitor hangs off the feeder directly and has
+no primary to fall back on, so when net-spec's own ask ladder gives up the
+follow asks the OTHER player, who holds both input streams in lockstep.
 
 ASKING IS NOT TAKING. Whether an event offers a screen is `monitor_allowed` on
 `state` and on every `events` row. The `monitor` call CLAIMS the slot -- never
@@ -77,12 +98,6 @@ switched off. An absent field reads as allowed.
 A refusal is said once and then STOPS. Neither 409 `monitor taken` nor 403
 `no monitor` becomes true by being asked again, and a screen nobody attends must
 not sit retrying.
-
-KNOWN GAP, accepted for v1: a player with MAKE DUELS PRIVATE on refuses the
-monitor's feed. The grant comes from the roles sheet and a monitor is deliberately
-in no participant list, so it is never granted. The screen follows that match on
-the bracket without the board. Fixing it properly needs the monitor named
-somewhere a player can grant it, which is the server's to decide.
 
 ## An event tournament is an ORDINARY tournament
 

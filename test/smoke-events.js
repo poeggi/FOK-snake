@@ -1371,6 +1371,114 @@ const DRIVER = `
       }
       log('watcher level-done ok: no advance offered or taken, ESC is the way out, a player keeps both');
 
+      // ---- THE MONITOR IS DEALT THE SHEET (server API 4.14) ---------------
+      // Field report from a TV: the monitor joined every round up to 30 s late and
+      // showed a lobby long after it opened. It was on no participant list, so the
+      // tournament pushed it nothing; its own 30 s lease read was the only thing that
+      // ever told it a match was in flight. Now the server deals it the same signals
+      // the participants get, and tourney.js hands them to the screen when the tid is
+      // not one it holds. A sheet IS the state read: adopted and followed at once.
+      {
+        const _oSpec4 = netSpectating, _oWatch4 = specWatch, _oStop4 = specStop, _oRead4 = eventMonitorRead, _oTt = _tt, _oAsk = specAsking;
+        let on4 = false, asked = [], reads4 = 0, asking = false;
+        netSpectating = () => on4;
+        specWatch = (peer, tid, nid) => { asked.push(peer + '/' + tid + '/' + nid); };
+        specStop = () => { on4 = false; };
+        specAsking = () => asking;
+        eventMonitorRead = async () => { reads4++; return true; };
+        _tt = null;
+        _evEid = 'K7QM'; _evMonT = 1; _evMon = { eid:'K7QM', tourney:null }; _evMonNid = ''; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0;
+        const sheet = (extra) => Object.assign({ event:'roles', tid:'t1', eid:'K7QM', nid:'n1', round:1, players:['c0ffee42','dddddddd'], feeder:'c0ffee42', primaries:[], secondaries:[], names:{}, monitor:getPlayerId(), you:'idle' }, extra || {});
+        // A sheet for the monitored event, for a tid this client does not hold: the feed
+        // is asked for the instant it lands, of the feeder, naming the node.
+        _ttOnSignal(sheet());
+        if(asked.length !== 1 || asked[0] !== 'c0ffee42/t1/n1') throw 'the sheet must ask the feeder for the feed at once, got ' + JSON.stringify(asked);
+        if(!_evMon.tourney || !_evMon.tourney.roles || _evMon.tourney.roles.nid !== 'n1') throw 'the sheet is the state read: it must be adopted';
+        if(reads4 !== 0) throw 'a sheet is not a reason to ask for a read, got ' + reads4;
+        // The sheet's stagger is owed by a watcher too: nothing goes on the wire before
+        // after_ms, and the one-shot that waits it out is not the 4 s tick.
+        asked.length = 0; _evMonNid = ''; _evMonAskAt = 0;
+        _ttOnSignal(sheet({ nid:'n2', after_ms:300 }));
+        if(asked.length) throw 'a sheet with after_ms must not be asked on at once: ' + JSON.stringify(asked);
+        if(!(_evMonAfter > _msgNow())) throw 'the stagger must be recorded';
+        _evMonAfter = 0; _evMonFollow();
+        if(asked.length !== 1 || asked[0] !== 'c0ffee42/t1/n2') throw 'and asked on once it has passed, got ' + JSON.stringify(asked);
+        // While net-spec's own ladder is still re-sending the ask, the follow stays out
+        // of it. The ladder giving up is what makes the follow ask again -- of the OTHER
+        // player, because a monitor hangs off the feeder directly and has no primary to
+        // fall back on.
+        asked.length = 0; asking = true; _evMonAskAt = _msgNow() - EV_MON_WATCH_MS - 1;
+        _evMonFollow();
+        if(asked.length) throw 'an ask still on the ladder must not be repeated: ' + JSON.stringify(asked);
+        asking = false; _evMonFollow();
+        if(asked.length !== 1 || asked[0] !== 'dddddddd/t1/n2') throw 'the re-ask goes to the other player, got ' + JSON.stringify(asked);
+        asked.length = 0; _evMonAskAt = _msgNow() - EV_MON_WATCH_MS - 1; _evMonFollow();
+        if(asked.length !== 1 || asked[0] !== 'c0ffee42/t1/n2') throw 'and back to the feeder, got ' + JSON.stringify(asked);
+        // A patch re-wires the tree and asks for nothing; every other transition is a
+        // hint that the picture moved, answered by the monitor's own read.
+        asked.length = 0; on4 = true;
+        _ttOnSignal({ event:'roles-patch', tid:'t1', eid:'K7QM', nid:'n2', primaries:['eeeeeeee'], secondaries:[] });
+        if(asked.length || reads4) throw 'a patch asks for nothing';
+        if(_evMon.tourney.roles.primaries[0] !== 'eeeeeeee') throw 'a patch re-wires the sheet held';
+        for(const ev of ['result', 'round', 'standings', 'over', 'lobby']) _ttOnSignal({ event:ev, tid:'t1', eid:'K7QM', nid:'n2' });
+        if(reads4 !== 5) throw 'every other transition re-reads the monitor, got ' + reads4;
+        // Not the monitored event, or the monitor not up: nothing.
+        reads4 = 0; asked.length = 0; on4 = false; _evMonNid = ''; _evMonAskAt = 0;
+        _ttOnSignal(sheet({ eid:'ZZZZ', nid:'n3' }));
+        _evMonT = null; _ttOnSignal(sheet({ nid:'n4' }));
+        if(asked.length || reads4) throw 'a sheet for another event, or with no monitor up, is not ours: ' + JSON.stringify(asked) + ' ' + reads4;
+        // ...and a read asked for while one is in flight is not dropped.
+        eventMonitorRead = _oRead4;
+        const _oPost4 = _evPost; let posts4 = 0, release = null;
+        _evPost = () => { posts4++; return new Promise(res => { release = () => res({ json:{ ok:true, tourney:null } }); }); };
+        _evMonT = 1; _evMonBusy = false; _evMonAgain = false;
+        const p1 = eventMonitorRead(); const p2 = eventMonitorRead();
+        if(posts4 !== 1) throw 'one read in flight, got ' + posts4;
+        release(); await p1; await p2; await new Promise(r => setTimeout(r, 0));
+        if(posts4 !== 2) throw 'the read asked for during a read must follow it, got ' + posts4;
+        if(release) release();
+        await new Promise(r => setTimeout(r, 0));
+        _evPost = _oPost4; _evMonT = null; _evMon = null; _evMonNid = ''; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonBusy = false; _evEid = '';
+        netSpectating = _oSpec4; specWatch = _oWatch4; specStop = _oStop4; specAsking = _oAsk; _tt = _oTt;
+      }
+      log('monitor sheet ok: dealt like a spectator, followed at once, the stagger owed, the re-ask goes to the other player, every other transition re-reads');
+
+      // ---- AND THE FEEDER SERVES IT ON A SLOT OF ITS OWN --------------------
+      // Invisible means it costs nobody anything: the two direct slots are counted
+      // over everyone but the monitor, it always has room, and it is never handed out
+      // as an alt -- it feeds nobody. Granted off the sheet's own field, which is what
+      // lets a MAKE DUELS PRIVATE player feed it at all.
+      {
+        const _oOut = _spOut, _oAsk5 = _spAsk, _oGrant = _spGrant, _oTt5 = _tt, _oNid = _ttNid;
+        _spGrant = {}; _spAsk = [];
+        specMonitor('abcdef01');
+        _spOut = [{ peer:'11111111' }, { peer:'22222222' }];
+        if(!_spRoomNow('abcdef01')) throw 'the monitor has room beside two primaries';
+        if(_spRoomNow('33333333')) throw 'a third person does not';
+        _spOut = [{ peer:'abcdef01' }, { peer:'11111111' }];
+        if(!_spRoomNow('22222222')) throw 'the monitor costs nobody a slot';
+        if(!_spRoomLater('22222222')) throw 'nor a parked ask';
+        _spAsk = [{ from:'22222222', at:0 }];
+        if(_spRoomLater('33333333')) throw 'two people held is full';
+        if(!_spRoomLater('abcdef01')) throw 'the monitor may always be held';
+        const alts = _spAlts();
+        if(alts.length !== 1 || alts[0] !== '11111111') throw 'the monitor is never an alt: ' + JSON.stringify(alts);
+        specMonitor('');
+        if(_spRoomNow('abcdef01')) throw 'with no monitor named it is a third person again';
+        // The grant comes off the sheet, on the sheet and on a patch, and goes with the tournament.
+        _tt = { tid:'t9', schedule:[], bracket:[], roles:null, state:'running' }; _ttNid = '';
+        _ttRoles({ event:'roles', tid:'t9', nid:'n9', players:['11111111','22222222'], feeder:'11111111', primaries:[], secondaries:[], names:{}, monitor:'abcdef01', you:'idle' });
+        if(!_spGrantOk('abcdef01')) throw 'the sheet grants the monitor';
+        if(_spMonitor !== 'abcdef01') throw 'and names it to the serving side';
+        _spGrant = {};
+        _ttPatch({ event:'roles-patch', tid:'t9', nid:'n9', primaries:['33333333'], secondaries:[] });
+        if(!_spGrantOk('abcdef01')) throw 'a patch keeps the grant';
+        _ttDrop('');
+        if(_spMonitor) throw 'dropping the tournament forgets the monitor';
+        _spOut = _oOut; _spAsk = _oAsk5; _spGrant = _oGrant; _tt = _oTt5; _ttNid = _oNid;
+      }
+      log('monitor slot ok: room beside two primaries, costs nobody a slot, never an alt, granted off the sheet and the patch, forgotten with the tournament');
+
 
       // ---- AND SCANNING A POSTER EARLY LANDS ON THE LIST --------------------
       // Server 4.13: a printed KEY admits while the event is upcoming (a live pass

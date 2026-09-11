@@ -891,6 +891,9 @@ var _evMonAt = 0;                // when the lease was last renewed
 var _evMonErr = '';              // 'no monitor' | 'monitor taken' | '' -- said, then stopped
 var _evMonNid = '';              // the match we are watching, so a moved cursor is noticed
 var _evMonAskAt = 0;
+var _evMonTry = 0;               // asks made for _evMonNid: the feeder first, then the other player
+var _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the same stagger as a player
+var _evMonAgain = false;         // a read asked for while one was in flight
 function eventMonitorView(){ return _evMon; }
 function eventMonitorErr(){ return _evMonErr; }
 // Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`
@@ -904,10 +907,16 @@ function eventMonitorOffered(e){
     return !!e && e.monitor_allowed !== false;
 }
 async function eventMonitorRead(){
-    if(_evMonBusy || !_evEid || !_evOk()) return false;
+    if(!_evEid || !_evOk()) return false;
+    // A read asked for during a read is not dropped: two transitions can land in one
+    // drain (a result and the round that follows it), and the second is the one that
+    // names the new picture.
+    if(_evMonBusy){ _evMonAgain = true; return false; }
     _evMonBusy = true;
+    _evMonAt = _msgNow();        // any read IS the lease's renewal
     const r = await _evPost('monitor');
     _evMonBusy = false;
+    if(_evMonAgain){ _evMonAgain = false; if(_evMonT != null) eventMonitorRead(); }
     if(!r.json){
         const err = String((r.body && r.body.error) || '');
         // Two refusals, and they mean different things: somebody else has the
@@ -943,15 +952,60 @@ function _evMonFollow(){
         // A NEW match. Drop the old feed before asking for the next: the two are
         // different timelines and a spectator boots from a checkpoint off the feed.
         if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
-        _evMonNid = nid; _evMonAskAt = 0;
+        _evMonNid = nid; _evMonAskAt = 0; _evMonTry = 0;
     }
     if(netSpectating()) return;                       // already watching this one
+    // An ask still on net-spec's own ladder is being re-sent and waited on there; asking
+    // again here would only restart its deadline. The ladder giving up is the re-ask.
+    if(typeof specAsking === 'function' && specAsking()) return;
     const now = _msgNow();
     if(_evMonAskAt && now - _evMonAskAt < EV_MON_WATCH_MS) return;
+    // The sheet's stagger: the whole field was dealt in one instant, and a watcher owes
+    // the same wait a player does before it puts anything on the wire. Under a second,
+    // so it is waited out with a one-shot rather than the 4 s tick.
+    if(_evMonAfter > now){
+        if(typeof setTimeout === 'function') setTimeout(_evMonFollow, _evMonAfter - now);
+        return;
+    }
     _evMonAskAt = now;
-    // players[0] is the feeder, exactly as it is for a tournament spectator.
-    const feeder = String(roles.feeder || (roles.players || [])[0] || '');
+    // players[0] is the feeder, exactly as it is for a tournament spectator. A monitor
+    // hangs off the feeder directly and has no primary to fall back on, so a re-ask --
+    // the feed was refused, lost, or never answered -- goes to the OTHER player: a
+    // lockstep player holds both input streams and can serve the same timeline.
+    const players = (roles.players || []).map(String);
+    const feeder = _evMonTry % 2 === 0 ? String(roles.feeder || players[0] || '') : String(players[1] || players[0] || '');
+    _evMonTry++;
     if(/^[0-9a-f]{8}$/.test(feeder)) specWatch(feeder, String(t.tid || ''), nid);
+}
+// THE SHEET COMES TO THE MONITOR. Server API 4.14 deals an event's monitor the same
+// `tourney` signals its tournament's participants get -- `roles` names it in a field
+// of its own, outside the tree, so nobody lists it -- and tourney.js hands them here
+// when the tid is not one it holds. A sheet IS the state read, exactly as it is for a
+// participant: it is adopted and followed at once, which is what puts the screen on a
+// match when it starts instead of at the next 30 s lease. Everything else is a hint
+// that the picture moved, answered by the monitor's own read, the one place its
+// screen comes from.
+function eventMonitorSignal(d){
+    if(_evMonT == null || !_evEid || !d) return;
+    if(String(d.eid || '') !== _evEid) return;
+    const ev = String(d.event || ''), tid = String(d.tid || '');
+    if(ev === 'roles'){
+        if(!_evMon) _evMon = {};
+        const t = _evMon.tourney && String(_evMon.tourney.tid || '') === tid ? _evMon.tourney : { tid };
+        _evMon.tourney = t;
+        t.roles = d;
+        const a = (d.after_ms | 0) || 0;
+        if(a > 0) _evMonAfter = Math.max(_evMonAfter, _msgNow() + Math.min(a, TT_AFTER_MAX));
+        _evMonFollow();
+        _uiDirty = true;
+        return;
+    }
+    if(ev === 'roles-patch'){
+        const r = _evMon && _evMon.tourney && _evMon.tourney.roles;
+        if(r && String(r.nid || '') === String(d.nid || '')){ r.primaries = d.primaries || []; r.secondaries = d.secondaries || []; }
+        return;
+    }
+    eventMonitorRead();
 }
 function _evMonTick(){
     // ATTACHED IS NOT GONE. While the monitor is watching a match it is drawing the
@@ -970,13 +1024,12 @@ function _evMonTick(){
     // Elapsed only, never a not-yet-set test: entering the screen stamps this AND
     // does the first read, so a clock whose zero is a real reading cannot be read
     // as never renewed and spend a lease on every tick.
-    if(now - _evMonAt >= EV_MON_MS){ _evMonAt = now; eventMonitorRead(); return; }
+    if(now - _evMonAt >= EV_MON_MS){ eventMonitorRead(); return; }
     _evMonFollow();
 }
 function eventMonitorEnter(){
-    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonAskAt = 0;
+    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
     phase = 'eventMonitor';
-    _evMonAt = _msgNow();        // the read below IS this lease period's renewal
     eventWakeSet(true);
     eventMonitorRead();
     if(_evMonT == null && typeof setInterval === 'function') _evMonT = setInterval(_evMonTick, EV_MON_WATCH_MS);
@@ -990,7 +1043,7 @@ function eventMonitorStop(keep){
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
     if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
         specStop('');
-    _evMonNid = ''; _evMonAskAt = 0; _evMonAt = 0;
+    _evMonNid = ''; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
     if(!keep){ _evMon = null; _evMonErr = ''; if(phase === 'eventMonitor') phase = 'eventPage'; }
     _uiDirty = true;
 }
@@ -1042,7 +1095,7 @@ function _evOnSignal(d){
     // shows still comes from its own read, so a signal that is late, doubled or
     // lost costs at most a slower refresh and never a wrong picture.
     if(what === 'state' || what === 'tourney'){
-        if(_evEid === eid && eventScreen()) eventNewsRead();
+        if(_evEid === eid && (eventScreen() || _evMonT != null)) eventNewsRead();
         _uiDirty = true;
     }
 }
@@ -1069,7 +1122,7 @@ function _evOnSignal(d){
 // TV showing the old room -- which is the whole failure this exists to avoid, and
 // it is one line in two places if it is not written down once.
 function eventNewsRead(){
-    return phase === 'eventMonitor' ? eventMonitorRead() : eventRead();
+    return (phase === 'eventMonitor' || _evMonT != null) ? eventMonitorRead() : eventRead();
 }
 function eventTourneySeen(list){
     if(!_evEid) return false;

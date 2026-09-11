@@ -386,6 +386,7 @@ function _ttDrop(msg){
     _ttPlayNid = ''; _ttWatchNid = ''; _ttOverAt = 0;
     if(typeof specNode === 'function') specNode('', '');
     if(typeof specGrant === 'function') specGrant([]);
+    if(typeof specMonitor === 'function') specMonitor('');
     _ttDisarm();
     _ttUi.sel = -1; _ttUi.contAt = 0;
     if(_TT_PHASES[phase]) phase = tourneyHome('tourneyLobby');
@@ -399,9 +400,14 @@ function _ttOnSignal(d){
     if(!d || typeof d !== 'object') return;
     const ev = String(d.event || ''), tid = String(d.tid || '');
     if(!ev || !tid) return;
-    // Not our tournament: it is either an echo from one we left or a mix-up. Either way we
-    // render what state() says, and state() is only worth asking about the one we hold.
-    if(!_tt || _tt.tid !== tid) return;
+    // Not our tournament to PLAY. An event's MONITOR is dealt the sheets of the event's
+    // tournament like any spectator (server API 4.14) without ever holding it here, so
+    // the signal goes to its screen; anything else is an echo from one we left or a
+    // mix-up, and we render what state() says about the one we hold.
+    if(!_tt || _tt.tid !== tid){
+        if(typeof eventMonitorSignal === 'function') eventMonitorSignal(d);
+        return;
+    }
     _ttAfterNote(d);
     switch(ev){
         case 'lobby':
@@ -493,8 +499,11 @@ function _ttRoles(d){
     // The sheet is the introduction. Everyone on it may connect to us for this node --
     // players, primaries and secondaries alike -- so a spectator link needs no friendship
     // and no invite, exactly as the server's signal gating allows.
-    if(typeof specGrant === 'function') specGrant([].concat(d.players || [], d.primaries || [], d.secondaries || []));
+    if(typeof specGrant === 'function') specGrant([].concat(d.players || [], d.primaries || [], d.secondaries || [], d.monitor || []));
     if(typeof specNode === 'function') specNode(_tt.tid, nid);
+    // The event's screen, a spectator in no list: granted like the rest, served beside the
+    // tree rather than in it (net-spec.js specMonitor), drawn nowhere.
+    if(typeof specMonitor === 'function') specMonitor(d.monitor);
     // ONE EVENT, ONE CALL. The sheet carries everything a match needs -- nid, hm, lvl,
     // stakes, players, feeder, primaries, secondaries, names and `you` -- so it IS a state
     // read: nothing asks the server to repeat what it just pushed, least of all beside the
@@ -520,7 +529,9 @@ function _ttPatch(d){
     const r = _tt.roles;
     r.primaries   = d.primaries   || [];
     r.secondaries = d.secondaries || [];
-    if(typeof specGrant === 'function') specGrant([].concat(r.players || [], r.primaries, r.secondaries));
+    if(d.monitor !== undefined) r.monitor = d.monitor;
+    if(typeof specGrant === 'function') specGrant([].concat(r.players || [], r.primaries, r.secondaries, r.monitor || []));
+    if(typeof specMonitor === 'function') specMonitor(r.monitor);
     // Re-source only if the tree moved US. net-spec repairs a dead link on its own and a
     // patch must never yank a healthy feed out from under a running sim.
     if(_tt.you === 'spectate' && typeof netSpectating === 'function' && netSpectating()
