@@ -1337,6 +1337,40 @@ const DRIVER = `
       }
       log('monitor feed ok: watching is not leaving, the lease and the re-ask keep their own rates, and the way back stays its own screen');
 
+      // ---- A WATCHER IS NOT OFFERED THE NEXT LEVEL, AND CANNOT OPEN IT --------
+      // Field report from the monitor: LEVEL COMPLETE showed 'A:next  TAP:next' to a
+      // screen that is not in the duel, and the press was TAKEN -- a RE-SYNCING cover
+      // over a board that had not moved, and a req parked in a tx slot that nothing
+      // would ever echo. The players open the next level; the watcher's only key is
+      // the way out, which LEVEL COMPLETE did not have either.
+      {
+        const _oSpec3 = netSpectating, _oCt = ct, _oSess3 = _netSess, _oIn3 = inGame, _oPh3 = phase, _oLdw = levelDoneWaiting, _oPa = phaseAt;
+        let on3 = true; netSpectating = () => on3;
+        _netSess = _netMkSess('', 'peer'); _netSess.game = true; inGame = true;
+        phase = 'levelDone'; levelDoneWaiting = true; phaseAt = 0; _lvlCover = false;
+        const drawn = []; ct = (t) => { drawn.push(String(t)); };
+        const BLINK_ON = 1040;                      // an instant the player's hint is lit
+        drawLevelDoneFx(BLINK_ON);
+        if(drawn.some(t => /next/.test(t))) throw 'a watcher was offered the advance: ' + JSON.stringify(drawn);
+        if(!drawn.some(t => t === 'ESC:back')) throw 'and its way out must be said: ' + JSON.stringify(drawn);
+        handleKey('Enter', () => {});
+        if(_lvlCover) throw 'the press covered the watcher board';
+        if(_netSess.tx) throw 'the press parked a req nothing will echo';
+        if(phase !== 'levelDone') throw 'the press moved the watcher off the board, to ' + phase;
+        handleKey('Escape', () => {});
+        if(phase !== 'quitConfirm' || prevPhase !== 'levelDone') throw 'ESC on LEVEL COMPLETE must ask a watcher whether to leave, got ' + phase;
+        Snd.duck(false); phase = 'levelDone';
+        // THE CONTROL: a player on the same screen keeps both the hint and the ask.
+        on3 = false; drawn.length = 0;
+        drawLevelDoneFx(BLINK_ON);
+        if(!drawn.some(t => /A:next/.test(t))) throw 'a player must still be offered the advance: ' + JSON.stringify(drawn);
+        handleKey('Enter', () => {});
+        if(!_lvlCover || !_netSess.tx || _netSess.tx.pkt.why !== 'level') throw 'a player pressing A must still ask for the level';
+        _netSess.tx = null; _lvlCover = false;
+        ct = _oCt; netSpectating = _oSpec3; _netSess = _oSess3; inGame = _oIn3; phase = _oPh3; levelDoneWaiting = _oLdw; phaseAt = _oPa;
+      }
+      log('watcher level-done ok: no advance offered or taken, ESC is the way out, a player keeps both');
+
 
       // ---- AND SCANNING A POSTER EARLY LANDS ON THE LIST --------------------
       // Server 4.13: a printed KEY admits while the event is upcoming (a live pass

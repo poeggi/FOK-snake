@@ -1058,6 +1058,12 @@ function _netMaybeRestart(){
 // asks the host with req{why:'level'}; P0 owns the epoch bump + the go.
 function netRequestNextLevel(){
     const s = _netSess; if(!s || !s.game || !inGame) return;
+    // A WATCHER NEVER ASKS FOR A BOUNDARY. It is not in this duel: the players open the
+    // next level between themselves and the feed carries the go when they do. Its session
+    // is synthetic and _netSend drops the req anyway -- what this refuses is the rest of
+    // the press: a RE-SYNCING cover over a board that has not moved, and a req parked in
+    // the tx slot that nothing will ever echo.
+    if(typeof netSpectating === 'function' && netSpectating()) return;
     _lvlCover = true;
     if(s.role === 'host') _netStartNextLevel(s);
     else _netTxShip(s, { t:'req', why:'level', epoch:(s.epoch|0) });   // epoch pins the ask to THIS boundary; retried until echoed (or superseded by the go itself)

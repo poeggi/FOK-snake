@@ -822,7 +822,11 @@ function handleKey(key, pde) {
     // the online death HOLD parks there while the respawn boundary negotiates, and no
     // live phase may be one the player cannot quit from. All UI screens handle Escape
     // via their table row instead.
-    if(key==='Escape' && (phase==='playing'||phase==='paused'||phase==='dying'||phase==='duel'||phase==='duelReady'||phase==='duelPaused')){
+    // 'levelDone' is on the list for a WATCHER only: a player's every key there is the
+    // advance (see below), a watcher has no advance, and LEVEL COMPLETE lasts until the
+    // players press -- so it needs a way out like every other live phase.
+    if(key==='Escape' && (phase==='playing'||phase==='paused'||phase==='dying'||phase==='duel'||phase==='duelReady'||phase==='duelPaused'
+                          || (phase==='levelDone' && typeof netSpectating==='function' && netSpectating()))){
         prevPhase=phase; quitConfirmSel=1;
         Snd.duck(true);   // dialog up: music + sfx at 50% while the game runs behind it
         phase='quitConfirm'; if(pde)pde(); return;

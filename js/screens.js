@@ -1309,7 +1309,11 @@ function drawLevelDoneFx(now){
             ctx.restore();
         }
     }
-    if(levelDoneWaiting&&Math.floor(now/520)%2===0){
+    // A watcher is not offered the advance: the players decide when the next level opens,
+    // so its only key is the way out, and it does not blink -- a blink is an invitation.
+    if(typeof netSpectating==='function' && netSpectating()){
+        ctx.save(); ctx.shadowBlur=0; ct('ESC:back',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
+    } else if(levelDoneWaiting&&Math.floor(now/520)%2===0){
         ctx.save(); ctx.shadowBlur=0; ct('A:next  TAP:next',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
     }
 }
