@@ -2443,7 +2443,8 @@ function drawEventChooser(){
         // column where the eyes already are, and nothing sits beside it.
         if(r.head){ _tableRow([[EV_CHOOSE.ID_R - 80, 'left', r.head]], y, '#4a7a4a'); continue; }
         const e = r.e;
-        menuItem(clipName(String(e.name || e.eid).toUpperCase(), EV_CHOOSE.NAME_MAX), y, sel === from + k);
+        menuItem(clipName(String(e.name || e.eid).toUpperCase(), EV_CHOOSE.NAME_MAX), y,
+                 sel === from + k, ctx, !eventChooserOk(r));
         // THE ID, because that is what somebody reads out across a room and what a
         // printed poster carries. Right aligned, so it grows away from the name.
         _tableRow([[EV_CHOOSE.ID_R, 'right', String(e.eid || '')]], y, '#555');
@@ -2452,7 +2453,10 @@ function drawEventChooser(){
         ct(word, EV_CHOOSE.TAG_C, y, wcol, FONT.HINT);
     }
     menuItem('BACK', BACK_Y, sel >= rows.length);
-    if(ui.msg) drawStatus(ui.msg);
+    // The armed row's own reason, in the band every other menu puts a note in --
+    // so a dark row says WHY it is dark without having to be pressed first.
+    const cur = rows[sel];
+    drawStatus(ui.msg || (cur && !eventChooserOk(cur) ? (cur.note || '') : ''));
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // The roster. The friends list is the model for the LOOK and nothing else: this is

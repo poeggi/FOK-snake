@@ -304,7 +304,11 @@ const UI_INPUT = {
         confirm(){
             const rows=eventChooserRows();
             if(_evUi.sel>=rows.length || !rows[_evUi.sel] || !rows[_evUi.sel].eid){ this.back(); return; }
-            Snd.sfxPlay('select',cfg.music); _eventBack='eventChooser'; eventOpen(rows[_evUi.sel].eid);
+            const r=rows[_evUi.sel];
+            // A dark row is shown so it can be READ, not pressed. Say when it opens
+            // and stop -- the same answer the event page gives its own dark rows.
+            if(!eventChooserOk(r)){ Snd.sfxPlay('fail',cfg.music); _evMsg(r.note||'NOT STARTED YET', true); return; }
+            Snd.sfxPlay('select',cfg.music); _eventBack='eventChooser'; eventOpen(r.eid);
         },
         back(){ Snd.sfxPlay('nav',cfg.music); phase='multiplayer'; _uiDirty=true; },
     },

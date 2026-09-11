@@ -289,7 +289,7 @@ function eventChooserRows(){
             return an < bn ? -1 : an > bn ? 1 : 0;
         });
         out.push({ head:g.t });
-        for(const e of rows) out.push({ eid:String(e.eid || ''), e:e });
+        for(const e of rows) out.push(_evChooserRow(e));
     }
     // An event whose state is a word we do not know still has to be reachable: it
     // is a room somebody is in, and a screen that silently drops it is worse than
@@ -299,10 +299,34 @@ function eventChooserRows(){
     const rest = left.filter(e => !seen[String(e.eid || '')]);
     if(rest.length){
         out.push({ head:'EVENTS' });
-        for(const e of rest) out.push({ eid:String(e.eid || ''), e:e });
+        for(const e of rest) out.push(_evChooserRow(e));
     }
     return out;
 }
+// ONE ROW. A room you cannot walk into yet is SHOWN so it can be read -- when it
+// starts, that you are on the list for it -- and refuses the press with the reason,
+// which is the same rule every dark row on the event page keeps. Registering ahead
+// of a night is the whole point of a poster on a wall; being unable to see that you
+// registered is what made scanning one feel like it had failed.
+//
+// THE ORGANIZER IS THE EXCEPTION and it is not a courtesy: a scheduled event is
+// driven by its own clock, so its organizer has no way to start it early and every
+// reason to be inside it beforehand -- approving the queue at the door, reading the
+// roster, closing the door. Locking them out of their own room would be a bug.
+function _evChooserRow(e){
+    const row = { eid:String(e.eid || ''), e:e };
+    if(eventState(e) === 'upcoming' && !(e.you && e.you.organizer)){
+        row.en = false;
+        const w = e.starts != null ? eventClock(e.starts) : '';
+        row.note = w ? 'STARTS ' + w : 'NOT STARTED YET';
+    }
+    return row;
+}
+// Whether a row can be OPENED, as opposed to merely sat on. A dark row keeps the
+// cursor -- that is how its note gets read -- so this is not the same question as
+// eventChooserPickable, and conflating the two is what would make the row silently
+// unreachable instead of visibly not-yet.
+function eventChooserOk(r){ return !!(r && r.eid && r.en !== false); }
 // Where the cursor may sit: never a heading, and BACK (the index past the end)
 // when there is nothing else at all.
 function eventChooserPickable(rows, i){

@@ -369,6 +369,62 @@ const DRIVER = `
     }
     log('event list ok: live first then coming then finished, ordered inside each, and the cursor never lands on a heading');
 
+    // ---- A ROOM YOU CANNOT WALK INTO YET IS SHOWN, NOT HIDDEN -------------
+    // Scanning the poster of an event that has not started is answered 409 by the
+    // server today, so no row is made and the event is invisible until the night --
+    // which makes scanning a poster feel like it failed. The row is what is wanted
+    // instead: readable, saying when it opens, and refusing the press. Every field
+    // this needs is one the events list already carries, so the client half stands
+    // on its own and simply has nothing to show until the server makes the row.
+    {
+        const now3 = (typeof netPts === 'function' && netPts() != null) ? netPts() : Date.now();
+        const up = (x) => Object.assign({ eid:'U1', name:'NEXT WEEK', state:'upcoming',
+                                          starts:now3 + 9e8, you:{state:'member', organizer:false} }, x||{});
+        _netEvApply([up(), { eid:'A1', name:'TONIGHT', state:'active', you:{state:'member'} }]);
+        const rows = eventChooserRows();
+        const upRow = rows.filter(r => r.eid === 'U1')[0];
+        const onRow = rows.filter(r => r.eid === 'A1')[0];
+        if(!upRow) throw 'an upcoming event must be IN the list, not dropped from it';
+        if(eventChooserOk(upRow)) throw 'and it must not be openable yet';
+        if(!eventChooserOk(onRow)) throw 'while a live one still opens';
+        if(!/STARTS /.test(upRow.note || '')) throw 'a dark row must say when it opens, got '+JSON.stringify(upRow.note);
+        // ...and the note is a TIME, not the word: eventClock renders milliseconds,
+        // and starts is milliseconds, so a row that reads 1970 means somebody fed it
+        // the seconds path.
+        if(/19[67][0-9]/.test(upRow.note || '')) throw 'starts is MILLISECONDS and was read as seconds: '+upRow.note;
+        // THE CURSOR STILL LANDS ON IT. A row nobody can arm is a row whose reason
+        // nobody can read -- dark is not the same as absent, and that is the whole
+        // point of showing it.
+        if(!eventChooserPickable(rows, rows.indexOf(upRow))) throw 'a dark row must still take the cursor';
+        // Pressing it refuses, says why, and goes nowhere.
+        _evUi.sel = rows.indexOf(upRow); _evUi.msg = ''; phase = 'eventChooser';
+        UI_INPUT.eventChooser.confirm();
+        if(phase !== 'eventChooser') throw 'pressing a dark row must not open anything, landed on '+phase;
+        if(!/STARTS /.test(_evUi.msg || '')) throw 'and it must say when it opens, got '+JSON.stringify(_evUi.msg);
+        // ...while the live one next to it opens exactly as before.
+        _evUi.sel = rows.indexOf(onRow); _evUi.msg = '';
+        UI_INPUT.eventChooser.confirm();
+        if(phase !== 'eventPage' || _evEid !== 'A1') throw 'a live row must still open its page: '+phase+'/'+_evEid;
+        phase = 'eventChooser';
+        // THE ORGANIZER IS THE EXCEPTION, and not as a courtesy: a scheduled event
+        // runs on its own clock, so its organizer cannot start it early and has every
+        // reason to be inside beforehand -- the door, the roster, the queue at it.
+        _netEvApply([up({ you:{state:'member', organizer:true} })]);
+        const mine = eventChooserRows().filter(r => r.eid === 'U1')[0];
+        if(!eventChooserOk(mine)) throw 'an organizer must be able to open its own upcoming event';
+        // A PENDING row is a different wait and keeps its own: it is not upcoming,
+        // it is unapproved, and its page is where that is explained.
+        _netEvApply([{ eid:'P1', name:'ASKED', state:'active', you:{state:'pending'} }]);
+        const pend = eventChooserRows().filter(r => r.eid === 'P1')[0];
+        if(!eventChooserOk(pend)) throw 'a pending row still opens -- the page is where the wait is explained';
+        // ...and the two other groups are untouched by any of this.
+        _netEvApply([{ eid:'E1', name:'OVER', state:'ended', ends:now3 - 9e8, you:{state:'member'} }]);
+        const done = eventChooserRows().filter(r => r.eid === 'E1')[0];
+        if(!eventChooserOk(done)) throw 'a finished event is still readable';
+        _evList = []; _evUi.sel = 0; _evUi.msg = ''; _ev = null; _evEid = ''; phase = 'menu';
+    }
+    log('upcoming rows ok: shown and dark with the time it opens, the cursor still reads it, the organizer still gets in');
+
     // ---- THE ROSTER IS THREE COLUMNS AND THEY MUST CLEAR EACH OTHER -------
     // The numbers come from EV_ROSTER, which is what the DRAW uses -- a guard that
     // re-declares them proves only that the test agrees with itself. (It did, the
