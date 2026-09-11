@@ -522,7 +522,7 @@ function eventChooserFits(){
 // fit between it and the status band. The PITCH shrinks only when the set needs
 // it: an organizer's page carries eight rows and the menu pitch does not hold
 // eight in that room. Named here so the guard reads the same numbers the draw does.
-const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, KEEP: 14 };
+const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, KEEP: 14, HEAD_Y: 50, BODY_Y: 72, BODY_STEP: 22 };
 function _evRowH(n){
     const room = (STATUS_Y - EV_PAGE.KEEP) - EV_PAGE.ROWS_TOP;
     return (n < 2 || n*MENU_ROW <= room) ? MENU_ROW : Math.floor(room / n);
@@ -2306,9 +2306,12 @@ function drawEventPage(){
     // the times are why -- and both are derived here rather than pushed, so a
     // scheduled event flips on this frame with nothing having arrived.
     const when = eventWhen(e);
-    if(word) ct(when ? word + '  ' + when : word, CW/2, 50, wcol, FONT.HINT);
-    let y = 72;
-    if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += 18; }
+    if(word) ct(when ? word + '  ' + when : word, CW/2, EV_PAGE.HEAD_Y, wcol, FONT.HINT);
+    // ONE STEP for the whole header block, so the gap under the description is the
+    // same as the gap above it. It was 18 against 22 and the last line sat visibly
+    // closer to the one before it than that one did to the state.
+    let y = EV_PAGE.BODY_Y;
+    if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += EV_PAGE.BODY_STEP; }
     // WHO IS IN IT AND WHOSE IT IS, on ONE line. They are two halves of the same
     // fact -- the size of the room and the person running it -- and a line each
     // pushed the rows down for nothing. A PENDING row sees neither: it gets the
@@ -2321,7 +2324,9 @@ function drawEventPage(){
         const bits = [];
         if(eventIsMember() && e.members != null) bits.push((e.members|0) + ' JOINED');
         if(e.organizer_name) bits.push('HOSTED BY ' + String(e.organizer_name).substring(0, 15));
-        if(bits.length) ct(bits.join('   '), CW/2, y, '#7fff7f', FONT.HINT);
+        // Joined BY a dash: two facts on one line read as one run of words without
+        // something between them, and the gap alone was not enough at this size.
+        if(bits.length) ct(bits.join(' - '), CW/2, y, '#7fff7f', FONT.HINT);
     }
     const rows = eventRows(), rh = _evRowH(rows.length);
     rows.forEach((r,i)=>menuItem(r.t, EV_PAGE.ROWS_TOP + i*rh, ui.sel===i, ctx, !eventRowOk(r)));

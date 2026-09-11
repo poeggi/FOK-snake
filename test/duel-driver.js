@@ -237,7 +237,19 @@ const HOOKS = (id) => `
   // Ring-snapshot hashes at a PAST tick: the settled-history equality test the continuous
   // detector uses. The ring is thinned to the RB_SNAP_EVERY grid, so pass a grid tk (__rbSnap).
   globalThis.__ringTicks   = ()=> _rbRing.map(e=>e.tk);
-  globalThis.__ringHashAt  = (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return _rbHash(_rbRing[i].snap); return null; };
+  // REMEMBERED PER SNAPSHOT. The spectator divergence check runs once per simulated
+  // MILLISECOND and rounds the tick down to the snapshot grid, so it asks for the hash
+  // of the SAME ring entry ~50 times before the window moves on, for every client --
+  // and that hash was 85% of a tourney-sim evening (39 s of a 39 s match, profiled). A
+  // snap is never mutated once it is in the ring: every write is a fresh _rbCloneSnap
+  // (the push, the re-record after a rollback, the resync's replacement), so a
+  // rewritten entry is a NEW object and misses the memo. Same comparisons, same
+  // counts, same verdicts; only the repeated work is gone.
+  const __hashMemo = new WeakMap();
+  globalThis.__ringHashAt  = (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk){
+      const sn=_rbRing[i].snap; let h=__hashMemo.get(sn);
+      if(h===undefined){ h=_rbHash(sn); __hashMemo.set(sn,h); }
+      return h; } return null; };
   globalThis.__ringFieldsAt= (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return _rbHashFields(_rbRing[i].snap); return null; };
   globalThis.__ringSnapAt  = (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return JSON.parse(JSON.stringify(_rbRing[i].snap)); return null; };
   // The input log for a tick range: what commands each client will replay for those ticks.
