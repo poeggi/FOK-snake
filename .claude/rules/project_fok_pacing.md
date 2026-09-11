@@ -1,6 +1,6 @@
 # Request pacing (client half; server half: FOK-server docs/API.md Pacing)
 
-THE SERVER HAS A LOW PHP WORKER LIMIT. Every request in flight and every held
+THE SERVER HAS A LOW WORKER LIMIT. Every request in flight and every held
 connection (poll, relay) is a worker; the budget is concurrent connections per
 client, never bytes. Weigh every new request site and every cadence against it.
 

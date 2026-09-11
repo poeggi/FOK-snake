@@ -435,8 +435,9 @@ exists to stop, in the order they run (the 4.11 set first, then what came after)
   and this walks the menu with and without the row to prove BACK stays BACK.
 - **The `event` signal**: four payloads, every one an ask and never an adopt.
 - **The request shape**: `events` rides the hello and a poll TICK OF ITS OWN on the six
-  screens that show it, and nowhere else. `ev` answers at once (poll.php never 204s a
-  request that asked for rows), so riding every poll would cut every hold short.
+  screens that show it, slower still on the MULTIPLAYER door (which only needs to know
+  there is an event at all), and nowhere else. `ev` answers at once (poll.php never
+  204s a request that asked for rows), so riding every poll would cut every hold short.
 - **The page rows** are derived from the same three facts the server checks -- row
   state, organizer, schedule -- because a screen that offers what the next request will
   refuse is a screen that lies.
