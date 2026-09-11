@@ -61,8 +61,8 @@ place that sets `_evEid`. Do not add a second.
 It goes through the path that already exists: the ordinary `watch` signal, the
 same P2P feed a tournament spectator gets, the same renderer. `js/events.js`
 contains no part of the feed -- no RTCPeerConnection, no signalling, no envelope
-handling -- and `js/net-spec.js` was not touched to build it. The only new thing
-is the screen. Never write a second transport here.
+handling. What `js/net-spec.js` knows about it is ONE id and one rule: the
+monitor's slot (`specMonitor`, below). Never write a second transport here.
 
 Following the bracket is one rule: the sheet names the match in flight, and a
 new one is asked for only AFTER the old feed is let go, because the two are

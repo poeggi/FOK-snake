@@ -409,10 +409,10 @@ The ring snapshot at a tick that is already IMMUTABLE (no accepted input can sti
 rewrite it) is the real equality test -- that is what both the driver's detector and
 the product's own 1Hz detector compare.
 
-### smoke-events.js  (FAST tier -- the client half of events, server API 4.11)
+### smoke-events.js  (FAST tier -- the client half of events, server API 4.14)
 
-Twelve lanes over `js/events.js` and the screens around it. What each one exists to
-stop, in the order they run:
+Twenty-eight lanes over `js/events.js` and the screens around it. What each one
+exists to stop, in the order they run (the 4.11 set first, then what came after):
 
 - **The hash parser.** `EVENT_HASH_RE` is the parser for BOTH entry points -- the boot
   hash in game.js and the camera in input.js -- so this is the thing itself, not a copy
@@ -450,6 +450,36 @@ stop, in the order they run:
 - **Event tournaments**: `eid` rides the create and ONLY that create (one started from
   the ordinary tournament screen inherits nothing), and the announce marks a lobby that
   carries one.
+
+Added with 4.12 to 4.14:
+
+- **Units**: the three SECONDS fields (`asked`, `joined`, `finished`) go through
+  `eventDay()` and nothing else feeds `Date()` a bare value -- 1970 never throws.
+- **The egg page** draws the event achievement only once earned.
+- **The menu row** is PRESSED, not called: cursor on EVENTS, Enter, phase moved. The row
+  was once dead with twelve green lanes behind it.
+- **The event list** is one grouped order with no headings; **upcoming rows** are dark,
+  say when they open, and refuse to open unless you are the organizer; **early join** from
+  a printed key lands on the list, never on a page the same scan cannot reopen.
+- **Roster columns** and **page rows fit**: every label the code can produce, every
+  adjacent pair, header included, and the organizer's eight rows inside the band.
+- **QR screens**: both codes an event shows read back through the game's own scanner.
+- **Statistics** is its own screen and the only one that draws the archive.
+- **A new tournament** reaches the page and the monitor by the announce on the poll they
+  already hold, not by a screen re-entry.
+- **The wake lock** is feature-detected, held only while the monitor is up, re-taken on
+  visibilitychange.
+- **Monitor feed**: watching is not leaving (a monitor drawing the match is off its own
+  screen and must not be torn down), and the lease and the re-ask keep their own rates.
+- **Watcher level-done**: a spectator is offered no advance and cannot take one, ESC is
+  its way off LEVEL COMPLETE, a player keeps both.
+- **Monitor sheet** (4.14): a `roles` sheet for the monitored event is adopted and
+  followed at once, its stagger owed, a patch re-wires, every other transition
+  re-reads, and once net-spec's own ask ladder gives up the re-ask goes to the other
+  player.
+- **Monitor slot** (4.14): the feeder has room for the monitor beside two primaries, it
+  costs nobody a direct slot, it is never an alt, it is granted off the sheet and the
+  patch and forgotten with the tournament.
 
 ### check-drivers.js  (FAST tier -- suite bodies survive template-literal insertion)
 
