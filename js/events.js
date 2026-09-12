@@ -928,6 +928,7 @@ var _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the sam
 var _evMonAgain = false;         // a read asked for while one was in flight
 var _evMonOver = null;           // the podium the 'over' signal handed the wall: {tid, podium, names, at}
 var _evMonIdleAt = 0;            // the frame the room-between-tournaments picture came up: the flip counts from it
+var _evMonGone = false;          // displaced while a feed was up: the feed's end lands on the event page
 function eventMonitorView(){ return _evMon; }
 function eventMonitorRolesAt(){ return _evMonRolesAt; }
 // THE PODIUM STAYS ON THE WALL. A player holds the tournament and keeps its podium up
@@ -1003,7 +1004,19 @@ async function eventMonitorRead(){
         // Two refusals, and they mean different things: somebody else has the
         // screen, or this event does not offer one. Say which, and STOP -- a
         // screen nobody attends must not sit retrying a refusal forever.
-        if(r.status === 409 || err === 'monitor taken'){ _evMonErr = 'monitor taken'; eventMonitorStop(true); }
+        if(r.status === 409 || err === 'monitor taken'){
+            // A 409 AFTER WE HELD THE SEAT is the event's own screen taking it back
+            // (API 4.15: a reserved screen has right of way; a member only stands in
+            // while it is away). That is not a refusal to show: the stand-in goes
+            // back to the event page and is told why. A feed it was watching ends
+            // through the ordinary session end, which asks eventExitPhase.
+            if(_evMon){
+                const watching = typeof netSpectating === 'function' && netSpectating();
+                _evMonGone = watching;
+                eventMonitorStop();
+                _evMsg('THE EVENT SCREEN TOOK OVER', !watching);   // a feed's end already sounds
+            } else { _evMonErr = 'monitor taken'; eventMonitorStop(true); }
+        }
         else if(err === 'no monitor'){ _evMonErr = 'no monitor'; eventMonitorStop(true); }
         return false;
     }
@@ -1119,7 +1132,7 @@ function _evMonTick(){
     _evMonFollow();
 }
 function eventMonitorEnter(){
-    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null; _evMonIdleAt = 0;
+    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null; _evMonIdleAt = 0; _evMonGone = false;
     phase = 'eventMonitor';
     eventWakeSet(true);
     eventMonitorRead();
@@ -1141,8 +1154,13 @@ function eventMonitorStop(keep){
 }
 // Where a feed that ends puts us back. net-session.js asks this the same way it
 // asks tourneyExitPhase, so a match ending under a monitor returns to the screen
-// rather than to the 1vs1 menu.
-function eventExitPhase(){ return _evMonT != null ? 'eventMonitor' : ''; }
+// rather than to the 1vs1 menu -- and a stand-in displaced mid-feed returns to
+// the event page, once.
+function eventExitPhase(){
+    if(_evMonT != null) return 'eventMonitor';
+    if(_evMonGone){ _evMonGone = false; return 'eventPage'; }
+    return '';
+}
 
 // ---- the reserved 'event' signal -------------------------------------------
 // Four payloads, and NOT ONE of them is a state change to apply on its own word.
@@ -1174,6 +1192,13 @@ function _evOnSignal(d){
         // the ordinary unlock moment play.
         if(_evEid === eid) eventRead();
         else { _evEid = eid; eventRead(); }
+        return;
+    }
+    if(what === 'monitor'){
+        // The seat moved: the event's own screen took it back from us (API 4.15).
+        // Sent to the displaced holder only. Ask, and let the answer say so -- the
+        // 409 the read gets is what puts us back on the page; nothing is adopted.
+        if(_evEid === eid && _evMonT != null) eventMonitorRead();
         return;
     }
     // 'state' (the organizer ran, paused or ended it) and 'tourney' (a lobby

@@ -957,11 +957,43 @@ const DRIVER = `
         // sit retrying forever.
         const _oPost3=_evPost;
         _evPost=async()=>({ json:null, status:409, body:{error:'monitor taken'} });
-        _evMonBusy=false; _evMonErr='';
+        _evMonBusy=false; _evMonErr=''; _evMon=null;   // a FIRST ask: no picture yet
         _evMonT = 1;                                   // as if the tick were armed
         await eventMonitorRead();
         if(eventMonitorErr() !== 'monitor taken') throw 'a 409 must say the screen is taken';
         if(_evMonT !== null) throw 'a refusal must stop the asking';
+        // ...but a 409 AFTER WE HELD THE SEAT is the event's own screen taking it back
+        // (API 4.15: the reserved screen has right of way): the stand-in goes back to
+        // the event page, told why, with nothing kept.
+        const _oPhD = phase, _oMsgD = _evUi.msg; _evUi.msg = '';
+        _evMon={ eid:'K7QM', tourney:null }; _evMonErr=''; _evMonT=1; phase='eventMonitor';
+        await eventMonitorRead();
+        if(phase !== 'eventPage') throw 'displaced: back to the event page, got ' + phase;
+        if(_evUi.msg !== 'THE EVENT SCREEN TOOK OVER') throw 'and told why: ' + _evUi.msg;
+        if(_evMonT !== null || _evMon !== null || eventMonitorErr() !== '') throw 'nothing of the screen is kept';
+        if(eventExitPhase() !== '') throw 'not watching, nothing owed to a feed end';
+        // Displaced WHILE WATCHING a match: the feed is let go, and its end lands on the
+        // event page once, then owes nothing.
+        const _oSpecD = netSpectating; netSpectating = () => true; stops = 0;
+        _evMon={ eid:'K7QM', tourney:null }; _evMonT=1; _evMonNid='n9'; phase='duel';
+        await eventMonitorRead();
+        if(stops !== 1) throw 'the feed is let go';
+        if(phase !== 'duel') throw 'the screen is not moved under a feed; the session end moves it';
+        if(eventExitPhase() !== 'eventPage') throw 'the feed end lands on the event page';
+        if(eventExitPhase() !== '') throw 'once';
+        netSpectating = _oSpecD; phase = _oPhD; _evUi.msg = _oMsgD;
+        // THE SEAT MOVED, the server says so: the one signal payload sent to the displaced
+        // holder is a re-read (the 409 it gets does the rest); nobody else acts on it.
+        const _oReadS = eventMonitorRead; let sreads = 0; eventMonitorRead = async () => { sreads++; return true; };
+        _evEid='K7QM'; _evMonT=1;
+        _evOnSignal({ event:'monitor', eid:'K7QM' });
+        if(sreads !== 1) throw 'the displaced holder re-reads, got ' + sreads;
+        _evOnSignal({ event:'monitor', eid:'ZZZZ' });
+        _evMonT=null; _evOnSignal({ event:'monitor', eid:'K7QM' });
+        if(sreads !== 1) throw 'another event, or no monitor up: nothing, got ' + sreads;
+        eventMonitorRead = _oReadS;
+        _evPost=async()=>({ json:null, status:409, body:{error:'monitor taken'} });
+        _evMon=null; _evMonErr=''; _evMonBusy=false;
         _evPost=async()=>({ json:null, status:403, body:{error:'no monitor'} });
         _evMonBusy=false; _evMonErr=''; _evMonT = 1;
         await eventMonitorRead();
@@ -976,7 +1008,7 @@ const DRIVER = `
         _evPost=_oPost3; specWatch=_oWatch; specStop=_oStop; netSpectating=_oSpec;
         _evMon=null; _evMonErr=''; _evMonNid=''; _evMonBusy=false;
       }
-      R.steps.push('monitor ok: one specWatch per match, the cursor followed, a refusal said once and then stopped');
+      R.steps.push('monitor ok: one specWatch per match, the cursor followed, a first refusal said once and then stopped, a displaced stand-in back on the page');
 
       // ---- an event tournament is an ORDINARY tournament ------------------
       // eid is a tag on it and a membership check on the way in. There is no
