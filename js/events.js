@@ -914,7 +914,7 @@ const EV_MON_WATCH_MS = 4000;    // how often an unanswered or LOST watch ask go
                                  // -- and the timer's own interval, because the ask has to
                                  // be able to happen at that rate to mean anything
 const EV_MON_OVER_MS = 10000;    // how long the wall keeps a finished tournament's podium up
-const EV_MON_FLIP_MS = 10000;    // the idle wall alternates the overview and the event QR, this long each
+const EV_MON_FLIP_MS = 10000;    // the idle wall shows the event QR this long, then the room's lines this long
 var _evMon = null;               // the last `monitor` answer -- the whole screen
 var _evMonT = null;
 var _evMonBusy = false;
@@ -956,11 +956,13 @@ function eventMonitorIdle(){
     if(!m || _evMonErr || _evMonOver) return false;
     return !(t && (t['break'] || t.roles || t.state === 'running' || t.state === 'open'));
 }
-// WHAT THE IDLE WALL SHOWS THIS FRAME. Between tournaments the wall alternates the
-// room's overview and the event's live pass, EV_MON_FLIP_MS each way, counted from
-// the frame the room first came up, so somebody walking in can join off the TV.
-// The QR half is offered only while a code is in hand: without one the overview
-// stays up rather than an empty card. A fixed mode for now; an event option later.
+// WHAT THE IDLE WALL SHOWS THIS FRAME under its header. Between tournaments the
+// room's lines (NO TOURNAMENT RUNNING, PLAYED HERE) and the event's live pass take
+// turns, EV_MON_FLIP_MS each, counted from the frame the room first came up, so
+// somebody walking in can join off the TV. The page itself never changes: name,
+// state and the figures stay put. The QR turn is offered only while a code is in
+// hand: without one the room's lines stay up rather than an empty card. A fixed
+// mode for now; an event option later.
 function eventMonitorFace(pts){
     if(!eventMonitorIdle()){ _evMonIdleAt = 0; return 'room'; }
     const now = _msgNow();
@@ -969,12 +971,10 @@ function eventMonitorFace(pts){
     return qr && eventPassSlot(pts) ? 'qr' : 'room';
 }
 // The wall asks for the pass only while it would show one: on its own screen, idle,
-// the event LIVE (a pass is refused otherwise), and never from a RESERVED monitor
-// row -- the contract says a monitor holds no pass (403 monitor only).
+// the event LIVE (a pass is refused otherwise). A reserved monitor row may ask
+// (API 4.15: `pass` is the third action a monitor row has).
 function _evMonPassWant(){
-    if(phase !== 'eventMonitor' || !eventMonitorIdle()) return false;
-    if(eventState(_evMon) !== 'active') return false;
-    return String((_evMon.you && _evMon.you.state) || '') !== 'monitor';
+    return phase === 'eventMonitor' && eventMonitorIdle() && eventState(_evMon) === 'active';
 }
 function _evMonPass(){ if(_evMonPassWant()) _evPassArm(); }
 // Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`

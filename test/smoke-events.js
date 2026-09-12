@@ -1634,12 +1634,13 @@ const DRIVER = `
       }
       log('monitor slot ok: room beside two primaries, costs nobody a slot, never an alt, granted off the sheet and the patch, forgotten with the tournament');
 
-      // ---- THE IDLE WALL TAKES TURNS: THE ROOM, THEN THE EVENT'S QR ----------
-      // Between tournaments the monitor alternates its overview with the event's live
-      // pass, EV_MON_FLIP_MS each way from the frame the room came up, so somebody
-      // walking in joins off the TV. The pass is asked for only where it would be
-      // shown (idle, live, not a reserved row), one minute per call like the QR
-      // screen, and a refusal is not asked again every second.
+      // ---- THE IDLE WALL TAKES TURNS UNDER ITS HEADER: THE ROOM'S LINES, THEN THE QR
+      // Between tournaments the monitor page keeps its header (name, state, JOINED and
+      // ONLINE) and its lower half alternates the room's lines with the event's live
+      // pass, EV_MON_FLIP_MS each from the frame the room came up, so somebody walking
+      // in joins off the TV. The pass is asked for only where it would be shown (idle,
+      // live; a reserved monitor row included, API 4.15), one minute per call like
+      // the QR screen, and a refusal is not asked again every second.
       {
         const _oNow = _msgNow, _oPts = netPts, _oPost = _evPost, _oCt = ct, _oCtg = ctg, _oQr = drawQrCard, _oPh = phase, _oMon = _evMon, _oEid = _evEid, _oMonT = _evMonT, _oSpec = netSpectating, _oMsg = _evUi.msg;
         netSpectating = () => false;
@@ -1653,11 +1654,13 @@ const DRIVER = `
           return { json:{ ok:true, step:10, valid:20, slots:[0,1,2,3,4,5].map(i => ({ at:T0 + i*10000, code:'WAL' + i + 'XX' })) }, status:200, body:{} };
         };
         const settle = () => new Promise(r => setTimeout(r, 0));
-        const drawn = [];
-        ct = (t) => { drawn.push(String(t)); }; ctg = (t) => { drawn.push(String(t)); };
-        drawQrCard = (text) => { drawn.push('QR:' + text); return { x:0, y:58, size:296, bottom:354 }; };
+        const drawn = [], geo = {};
+        ct = (t, x, y, c, sz) => { drawn.push(String(t)); geo[String(t)] = { x, y, sz }; };
+        ctg = (t, x, y, c, sz) => { drawn.push(String(t)); geo[String(t)] = { x, y, sz }; };
+        drawQrCard = (text, qy, mod) => { drawn.push('QR:' + text); return Object.assign(_oQr(text, qy, mod), { qy, mod }); };
         const face = () => eventMonitorFace(pts);
         const draw = () => { drawn.length = 0; drawEventMonitor(); return drawn; };
+        const _oCounts = _netCounts; _netCounts = { online:7, playing:0 };
         _evEid = 'K7QM'; _evMonT = 1; _evMonErr = ''; _evMonOver = null; _evMonIdleAt = 0; _evMonNid = ''; _evMonAt = tnow;
         _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evUi.msg = '';
         _evMon = { eid:'K7QM', name:'Room', state:'active', you:{ state:'member' }, members:3, tourney:null };
@@ -1676,17 +1679,35 @@ const DRIVER = `
         tnow += 9999; if(face() !== 'qr') throw 'the QR for its ten seconds';
         tnow += 1;    if(face() !== 'room') throw 'then the room again';
         tnow += 10000; if(face() !== 'qr') throw 'and so on';
-        // What each face draws: the QR face is the pass card under the event's name
-        // (the same card the EVENT QR screen holds up, the live slot's code) and no
-        // menu row; the room face is the overview.
-        let d = draw();
-        if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL0XX')) < 0) throw 'the QR face draws the live pass: ' + JSON.stringify(d);
-        if(d.indexOf('ROOM') < 0 || d.indexOf('SCAN TO JOIN THIS EVENT') < 0) throw 'under the event name, with the invitation: ' + JSON.stringify(d);
-        if(d.indexOf('NO TOURNAMENT RUNNING') >= 0) throw 'and not the overview';
+        // What each turn draws. The HEADER on both: the name, the state, JOINED and
+        // ONLINE side by side, the same size. The QR turn puts the pass card (the live
+        // slot's code, the card painter the EVENT QR screen uses) in the lower half,
+        // fitted between the figures and the hint line, the invitation beside it, and
+        // no menu row; the room turn puts the room's lines there.
+        const header = (d) => {
+          if(d.indexOf('ROOM') < 0 || d.indexOf('LIVE') < 0) throw 'the page keeps its name and state: ' + JSON.stringify(d);
+          if(!geo['3'] || !geo['7'] || d.indexOf('JOINED') < 0 || d.indexOf('ONLINE') < 0) throw 'the page keeps JOINED and ONLINE: ' + JSON.stringify(d);
+          if(geo['3'].y !== geo['7'].y || geo['3'].sz !== geo['7'].sz || geo['3'].sz !== FONT.DISPLAY) throw 'the two figures are one size on one line: ' + JSON.stringify([geo['3'], geo['7']]);
+          if(!(geo['3'].x < CW/2 && geo['7'].x > CW/2)) throw 'joined left, online right: ' + JSON.stringify([geo['3'], geo['7']]);
+          if(geo['JOINED'].x !== geo['3'].x || geo['ONLINE'].x !== geo['7'].x) throw 'each label under its figure';
+        };
+        let d = draw(); header(d);
+        if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL0XX')) < 0) throw 'the QR turn draws the live pass: ' + JSON.stringify(d);
+        if(d.indexOf('SCAN TO JOIN') < 0 || d.indexOf('THIS EVENT') < 0) throw 'with the invitation: ' + JSON.stringify(d);
+        if(d.indexOf('NO TOURNAMENT RUNNING') >= 0) throw 'and not the room lines';
+        const card = drawQrCard(eventUrl('K7QM', 'WAL0XX'), EV_MON_QR_Y, EV_MON_QR_MOD);
+        if(!(card.y > geo['JOINED'].y + 6 && card.bottom + 10 < HINT_Y - 8)) throw 'the card sits between the figures and the hint line: ' + JSON.stringify(card);
+        if(!(geo['SCAN TO JOIN'].x > card.x + card.size && geo['SCAN TO JOIN'].x < CW && geo['SCAN TO JOIN'].y > card.y && geo['THIS EVENT'].y < card.bottom)) throw 'the invitation stands in the margin beside the card: ' + JSON.stringify([geo['SCAN TO JOIN'], card]);
         pts = T0 + 10000; d = draw();
         if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL1XX')) < 0) throw 'the card follows the slot: ' + JSON.stringify(d);
-        tnow += 10000; d = draw();
-        if(d.indexOf('NO TOURNAMENT RUNNING') < 0 || d.join('|').indexOf('QR:') >= 0) throw 'the room face is the overview: ' + JSON.stringify(d);
+        tnow += 10000; d = draw(); header(d);
+        if(d.indexOf('NO TOURNAMENT RUNNING') < 0 || d.join('|').indexOf('QR:') >= 0) throw 'the room turn is the room lines: ' + JSON.stringify(d);
+        // ONLINE is the monitor answer's own count when it carries one (members heard
+        // within the online window, API 4.15 optional field); without it, the server-wide
+        // count hello/poll keep.
+        _evMon.online = 2; d = draw();
+        if(!geo['2'] || geo['2'].x !== geo['ONLINE'].x || d.indexOf('7') >= 0) throw 'the answer carrying online is the figure: ' + JSON.stringify(d);
+        delete _evMon.online;
         // No code in hand: the overview stays up rather than an empty card.
         tnow += 10000; pts = T0 + 70000;
         if(face() !== 'room') throw 'no live code, no QR face';
@@ -1710,13 +1731,14 @@ const DRIVER = `
         if(passReqs !== 2 || !_evPass) throw 'the room back asks for the pass again, got ' + passReqs;
         if(face() !== 'room' || _evMonIdleAt !== tnow) throw 'and the flip counts from now';
         tnow += 10000; if(face() !== 'qr') throw 'ten seconds later the QR';
-        // Not live, or a RESERVED monitor row: the overview only, and no ask.
+        // Not live: the room lines only, and no ask. A RESERVED monitor row asks like a
+        // member (API 4.15 hands it the pass).
         _evMon.state = 'paused';
         if(_evMonPassWant()) throw 'a paused event has no pass to show';
-        _evMon.state = 'active'; _evMon.you = { state:'monitor' };
-        if(_evMonPassWant()) throw 'a reserved monitor row holds no pass (403 monitor only)';
         _evPassTick();
         if(_evPass !== null) throw 'and lets go of any it held';
+        _evMon.state = 'active'; _evMon.you = { state:'monitor' };
+        if(!_evMonPassWant()) throw 'the reserved monitor row shows the code too';
         _evMon.you = { state:'member' };
         // A REFUSAL is not asked again every second: EV_PASS_RETRY_MS between asks, and
         // the wall says nothing (the message and its sound are the QR screen's).
@@ -1738,10 +1760,10 @@ const DRIVER = `
         eventMonitorStop();
         if(_evPass !== null || _evPassT !== null || _evMonIdleAt) throw 'the exit drops the codes and the flip';
         if(phase !== 'eventPage') throw 'and goes back to the page';
-        _msgNow = _oNow; netPts = _oPts; _evPost = _oPost; ct = _oCt; ctg = _oCtg; drawQrCard = _oQr; phase = _oPh; _evMon = _oMon; _evEid = _oEid; _evMonT = _oMonT; netSpectating = _oSpec; _evUi.msg = _oMsg;
+        _msgNow = _oNow; netPts = _oPts; _evPost = _oPost; ct = _oCt; ctg = _oCtg; drawQrCard = _oQr; phase = _oPh; _evMon = _oMon; _evEid = _oEid; _evMonT = _oMonT; netSpectating = _oSpec; _evUi.msg = _oMsg; _netCounts = _oCounts;
         _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evMonIdleAt = 0; _evMonAt = 0;
       }
-      log('idle wall ok: room and QR ten seconds each from the frame the room came up, the pass asked once and only where it shows, a refusal backed off, the exit drops it');
+      log('idle wall ok: the header stays, the lower half takes turns ten seconds each from the frame the room came up, JOINED and ONLINE side by side, the pass asked once and only where it shows, a refusal backed off, the exit drops it');
 
 
       // ---- AND SCANNING A POSTER EARLY LANDS ON THE LIST --------------------
