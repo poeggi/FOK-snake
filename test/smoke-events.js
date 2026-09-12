@@ -1179,20 +1179,39 @@ const DRIVER = `
         const HOST='ffffffff';   // somebody else's room, so leaving it is a real leave
         if(getPlayerId()===HOST) throw 'the guest cases need a host that is not us';
 
-        for(const c of [{ home:'', want:'multiplayer' }, { home:'eventPage', want:'eventPage' }]){
+        // THE RETURN IS THE PAGE'S OPEN. The page handed over showing the tournament as
+        // open or running, and the 'over' signal that ends it lands while a tournament
+        // screen is up, where no event screen is on show and it is dropped. So every
+        // exit that lands on the page reads it fresh -- ONCE, DONE included, although
+        // it drops the tournament (which lands) and then goes home -- and an exit to
+        // the multiplayer menu reads nothing: there is no page to freshen.
+        const _oRead=eventRead; let reads=0;
+        eventRead=async()=>{ reads++; return true; };
+        _evEid='K7QM'; _ev={ eid:'K7QM', name:'n', state:'active', you:{state:'member'}, tourney:{ tid:'t1', state:'open' } };
+        for(const c of [{ home:'', want:'multiplayer', reads:0 }, { home:'eventPage', want:'eventPage', reads:1 }]){
           const say=' with home '+JSON.stringify(c.home)+', got ';
           // off the room list, which is off tournaments altogether
-          _tt=null; _ttUi.home=c.home; phase='tourneyLobby';
+          _tt=null; _ttUi.home=c.home; phase='tourneyLobby'; reads=0;
           if(press() !== c.want) throw 'BACK off the room list'+say+phase;
+          if(reads !== c.reads) throw 'BACK off the room list read '+reads+'x'+say+c.reads;
           // ...off one that is OVER, which is a different row on a different screen
           _tt={ tid:'t1', state:'done', host:HOST, players:[] };
-          _ttUi.home=c.home; phase='tourneyPodium';
+          _ttUi.home=c.home; phase='tourneyPodium'; reads=0;
           if(press() !== c.want) throw 'DONE off the podium'+say+phase;
+          if(reads !== c.reads) throw 'DONE off the podium read '+reads+'x'+say+c.reads;
           // ...and out of a lobby somebody else is hosting, which leaves for real
           _tt={ tid:'t1', state:'open', host:HOST, players:[] };
-          _ttUi.home=c.home; phase='tourneyLobby';
+          _ttUi.home=c.home; phase='tourneyLobby'; reads=0;
           if(press() !== c.want) throw 'LEAVE off an open lobby'+say+phase;
+          if(reads !== c.reads) throw 'LEAVE off an open lobby read '+reads+'x'+say+c.reads;
+          // ...and the quit dialog's YES, which names the page as its destination
+          _tt={ tid:'t1', state:'open', host:HOST, players:[] };
+          _ttUi.home=c.home; phase='tourneyQuit'; reads=0;
+          await tourneyLeave(c.want);
+          if(phase !== c.want) throw 'YES off the quit dialog'+say+phase;
+          if(reads !== c.reads) throw 'YES off the quit dialog read '+reads+'x'+say+c.reads;
         }
+        eventRead=_oRead; _ev=null; _evEid='';
 
         // The CREATE dialog carries the same fact: the event it was opened from is
         // both the room its tournament belongs to and the screen its BACK gives back.
@@ -1463,6 +1482,38 @@ const DRIVER = `
         if(_evMon.tourney.roles.primaries[0] !== 'eeeeeeee') throw 'a patch re-wires the sheet held';
         for(const ev of ['result', 'round', 'standings', 'over', 'lobby']) _ttOnSignal({ event:ev, tid:'t1', eid:'K7QM', nid:'n2' });
         if(reads4 !== 5) throw 'every other transition re-reads the monitor, got ' + reads4;
+        // THE PODIUM STAYS ON THE WALL. A player keeps the podium up until DONE; the
+        // wall holds no tournament once it is over, so the ids the 'over' signal carries
+        // are kept, named off the projection, the sheet and the archive row, and drawn
+        // for EV_MON_OVER_MS from the first frame that asks. The read still goes out,
+        // and a sheet for the next match takes the wall back.
+        {
+          const _oNowM = _msgNow; let tnow = 500000; _msgNow = () => tnow;
+          _evMon.tourney = { tid:'t1', players:[{ id:'c0ffee42', name:'Kai' }], roles:{ nid:'n2', names:{ dddddddd:'Bob' } } };
+          _evMon.archive = [{ tid:'t1', podium:[{ id:'c0ffee42', name:'Kai' }, { id:'dddddddd', name:'Bob' }, { id:'eeeeeeee', name:'Eve' }] }];
+          reads4 = 0;
+          _ttOnSignal({ event:'over', tid:'t1', eid:'K7QM', podium:['c0ffee42', 'dddddddd', 'eeeeeeee'] });
+          if(reads4 !== 1) throw 'over still re-reads the monitor, got ' + reads4;
+          if(!_evMonOver || _evMonOver.at) throw 'the podium is kept and its clock has not started';
+          const o = eventMonitorOver();
+          if(!o || o.at !== tnow) throw 'the first ask starts the clock';
+          if(o.names.c0ffee42 !== 'Kai' || o.names.dddddddd !== 'Bob' || o.names.eeeeeeee !== 'Eve') throw 'names off the projection, the sheet and the archive: ' + JSON.stringify(o.names);
+          const _oCtM = ct, _oCtgM = ctg, _oPhM = phase, drawnM = [];
+          ct = (t) => { drawnM.push(String(t)); }; ctg = (t) => { drawnM.push(String(t)); };
+          phase = 'eventMonitor';
+          drawEventMonitor();
+          if(drawnM.indexOf('TOURNAMENT OVER') < 0 || drawnM.indexOf('KAI WON IT') < 0 || drawnM.indexOf('EVE') < 0) throw 'the wall draws the podium: ' + JSON.stringify(drawnM);
+          tnow += EV_MON_OVER_MS - 1; drawnM.length = 0; drawEventMonitor();
+          if(drawnM.indexOf('TOURNAMENT OVER') < 0) throw 'still up just inside the hold';
+          tnow += 1; drawnM.length = 0; drawEventMonitor();
+          if(drawnM.indexOf('TOURNAMENT OVER') >= 0 || _evMonOver) throw 'down at the hold, back to the room: ' + JSON.stringify(drawnM);
+          _ttOnSignal({ event:'over', tid:'t1', eid:'K7QM', podium:[] });
+          drawnM.length = 0; drawEventMonitor();
+          if(drawnM.indexOf('NO PODIUM - THE BRACKET VOIDED') < 0) throw 'an empty podium is a verdict, and said: ' + JSON.stringify(drawnM);
+          _ttOnSignal(sheet({ nid:'n5' }));
+          if(_evMonOver) throw 'a match up takes the wall back from the podium';
+          ct = _oCtM; ctg = _oCtgM; phase = _oPhM; _msgNow = _oNowM; _evMonOver = null; delete _evMon.archive;
+        }
         // Not the monitored event, or the monitor not up: nothing.
         reads4 = 0; asked.length = 0; on4 = false; _evMonNid = ''; _evMonAskAt = 0;
         _ttOnSignal(sheet({ eid:'ZZZZ', nid:'n3' }));
@@ -1482,7 +1533,7 @@ const DRIVER = `
         _evPost = _oPost4; _evMonT = null; _evMon = null; _evMonNid = ''; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonBusy = false; _evEid = '';
         netSpectating = _oSpec4; specWatch = _oWatch4; specStop = _oStop4; specAsking = _oAsk; _tt = _oTt;
       }
-      log('monitor sheet ok: dealt like a spectator, followed at once, the stagger owed, the re-ask goes to the other player, every other transition re-reads');
+      log('monitor sheet ok: dealt like a spectator, followed at once, the stagger owed, the re-ask goes to the other player, every other transition re-reads, the podium holds the wall 10 s');
 
       // ---- THE WALKOVER CLOCK (server API 4.15) -------------------------------
       // A player who closed the app leaves the other on YOU ARE UP until the server's
@@ -1529,8 +1580,17 @@ const DRIVER = `
         if(!_evMonRolesAt) throw 'a new match stamps when its sheet reached the monitor';
         const stamped = _evMonRolesAt; _evMonFollow();
         if(_evMonRolesAt !== stamped) throw 'the same match re-read does not restamp (the grace would never end)';
+        // The monitor says it TWICE: in the subtitle every board carries, and once more
+        // big and centred, which is the copy a room reads. A player's screens say it once.
+        const big = []; ctg = (t, x, y, col, size) => { drawn.push(String(t)); if(size === FONT.JUMBO) big.push(String(t)); };
         _evMonRolesAt = here - 20000; drawn.length = 0; drawEventMonitor();
-        if(!drawn.some(t => /WALKOVER IN 0:4[4-6]$/.test(t))) throw 'the monitor shows the clock on its board: ' + JSON.stringify(drawn);
+        if(drawn.filter(t => /WALKOVER IN 0:4[4-6]$/.test(t)).length !== 2) throw 'the monitor shows the clock on its board and over it: ' + JSON.stringify(drawn);
+        if(!big.some(t => /^WALKOVER IN 0:4[4-6]$/.test(t))) throw 'the copy over the board is the big one: ' + JSON.stringify(big);
+        drawn.length = 0; big.length = 0; sheet.you = 'idle'; _ttRolesAt = here - 20000; drawTourneyBracket();
+        if(big.length) throw 'the bracket a player reads has no big clock: ' + JSON.stringify(big);
+        _evMonRolesAt = here - 2000; drawn.length = 0; drawEventMonitor();
+        if(drawn.some(t => /WALKOVER/.test(t))) throw 'the monitor keeps the grace too: ' + JSON.stringify(drawn);
+        _evMonRolesAt = here - 20000;
         _evMon.tourney.roles = null; _evMonFollow();
         if(_evMonRolesAt) throw 'no match, no stamp';
         ct = _oCt; ctg = _oCtg; _ttCol = _oCol; _msgNow = _oNow; _tt = _oTt; _ttRolesAt = _oRolesAt; phase = _oPh; _evMon = _oMon; _evMonRolesAt = _oMonAt; netPts = _oPts;

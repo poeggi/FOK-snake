@@ -235,7 +235,7 @@ function _ttUiInput(escTo){
         // event page leaves through that page rather than through the multiplayer menu.
         back(){
             const rows = tourneyRows(), r = rows[rows.length - 1];
-            if(r && r.act) r.act(); else { phase = escTo || tourneyHome(); Snd.sfxPlay('nav', cfg.music); }
+            if(r && r.act) r.act(); else { tourneyLand(escTo || tourneyHome()); Snd.sfxPlay('nav', cfg.music); }
         },
     };
 }

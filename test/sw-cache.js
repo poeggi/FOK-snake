@@ -241,7 +241,19 @@ function boot() {
         check(!sw.stores.has(sw.CACHE) && sw.stores.has('snake-v0.0.1'), 'the new cache is deleted, the previous bundle untouched');
     }
 
-    // 10. A previous cache without a manifest (an install that never finished, an older
+    // 10. This version already installed whole (a re-run under the same CACHE name): nothing
+    //     is fetched, nothing is touched, and the install still completes.
+    {
+        const sw = boot();
+        const s = sw.seedPrev(sw.CACHE);
+        const done = sw.install();
+        await tick();
+        check(sw.pending.length === 0, 'an installed bundle is not fetched again');
+        check(await done && sw.calls.skipWaiting === 1, 'and the install completes');
+        check(s.get(sw.urlOf('./js/game.js')).tag === 'old:./js/game.js' && sw.stores.has(sw.CACHE), 'the bundle in place is left as it is');
+    }
+
+    // 11. A previous cache without a manifest (an install that never finished, an older
     //    worker) is not a bundle: nothing is copied from it, everything is fetched.
     {
         const sw = boot();

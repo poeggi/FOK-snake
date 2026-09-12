@@ -1,7 +1,7 @@
 // AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually
-// version snake-v4.4.44, released 2026-09-11 23:07 +0200
-const CACHE = 'snake-v4.4.44';
-const ASSETS = {'./': 'd264f63d2a8e', './css/fonts.css': '1b96ff9d0895', './css/style.css': '876741900d8d', './docs/barricade-fragile.svg': 'daae9e47b6e1', './docs/barricade.svg': 'b7b8b6ee6e04', './docs/gem-epic.svg': 'f92ed6b94963', './docs/gem-gouranga.svg': '36df1893198a', './docs/gem-lucky.svg': 'b4072f7a10a9', './docs/gem.svg': 'b7577f814b55', './docs/heart.svg': '7ef1bc16acde', './docs/power-pellet.svg': '734a331dd3b7', './docs/time-crystal.svg': '24f2ac8c76c7', './fonts/PressStart2P-Regular.woff2': '947a9792df96', './icon.svg': '62446247c96b', './js/assets.js': 'ca73d46cb896', './js/audio.js': '1c1cdfebad2b', './js/duel-core.js': '2044dc691032', './js/events.js': '7fda51dce339', './js/game.js': 'ceb7254c479f', './js/hmac.js': '11b484d9ba32', './js/input.js': 'ca0a825f9842', './js/items.js': '413deee41908', './js/net-api.js': 'dce95e195d11', './js/net-relay.js': 'afd2dc746e6e', './js/net-rtc.js': 'ba8c4f4cbbf7', './js/net-session.js': 'c8a460fc669c', './js/net-spec.js': '8db1ea3cefc6', './js/qr.js': '23f34cd594a7', './js/render.js': '27c8e88b62cf', './js/screens.js': '24ed0e7c1c58', './js/sim-worker.js': 'd458b3956e04', './js/sim.js': '5d78ce1601a6', './js/storage.js': 'e422cedf6ae9', './js/text.js': 'a9f7ac447b99', './js/tourney.js': '15a92be67690', './manifest.json': '57520bb0d337'};
+// version snake-v4.4.45, released 2026-09-12 09:16 +0200
+const CACHE = 'snake-v4.4.45';
+const ASSETS = {'./': 'd264f63d2a8e', './css/fonts.css': '1b96ff9d0895', './css/style.css': '876741900d8d', './docs/barricade-fragile.svg': 'daae9e47b6e1', './docs/barricade.svg': 'b7b8b6ee6e04', './docs/gem-epic.svg': 'f92ed6b94963', './docs/gem-gouranga.svg': '36df1893198a', './docs/gem-lucky.svg': 'b4072f7a10a9', './docs/gem.svg': 'b7577f814b55', './docs/heart.svg': '7ef1bc16acde', './docs/power-pellet.svg': '734a331dd3b7', './docs/time-crystal.svg': '24f2ac8c76c7', './fonts/PressStart2P-Regular.woff2': '947a9792df96', './icon.svg': '62446247c96b', './js/assets.js': '3b3c59b03d3c', './js/audio.js': '1c1cdfebad2b', './js/duel-core.js': '2044dc691032', './js/events.js': 'f24d111a3ab0', './js/game.js': 'ceb7254c479f', './js/hmac.js': '11b484d9ba32', './js/input.js': '0d01db970d85', './js/items.js': '413deee41908', './js/net-api.js': 'dce95e195d11', './js/net-relay.js': 'afd2dc746e6e', './js/net-rtc.js': 'ba8c4f4cbbf7', './js/net-session.js': 'c8a460fc669c', './js/net-spec.js': '8db1ea3cefc6', './js/qr.js': '23f34cd594a7', './js/render.js': '27c8e88b62cf', './js/screens.js': '4262d4ef498d', './js/sim-worker.js': 'd458b3956e04', './js/sim.js': '5d78ce1601a6', './js/storage.js': 'e422cedf6ae9', './js/text.js': 'a9f7ac447b99', './js/tourney.js': 'c46977d1cfe2', './manifest.json': '57520bb0d337'};
 
 // The bundle above IS the app. Every asset is served from this version's cache, at once, on
 // any link; the network never answers a running version's request. It only ever delivers
@@ -65,6 +65,10 @@ async function _precache() {
     const paths = Object.keys(ASSETS);
     const want = "APP_VERSION = '" + CACHE.replace(/^snake-/, '') + "'";
     const c = await caches.open(CACHE);
+    // A manifest already here is this version installed whole: a re-run (a worker restarted
+    // mid-install, a sw.js that changed under the same CACHE name) has nothing to do, and must
+    // not touch a cache a page may be running from.
+    if (await c.match(_key(MANIFEST), _MATCH)) return;
     try {
         const prev = await _prevBundles();
         await _pool(paths, async p => {

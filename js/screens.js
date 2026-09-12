@@ -1822,6 +1822,17 @@ function _ttWalkText(left, due){
     const m = Math.floor(left / 60), sec = left % 60;
     return 'WALKOVER IN ' + m + ':' + (sec < 10 ? '0' : '') + sec;
 }
+// THE SAME CLOCK FOR A ROOM. The monitor is read from across one, and while a player is
+// being waited for the seconds left are the one thing on it that is critical -- and the
+// subtitle's copy is set at the size the boards are, which is not readable from a sofa.
+// So the monitor lays the clock over its board too: big, centred, flashing between the
+// clock's amber and white so it is never off the screen. Only there: a player's own
+// screens are read at arm's length, where the subtitle is enough.
+function _ttWalkBig(text){
+    const on = Math.floor(_ttClock() / 400) % 2 === 0;
+    ctx.fillStyle = 'rgba(7,7,14,0.85)'; ctx.fillRect(CW/2 - 230, CH/2 - 30, 460, 60);
+    ctg(text, CW/2, CH/2, on ? '#ffaa44' : '#fff4dd', FONT.JUMBO, GLOW.BIG);
+}
 // The row strip every tournament screen ends with: the list from tourneyRows(), drawn from
 // startY, with its last entry (always BACK) parked at the bottom like every other menu.
 function _ttDrawRows(startY, rowH){
@@ -2611,6 +2622,24 @@ function drawEventQr(){
     // these screens are one thing held up to a phone. The hint line is the way out.
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
+// THE PODIUM ON THE WALL. The players' own podium (drawTourneyPodium) reads off the
+// tournament they hold and speaks to a seat; the wall holds only what the 'over'
+// signal handed it (eventMonitorOver) and speaks to the room: the three places and
+// who won, no YOU, no rows.
+function _evMonPodium(over){
+    drawGrid(); drawOvBg(0.92);
+    ctg('TOURNAMENT OVER', CW/2, 24, '#ffd700', FONT.TITLE, GLOW.TITLE);
+    const pod = over.podium, nm = id => String(over.names[id] || fmtFriendId(String(id))).toUpperCase();
+    const place = [['1ST', '#ffd700', 116], ['2ND', '#cccccc', 146], ['3RD', '#cd7f32', 176]];
+    place.forEach((pl, i) => {
+        if(!pod[i]) return;
+        ct(pl[0], CW/2 - 150, pl[2], pl[1], FONT.HINT);
+        ctg(nm(pod[i]).slice(0, 12), CW/2, pl[2], pl[1], FONT.TITLE, i ? GLOW.FAINT : GLOW.TITLE);
+    });
+    if(!pod.length) ct('NO PODIUM - THE BRACKET VOIDED', CW/2, 146, '#555', FONT.HINT);
+    else ctg(nm(pod[0]).slice(0, 10) + ' WON IT', CW/2, 228, '#ffd700', FONT.JUMBO, GLOW.HERO);
+    ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
 // THE EVENT MONITOR -- a screen somebody puts on a TV in the room. Nothing on it
 // is ever pressed and it never times out; it shows whatever is interesting at that
 // moment. While a match is running the SPECTATOR path owns the canvas instead
@@ -2629,6 +2658,11 @@ function drawEventMonitor(){
         ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
+    // A TOURNAMENT JUST ENDED: the podium, for the seconds the wall owes it, before the
+    // room. Ahead of the boards, because the projection may still name the final's
+    // sheet until the re-read lands.
+    const over = eventMonitorOver();
+    if(over){ _evMonPodium(over); return; }
     if(!m){
         ctg('EVENT MONITOR',CW/2,CH/2-20,'#7fff7f',FONT.TITLE, GLOW.TITLE);
         ct('CONNECTING...', CW/2, CH/2+20, '#4a7a4a', FONT.HINT);
@@ -2656,7 +2690,11 @@ function drawEventMonitor(){
     // the action rows: a monitor presses nothing and is in no participant list.
     if(t && (t['break'] || t.roles || t.state === 'running')){
         if(t['break']) _ttRoundBoard(t, t['break']);
-        else _ttBracketBoard(t, _ttWalkText(tourneyWalkoverLeft(t.roles, eventMonitorRolesAt()), false));
+        else {
+            const walk = _ttWalkText(tourneyWalkoverLeft(t.roles, eventMonitorRolesAt()), false);
+            _ttBracketBoard(t, walk);
+            if(walk) _ttWalkBig(walk);
+        }
         // ...and one line saying whose screen this is, since the boards above are
         // written for somebody who is playing.
         const roles = t.roles;

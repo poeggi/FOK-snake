@@ -277,6 +277,11 @@ function eventOpen(eid){
     eventRead();
     _uiDirty = true;
 }
+// The way BACK from the tournament screens (tourney.js lands on it through this). The
+// page handed over holding a picture that named the tournament as open or running,
+// and the signal that ended it found no event screen on show. Coming back is an
+// open, and an open reads fresh.
+function eventReturn(){ eventOpen(_evEid); }
 // THE ROOMS YOU ARE IN, in the order they matter. LIVE first -- that is the room
 // you are standing in and the only one with anything to press tonight -- then what
 // is coming, then what is over, which is a record rather than a door.
@@ -888,6 +893,7 @@ const EV_MON_MS = 30000;         // the LEASE: renewed well inside the 120 s win
 const EV_MON_WATCH_MS = 4000;    // how often an unanswered or LOST watch ask goes out again
                                  // -- and the timer's own interval, because the ask has to
                                  // be able to happen at that rate to mean anything
+const EV_MON_OVER_MS = 10000;    // how long the wall keeps a finished tournament's podium up
 var _evMon = null;               // the last `monitor` answer -- the whole screen
 var _evMonT = null;
 var _evMonBusy = false;
@@ -899,8 +905,27 @@ var _evMonAskAt = 0;
 var _evMonTry = 0;               // asks made for _evMonNid: the feeder first, then the other player
 var _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the same stagger as a player
 var _evMonAgain = false;         // a read asked for while one was in flight
+var _evMonOver = null;           // the podium the 'over' signal handed the wall: {tid, podium, names, at}
 function eventMonitorView(){ return _evMon; }
 function eventMonitorRolesAt(){ return _evMonRolesAt; }
+// THE PODIUM STAYS ON THE WALL. A player holds the tournament and keeps its podium up
+// until DONE; the monitor holds nothing once it is over -- its read answers `tourney:
+// null` -- so the 'over' signal's podium is kept here and drawn for EV_MON_OVER_MS.
+// The clock starts on the first frame the screen ASKS for it: the signal can land
+// while the wall is still on the final's feed, and the seconds are owed on the wall.
+// Names come from the projection held when the signal landed, then from the archive
+// row the re-read brings (it names the same podium), then the id.
+function eventMonitorOver(){
+    if(!_evMonOver) return null;
+    const now = _msgNow();
+    if(!_evMonOver.at) _evMonOver.at = now;
+    if(now - _evMonOver.at >= EV_MON_OVER_MS){ _evMonOver = null; _uiDirty = true; return null; }
+    for(const a of ((_evMon && _evMon.archive) || [])){
+        if(!a || String(a.tid || '') !== _evMonOver.tid) continue;
+        for(const p of (a.podium || [])) if(p && p.id && p.name && !_evMonOver.names[String(p.id)]) _evMonOver.names[String(p.id)] = String(p.name);
+    }
+    return _evMonOver;
+}
 function eventMonitorErr(){ return _evMonErr; }
 // Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`
 // on `state` and on every `events` row precisely so this can be asked without
@@ -996,6 +1021,7 @@ function eventMonitorSignal(d){
     if(String(d.eid || '') !== _evEid) return;
     const ev = String(d.event || ''), tid = String(d.tid || '');
     if(ev === 'roles'){
+        _evMonOver = null;   // a match is up: the wall follows it
         if(!_evMon) _evMon = {};
         const t = _evMon.tourney && String(_evMon.tourney.tid || '') === tid ? _evMon.tourney : { tid };
         _evMon.tourney = t;
@@ -1010,6 +1036,13 @@ function eventMonitorSignal(d){
         const r = _evMon && _evMon.tourney && _evMon.tourney.roles;
         if(r && String(r.nid || '') === String(d.nid || '')){ r.primaries = d.primaries || []; r.secondaries = d.secondaries || []; }
         return;
+    }
+    if(ev === 'over'){
+        const t = _evMon && _evMon.tourney, names = {};
+        for(const p of ((t && t.players) || [])) if(p && p.id && p.name) names[String(p.id)] = String(p.name);
+        const rn = (t && t.roles && t.roles.names) || {};
+        for(const k in rn) if(rn[k]) names[k] = String(rn[k]);
+        _evMonOver = { tid, podium:(Array.isArray(d.podium) ? d.podium : []).map(String), names, at:0 };
     }
     eventMonitorRead();
 }
@@ -1034,7 +1067,7 @@ function _evMonTick(){
     _evMonFollow();
 }
 function eventMonitorEnter(){
-    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
+    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null;
     phase = 'eventMonitor';
     eventWakeSet(true);
     eventMonitorRead();
@@ -1049,7 +1082,7 @@ function eventMonitorStop(keep){
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
     if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
         specStop('');
-    _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false;
+    _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null;
     if(!keep){ _evMon = null; _evMonErr = ''; if(phase === 'eventMonitor') phase = 'eventPage'; }
     _uiDirty = true;
 }

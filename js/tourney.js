@@ -197,6 +197,17 @@ function _ttRealName(id){
 // off the boards is off tournaments altogether (MULTIPLAYER), off a running one is back
 // to the list of rooms, where there is something else to do.
 function tourneyHome(fallback){ return _ttUi.home || fallback || 'multiplayer'; }
+// ...and LANDING there. An event page hands over to these screens holding a picture that
+// names the tournament as open or running, and the signal that ends it reaches a tournament
+// screen, which is no event screen, and is dropped there. So the way back is that page's
+// OPEN, and an open reads fresh: the row goes dark, or names the next one. Standing on the
+// page already (DONE drops the tournament, which lands, and then goes home) is not a
+// return and reads nothing.
+function tourneyLand(to){
+    if(to === 'eventPage' && phase !== to && typeof eventReturn === 'function') eventReturn();
+    else phase = to;
+}
+function tourneyGoHome(fallback){ tourneyLand(tourneyHome(fallback)); }
 // THE WALKOVER CLOCK. The sheet carries `walkover_at` (server API 4.15, unix ms on the
 // shared clock): the instant the server may first hand the node to whoever is still there.
 // Everybody waiting on a dealt match -- the player called up, the watchers, the event's
@@ -406,7 +417,7 @@ function _ttDrop(msg){
     if(typeof specMonitor === 'function') specMonitor('');
     _ttDisarm();
     _ttUi.sel = -1; _ttUi.contAt = 0;
-    if(_TT_PHASES[phase]) phase = tourneyHome('tourneyLobby');
+    if(_TT_PHASES[phase]) tourneyGoHome('tourneyLobby');
     if(msg) _ttMsg(msg, true); else _uiDirty = true;
 }
 
@@ -995,7 +1006,7 @@ async function tourneyLeave(to){
     if(!_tt) return;
     const tid = _tt.tid;
     _ttDrop('');
-    phase = to || tourneyHome('tourneyLobby'); _ttUi.sel = -1;
+    tourneyLand(to || tourneyHome('tourneyLobby')); _ttUi.sel = -1;
     Snd.sfxPlay('nav', cfg.music);
     await _ttPost('leave', { tid });
 }
@@ -1051,7 +1062,7 @@ function tourneyRows(){
         // freely. Fixed at create, like the stakes -- there is no turning it on later.
         rows.push(_ttDial('SPEED TOURNAMENT: ' + (_ttUi.speed ? 'ON' : 'OFF'),
                           _ttUi.speed ? 1 : 0, 2, v => { _ttUi.speed = !!v; }));
-        rows.push({ t:'BACK', en:true, act:() => { phase = tourneyHome('tourneyLobby'); Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
+        rows.push({ t:'BACK', en:true, act:() => { tourneyGoHome('tourneyLobby'); Snd.sfxPlay('nav', cfg.music); _uiDirty = true; } });
         return rows;
     }
     if(!_tt){
@@ -1100,7 +1111,7 @@ function tourneyRows(){
         // Acknowledging it and stepping off it are the same press, so they are one row -- and
         // it is the one exit that IS pre-selected, because there is nothing left to lose by
         // pressing it and nobody still playing behind it.
-        rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); phase = tourneyHome(); Snd.sfxPlay('nav', cfg.music); } });
+        rows.push({ t:'DONE', en:true, act:() => { _ttDrop(''); tourneyGoHome(); Snd.sfxPlay('nav', cfg.music); } });
     } else {
         // A board opened from a ceremony has to lead back to it. ESC off the ceremony is how
         // a spectator gets here -- reading the standings while the match they are watching is
@@ -1136,7 +1147,7 @@ function tourneyRows(){
     // says what leaving actually costs: a lobby you walk away from is a lobby other people are
     // still sitting in, waiting for a start that is never coming, so walking away IS cancelling
     // it. Off a tournament altogether, BACK is just BACK.
-    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { phase = tourneyHome(); Snd.sfxPlay('nav', cfg.music); } });
+    if(!_tt) rows.push({ t:'BACK', en:true, act:() => { tourneyGoHome(); Snd.sfxPlay('nav', cfg.music); } });
     else if(_tt.state === 'open')
         rows.push({ t:_tt.host === getPlayerId() ? 'BACK - CANCEL TOURNAMENT' : 'BACK - LEAVE TOURNAMENT',
                     en:true, act:() => tourneyAsk(tourneyHome()) });
