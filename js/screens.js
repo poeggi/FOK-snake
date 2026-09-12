@@ -2608,19 +2608,36 @@ function drawEventQr(){
         ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    const card = drawQrCard(eventUrl(_evEid, slot.code), 58);
-    // The life left in the code on screen. It is the honest thing to draw here: the
-    // code is refused the moment this reaches the left edge, and somebody walking
-    // over with a phone can see whether they have time.
-    const left = eventPassLeft(now), by = card.bottom + 6;
-    ctx.fillStyle = '#1a3a1a'; ctx.fillRect(card.x, by, card.size, 4);
-    ctx.fillStyle = left > 0.25 ? '#7fff7f' : '#ffd700';
-    ctx.fillRect(card.x, by, Math.round(card.size * left), 4);
+    const by = _evPassCard(slot, now);
     ct('THIS CODE ONLY WORKS WHILE IT IS ON SCREEN', CW/2, by + 16, '#4a7a4a', FONT.HINT);
     // NO BACK ROW, exactly like MY ID and the tournament JOIN CODE: BACK_Y sits
     // INSIDE the card on a screen whose picture is this tall, and all three of
     // these screens are one thing held up to a phone. The hint line is the way out.
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+}
+// The pass card with its life bar, shared by the EVENT QR screen and the wall: one
+// picture on the TV and the same one in a hand. Returns the bar's y, so the caller
+// puts its own line under it.
+//
+// The bar is the life left in the code on screen. It is the honest thing to draw
+// here: the code is refused the moment this reaches the left edge, and somebody
+// walking over with a phone can see whether they have time.
+function _evPassCard(slot, now){
+    const card = drawQrCard(eventUrl(_evEid, slot.code), 58);
+    const left = eventPassLeft(now), by = card.bottom + 6;
+    ctx.fillStyle = '#1a3a1a'; ctx.fillRect(card.x, by, card.size, 4);
+    ctx.fillStyle = left > 0.25 ? '#7fff7f' : '#ffd700';
+    ctx.fillRect(card.x, by, Math.round(card.size * left), 4);
+    return by;
+}
+// THE WALL'S QR: between tournaments the monitor alternates the room's overview with
+// this (eventMonitorFace), the event's name over the same card the EVENT QR screen
+// holds up, so somebody walking in joins off the TV.
+function _evMonQr(m, now){
+    ctg(String(m.name || 'EVENT').toUpperCase().substring(0, 22), CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    const by = _evPassCard(eventPassSlot(now), now);
+    ct('SCAN TO JOIN THIS EVENT', CW/2, by + 16, '#4a7a4a', FONT.HINT);
+    ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 // THE PODIUM ON THE WALL. The players' own podium (drawTourneyPodium) reads off the
 // tournament they hold and speaks to a seat; the wall holds only what the 'over'
@@ -2669,6 +2686,11 @@ function drawEventMonitor(){
         ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
+    // BETWEEN TOURNAMENTS the wall takes turns: the room, then the event's QR.
+    // Asked every frame, on either face, so the flip's clock runs. One reading of
+    // the clock for the face and the card, so the slot the face saw is the one drawn.
+    const pts = (typeof netPts === 'function') ? netPts() : null;
+    if(eventMonitorFace(pts) === 'qr'){ _evMonQr(m, pts); return; }
     ctg(String(m.name || 'EVENT').toUpperCase().substring(0, 22), CW/2, 30, '#7fff7f', FONT.TITLE, GLOW.TITLE);
     const [word, wcol] = _evStateLine(m);
     const when = eventWhen(m);

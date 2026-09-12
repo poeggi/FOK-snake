@@ -693,6 +693,8 @@ function eventTourneyNew(){
 var _evPass = null;      // { step, valid, slots:[{at, code}] }
 var _evPassT = null;     // the 1 Hz tick that re-asks before the last slot lapses
 var _evPassBusy = false;
+var _evPassDenyAt = 0;   // when a read was last refused: the tick waits EV_PASS_RETRY_MS before asking again
+const EV_PASS_RETRY_MS = 30000;
 function eventPassView(){ return _evPass; }
 // step and valid are ADMIN-CONFIGURABLE and ride the answer, so nothing here
 // hard-codes 10 and 20. The bounds are not a second opinion on the server's
@@ -735,24 +737,43 @@ async function eventPassRead(){
     _evPassBusy = false;
     if(!r.json){
         const err = String((r.body && r.body.error) || '');
-        _evMsg(err === 'not started' ? 'THIS EVENT HAS NOT STARTED YET'
-             : err === 'paused' ? 'THIS EVENT IS PAUSED'
-             : err === 'ended' ? 'THIS EVENT HAS ENDED'
-             : 'NO CODE RIGHT NOW', true);
+        _evPassDenyAt = _msgNow();
+        // Said only where somebody is looking at the card: the wall between
+        // tournaments falls back to its overview and stays quiet.
+        if(phase === 'eventQr')
+            _evMsg(err === 'not started' ? 'THIS EVENT HAS NOT STARTED YET'
+                 : err === 'paused' ? 'THIS EVENT IS PAUSED'
+                 : err === 'ended' ? 'THIS EVENT HAS ENDED'
+                 : 'NO CODE RIGHT NOW', true);
         return false;
     }
     const slots = Array.isArray(r.json.slots) ? r.json.slots : [];
     _evPass = { step:r.json.step, valid:r.json.valid, slots:slots };
-    _evMsg('');
+    _evPassDenyAt = 0;
+    if(phase === 'eventQr') _evMsg('');
     return true;
+}
+// Who holds the codes: the EVENT QR screen, and the wall between tournaments.
+function _evPassWanted(){ return phase === 'eventQr' || _evMonPassWant(); }
+// Arm the 1 Hz tick and ask for the first minute. Idempotent: a caller that runs
+// on its own timer may call it every time; the tick owns every ask after the first
+// (and the back-off after a refusal).
+function _evPassArm(){
+    if(_evPassT != null) return;
+    // Armed is the handle being set; a headless run with no timers marks it 0.
+    _evPassT = (typeof setInterval === 'function') ? setInterval(_evPassTick, 1000) : 0;
+    eventPassRead();
 }
 // Ask again BEFORE the last slot lapses, never after: a screen that waited for
 // the gap would show nothing across it. One request a minute, which is what six
 // slots were handed out for.
 function _evPassTick(){
-    if(phase !== 'eventQr'){ eventPassLeave(); return; }
+    if(!_evPassWanted()){ eventPassLeave(); return; }
     const now = _evNow();
     if(now == null || _evPassBusy) return;
+    // A refusal is not asked again every second: the event is not live, or this
+    // row holds no pass, and neither changes within the tick.
+    if(_evPassDenyAt && _msgNow() - _evPassDenyAt < EV_PASS_RETRY_MS) return;
     const slots = (_evPass && _evPass.slots) || [];
     if(!slots.length){ eventPassRead(); return; }
     let last = slots[0];
@@ -761,17 +782,16 @@ function _evPassTick(){
     _uiDirty = true;
 }
 function eventPassEnter(){
-    _evPass = null;
+    _evPass = null; _evPassDenyAt = 0;
     phase = 'eventQr';
-    eventPassRead();
-    if(_evPassT == null && typeof setInterval === 'function') _evPassT = setInterval(_evPassTick, 1000);
+    _evPassArm();
     _uiDirty = true;
 }
 // The codes go with the screen. They are minted from the server's clock and
 // nothing here is worth keeping for a screen that is closed.
 function eventPassLeave(){
     if(_evPassT != null){ if(typeof clearInterval === 'function') clearInterval(_evPassT); _evPassT = null; }
-    _evPass = null;
+    _evPass = null; _evPassDenyAt = 0;
     if(phase === 'eventQr'){ phase = 'eventPage'; _uiDirty = true; }
 }
 
@@ -894,6 +914,7 @@ const EV_MON_WATCH_MS = 4000;    // how often an unanswered or LOST watch ask go
                                  // -- and the timer's own interval, because the ask has to
                                  // be able to happen at that rate to mean anything
 const EV_MON_OVER_MS = 10000;    // how long the wall keeps a finished tournament's podium up
+const EV_MON_FLIP_MS = 10000;    // the idle wall alternates the overview and the event QR, this long each
 var _evMon = null;               // the last `monitor` answer -- the whole screen
 var _evMonT = null;
 var _evMonBusy = false;
@@ -906,6 +927,7 @@ var _evMonTry = 0;               // asks made for _evMonNid: the feeder first, t
 var _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the same stagger as a player
 var _evMonAgain = false;         // a read asked for while one was in flight
 var _evMonOver = null;           // the podium the 'over' signal handed the wall: {tid, podium, names, at}
+var _evMonIdleAt = 0;            // the frame the room-between-tournaments picture came up: the flip counts from it
 function eventMonitorView(){ return _evMon; }
 function eventMonitorRolesAt(){ return _evMonRolesAt; }
 // THE PODIUM STAYS ON THE WALL. A player holds the tournament and keeps its podium up
@@ -927,6 +949,34 @@ function eventMonitorOver(){
     return _evMonOver;
 }
 function eventMonitorErr(){ return _evMonErr; }
+// IDLE: the room between tournaments -- an answer in hand, no refusal, no podium
+// owed, and no tournament forming or running. The picture the wall alternates.
+function eventMonitorIdle(){
+    const m = _evMon, t = m && m.tourney;
+    if(!m || _evMonErr || _evMonOver) return false;
+    return !(t && (t['break'] || t.roles || t.state === 'running' || t.state === 'open'));
+}
+// WHAT THE IDLE WALL SHOWS THIS FRAME. Between tournaments the wall alternates the
+// room's overview and the event's live pass, EV_MON_FLIP_MS each way, counted from
+// the frame the room first came up, so somebody walking in can join off the TV.
+// The QR half is offered only while a code is in hand: without one the overview
+// stays up rather than an empty card. A fixed mode for now; an event option later.
+function eventMonitorFace(pts){
+    if(!eventMonitorIdle()){ _evMonIdleAt = 0; return 'room'; }
+    const now = _msgNow();
+    if(!_evMonIdleAt) _evMonIdleAt = now;
+    const qr = Math.floor((now - _evMonIdleAt) / EV_MON_FLIP_MS) % 2 === 1;
+    return qr && eventPassSlot(pts) ? 'qr' : 'room';
+}
+// The wall asks for the pass only while it would show one: on its own screen, idle,
+// the event LIVE (a pass is refused otherwise), and never from a RESERVED monitor
+// row -- the contract says a monitor holds no pass (403 monitor only).
+function _evMonPassWant(){
+    if(phase !== 'eventMonitor' || !eventMonitorIdle()) return false;
+    if(eventState(_evMon) !== 'active') return false;
+    return String((_evMon.you && _evMon.you.state) || '') !== 'monitor';
+}
+function _evMonPass(){ if(_evMonPassWant()) _evPassArm(); }
 // Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`
 // on `state` and on every `events` row precisely so this can be asked without
 // touching the slot -- the `monitor` call is the one that CLAIMS it, and using
@@ -960,6 +1010,7 @@ async function eventMonitorRead(){
     _evMonErr = '';
     _evMon = r.json;
     _evMonFollow();
+    _evMonPass();
     _uiDirty = true;
     return true;
 }
@@ -1054,6 +1105,7 @@ function _evMonTick(){
     // landed on the 1vs1 menu instead of going back to watching.
     const watching = typeof netSpectating === 'function' && netSpectating();
     if(phase !== 'eventMonitor' && !watching){ eventMonitorStop(); return; }
+    _evMonPass();
     // TWO CADENCES ON ONE TIMER. The lease is the expensive call -- it claims or
     // renews the slot AND builds the whole tournament projection -- and wants its
     // 30 s. A feed that was refused or has died wants asking again in four, which is
@@ -1067,7 +1119,7 @@ function _evMonTick(){
     _evMonFollow();
 }
 function eventMonitorEnter(){
-    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null;
+    _evMon = null; _evMonErr = ''; _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null; _evMonIdleAt = 0;
     phase = 'eventMonitor';
     eventWakeSet(true);
     eventMonitorRead();
@@ -1082,7 +1134,8 @@ function eventMonitorStop(keep){
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
     if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
         specStop('');
-    _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null;
+    _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null; _evMonIdleAt = 0;
+    if(phase !== 'eventQr') eventPassLeave();
     if(!keep){ _evMon = null; _evMonErr = ''; if(phase === 'eventMonitor') phase = 'eventPage'; }
     _uiDirty = true;
 }

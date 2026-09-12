@@ -475,7 +475,7 @@ const DRIVER = `
     // all three are the same gesture: hold this up to a phone.
     {
         // The CALL, not the word: a comment saying there is no BACK row is not one.
-        const src = String(drawEventQr) + String(drawMyId) + String(drawTourneyCode);
+        const src = String(drawEventQr) + String(drawMyId) + String(drawTourneyCode) + String(_evMonQr);
         const backs = src.split('menuItem(').length - 1;
         if(backs) throw 'a QR screen draws a menu row, which lands on the card ('+backs+' found)';
         const card = drawQrCard('https://poeggi.github.io/FOK-snake/#event=K7QM.H3KM9P', 58);
@@ -1633,6 +1633,115 @@ const DRIVER = `
         _spOut = _oOut; _spAsk = _oAsk5; _spGrant = _oGrant; _tt = _oTt5; _ttNid = _oNid;
       }
       log('monitor slot ok: room beside two primaries, costs nobody a slot, never an alt, granted off the sheet and the patch, forgotten with the tournament');
+
+      // ---- THE IDLE WALL TAKES TURNS: THE ROOM, THEN THE EVENT'S QR ----------
+      // Between tournaments the monitor alternates its overview with the event's live
+      // pass, EV_MON_FLIP_MS each way from the frame the room came up, so somebody
+      // walking in joins off the TV. The pass is asked for only where it would be
+      // shown (idle, live, not a reserved row), one minute per call like the QR
+      // screen, and a refusal is not asked again every second.
+      {
+        const _oNow = _msgNow, _oPts = netPts, _oPost = _evPost, _oCt = ct, _oCtg = ctg, _oQr = drawQrCard, _oPh = phase, _oMon = _evMon, _oEid = _evEid, _oMonT = _evMonT, _oSpec = netSpectating, _oMsg = _evUi.msg;
+        netSpectating = () => false;
+        let tnow = 900000; _msgNow = () => tnow;
+        const T0 = 1784182410000; let pts = T0; netPts = () => pts;
+        let passReqs = 0, passOk = true;
+        _evPost = async (a) => {
+          if(a !== 'pass') return { json:{ ok:true }, status:200, body:{} };
+          passReqs++;
+          if(!passOk) return { json:null, status:403, body:{ error:'monitor only' } };
+          return { json:{ ok:true, step:10, valid:20, slots:[0,1,2,3,4,5].map(i => ({ at:T0 + i*10000, code:'WAL' + i + 'XX' })) }, status:200, body:{} };
+        };
+        const settle = () => new Promise(r => setTimeout(r, 0));
+        const drawn = [];
+        ct = (t) => { drawn.push(String(t)); }; ctg = (t) => { drawn.push(String(t)); };
+        drawQrCard = (text) => { drawn.push('QR:' + text); return { x:0, y:58, size:296, bottom:354 }; };
+        const face = () => eventMonitorFace(pts);
+        const draw = () => { drawn.length = 0; drawEventMonitor(); return drawn; };
+        _evEid = 'K7QM'; _evMonT = 1; _evMonErr = ''; _evMonOver = null; _evMonIdleAt = 0; _evMonNid = ''; _evMonAt = tnow;
+        _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evUi.msg = '';
+        _evMon = { eid:'K7QM', name:'Room', state:'active', you:{ state:'member' }, members:3, tourney:null };
+        phase = 'eventMonitor';
+        // The wall asks for the pass the moment it is idle, live and allowed -- and once:
+        // the tick that follows owns every ask after the first.
+        if(!eventMonitorIdle() || !_evMonPassWant()) throw 'an idle live wall on a member row wants the pass';
+        _evMonTick(); await settle();
+        if(passReqs !== 1 || !_evPass || _evPass.slots.length !== 6) throw 'the tick arms the pass and asks for the first minute, got ' + passReqs;
+        _evMonTick(); _evMonPass(); await settle();
+        if(passReqs !== 1) throw 'armed is armed: no second ask, got ' + passReqs;
+        // Ten seconds each way, counted from the frame the room came up.
+        if(face() !== 'room') throw 'the room first';
+        tnow += 9999; if(face() !== 'room') throw 'the room for its ten seconds';
+        tnow += 1;    if(face() !== 'qr') throw 'then the QR';
+        tnow += 9999; if(face() !== 'qr') throw 'the QR for its ten seconds';
+        tnow += 1;    if(face() !== 'room') throw 'then the room again';
+        tnow += 10000; if(face() !== 'qr') throw 'and so on';
+        // What each face draws: the QR face is the pass card under the event's name
+        // (the same card the EVENT QR screen holds up, the live slot's code) and no
+        // menu row; the room face is the overview.
+        let d = draw();
+        if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL0XX')) < 0) throw 'the QR face draws the live pass: ' + JSON.stringify(d);
+        if(d.indexOf('ROOM') < 0 || d.indexOf('SCAN TO JOIN THIS EVENT') < 0) throw 'under the event name, with the invitation: ' + JSON.stringify(d);
+        if(d.indexOf('NO TOURNAMENT RUNNING') >= 0) throw 'and not the overview';
+        pts = T0 + 10000; d = draw();
+        if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL1XX')) < 0) throw 'the card follows the slot: ' + JSON.stringify(d);
+        tnow += 10000; d = draw();
+        if(d.indexOf('NO TOURNAMENT RUNNING') < 0 || d.join('|').indexOf('QR:') >= 0) throw 'the room face is the overview: ' + JSON.stringify(d);
+        // No code in hand: the overview stays up rather than an empty card.
+        tnow += 10000; pts = T0 + 70000;
+        if(face() !== 'room') throw 'no live code, no QR face';
+        d = draw(); if(d.join('|').indexOf('QR:') >= 0) throw 'nothing to scan is not drawn';
+        pts = T0;
+        if(face() !== 'qr') throw 'the code back, the QR face back';
+        // A TOURNAMENT FORMING OR RUNNING is not idle: the room, the pass let go,
+        // the flip re-counted from the frame the room comes back.
+        _evMon.tourney = { tid:'t1', state:'open', players:[] };
+        if(eventMonitorIdle() || face() !== 'room' || _evMonIdleAt) throw 'a forming tournament takes the wall';
+        if(_evMonPassWant()) throw 'and wants no pass';
+        _evPassTick();
+        if(_evPass !== null || _evPassT !== null) throw 'the codes go with the picture';
+        if(phase !== 'eventMonitor') throw 'letting the pass go does not move the screen';
+        _evMon.tourney = { tid:'t1', state:'running', roles:{ nid:'n1', players:['a', 'b'] } };
+        if(eventMonitorIdle()) throw 'a running one neither';
+        _evMon.tourney = { tid:'t1', 'break':{ round:1 } };
+        if(eventMonitorIdle()) throw 'nor a round break';
+        _evMon.tourney = null; tnow += 5000;
+        _evMonTick(); await settle();
+        if(passReqs !== 2 || !_evPass) throw 'the room back asks for the pass again, got ' + passReqs;
+        if(face() !== 'room' || _evMonIdleAt !== tnow) throw 'and the flip counts from now';
+        tnow += 10000; if(face() !== 'qr') throw 'ten seconds later the QR';
+        // Not live, or a RESERVED monitor row: the overview only, and no ask.
+        _evMon.state = 'paused';
+        if(_evMonPassWant()) throw 'a paused event has no pass to show';
+        _evMon.state = 'active'; _evMon.you = { state:'monitor' };
+        if(_evMonPassWant()) throw 'a reserved monitor row holds no pass (403 monitor only)';
+        _evPassTick();
+        if(_evPass !== null) throw 'and lets go of any it held';
+        _evMon.you = { state:'member' };
+        // A REFUSAL is not asked again every second: EV_PASS_RETRY_MS between asks, and
+        // the wall says nothing (the message and its sound are the QR screen's).
+        passOk = false; passReqs = 0;
+        _evMonPass(); await settle();
+        if(passReqs !== 1 || _evPass !== null || !_evPassDenyAt) throw 'the refusal is recorded, got ' + passReqs;
+        if(_evUi.msg !== '') throw 'the wall stays quiet about it: ' + _evUi.msg;
+        _evPassTick(); _evPassTick(); await settle();
+        if(passReqs !== 1) throw 'no re-ask inside the back-off, got ' + passReqs;
+        tnow += EV_PASS_RETRY_MS; _evPassTick(); await settle();
+        if(passReqs !== 2) throw 'asked again after it, got ' + passReqs;
+        // ...where the QR SCREEN does say it, in its own words.
+        eventPassLeave(); phase = 'eventQr'; _evPassArm(); await settle();
+        if(_evUi.msg !== 'NO CODE RIGHT NOW') throw 'the QR screen names the refusal: ' + _evUi.msg;
+        eventPassLeave(); _evUi.msg = ''; passOk = true; phase = 'eventMonitor';
+        // Leaving the wall takes the codes with it.
+        _evMonPass(); await settle();
+        if(!_evPass) throw 'armed again for the exit';
+        eventMonitorStop();
+        if(_evPass !== null || _evPassT !== null || _evMonIdleAt) throw 'the exit drops the codes and the flip';
+        if(phase !== 'eventPage') throw 'and goes back to the page';
+        _msgNow = _oNow; netPts = _oPts; _evPost = _oPost; ct = _oCt; ctg = _oCtg; drawQrCard = _oQr; phase = _oPh; _evMon = _oMon; _evEid = _oEid; _evMonT = _oMonT; netSpectating = _oSpec; _evUi.msg = _oMsg;
+        _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evMonIdleAt = 0; _evMonAt = 0;
+      }
+      log('idle wall ok: room and QR ten seconds each from the frame the room came up, the pass asked once and only where it shows, a refusal backed off, the exit drops it');
 
 
       // ---- AND SCANNING A POSTER EARLY LANDS ON THE LIST --------------------
