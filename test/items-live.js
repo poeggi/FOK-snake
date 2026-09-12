@@ -17,8 +17,8 @@
 const crypto = require('crypto');
 
 const BASE = process.argv[2] || 'https://fok-server.poggensee.it';
-const A = '11117e57';                 // the loser / minter side
-const B = '22227e57';                 // the taker side
+const A = '1111c1e7';                 // the loser / minter side
+const B = '2222c1e7';                 // the taker side
 // WHAT THESE TWO ARE CALLED where somebody might have to look at them. Nothing in
 // the item contract reads a display name, but the ids leave rows on a production
 // box, and hello is the only place a name is recorded. clnt-CI-<first four of the

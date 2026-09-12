@@ -35,7 +35,7 @@ const N = Math.max(3, Math.min(30, parseInt(process.argv[3] || '8', 10) || 8));
 const ROUNDS = Math.max(1, Math.min(20, parseInt(process.argv[4] || '4', 10) || 4));
 const GAP_MS = 300;                   // between samples: past the client's own 100 ms gap
 const POLL_S = 5;                     // the contract's longest hold
-const ID = '11117e57';
+const ID = '1111c1e7';
 const NAME = 'clnt-CI-' + ID.slice(0, 4);   // the same name items-live.js records for this id
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));

@@ -19,7 +19,7 @@ try {
     const types = (l)=>l.rx.map(e => e.t === 'sp' ? 'sp:' + e.m.t : e.t).join(' ');
 
     // A player feeder, hosting, on level 3 of a match its session says opened on level 1.
-    _netSess = _netMkSess('22227e57', 'host');
+    _netSess = _netMkSess('2222c1e7', 'host');
     _netSess.game = true; _netSess.seed = 0xBEEF; _netSess.startPts = 0; _netSess.hearts = 3; _netSess.stakes = false; _netSess.lvl = 1;
     inGame = true;
     beginOnlineDuel(0xBEEF, true);
@@ -29,14 +29,14 @@ try {
     // The bootstrap context names the level being PLAYED, read off the sim: a joiner's
     // session never learns a level boundary, and neither does a relay's booted context.
     if(_spCtxBuild().lvl !== 3) fail('player ctx names level ' + _spCtxBuild().lvl + ', the sim is on 3 (s.lvl is the level the match OPENED on)');
-    _spOn = true; _spCtx = { t:'sctx', g:0, hops:1, pids:['11117e57','22227e57'], seed:0xBEEF, startPts:0, ep:0, hm:3, stakes:false, lvl:1, ws:null, names:null, look:null };
+    _spOn = true; _spCtx = { t:'sctx', g:0, hops:1, pids:['1111c1e7','2222c1e7'], seed:0xBEEF, startPts:0, ep:0, hm:3, stakes:false, lvl:1, ws:null, names:null, look:null };
     const relayLvl = _spCtxBuild().lvl;
     _spOn = false; _spCtx = null;
     if(relayLvl !== 3) fail('relay ctx re-sent its booted level ' + relayLvl + ', the sim is on 3');
     ok('the bootstrap context names the level being played, from a player and from a relay');
 
     // In-process home (control): serve-open mints synchronously and the link leaves subscribed.
-    const a = link('33337e57'); _spOut.push(a);
+    const a = link('3333c1e7'); _spOut.push(a);
     _spServeOpen(a);
     if(types(a) !== 'sctx sp:rs') fail('in-process bootstrap: ' + types(a));
     if(a.sub !== true || a.tail) fail('in-process link not subscribed after its bootstrap');
@@ -52,7 +52,7 @@ try {
     if(!netWorkerDuelOn()) fail('worker duel not on');
     if(_rbRing.length) fail('main ring is not empty in the worker home: the control below would not be a control');
     a.rx.length = 0; a.sub = true;                // already subscribed from the in-process phase
-    const b = link('44447e57'); _spOut.push(b);
+    const b = link('4444c1e7'); _spOut.push(b);
     posts.length = 0;
     _spServeOpen(b);
     if(types(b) !== 'sctx') fail('worker-home bootstrap sent ' + types(b) + ' before the checkpoint landed');
@@ -84,7 +84,7 @@ try {
 
     // An empty answer (the ring was just cleared by a boundary) releases the hold, leaves the
     // waiting link waiting, and the housekeeping tick asks again on its behalf.
-    const c = link('55557e57'); _spOut.push(c);
+    const c = link('5555c1e7'); _spOut.push(c);
     posts.length = 0; a.rx.length = 0;
     _spServeOpen(c);
     _spTapOut({ t:'in', tk:13, l:[] });
@@ -107,14 +107,14 @@ try {
 
     // A relay whose UPSTREAM checkpoint arrives while its worker is still minting: the
     // upstream one is newer and outranks it -- waiting links take it, the answer is dropped.
-    const d = link('66667e57'); _spOut.push(d);
-    _spCtx = _spCtxBuild(); _spOn = true; _spGen = 0; _spSeen = 40; _spLine = '11117e57';   // a primary: booted on a player's context, serving on
+    const d = link('6666c1e7'); _spOut.push(d);
+    _spCtx = _spCtxBuild(); _spOn = true; _spGen = 0; _spSeen = 40; _spLine = '1111c1e7';   // a primary: booted on a player's context, serving on
     posts.length = 0;
     _spServeOpen(d);
     if(!_spCkptReq || _spCkptReq.n !== 40) fail('relay reserved n ' + (_spCkptReq && _spCkptReq.n) + ', expected its consumed high-water mark 40');
-    const up = { t:'sp', g:0, n:41, o:'11117e57', p:0, m:rs };
+    const up = { t:'sp', g:0, n:41, o:'1111c1e7', p:0, m:rs };
     _spBootT = null; _spOn = true;
-    const feed = { peer:'11117e57', sub:true, dc:{ readyState:'open' } };
+    const feed = { peer:'1111c1e7', sub:true, dc:{ readyState:'open' } };
     _spOnFeedMsg(feed, JSON.stringify(up));
     if(_spCkptReq) fail('an upstream checkpoint did not cancel the mint in flight');
     if(types(d) !== 'sctx sp:rs' || d.rx[1].n !== 41) fail('waiting link did not take the upstream checkpoint: ' + types(d));

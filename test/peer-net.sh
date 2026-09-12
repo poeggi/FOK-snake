@@ -62,8 +62,8 @@ post() { req -X POST -H 'Content-Type: application/json' -d "$2" "$BASE$1"; }
 # is also serving real players: fixed means a run reuses last run's rows instead
 # of leaving a fresh pair behind, and the name is what tells somebody reading the
 # player list that the row is a test client and not a person.
-ID_A6=11117e57; ID_B6=22227e57
-ID_A4=33337e57; ID_B4=44447e57
+ID_A6=1111c1e7; ID_B6=2222c1e7
+ID_A4=3333c1e7; ID_B4=4444c1e7
 ciname() { echo "clnt-CI-${1:0:4}"; }
 # Field out of the peer-net payload, which arrives as JSON escaped inside the
 # signal envelope: "payload":"{\"ip\":\"...\"}".
