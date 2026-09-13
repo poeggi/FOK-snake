@@ -418,16 +418,17 @@ function eventRows(){
     const e = _ev, rows = [];
     if(!e || _evYou() === 'pending') return rows;
     const st = eventState(e), org = eventIsOrganizer(), scheduled = e.starts != null || e.ends != null;
-    // A RESERVED MONITOR may call state and monitor and NOTHING else, so it is
-    // offered exactly one row -- the screen it exists to be. It is not a member: no
-    // pass, no roster, no leaving, and the server refuses all of it with
-    // `monitor only`.
+    // A RESERVED MONITOR may call state, monitor and pass and NOTHING else, so it
+    // is offered the screen it exists to be and, while the event is live, the code
+    // the wall shows anyway. It is not a member: no roster, no tournament, no
+    // leaving, and the server refuses all of it with `monitor only`.
     //
     // Returning an EMPTY list here, which is what this did first, left the one
     // account that most needs the row unable to reach it: an operator names a TV as
     // the monitor, the TV opens the event, and the page has nothing on it at all.
     if(_evYou() === 'monitor'){
         if(eventMonitorOffered(e)) rows.push({ t:'EVENT MONITOR', go:'monitor' });
+        if(st === 'active') rows.push({ t:'SHOW EVENT QR', go:'pass' });
         return rows;
     }
     // ONE ROW ABOUT THE TOURNAMENT, and which one depends on what you can do

@@ -1757,14 +1757,19 @@ function netSubmitScore(name, sc, lvl, completed){
         pts: pts != null ? pts : undefined,   // the game-over moment on the PTS clock
     }, true).then(r => { if(r){ _netScores = null; _netScoresAt = 0; } });   // bust the cache: the tab shows the fresh board
 }
-let _netScores = null, _netScoresAt = 0, _netScoresLoading = false;
-function netFetchScores(){   // called by the GLOBAL tab draw; cached 60s, single-flight
+let _netScores = null, _netScoresAt = 0, _netScoresLoading = false, _netScoresErr = false;
+const NET_SCORES_TTL_MS = 60000, NET_SCORES_RETRY_MS = 10000;
+// Called by the GLOBAL tab draw, every frame: a board is kept a minute, a failed ask
+// waits NET_SCORES_RETRY_MS before the next (the draw runs at frame rate, and an ask
+// re-fired on every failed frame is a hot loop against a host that is down).
+function netFetchScores(){
     if(!_netOk() || _netScoresLoading) return;
-    if(_netScores && Date.now() - _netScoresAt < 60000) return;
+    if(Date.now() - _netScoresAt < (_netScores ? NET_SCORES_TTL_MS : (_netScoresErr ? NET_SCORES_RETRY_MS : 0))) return;
     _netScoresLoading = true; _uiDirty = true;
     _netGet('/api/scores.php?limit=100', undefined, false, true).then(r => {
-        _netScoresLoading = false;
-        if(r && Array.isArray(r.scores)){ _netScores = r.scores; _netScoresAt = Date.now(); }
+        _netScoresLoading = false; _netScoresAt = Date.now();
+        if(r && Array.isArray(r.scores)){ _netScores = r.scores; _netScoresErr = false; }
+        else _netScoresErr = true;
         _uiDirty = true;
     });
 }

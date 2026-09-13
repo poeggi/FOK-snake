@@ -1807,6 +1807,35 @@ runTest('SMOKE-NET', `
     _netScores=null; scoresTab=0; phase='menu';
     log('global scores tab ok: offline, unreachable and data states render');
 
+    // ---- a failed ask is SAID, and not asked again on the next frame ----
+    // The tab draws at frame rate and asks from the draw. Without a back-off a host
+    // that is down was asked again the frame after every failure, and the screen
+    // flickered LOADING / UNREACHABLE for as long as the tab was open.
+    {
+        const _oGetS=_netGet, _oFetchS=globalThis.fetch, _oCt=ct;
+        globalThis.fetch=async()=>null;
+        let asks=0; _netGet=async()=>{ asks++; return null; };
+        const drawn=[]; ct=(t)=>{ drawn.push(String(t)); };
+        phase='scores'; scoresTab=1; cfg.offline=false;
+        _netScores=null; _netScoresLoading=false; _netScoresErr=true; _netScoresAt=Date.now();
+        drawScores();
+        if(asks!==0) throw 'a failed ask was re-fired on the next frame';
+        if(!drawn.some(t=>t.indexOf('SERVER UNREACHABLE')===0)) throw 'a failed ask must say so: '+JSON.stringify(drawn);
+        if(drawn.some(t=>t.indexOf('LOADING')===0)) throw 'a failed ask must not read LOADING';
+        _netScoresAt=Date.now()-NET_SCORES_RETRY_MS-1; drawn.length=0;
+        drawScores();
+        if(asks!==1) throw 'the retry is owed once the back-off has passed, got '+asks;
+        if(!_netScoresLoading) throw 'the retry must be in flight';
+        if(!drawn.some(t=>t.indexOf('SERVER UNREACHABLE')===0)) throw 'a retry in flight keeps saying unreachable: '+JSON.stringify(drawn);
+        drawScores(); if(asks!==1) throw 'single-flight: no second ask beside one in flight';
+        // Before the first answer there is nothing to say but LOADING.
+        _netScoresErr=false; drawn.length=0; drawScores();
+        if(!drawn.some(t=>t.indexOf('LOADING')===0)) throw 'the first ask reads LOADING: '+JSON.stringify(drawn);
+        _netScoresLoading=false; _netScores=null; _netScoresAt=0; _netScoresErr=false;
+        _netGet=_oGetS; globalThis.fetch=_oFetchS; ct=_oCt; scoresTab=0; phase='menu';
+        log('global scores back-off ok: a failure is said, retried after NET_SCORES_RETRY_MS, never every frame');
+    }
+
     localStorage.removeItem('fok-snake-friends');
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

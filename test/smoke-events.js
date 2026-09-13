@@ -618,16 +618,22 @@ const DRIVER = `
     const org = (x) => mem(Object.assign({ you:{ state:'member', organizer:true } }, x||{}));
     // A PENDING row gets nothing at all -- it sees the public face and no more.
     if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing, not even a dark row';
-    // A RESERVED MONITOR gets EXACTLY ONE ROW: the screen it exists to be. It is not
-    // a member -- no pass, no roster, no leaving -- but an empty page is not that
-    // rule, it is the one account that most needs the row unable to reach it. An
-    // operator names a TV, the TV opens the event, and there has to be a way in.
-    if(gos(mem({ you:{state:'monitor'} })).join(',') !== 'monitor')
-        throw 'a reserved monitor gets the screen row and nothing else: '+gos(mem({ you:{state:'monitor'} }));
-    if(!live(mem({ you:{state:'monitor'} })).length) throw 'and it must be pressable';
-    // ...unless the event offers no screen at all, and then it has nothing to do.
-    if(gos(mem({ you:{state:'monitor'}, monitor_allowed:false })).length)
-        throw 'an event with no screen offers a monitor nothing';
+    // A RESERVED MONITOR gets the screen it exists to be, and the live code while
+    // the event runs (the server lets a monitor call pass; the wall shows it anyway).
+    // It is not a member -- no roster, no tournament, no leaving -- but an empty page
+    // is not that rule, it is the one account that most needs the row unable to reach
+    // it. An operator names a TV, the TV opens the event, and there has to be a way in.
+    if(gos(mem({ you:{state:'monitor'} })).join(',') !== 'monitor,pass')
+        throw 'a reserved monitor gets the screen row and the code: '+gos(mem({ you:{state:'monitor'} }));
+    if(live(mem({ you:{state:'monitor'} })).join(',') !== 'monitor,pass') throw 'and both must be pressable';
+    // The screen comes first, so opening the page lands on it.
+    if(gos(mem({ you:{state:'monitor'} }))[0] !== 'monitor') throw 'the screen row leads';
+    // ...unless the event offers no screen at all: then only the code is left.
+    if(gos(mem({ you:{state:'monitor'}, monitor_allowed:false })).join(',') !== 'pass')
+        throw 'an event with no screen offers a monitor the code alone';
+    // No code before the event starts, or after: the pass rule is everybody's.
+    if(gos(mem({ you:{state:'monitor'}, state:'paused' })).join(',') !== 'monitor')
+        throw 'a paused event hands the monitor no code';
     // An ordinary member: leave, and nothing that is the organizer's.
     // ONE ROW ABOUT THE TOURNAMENT, and which one depends on what you can do about
     // it. A MEMBER is never offered CREATE -- a permanently dark row they can never
@@ -658,11 +664,11 @@ const DRIVER = `
     // A PENDING row and a RESERVED MONITOR are the two that get no tournament row
     // at all -- one is not in the event yet, the other is not a participant.
     if(gos(mem({ you:{state:'pending'} })).length) throw 'a pending row must be offered nothing, not even a dark row';
-    if(gos(mem({ you:{state:'monitor'} })).join(',') !== 'monitor')
-        throw 'a reserved monitor gets the screen row and nothing else: '+gos(mem({ you:{state:'monitor'} }));
-    if(!live(mem({ you:{state:'monitor'} })).length) throw 'and it must be pressable';
-    if(gos(mem({ you:{state:'monitor'}, monitor_allowed:false })).length)
-        throw 'an event with no screen offers a monitor nothing';
+    if(gos(mem({ you:{state:'monitor'} })).join(',') !== 'monitor,pass')
+        throw 'a reserved monitor gets the screen row and the code: '+gos(mem({ you:{state:'monitor'} }));
+    if(live(mem({ you:{state:'monitor'} })).join(',') !== 'monitor,pass') throw 'and both must be pressable';
+    if(gos(mem({ you:{state:'monitor'}, monitor_allowed:false })).join(',') !== 'pass')
+        throw 'an event with no screen offers a monitor the code alone';
     // The screen row itself is decided on monitor_allowed, never by calling monitor
     // to find out -- that call CLAIMS the slot.
     if(gos(mem({monitor_allowed:false})).indexOf('monitor') >= 0) throw 'an event that offers no screen must not offer the row';

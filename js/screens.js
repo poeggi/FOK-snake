@@ -632,12 +632,16 @@ function drawScores() {
             ct('GLOBAL SCORES',CW/2,CH/2-14,'#ffd24a',FONT.MENU);
             ct('DISABLED IN OFFLINE MODE (SETTINGS > NETWORK)',CW/2,CH/2+12,'#aaa',FONT.HINT);
         } else {
-            if(typeof netFetchScores==='function') netFetchScores();   // cached 60s, single-flight
+            if(typeof netFetchScores==='function') netFetchScores();   // cached 60s, a failure retried, single-flight
             const gs=(typeof _netScores!=='undefined')?_netScores:null;
-            if(!gs && typeof _netScoresLoading!=='undefined' && _netScoresLoading){
+            const failed = typeof _netScoresErr!=='undefined' && _netScoresErr;
+            // LOADING only until the first answer. A failed ask says so and stays said
+            // through the retries, so the screen never flickers between the two.
+            if(!gs && !failed && typeof _netScoresLoading!=='undefined' && _netScoresLoading){
                 ct('LOADING GLOBAL SCORES...',CW/2,CH/2,'#aaa',FONT.HINT);
             } else if(!gs){
-                ct('SERVER UNREACHABLE',CW/2,CH/2-14,'#ff8888',FONT.MENU);
+                const notice = (typeof netStatusNotice==='function') ? netStatusNotice() : null;
+                ct(notice || 'SERVER UNREACHABLE - RETRYING',CW/2,CH/2-14,'#ff8888',FONT.MENU);
                 ct('GLOBAL SCORES NEED A CONNECTION',CW/2,CH/2+12,'#aaa',FONT.HINT);
             } else if(!gs.length){
                 ct('NO GLOBAL SCORES YET - BE THE FIRST!',CW/2,CH/2,'#aaa',FONT.HINT);
@@ -2617,7 +2621,12 @@ function drawEventMembers(){
 // has left. Both are read off the synced clock every frame; nothing polls.
 function drawEventQr(){
     drawGrid(); drawOvBg(0.92);
-    drawTitle('EVENT QR');
+    // The room's own name over its code, as MY ID puts the id over the friend code:
+    // the card is held up to strangers, and the name is what tells them what they
+    // are scanning into. The motto under it in the same yellow.
+    const e = eventView();
+    drawTitle(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT QR');
+    if(e && e.descr) drawSubhead(String(e.descr).substring(0, 46), '#ffd700');
     const ui = eventUi(), now = (typeof netPts === 'function') ? netPts() : null;
     const slot = eventPassSlot(now);
     if(!slot){
