@@ -929,15 +929,15 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // Swipe/gesture control on game canvas.
 // Thresholds (px of finger travel): first move or reverse = SWIPE_1 (16), or SWIPE_N
 // (24) while boosting; 90-deg turn = SWIPE_N (24); continue same direction = SWIPE_SAME
-// (48), which suppresses accidental boosts.
-// Dead zone: 40-50 degrees from horizontal -- diagonal motion commits nothing until
-// the finger clearly enters a direction corridor (0-40 deg = horizontal, 50-90 = vertical).
-// In the dead zone the baseline is NOT reset, so displacement keeps accumulating until
-// the angle exits into a real corridor.
+// (48), which suppresses accidental boosts. One table for both readers (_swipeRead).
+// Dead zone (the chord reader): 40-50 degrees from horizontal -- diagonal motion commits
+// nothing until the finger clearly enters a direction corridor (0-40 deg = horizontal,
+// 50-90 = vertical). In the dead zone the baseline is NOT reset, so displacement keeps
+// accumulating until the angle exits into a real corridor.
 // Move cooldown: if the finger PAUSES longer than SWIPE_COOLDOWN (50ms) -- staying near
 // still, not merely a coalesced gap under load -- the last direction is cleared, so the
 // next move uses the first-move threshold and re-moves after a pause feel as responsive as
-// the first direction.
+// the first direction. The MODERN reader also moves the anchor to the pause.
 // ---- Focus-grab clicks: a click whose job is giving this WINDOW focus (two
 // side-by-side clients) must not also operate the game. Detection, not a blanket
 // first-click filter: such a gesture starts with the window still BLURRED -- its
@@ -1076,6 +1076,7 @@ function _dbgSteerLog(p, d){
 }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
+let _swipeFollow=null;   // the furthest point the finger has reached along the last sent axis (MODERN reader)
 // Swipes are read on the whole document; a touch starting on a live control (the gamepad cluster,
 // the MUTE/FPS boxes, or the level-3 SNAP button) is excluded, grown by a margin so a near-miss
 // isn't stolen as a swipe.
@@ -1089,6 +1090,45 @@ function _inControlMask(x,y){
         if(x>=r.left-_MASK_MARGIN && x<=r.right+_MASK_MARGIN && y>=r.top-_MASK_MARGIN && y<=r.bottom+_MASK_MARGIN) return true;
     }
     return false;
+}
+// THE SWIPE READER: one finger sample in, the key it asks for and the distance the threshold
+// table judges out; null while nothing is readable. Both readers share the CHORD from the
+// anchor, classified by its angle through the dead zone: the first swipe of a touch, the swipe
+// after a pause, and every menu swipe. They part once a direction has been sent in play:
+//   MODERN (default): three distances from the commit point, each on its own axis. ACROSS the
+//     sent axis is the 90-degree turn, whatever the finger did along the axis, so a turn always
+//     costs SWIPE_N of across travel however long the stroke before it. ALONG the axis, while
+//     still advancing and within a turn's width of it, is the same direction (the boost slide).
+//     BACK from the furthest point the finger reached (_swipeFollow) is the reverse (the brake).
+//   LEGACY (cfg.touchLegacy): the chord again, from a commit point that stays put while the
+//     finger keeps sliding, with the dead zone leaning 5 degrees toward the axis just sent. The
+//     overshoot of the previous stroke sits inside every chord, so a turn costs anything from
+//     SWIPE_N to never, and a 48px chord in the old direction reads as a boost slide first.
+// The threshold table, the anti-spiral guard and the boost gate are the same for both.
+function _swipeRead(x,y,sf){
+    if(_inPlay()&&!cfg.touchLegacy&&_swipeLastDir){
+        const d=GDIRS[_swipeLastDir];
+        const adv=d.x?(x-_swipeFollow.x)*d.x:(y-_swipeFollow.y)*d.y;
+        const atExtreme=adv>0;
+        if(atExtreme) _swipeFollow={x,y};
+        const sdx=x-_swipeBase.x, sdy=y-_swipeBase.y;
+        const along=d.x?sdx*d.x:sdy*d.y;
+        const across=d.x?sdy:sdx;
+        const back=d.x?(_swipeFollow.x-x)*d.x:(_swipeFollow.y-y)*d.y;
+        if(atExtreme&&along>=Math.round(SWIPE_SAME*sf)&&Math.abs(across)<Math.round(SWIPE_N*sf)) return {key:_swipeLastDir, dist:along};
+        if(Math.abs(across)>=Math.round(SWIPE_N*sf)) return {key:d.x?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)};
+        if(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across)) return {key:d.x?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back};
+        return null;
+    }
+    const dx=x-_swipeBase.x, dy=y-_swipeBase.y;
+    const dist=Math.hypot(dx,dy);
+    if(dist<Math.round(SWIPE_1*sf)) return null;
+    const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
+    const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
+    const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
+    const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
+    if(ang>=dzLo&&ang<=dzHi) return null;
+    return {key:ang<dzLo?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'), dist};
 }
 document.addEventListener('touchstart',e=>{
     const t=e.touches[0];
@@ -1108,7 +1148,7 @@ document.addEventListener('touchstart',e=>{
         const onVf = _scanFor() && _scanTapAt(t.clientX, t.clientY);   // a viewfinder tap cycles the camera
         if(!onVf && _entryInField(t.clientX, t.clientY)) nameInp.focus(); else nameInp.blur();
     }
-    _swipeBase={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
 },{passive:false});
 document.addEventListener('touchmove',e=>{
     if(!_swipeBase||phase==='splash') return;
@@ -1120,20 +1160,20 @@ document.addEventListener('touchmove',e=>{
     // move means the finger kept sliding and the browser merely coalesced touchmove under
     // main-thread load -- reading that as a pause would wrongly wipe _swipeLastDir and re-seed
     // the next move as a fresh first swipe. Distance travelled, not the event-delivery gap,
-    // tells a real pause from a coalesced slide. (This no longer touches boost: the boost gate
-    // is anchored to touchdown, so a forgotten heading can never restart it.)
-    if(_swipeLastDir&&now-_swipeLastMoveAt>SWIPE_COOLDOWN&&moved<SWIPE_N) _swipeLastDir=null;
+    // tells a real pause from a coalesced slide. Boost is untouched here: the boost gate is
+    // anchored to touchdown, so a forgotten heading cannot restart it.
+    if(now-_swipeLastMoveAt>SWIPE_COOLDOWN&&moved<SWIPE_N){
+        _swipeLastDir=null;
+        // MODERN reader: the anchor follows a paused finger (to the last checkpoint, at most 6px
+        // behind it), so a creep never accumulates into a commit and the next swipe is measured
+        // from where it starts. LEGACY and the menus keep the anchor where it is.
+        if(_inPlay()&&!cfg.touchLegacy&&_swipeLastMovePos){ _swipeBase={x:_swipeLastMovePos.x,y:_swipeLastMovePos.y}; _swipeFollow={x:_swipeBase.x,y:_swipeBase.y}; }
+    }
     if(!_swipeLastMovePos||moved>=6){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
-    const dx=t.clientX-_swipeBase.x, dy=t.clientY-_swipeBase.y;
-    const dist=Math.hypot(dx,dy);
     const sf=_touchSensF();
-    if(dist<Math.round(SWIPE_1*sf)) return;
-    const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
-    const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
-    const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
-    const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
-    if(ang>=dzLo&&ang<=dzHi) return;
-    const key=ang<dzLo?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp');
+    const rd=_swipeRead(t.clientX,t.clientY,sf);
+    if(!rd) return;
+    const key=rd.key, dist=rd.dist;
     // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
     // one-gesture handling below, so every menu scrolls by the same rule -- no per-screen tuning.
     const inMenu=!_inPlay()&&phase!=='credits';
@@ -1174,7 +1214,7 @@ document.addEventListener('touchmove',e=>{
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }
-    _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY};
+    _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY};
 },{passive:false});
 document.addEventListener('touchend',e=>{
     if(phase==='splash'){
@@ -1193,7 +1233,7 @@ document.addEventListener('touchend',e=>{
             const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
             if(!_inPlay()&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
         }
-        _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
+        _swipeBase=null; _swipeFollow=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
         // The release is NEVER phase-gated (engage is): finger-up is a device fact, and
         // swallowing it during 'dying' left the arm slot held -- the snake respawned
         // boosting with no finger down. Keyboard keyup and the dpad touchend already
@@ -1207,7 +1247,7 @@ document.addEventListener('touchend',e=>{
 document.addEventListener('touchcancel',e=>{
     if(!_swipeBase) return;
     gameBoostEnd(0);   // release is never phase-gated -- same rule as touchend above
-    _swipeBase=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
+    _swipeBase=null; _swipeFollow=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null;
 },{passive:true});
 
 // ================================================================

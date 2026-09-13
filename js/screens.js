@@ -391,6 +391,9 @@ const SETTINGS_CATS = [
         { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; also scales menu scroll travel
           act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
+        { lbl:()=>'TOUCH DETECT: '+(cfg.touchLegacy?'LEGACY':'MODERN'),   // how a swipe after the first is read in play (js/input.js _swipeRead)
+          act:()=>{cfg.touchLegacy=!cfg.touchLegacy;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.touchLegacy=!!r;} },
     ]},
     { label:'GAME', items:[
         { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
