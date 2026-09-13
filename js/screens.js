@@ -411,9 +411,8 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.gfxMode=cfg.gfxMode===0?1:0;} },
         { lbl:()=>'GRAPHICS MODE: FABULOUS', dis:()=>true,   // greyed: not yet implemented
           act:()=>{Snd.sfxPlay('fail',cfg.music);} },
-        { lbl:()=>'SMOOTH SNAKE: '+(['OFF (0MS)','LOW LATENCY (50MS)','HIGH LATENCY (100MS)'][cfg.smoothMotion|0]||'OFF (0MS)'),   // a render-side ramp between cells, never further behind the sim than 3 or 6 ticks (_smSegs in render.js)
-          act:()=>{cfg.smoothMotion=((cfg.smoothMotion|0)+1)%3;Snd.sfxPlay('select',cfg.music);},
-          adj:(r)=>{cfg.smoothMotion=((cfg.smoothMotion|0)+(r?1:-1)+3)%3;} },
+        { lbl:()=>'SMOOTH SNAKE: OFF', dis:()=>true,   // greyed: the render-side ramp between cells (_smSegs in render.js) is held OFF (storage.js) until it draws right
+          act:()=>{Snd.sfxPlay('fail',cfg.music);} },
         _tog('LIMIT 30 FPS','fps30'),
         _tog('DISABLE GLOW','disableGlow'),
         _tog('DEFER DRAW','deferDraw'),

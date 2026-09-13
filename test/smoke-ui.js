@@ -486,13 +486,14 @@ runTest('SMOKE-UI', `
     {
         const oSimple=_simpleGfx, oMotion=_reduceMotion;
         _simpleGfx=()=>false; _reduceMotion=()=>false;
-        // Where drawSnakeG puts the middle of the head: the cell, plus the jolt's draw offset.
-        // The head also SQUASHES on impact (that is what j[2] is), so its edges are the wrong
-        // thing to measure -- a boost wreck flattens 9px and would read as a gap that is not
-        // there. Centres are what say whether the two are on the same cell edge.
-        const headMid=(p,cx,now)=>{
-            const j=_crashJolt(p,now), o=j?j(0):[0,0,0,0];
-            return cx*CS+1+o[0]+(CS-2)/2;
+        // Where drawSnakeG puts the head's FRONT FACE: the cell, the jolt's draw offset, and
+        // the squash (j[2] narrows the head about its centre, so half of it comes off the
+        // face). The faces are what the eye reads as against or apart; a squashed head
+        // whose centre stayed put would show a gap that is not a gap.
+        const headFace=(p,cx,now,dir)=>{
+            const j=_crashJolt(p,now), o=j?j(0):[0,0,0,0], sw=CS-2;
+            const x=cx*CS+1+o[0], gw=o[2];
+            return dir>0 ? x+sw+gw/2 : x-gw/2;
         };
         // The sim leaves the two heads where they met FROM, and where that is depends on the
         // step phase: an even gap meets in a shared cell and leaves an empty one between them,
@@ -509,21 +510,24 @@ runTest('SMOKE-UI', `
             armCrash({p:1,hx:g.b.hx,hy:5,x:g.b.x,y:5,into:'headon',boost:boost,gp:2}, 1000);
             if(_crashFx.length!==2) throw 'the head-on wreck was not staged';
             for(const age of [0,40,120,300]){
-                const d=headMid(1,g.cb,1000+age)-headMid(0,g.ca,1000+age);
-                const at=g.n+' at '+age+'ms ('+(boost?'boost':'normal')+'): the heads are '+d.toFixed(1)+'px apart';
-                // Drawn against each other they are ONE cell apart; anything from one and a
-                // half up is the clear block of daylight the bug showed.
-                if(d>=CS*1.6) throw at+', more than a cell and a half, under a message saying they collided';
-                if(d<=CS*0.5) throw at+' -- they are through each other, not against';
+                const d=headFace(1,g.cb,1000+age,-1)-headFace(0,g.ca,1000+age,1);
+                const at=g.n+' at '+age+'ms ('+(boost?'boost':'normal')+'): the faces are '+d.toFixed(1)+'px apart';
+                // Against each other is the two 1px cell margins and nothing more, on every
+                // frame of the beat; a cell of daylight is the bug, an overlap is the other one.
+                if(d>4) throw at+', daylight under a message saying they collided';
+                if(d<0) throw at+' -- they are through each other, not against';
             }
         }
         // ...and the lean is specific to a head-on: a snake that hit a BAR is already against
-        // it, so its wreck still recoils away from the impact rather than into it.
+        // it, so its squashed face stays exactly where its face is in play -- one margin
+        // short of the bar, never into it and never back off it.
         _crashFx=[]; armCrash({p:0,hx:5,hy:5,x:6,y:5,into:'bar',boost:false,gp:2}, 1000);
-        const bj=_crashJolt(0,1000);
-        if(!bj||!(bj(0)[0]<0)) throw 'a bar crash must still recoil backwards, not lean forward';
+        for(const age of [0,40,300]){
+            const f=headFace(0,5,1000+age,1);
+            if(f!==5*CS+CS-1) throw 'a bar crash keeps the face on the bar, got '+f+' at '+age+'ms (bar at '+(6*CS)+')';
+        }
         _crashFx=[]; _simpleGfx=oSimple; _reduceMotion=oMotion;
-        log('head-on wreck ok: an even gap and an odd one both draw the two heads one cell apart, bar crashes still recoil');
+        log('head-on wreck ok: an even gap and an odd one both draw the two faces against each other on every frame, a bar crash keeps its face on the bar');
     }
 
     // ---- the menu snake is the game's snake, dimmed -----------------------------------

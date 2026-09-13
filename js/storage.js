@@ -111,7 +111,7 @@ function _sanitizeCfg() {
     cfg.deferDraw   = !!cfg.deferDraw;
     cfg.singleThreaded  = !!cfg.singleThreaded;
     cfg.gfxMode     = idx(cfg.gfxMode, 3, 1);   // 0 SIMPLE / 1 STANDARD (default) / 2 FABULOUS (not yet implemented)
-    cfg.smoothMotion = idx(cfg.smoothMotion, 3, 0);   // 0 OFF (default) / 1 LOW LATENCY (the ramp is done 3 ticks after a step, 50 ms) / 2 HIGH LATENCY (6 ticks, 100 ms) -- see _smSegs in render.js
+    cfg.smoothMotion = 0;   // HELD AT OFF for every save: the render-side ramp (_smSegs in render.js) is off the menu until it draws right; 1 LOW LATENCY (3 ticks, 50 ms) / 2 HIGH LATENCY (6 ticks, 100 ms) are its modes
     cfg.reduceMotion = !!cfg.reduceMotion;   // absent -> defaultCfg() already seeded it from the OS pref
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)

@@ -55,6 +55,11 @@ runTest('SMOKE-GAME', `
     if(cfg.smoothMotion!==0) throw 'smooth motion must default to OFF';
     localStorage.setItem(CFG_KEY, JSON.stringify({ smoothMotion:7 })); loadCfg();
     if(cfg.smoothMotion!==0) throw 'an out-of-range smooth motion value must fall back to OFF';
+    // Held OFF: a save that carries a mode loads as OFF too, and the row cannot be pressed.
+    localStorage.setItem(CFG_KEY, JSON.stringify({ smoothMotion:2 })); loadCfg();
+    if(cfg.smoothMotion!==0) throw 'smooth motion is held OFF for every save';
+    { const row = SETTINGS_CATS.find(c=>c.label==='GRAPHICS').items.find(it=>it.lbl().indexOf('SMOOTH SNAKE')===0);
+      if(!row || !row.dis || !row.dis()) throw 'the SMOOTH SNAKE row must be greyed'; }
     if(_smFrac(6, 0, 1, 6, 0.5, 0)!==1) throw 'cap 0 (OFF) must hand the cells back as they are';
     if(_smFrac(6, 0, 1, 6, 0, 3)!==0) throw 'right after a step the ramp must be at 0';
     // Level 10 boosting on the 3-tick cap: the ramp spans the whole period, so it stays linear.
@@ -220,8 +225,24 @@ runTest('SMOKE-GAME', `
     const fold=(ev,age)=>{ _crashFx.length=0; armCrash(ev, simNow); return _crashJolt(0, simNow+age); };
     const jn=fold(hit, 40);
     if(!jn) throw 'no crash jolt while the wreck is still fresh';
-    if(!(jn(0)[0]<0)) throw 'the head did not recoil back off what it hit';
-    if(!(jn(0)[2]<0 && jn(0)[3]>0)) throw 'the head did not squash flat against the wall';
+    if(jn(0).some(v=>v!==0)) throw 'the head keeps its cell and its shape on a bar crash: '+jn(0);
+    // NOTHING BOUNCES: the head never moves, and every carriage's pile-up only ever grows. A recoil, an overshoot or a ring
+    // shows as a value going the other way between two samples.
+    {
+        let prev=null;
+        for(const a of [0,10,20,40,80,160,320,640,CRASH_DUR-30]){
+            const j=fold(Object.assign({}, hit, {boost:true}), a), h=j(0);
+            if(h.some(v=>v!==0)) throw 'the head moved or deformed at '+a+'ms: '+h;
+            for(let i=1;i<16;i++) if(prev && j(i)[0] < prev.b[i]-1e-9) throw 'carriage '+i+' sprang back at '+a+'ms';
+            prev={ h, b:Array.from({length:16},(_,i)=>i?j(i)[0]:0) };
+        }
+        // ...and the fold runs at one engine tick per carriage and one to fold, so a
+        // 16-carriage body is DONE 16 ticks after the impact: nothing moves after that.
+        if(WAVE_MS!==TICK_MS || BUCKLE_MS!==TICK_MS) throw 'the buckle wave is one tick per carriage, one tick per fold';
+        const done=15*WAVE_MS+BUCKLE_MS;
+        const jd=fold(Object.assign({}, hit, {boost:true}), done), je=fold(Object.assign({}, hit, {boost:true}), CRASH_DUR-30);
+        for(let i=0;i<16;i++) if(jd(i).join()!==je(i).join()) throw 'carriage '+i+' still moving after '+done+'ms';
+    }
     // Depth follows the impact speed rather than a boost flag: boosting arrives at twice the
     // cells per second, and the gentlest crash the game can produce has to leave the body
     // near enough intact next to the hardest one.
@@ -257,6 +278,14 @@ runTest('SMOKE-GAME', `
         // Sign alone is not the test: a kick that rings out to nothing still alternates. Most
         // of it has to be STILL THERE at the end of the beat, which is what a wreck looks like.
         if(!(Math.abs(jf(i)[1]) > CS*0.15)) throw 'the zigzag rang out instead of holding: carriage '+i+' sits '+jf(i)[1]+'px off';
+    }
+    // THE BLOCK IS SHOVED, NOT DENTED: whole pixels along the impact, one per 5 cells/s above
+    // 5, capped at 4. A normal-level-4 coast moves nothing; the hardest crash the cap.
+    {
+        const px=(gp,boost)=>_crashShovePx({gp,boost});
+        const want=[[5,false,0],[4,false,1],[3,false,1],[6,true,1],[5,true,1],[2,false,2],[4,true,2],[3,true,3],[2,true,4]];
+        for(const [gp,boost,n] of want) if(px(gp,boost)!==n) throw 'shove at gp '+gp+(boost?' boost':'')+' is '+px(gp,boost)+'px, wanted '+n;
+        if(String(_crashShove).indexOf('_barsCanvas')<0) throw 'the shove must blit the cached bar cell whole, not repaint a face';
     }
     // A gap shuts by at most all of itself, so carriage i travels at most i cells and stops
     // dead on the head's own cell. That is what keeps the wreck out of the wall it just hit.
