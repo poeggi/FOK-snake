@@ -20,6 +20,35 @@ runTest('SMOKE-GAME', `
     if(cfg.diff!==1 || cfg.music!==true) throw 'garbage save did not fall back to defaults';
     log('config load tolerance ok');
 
+    // THE SPLASH HOLD: frame 0 (dark, no coin) holds SPLASH_HOLD_S after the splash comes
+    // up, then the 4 s cycle runs as before, its first drop at 1.5 s. drawSplash and the
+    // fast-forward read the same clock, so a press inside the hold starts the 2x replay
+    // at frame 0, not half a second in.
+    {
+      const _oPh = phase, _oAt = phaseAt, _oNow = simNow, _oFast = _splashFast;
+      phase = 'splash'; phaseAt = 10000; _splashFast = false;
+      if(SPLASH_HOLD_S !== 0.5) throw 'the hold is half a second, got ' + SPLASH_HOLD_S;
+      if(splashClock(10000) !== 0 || splashClock(10499) !== 0 || splashClock(10500) !== 0) throw 'frame 0 through the hold';
+      if(Math.abs(splashClock(11500) - 1.0) > 1e-9) throw 'the first drop (T_DROP = 1.0 on the cycle clock) begins 1.5 s in';
+      if(Math.abs(splashClock(14500) - 4.0) > 1e-9) throw 'the cycle is still 4 s long';
+      if(String(drawSplash).indexOf('splashClock(now)') < 0) throw 'drawSplash runs on the splash clock';
+      simNow = 10300; _canvasDown({ pointerType:'mouse', clientX:0, clientY:0, preventDefault(){} });
+      if(!_splashFast || _splashFastStart !== 10300 || _splashFastBase !== 0) throw 'a press in the hold fast-forwards from frame 0: ' + JSON.stringify([_splashFast, _splashFastStart, _splashFastBase]);
+      _splashFast = false; simNow = 11700; splashFastStart();
+      if(Math.abs(_splashFastBase - 1.2) > 1e-9) throw 'a press after the hold carries the clock, minus the hold: ' + _splashFastBase;
+      // The frame is FROZEN through the hold and the dark lead (nothing on it moves), and
+      // redrawn once the coin is due, the fast-forward is on or the exit plays.
+      const sp = SCREENS.splash; _splashFast = false; _splashExiting = false;
+      if(!sp.freeze || typeof sp.anim !== 'function') throw 'the splash is a freezable screen';
+      simNow = 10000; if(sp.anim()) throw 'static at frame 0';
+      simNow = 11499; if(sp.anim()) throw 'static through the dark lead';
+      simNow = 11500; if(!sp.anim()) throw 'animating from the first drop';
+      simNow = 10200; _splashFast = true; if(!sp.anim()) throw 'a fast-forward animates'; _splashFast = false;
+      _splashExiting = true; if(!sp.anim()) throw 'the exit animates'; _splashExiting = false;
+      phase = _oPh; phaseAt = _oAt; simNow = _oNow; _splashFast = _oFast; _splashFastStart = 0; _splashFastBase = 0;
+    }
+    log('splash hold ok: frame 0 for half a second, then the 4 s cycle, fast-forward on the same clock, the frame frozen until the coin is due');
+
     // SMOOTH MOTION, the render-side ramp between cells: off by default, the fraction read
     // off the sim's counters, linear where the ramp spans the period and an S where the cap
     // binds, segments part-way between their cells on whole pixels, no slide across a wrap.

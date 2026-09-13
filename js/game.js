@@ -120,6 +120,15 @@ applyHandedness();
 let _splashLeftAt = 0;
 let _splashFast = false, _splashFastStart = 0, _splashFastBase = 0;
 let _splashExiting = false, _splashExitAt = 0;
+// THE SPLASH CLOCK, in seconds, that drawSplash's 4 s cycle runs on. Frame 0 (dark, no
+// coin) holds for SPLASH_HOLD_S after the splash comes up, then the cycle starts: the
+// first drop begins at 1.5 s, not 1.0 s, and an update landing in that window reloads
+// into the same dark frame. The fast-forward reads its base off the same clock, so a
+// press during the hold plays the same timeline at 2x.
+const SPLASH_HOLD_S = 0.5;
+const SPLASH_DARK_S = 1.0;   // the cycle's dark lead: no coin, no blink, nothing moves until here
+function splashClock(now){ return Math.max(0, (now - phaseAt) / 1000 - SPLASH_HOLD_S); }
+function splashFastStart(){ _splashFast = true; _splashFastStart = simNow; _splashFastBase = splashClock(simNow); }
 function updateSplashExit() {
     if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
         _splashExiting = false;
@@ -901,7 +910,9 @@ let _lastDraw = 0, _uiDirty = true, _lastPhase = '';
 // code in the loop). freeze: static screen, skipped when idle. anim(): optional
 // "still animating while idle" predicate that keeps it redrawing. hud: show HUD row.
 const SCREENS = {
-    splash:       { d:()=>drawSplash(simNow),    hud:false },
+    // Frozen through the hold and the dark lead: that frame is static (two glow texts and
+    // the blits), and drawing it 60 times a second is the update check's only competition.
+    splash:       { d:()=>drawSplash(simNow),    hud:false, freeze:true, anim:()=> _splashExiting || _splashFast || splashClock(simNow) >= SPLASH_DARK_S },
     menu:         { d:()=>drawMenu(simNow),      hud:false },
     news:         { d:()=>drawNews(simNow),      hud:false, freeze:true, anim:()=> simNow-_newsAt < 700 },
     settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> _dbgSending || (!!_dataMsg && _msgNow()-_dataMsgAt < 2600) },
@@ -1671,47 +1682,43 @@ if (_swVersion === '?' && 'caches' in window) {
     }).catch(() => {});
 }
 
-if ('serviceWorker' in navigator) {
+// The registration itself, and the first update check, are js/sw-update.js's -- the first
+// script on the page, so the check leaves before the rest of the bundle is parsed. This is
+// what happens AFTER: the periodic checks, and the reload that puts a new worker on screen.
+if ('serviceWorker' in navigator && _swReg) {
     const wasControlled = !!navigator.serviceWorker.controller;
-    const _swStart = () => {
-        // Update checks: once per minute, plus immediately on regaining focus when
-        // the last check is over a minute old -- but ONLY on screens where the
-        // resulting auto-reload (controllerchange below) cannot kill anything:
-        // never during a run, a name entry, or an online lobby/handshake.
-        const _updSafe = new Set(['splash']);   // update checks (and their auto-reload) happen ONLY on the splash
-        let _lastUpd = Date.now();
-        const _updCheck = (reg) => {
-            if (Date.now() - _lastUpd < 60000) return;
-            if (!navigator.onLine || inGame || !_updSafe.has(phase)) return;
-            _lastUpd = Date.now();
-            reg.update().catch(() => {});
-        };
-        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
-            if (navigator.onLine) reg.update().catch(() => {});
-            if (typeof setInterval === 'function') setInterval(() => _updCheck(reg), 60000);
-            document.addEventListener('visibilitychange', () => { if (!document.hidden) _updCheck(reg); });
-        });
-        let _reloading = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (_reloading || !wasControlled) return;
-            // Only auto-reload from the splash, so a late-activating worker can't yank the player
-            // out of a menu or run. Off-splash the update applies on the next cold start, where
-            // the new worker already controls the page from its first byte.
-            if (!_updSafe.has(phase) || inGame) return;
-            // On iOS navigator.onLine reads true on a captive/dead-uplink wifi, so a worker that
-            // re-activates each load could reload the splash forever. sessionStorage (cleared on a
-            // real cold start) rate-limits the auto-reload without blocking a genuine update.
-            try {
-                if (Date.now() - (+sessionStorage.getItem('swReloadAt') || 0) < 30000) return;
-                sessionStorage.setItem('swReloadAt', String(Date.now()));
-            } catch (e) {}
-            _reloading = true;
-            window.location.reload();
-        });
+    // Update checks: once per minute, plus immediately on regaining focus when
+    // the last check is over a minute old -- but ONLY on screens where the
+    // resulting auto-reload (controllerchange below) cannot kill anything:
+    // never during a run, a name entry, or an online lobby/handshake.
+    const _updSafe = new Set(['splash']);   // update checks (and their auto-reload) happen ONLY on the splash
+    let _lastUpd = Date.now();
+    const _updCheck = (reg) => {
+        if (Date.now() - _lastUpd < 60000) return;
+        if (!navigator.onLine || inGame || !_updSafe.has(phase)) return;
+        _lastUpd = Date.now();
+        reg.update().catch(() => {});
     };
-    // A controlled page boots from its bundle and touches no network, so the update check
-    // leaves at once and a fresh deploy is on screen within the splash. An uncontrolled first
-    // visit is still downloading: registering then would set the precache against the page's
-    // own boot, so it waits for load.
-    if (wasControlled) _swStart(); else window.addEventListener('load', _swStart);
+    _swReg.then(reg => {
+        if (!reg) return;
+        if (typeof setInterval === 'function') setInterval(() => _updCheck(reg), 60000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) _updCheck(reg); });
+    }).catch(() => {});
+    let _reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (_reloading || !wasControlled) return;
+        // Only auto-reload from the splash, so a late-activating worker can't yank the player
+        // out of a menu or run. Off-splash the update applies on the next cold start, where
+        // the new worker already controls the page from its first byte.
+        if (!_updSafe.has(phase) || inGame) return;
+        // On iOS navigator.onLine reads true on a captive/dead-uplink wifi, so a worker that
+        // re-activates each load could reload the splash forever. sessionStorage (cleared on a
+        // real cold start) rate-limits the auto-reload without blocking a genuine update.
+        try {
+            if (Date.now() - (+sessionStorage.getItem('swReloadAt') || 0) < 30000) return;
+            sessionStorage.setItem('swReloadAt', String(Date.now()));
+        } catch (e) {}
+        _reloading = true;
+        window.location.reload();
+    });
 }

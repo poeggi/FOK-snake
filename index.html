@@ -11,6 +11,11 @@
          OFFLINE setting cannot refuse, and no static tag can read that setting -- gating it
          would take an inline script (see .claude/rules/project_fok_csp.md). -->
     <link rel="dns-prefetch" href="https://fok-server.poggensee.it">
+    <!-- Our own origin. A controlled page boots from the bundle and opens no connection, so
+         the update check's sw.js fetch (js/sw-update.js) would pay DNS + TCP + TLS first;
+         this warms the socket while the scripts load. It is the origin the page came from
+         and the check contacts it anyway, so no OFFLINE question arises. -->
+    <link rel="preconnect" href="https://poeggi.github.io">
     <meta name="theme-color" content="#07070e">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -45,6 +50,7 @@
 </div>
 <input id="name-inp" type="text" tabindex="-1" autocomplete="off" autocorrect="off"
        autocapitalize="characters" spellcheck="false" inputmode="text">
+<script src="js/sw-update.js"></script>
 <script src="js/hmac.js"></script>
 <script src="js/assets.js"></script>
 <script src="js/audio.js"></script>

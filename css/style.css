@@ -3,10 +3,10 @@
    object (js/screens.js), the same CSS-token pattern the font/glow scales use. BASE,
    EXPERT and EGGS all draw from these, so the three pages cannot drift apart: change
    a position or a card size here, once, and every page follows.
-   Headline, indicator and first card row sit where SHOP puts its headline, tab row and
-   first item, so the two screens read as one family (achievements have no tabs). */
+   The headline is the shared --ui-title-y row; indicator and first card row sit where
+   SHOP puts its tab row and first item, so the two screens read as one family
+   (achievements have no tabs). */
 :root {
-    --ach-title-y:  26px;   /* headline centre                                    */
     --ach-sub-y:    53px;   /* page-indicator centre (SHOP's tab-row centre)       */
     --ach-top:      72px;   /* top of the first card row                          */
     --ach-cols:      3;     /* cards per row                                      */
@@ -17,11 +17,17 @@
 }
 /* Canvas SCREEN-FURNITURE geometry -- SINGLE SOURCE OF TRUTH, read into the JS UI object
    (js/assets.js), the same CSS-token pattern the font, glow and achievement scales use.
-   Every screen in the game parks the same four things: a list of menu items from the top,
-   the status toaster, the way out, and the key hints. They are only recognisable AS the
-   same furniture if they are at the same height on every screen, so the heights live here
-   and nowhere else -- change one, once, and the whole game follows. */
+   Every screen in the game parks the same things: a headline, a list of menu items from
+   the top, the status toaster, the way out, and the key hints; a dialog and an overlay
+   each carry a title of their own. They are only recognisable AS the same furniture if
+   they are at the same height on every screen, so the heights live here and nowhere else
+   -- change one, once, and the whole game follows. Each row is drawn by ONE painter in
+   js/screens.js (drawTitle, drawDialogTitle, drawOverlayTitle, menuItem, drawStatus ...)
+   and test/check-layout.js refuses a row written as a number. */
 :root {
+    --ui-title-y:   24px;   /* the screen headline, centre                          */
+    --ui-dialog-title-y: 116px;  /* a modal's title (INVITE, REMOVE FRIEND, ...)    */
+    --ui-overlay-title-y: 182px; /* an in-game overlay's title (LEVEL n, PAUSED ...) */
     --ui-menu-top:  90px;   /* first menu item: one empty line below the headline   */
     --ui-menu-row:  28px;   /* menu-item pitch, and the high-score row pitch        */
     --ui-status-y: 324px;   /* the one in-menu status/toaster line                 */

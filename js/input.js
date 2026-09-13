@@ -968,7 +968,7 @@ const _canvasDown = e => {
     if (_scanFor() && _scanInVF(e.clientX, e.clientY)) return;
     // A pointer click (mouse / TV remote) acts as OK: start on splash, add-a-letter
     // in name entry, confirm/select in every other menu. Not during gameplay.
-    if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; }
+    if (phase === 'splash') { splashFastStart(); }
     else if (phase === 'nameEntry') { handleKey('NameAdd', null); }
     else if (!_inPlay()) { handleKey('Enter', null); }
 };
@@ -990,7 +990,7 @@ if (typeof window !== 'undefined' && window.PointerEvent) {
     canvas.addEventListener('mousedown', _canvasDown);
     canvas.addEventListener('mouseup', _canvasUp);
 }
-canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { _splashFast = true; _splashFastStart = simNow; _splashFastBase = (simNow - phaseAt) / 1000; e.preventDefault(); } }, { passive: false });
+canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.

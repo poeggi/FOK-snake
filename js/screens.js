@@ -32,6 +32,16 @@ function drawStatus(msg, y){
               : '#ffaa44';
     ct(msg, CW/2, y || STATUS_Y, col, FONT.HINT);
 }
+// THE THREE TITLE CLASSES, one painter each: the row, the font, the glow and the default
+// colour are written here and nowhere else (test/check-layout.js refuses a FONT.TITLE
+// draw on a numbered row anywhere else). A screen passes its text and, where the screen
+// is an accent (SHOP gold, a refusal red), its colour.
+// - headline: the top row of every ordinary screen.
+// - dialog title: a modal that covers the screen (INVITE, REMOVE FRIEND, event confirm).
+// - overlay title: an in-game overlay (LEVEL n, SPEED ROUND, PAUSED, a wall's blank face).
+function drawTitle(text, col){ ctg(text, CW/2, TITLE_Y, col || '#7fff7f', FONT.TITLE, GLOW.TITLE); }
+function drawDialogTitle(text, col){ ctg(text, CW/2, DLG_TITLE_Y, col || '#ffd700', FONT.TITLE, GLOW.TITLE); }
+function drawOverlayTitle(text, col, glow){ ctg(text, CW/2, OVL_TITLE_Y, col || '#7fff7f', FONT.TITLE, glow || GLOW.TITLE); }
 // A list whose rows can be greyed out and have to say why. The reason is a status message
 // like any other, so it goes to the ONE line above -- never to a height measured off the top
 // of the list. A note parked a fixed number of rows down IS the last row the moment the list
@@ -62,7 +72,7 @@ function drawMenuRows(items, sel, msg){
 // ================================================================
 function drawSplash(now) {
     // Cycle geometry constants
-    const DARK_LEAD = 1.0, DROP = 1.5, ENTER = 0.4, DARK_TAIL = 0.1;
+    const DARK_LEAD = SPLASH_DARK_S, DROP = 1.5, ENTER = 0.4, DARK_TAIL = 0.1;
     const CYCLE = DARK_LEAD + DROP + ENTER + 1.0 + DARK_TAIL;
     const T_DROP  = DARK_LEAD;
     const T_ENTER = DARK_LEAD + DROP;
@@ -97,7 +107,7 @@ function drawSplash(now) {
     } else {
         const elapsed = _splashFast
             ? _splashFastBase + (now - _splashFastStart) / 1000 * 2
-            : (now - phaseAt) / 1000;
+            : splashClock(now);
         t = elapsed % CYCLE;
         const dropT = t - T_DROP;
         const dropProgress = Math.min(Math.max(dropT, 0), DROP) / DROP;
@@ -454,7 +464,7 @@ function drawSettings() {
     drawGrid(); drawOvBg(0.92);
     const inCat=settingsCat>=0;
     const title=inCat?'SETTINGS/'+_cats()[settingsCat].label:'SETTINGS';
-    ctg(title,CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle(title);
     const list=_settingsList();
     const startY=MENU_TOP, rowH=MENU_ROW;   // one empty line below the headline before the first entry
     list.forEach((it,i)=>menuItem(inCat?it.lbl():it.label, startY+i*rowH, i===settingsSel, ctx, inCat && it.dis && it.dis()));
@@ -610,7 +620,7 @@ function _drawScoreRow(s, i, g){
 }
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
-    ctg('HIGH SCORES',CW/2,28,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('HIGH SCORES');
     _drawScoreTabs();
     if(scoresTab===1){
         if(netOffline()){
@@ -653,7 +663,7 @@ const ACH = (() => {
     let rt = null; try { rt = getComputedStyle(document.documentElement); } catch(_) {}
     const v = (n, def) => { try { return parseInt(rt.getPropertyValue(n)) || def; } catch(_) { return def; } };
     return {
-        TITLE_Y: v('--ach-title-y',26), SUB_Y: v('--ach-sub-y',53), TOP: v('--ach-top',72),
+        SUB_Y: v('--ach-sub-y',53), TOP: v('--ach-top',72),
         COLS: v('--ach-cols',3), CARD_W: v('--ach-card-w',188), CARD_H: v('--ach-card-h',66),
         GAP_X: v('--ach-gap-x',4), GAP_Y: v('--ach-gap-y',4),
     };
@@ -676,7 +686,7 @@ function drawAchievements() {
     const evs=onEggs?achEventList().slice(-_room):[];
     const list=onEggs?EGG_ACHIEVEMENTS.concat(evs):onExpert?EXPERT_ACHIEVEMENTS:ACHIEVEMENTS;
     const titleColor=onEggs?'#ff4488':onExpert?'#ff8800':'#7fff7f';
-    ctg('ACHIEVEMENTS',CW/2,ACH.TITLE_Y,titleColor,FONT.TITLE, GLOW.TITLE);
+    drawTitle('ACHIEVEMENTS', titleColor);
     // The indicator never counts the egg page (its N is the visible pages only) and the
     // visible pages never mention it: on it the position reads 0/N, off it nothing leaks.
     if(onEggs){
@@ -791,7 +801,10 @@ function _drawBoxReveal(){
     ctx.save(); ctx.globalAlpha=fade; drawOvBg(0.55);
     const r=_boxReward;
     ctx.shadowColor='#ffd700'; ctx.shadowBlur=GLOW.TITLE;
-    if(r.kind==='coins'){ ct('YOU GOT',CW/2,CH/2-18,'#aaa',FONT.HINT); ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',FONT.TITLE); }
+    if(r.kind==='coins'){
+        ct('YOU GOT',CW/2,CH/2-18,'#aaa',FONT.HINT);
+        ct('+'+r.amount.toLocaleString()+' FK',CW/2,CH/2+8,'#ffd700',FONT.TITLE);
+    }
     else if(r.kind==='dupe'){ const dit=_findItem(r.id), drc=RARITY_COLS[r.rarity]||'#aaaaaa';
         if(dit&&dit.icon) drawPixelIcon(CW/2-16,CH/2-52,dit.icon,4);
         ct(dit?dit.name:r.id,CW/2,CH/2+2,'#ffffff',FONT.MENU);
@@ -811,7 +824,7 @@ function _drawShopTabs(){
 }
 function drawShop() {
     drawGrid(); drawOvBg(0.92);
-    ctg('SHOP',CW/2,26,'#ffd700',FONT.TITLE, GLOW.TITLE);
+    drawTitle('SHOP', '#ffd700');
     _drawShopTabs();
     const coins=_cachedFOKoins;
     if(shopPage===BOX_PAGE){ _drawBoxesPage(); }
@@ -997,7 +1010,7 @@ function drawNameEntry(now) {
         ct('ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     } else {
         drawGrid(); drawOvBg(0.92);
-        ctg(entryMode==='friend'?'ADD FRIEND':entryMode==='tcode'?'JOIN TOURNAMENT':'YOUR NAME',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+        drawTitle(entryMode==='friend'?'ADD FRIEND':entryMode==='tcode'?'JOIN TOURNAMENT':'YOUR NAME');
         ct(entryMode==='friend'?'FRIEND ID (8 HEX DIGITS):':entryMode==='tcode'?'JOIN CODE (6 CHARACTERS):':'ENTER YOUR NAME:',CW/2,104,'#7fff7f',FONT.HINT);
     }
     // Two kinds of field share this dialog: FREE TEXT, which ends when the typist says so,
@@ -1280,9 +1293,9 @@ function drawReadyGo(now, title, subhead){
         if(_speedRound){
             _drawBolt(now, CW/2-116, CH/2-16, false);
             _drawBolt(now, CW/2+116, CH/2-16, true);
-            ctg('SPEED ROUND', CW/2, CH/2-18, strobe?'#fff14a':'#ff3b3b', FONT.TITLE, GLOW.BIG);
+            drawOverlayTitle('SPEED ROUND', strobe?'#fff14a':'#ff3b3b', GLOW.BIG);
         } else {
-            ctg(title, CW/2, CH/2-18, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+            drawOverlayTitle(title);
         }
         subhead();
     } else {
@@ -1420,7 +1433,7 @@ function drawConfirm(o) {
 }
 function drawConfirmYesNo(title, sel) {
     const YES_X=CW/2-80, NO_X=CW/2+80;
-        ctg(title,CW/2,CH/2-18,'#ff9900',FONT.TITLE, GLOW.TITLE);
+        drawOverlayTitle(title, '#ff9900');
     ctx.globalAlpha=sel===0?1:0.35;
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=sel===0?12:1;
     ct(sel===0?'> YES <':'  YES  ',YES_X,CH/2+38,'#7fff7f',FONT.MENU);
@@ -1471,7 +1484,7 @@ function drawMultiplayer() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
     // at y=24 with glow 16, items from MENU_TOP in MENU_ROW steps, #888 hint at HINT_Y.
     drawGrid(); drawOvBg(0.92);
-    ctg('MULTIPLAYER',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('MULTIPLAYER');
     drawMenuRows(multiRows(), multiSel, (_duelMsg && _msgNow()-_duelMsgAt<2600) ? _duelMsg : null);
     ct('UP/DN:nav  A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
@@ -1479,7 +1492,7 @@ function drawMultiplayer() {
 // (beginDuel gates on _hasKeyboard, so the row greys out on touch-only devices).
 function drawDuelMenu() {
     drawGrid(); drawOvBg(0.92);
-    ctg('1vs1 DUEL',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('1vs1 DUEL');
     const items=[
         {t:'1vs1 ONLINE', en:!netOffline(), note:netOffline()?netStatusNotice():null},
         {t:'1vs1 LOCAL',  en:_hasKeyboard, note:_hasKeyboard?null:'PC + KEYBOARD ONLY'},
@@ -1512,7 +1525,7 @@ function drawQrCard(text, qy, mod){
 function drawMyId() {
     _netMyIdAt = Date.now();   // an incoming request while our QR shows auto-accepts (see net-session.js)
     drawGrid(); drawOvBg(0.92);
-    ctg('MY ID',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('MY ID');
     ct(fmtPlayerId()+'   FRIENDS: '+getFriends().length, CW/2, 50, '#ffd700', FONT.MENU);
     // Scanning this opens the game with #friend=<this player's ID> in the hash.
     const card=drawQrCard(friendUrl(), 64);
@@ -1524,7 +1537,7 @@ function drawMyId() {
 // All state lives in the net files (_netLb / _netCounts / _netFriendsOnline).
 function drawDuelLobby(){
     drawGrid(); drawOvBg(0.92);
-    ctg('ONLINE 1vs1',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('ONLINE 1vs1');
     let stat, statCol='#4a7a4a';
     const notice=(typeof netStatusNotice==='function')?netStatusNotice():null;
     if(notice){ stat=notice; statCol='#ff8888'; }
@@ -1564,7 +1577,7 @@ function drawDuelLobby(){
         // Profile fields are untrusted (clamped in net-api.js, canvas text only).
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
-        ctg('INVITE',CW/2,CH/2-84,'#ffd700',FONT.TITLE, GLOW.TITLE);
+        drawDialogTitle('INVITE');
         ct(_netLb.invite.profile.name+'  ('+fmtFriendId(_netLb.invite.from)+')', CW/2, CH/2-48, '#aaa', FONT.MENU);
         ct('WANTS TO PLAY 1vs1', CW/2, CH/2-22, '#7fff7f', FONT.HINT);
         _drawModalYesNo(_netLb.inviteSel);
@@ -1594,7 +1607,7 @@ function _drawRowName(nm, y, sel, col){
 // confirm. Friendships live on the SERVER; removals are pushed there too.
 function drawFriends(){
     drawGrid(); drawOvBg(0.92);
-    ctg('FRIENDS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('FRIENDS');
     // The line under the title is for what is HAPPENING -- a notice, a load -- and
     // nothing else. Which key does what belongs in the one key line every screen
     // ends on, where the eye already looks for it; a second copy up here was a
@@ -1630,7 +1643,7 @@ function drawFriends(){
         // is silent/auto-confirmed, but the UI still guards an accidental delete).
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
-        ctg('REMOVE FRIEND',CW/2,CH/2-84,'#ff8888',FONT.TITLE, GLOW.TITLE);
+        drawDialogTitle('REMOVE FRIEND', '#ff8888');
         const nm=(typeof netFriendName==='function')?netFriendName(_netFr.confirm):null;
         ct((nm?nm+'  ':'')+fmtFriendId(_netFr.confirm), CW/2, CH/2-48, '#aaa', FONT.MENU);
         ct('THE SERVER FORGETS THE RELATION TOO', CW/2, CH/2-22, '#888', FONT.HINT);
@@ -1645,9 +1658,9 @@ function drawFriends(){
 // cannot reach an already-installed home-screen app, so hand it over manually.
 function drawDuelInvite() {
     drawGrid(); drawOvBg(0.92);
-    ctg('FRIEND INVITE',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('FRIEND INVITE');
     ct("YOUR FRIEND'S CODE:", CW/2, 74, '#aaa', FONT.HINT);
-    ctg(fmtFriendId(_inviteFid||''), CW/2, 102, '#ffd700', FONT.TITLE, GLOW.TEXT);
+    ctg(fmtFriendId(_inviteFid||''), CW/2, 102, '#ffd700', FONT.TITLE, GLOW.TEXT);   // layout-ok: the code itself, content in title size, not a heading
     ct('GOT THE GAME ON YOUR HOME SCREEN?', CW/2, 148, '#7fff7f', FONT.HINT);
     ct('OPEN IT: 1vs1 DUEL > ADD FRIEND', CW/2, 166, '#aaa', FONT.HINT);
     ct('AND ENTER (OR SCAN) THIS CODE', CW/2, 184, '#aaa', FONT.HINT);
@@ -1699,7 +1712,7 @@ function drawDuelBoard(now) {
     // re-sync + a server round trip), so name it RE-SYNCING -- otherwise the wait looks frozen.
     else if(phase==='levelDone' && typeof _lvlCover!=='undefined' && _lvlCover){
         drawOvBg(0.72);
-        ctg(_rTitle, CW/2, CH/2-18, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+        drawOverlayTitle(_rTitle);
         ct('RE-SYNCING' + '.'.repeat(1 + Math.floor(now/350)%3), CW/2, CH/2+12, '#ffd24a', FONT.HINT);
         _rSub();
     }
@@ -1793,13 +1806,13 @@ function _ttCut(y){
 // fact a player has to hunt for; parked in the top right of every board that has a round, it
 // stops being read and starts being simply known.
 function _ttWhere(round, t){
-    _ttCol('ROUND ' + (round | 0) + '/' + _ttRounds(t), CW - 16, 24, '#888', FONT.TITLE, 'right');
+    _ttCol('ROUND ' + (round | 0) + '/' + _ttRounds(t), CW - 16, TITLE_Y, '#888', FONT.TITLE, 'right');   // the headline's row, right-aligned beside it
 }
 // The headline band an info board wears: WHAT this board is, centred where every screen in
 // the game puts its title, and where in the tournament it is, in the corner. The stage names
 // are written to fit beside the marker -- see _ttStage.
 function _ttHead(title, round, t){
-    ctg(title, CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle(title);
     _ttWhere(round, t);
 }
 function _ttBoard(t){ return (t ? (t.round | 0) : 0) >= 2 ? 'KNOCKOUT' : 'STANDINGS'; }
@@ -1860,7 +1873,7 @@ function _ttDrawRows(startY, rowH){
 // is the picture of a room; this is the form that opens one.
 function drawTourneySetup(){
     drawGrid(); drawOvBg(0.92);
-    ctg('NEW TOURNAMENT', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle('NEW TOURNAMENT');
     ct('SET BEFORE THE ROOM OPENS - PLAYERS JOIN AFTERWARDS', CW/2, 50, '#4a7a4a', FONT.HINT);
     _ttDrawRows(MENU_TOP, MENU_ROW);
     // What the settings AMOUNT TO, on the line the lobby puts its own summary on: the level
@@ -1871,7 +1884,7 @@ function drawTourneySetup(){
 }
 function drawTourneyLobby(){
     drawGrid(); drawOvBg(0.92);
-    ctg('TOURNAMENT', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle('TOURNAMENT');
     const t = tourneyView(), ui = tourneyUi();
     if(!t){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
@@ -1937,7 +1950,7 @@ function drawTourneyCode(){
     const t = tourneyView();
     if(!t){ phase = 'tourneyLobby'; drawTourneyLobby(); return; }
     drawGrid(); drawOvBg(0.92);
-    ctg('JOIN CODE', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle('JOIN CODE');
     // MAX players, not the count: this screen exists to be pointed a camera at, and what the
     // person holding that camera needs to know is how big the room they are joining can get.
     // The number of people already in it is on the lobby they land in a second later. It is
@@ -2229,9 +2242,9 @@ function drawTourneyCeremony(){
     _ttWhere(r.round, t);
     ct(_ttStage(r.stage, r.round) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''),
        CW/2, 60, '#888', FONT.HINT);
-    ctg(_ttName(ps[0]).slice(0, 12), CW/2, 116, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    ctg(_ttName(ps[0]).slice(0, 12), CW/2, 116, '#7fff7f', FONT.TITLE, GLOW.TITLE);   // layout-ok: the two names are the ceremony's content, not a heading
     ct('vs', CW/2, 146, '#666', FONT.MENU);
-    ctg(_ttName(ps[1]).slice(0, 12), CW/2, 176, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    ctg(_ttName(ps[1]).slice(0, 12), CW/2, 176, '#7fff7f', FONT.TITLE, GLOW.TITLE);   // layout-ok: see above
     const hm = _duelHearts(r.hm);
     if(you === 'play'){
         ctg('YOU ARE UP', CW/2, 228, '#ffd700', FONT.JUMBO, GLOW.BIG);
@@ -2270,7 +2283,7 @@ function drawTourneyPodium(){
     const t = tourneyView();
     if(!t){ drawTourneyLobby(); return; }
     drawGrid(); drawOvBg(0.92);
-    ctg('TOURNAMENT OVER', CW/2, 24, '#ffd700', FONT.TITLE, GLOW.TITLE);
+    drawTitle('TOURNAMENT OVER', '#ffd700');
     // NO podium and an EMPTY one are different answers. Empty is a verdict: the bracket ran
     // out of players and voided all the way to the top. Null is ignorance -- the 'over' event
     // has not reached us and the final is not settled in anything we have been told since --
@@ -2356,8 +2369,7 @@ function _evStateLine(e){
 function drawEventPage(){
     drawGrid(); drawOvBg(0.92);
     const e = eventView(), ui = eventUi();
-    ctg(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT',
-        CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT');
     if(!e){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
         ct(notice || (ui.busy ? 'READING...' : 'NOTHING TO SHOW'), CW/2, 50,
@@ -2415,7 +2427,7 @@ function drawEventPage(){
 // keys this screen actually needs.
 function drawEventStats(){
     drawGrid(); drawOvBg(0.92);
-    ctg('EVENT STATISTICS', CW/2, 24, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle('EVENT STATISTICS');
     const e = eventView(), st = eventStatsView(), ui = eventUi();
     if(e && e.name) ct(String(e.name).toUpperCase().substring(0, 26), CW/2, 46, '#4a7a4a', FONT.HINT);
     // The two summary lines: how much has been played here, and the shape of it.
@@ -2492,7 +2504,7 @@ function drawEventConfirm(){
 // server's answer verbatim -- a pending row says so and opens the public face only.
 function drawEventChooser(){
     drawGrid(); drawOvBg(0.92);
-    ctg('EVENTS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('EVENTS');
     const rows = eventChooserRows(), ui = eventUi(), sel = ui.sel;
     if(!rows.length){
         ct('YOU ARE IN NO EVENT', CW/2, 50, '#4a7a4a', FONT.HINT);
@@ -2537,7 +2549,7 @@ function drawEventChooser(){
 // go stale. NO ONLINE STATE -- presence is friendship-gated and none is sent.
 function drawEventMembers(){
     drawGrid(); drawOvBg(0.92);
-    ctg('MEMBERS',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('MEMBERS');
     const rows = eventMemberRows(), sel = eventMemberSel(), ui = eventUi(), org = eventIsOrganizer();
     const ask = eventMemberAsk();
     const startY = 80, rowH = 24;
@@ -2576,7 +2588,7 @@ function drawEventMembers(){
     if(ask){
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
-        ctg(ask.title,CW/2,CH/2-84,'#ff8888',FONT.TITLE, GLOW.TITLE);
+        drawDialogTitle(ask.title, '#ff8888');
         ct(String(ask.name || '').substring(0,15), CW/2, CH/2-48, '#aaa', FONT.MENU);
         ct(ask.note, CW/2, CH/2-22, '#888', FONT.HINT);
         _drawModalYesNo(ask.sel);
@@ -2598,7 +2610,7 @@ function drawEventMembers(){
 // has left. Both are read off the synced clock every frame; nothing polls.
 function drawEventQr(){
     drawGrid(); drawOvBg(0.92);
-    ctg('EVENT QR',CW/2,24,'#7fff7f',FONT.TITLE, GLOW.TITLE);
+    drawTitle('EVENT QR');
     const ui = eventUi(), now = (typeof netPts === 'function') ? netPts() : null;
     const slot = eventPassSlot(now);
     if(!slot){
@@ -2649,7 +2661,7 @@ function _evMonQr(now){
 // who won, no YOU, no rows.
 function _evMonPodium(over){
     drawGrid(); drawOvBg(0.92);
-    ctg('TOURNAMENT OVER', CW/2, 24, '#ffd700', FONT.TITLE, GLOW.TITLE);
+    drawTitle('TOURNAMENT OVER', '#ffd700');
     const pod = over.podium, nm = id => String(over.names[id] || fmtFriendId(String(id))).toUpperCase();
     const place = [['1ST', '#ffd700', 116], ['2ND', '#cccccc', 146], ['3RD', '#cd7f32', 176]];
     place.forEach((pl, i) => {
@@ -2672,10 +2684,10 @@ function drawEventMonitor(){
     drawGrid(); drawOvBg(0.92);
     const m = eventMonitorView(), err = eventMonitorErr();
     if(err){
-        ctg('EVENT MONITOR',CW/2,CH/2-40,'#ff8888',FONT.TITLE, GLOW.TITLE);
+        drawOverlayTitle('EVENT MONITOR', '#ff8888');
         ct(err === 'monitor taken' ? 'ANOTHER SCREEN IS SHOWING THIS EVENT'
                                    : 'THIS EVENT HAS NO SCREEN',
-           CW/2, CH/2, '#aaa', FONT.MENU);
+           CW/2, CH/2+12, '#aaa', FONT.MENU);
         ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
@@ -2685,8 +2697,8 @@ function drawEventMonitor(){
     const over = eventMonitorOver();
     if(over){ _evMonPodium(over); return; }
     if(!m){
-        ctg('EVENT MONITOR',CW/2,CH/2-20,'#7fff7f',FONT.TITLE, GLOW.TITLE);
-        ct('CONNECTING...', CW/2, CH/2+20, '#4a7a4a', FONT.HINT);
+        drawOverlayTitle('EVENT MONITOR');
+        ct('CONNECTING...', CW/2, CH/2+12, '#4a7a4a', FONT.HINT);
         ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
@@ -2696,7 +2708,7 @@ function drawEventMonitor(){
     // turn saw is the one drawn.
     const pts = (typeof netPts === 'function') ? netPts() : null;
     const face = eventMonitorFace(pts);
-    ctg(String(m.name || 'EVENT').toUpperCase().substring(0, 22), CW/2, 30, '#7fff7f', FONT.TITLE, GLOW.TITLE);
+    drawTitle(String(m.name || 'EVENT').toUpperCase().substring(0, 22));
     const [word, wcol] = _evStateLine(m);
     const when = eventWhen(m);
     ct(when ? word + '  ' + when : word, CW/2, 58, wcol, FONT.HINT);
