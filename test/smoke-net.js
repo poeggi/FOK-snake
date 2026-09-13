@@ -1452,7 +1452,7 @@ runTest('SMOKE-NET', `
     // ---- FRIENDS screen: rows merge server + local, accept/remove flows ----
     simNow=100000; simTick=6000; _splashLeftAt=-1e9;   // past the post-splash input guard again
     localStorage.setItem('fok-snake-friends', JSON.stringify(['00ff00aa','00ff00bb']));
-    phase='multiplayer'; multiSel=4; press('Enter');
+    phase='multiplayer'; multiSel=multiRows().findIndex(r => r.go === 'friends'); press('Enter');
     if(phase!=='friends') throw 'FRIENDS entry did not open the screen';
     let rows=_netFrRows();
     if(rows.length!==2||rows[0].state!=='local') throw 'offline rows must show the local list';

@@ -18,7 +18,7 @@ One scale, declared once in `css/fonts.css` `:root`:
 `css/style.css` `:root`: `--ui-title-y 24`, `--ui-subhead-y 50`,
 `--ui-body-y 72`, `--ui-dialog-title-y 116`, `--ui-overlay-title-y 182`,
 `--ui-menu-top 90`, `--ui-menu-row 28`, `--ui-status-y 324`, `--ui-back-y
-348`, `--ui-band-y 370`, `--ui-corner-y 382`, `--ui-hint-y 390`, read once
+348`, `--ui-band-y 370`, `--ui-corner-y 384`, `--ui-hint-y 390`, read once
 into `UI.*` (js/assets.js).
 - A row has ONE painter that owns its font, glow and default colour:
   `drawTitle` (every screen headline), `drawSubhead` (the one line under

@@ -536,7 +536,7 @@ const EV_ROSTER = { NAME_MAX: 10, DATE_R: 180, TAG_C: 470 };
 // of it has to be anchored away from it. The list is grouped and can be longer
 // than the screen, so it scrolls -- and it scrolls by keeping the cursor in view
 // rather than by holding a scroll position, which is one less thing to get wrong.
-const EV_CHOOSE = { TOP: 78, ROW: 22, KEEP: 14, ID_R: 176, TAG_C: 474, NAME_MAX: 12 };
+const EV_CHOOSE = { TOP: MENU_TOP, ROW: 22, KEEP: 14, ID_R: 176, TAG_C: 474, NAME_MAX: 12 };
 function eventChooserFits(){
     return Math.max(1, Math.floor(((STATUS_Y - EV_CHOOSE.KEEP) - EV_CHOOSE.TOP) / EV_CHOOSE.ROW));
 }
@@ -1436,8 +1436,10 @@ function drawConfirm(o) {
     }
     drawConfirmYesNo('', o.sel);
 }
+// How far YES and NO sit from the centre line, shared by both YES/NO painters.
+const YESNO_DX = 60;
 function drawConfirmYesNo(title, sel) {
-    const YES_X=CW/2-80, NO_X=CW/2+80;
+    const YES_X=CW/2-YESNO_DX, NO_X=CW/2+YESNO_DX;
         drawOverlayTitle(title, '#ff9900');
     ctx.globalAlpha=sel===0?1:0.35;
     ctx.shadowColor='#7fff7f'; ctx.shadowBlur=sel===0?12:1;
@@ -1454,9 +1456,9 @@ function _drawModalYesNo(sel){
     const s0=sel===0, s1=sel===1;
     ctx.save();
     ctx.globalAlpha=s0?1:0.35; ctx.shadowColor='#7fff7f'; ctx.shadowBlur=s0?12:1;
-    ct(s0?'> YES <':'  YES  ', CW/2-80, CH/2+28, '#7fff7f', FONT.MENU);
+    ct(s0?'> YES <':'  YES  ', CW/2-YESNO_DX, CH/2+28, '#7fff7f', FONT.MENU);
     ctx.globalAlpha=s1?1:0.35; ctx.shadowColor='#ff5555'; ctx.shadowBlur=s1?12:1;
-    ct(s1?'> NO <':'  NO   ', CW/2+80, CH/2+28, '#ff5555', FONT.MENU);
+    ct(s1?'> NO <':'  NO   ', CW/2+YESNO_DX, CH/2+28, '#ff5555', FONT.MENU);
     ctx.restore();
 }
 function drawQuitConfirm() {
@@ -1625,7 +1627,7 @@ function drawFriends(){
     // the screen is left, so a row that was news on the way in stays news until then.
     const fresh={};
     if(typeof netFriendsNew==='function') for(const f of netFriendsNew()) fresh[f.id]=f.kind;
-    const startY=80, rowH=26;
+    const startY=MENU_TOP, rowH=26;   // the first row where MULTIPLAYER puts its first item
     rows.forEach((r,i)=>{
         const y=startY+i*rowH;
         menuItem(fmtFriendId(r.id), y, _netFr.sel===i);   // the ID stays centered + selected
@@ -2393,12 +2395,13 @@ function drawEventPage(){
     // closer to the one before it than that one did to the state.
     let y = BODY_Y;
     if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += EV_PAGE.BODY_STEP; }
-    // WHO IS IN IT AND WHOSE IT IS, on ONE line. They are two halves of the same
-    // fact -- the size of the room and the person running it -- and a line each
-    // pushed the rows down for nothing. A PENDING row sees neither: it gets the
-    // public face and nothing else -- no count, no members, no tournament, no
-    // archive, no pass -- because that is the server's rule, and a screen that
-    // showed more would only be showing what the next request will refuse.
+    // WHO IS IN IT AND WHOSE IT IS, on ONE line in the settings band under BACK,
+    // where the tournament screens keep their summary: the size of the room and
+    // the person running it are the room's settings, not its news. A PENDING row
+    // sees neither: it gets the public face and nothing else -- no count, no
+    // members, no tournament, no archive, no pass -- because that is the server's
+    // rule, and a screen that showed more would only be showing what the next
+    // request will refuse.
     if(eventYou() === 'pending'){
         ct('WAITING FOR THE ORGANIZER TO LET YOU IN', CW/2, y, '#ffd700', FONT.HINT);
     } else {
@@ -2407,7 +2410,7 @@ function drawEventPage(){
         if(e.organizer_name) bits.push('HOSTED BY ' + String(e.organizer_name).substring(0, 15));
         // Joined BY a dash: two facts on one line read as one run of words without
         // something between them, and the gap alone was not enough at this size.
-        if(bits.length) ct(bits.join(' - '), CW/2, y, '#7fff7f', FONT.HINT);
+        if(bits.length) ct(bits.join(' - '), CW/2, BAND_Y, '#4a7a4a', FONT.HINT);
     }
     const rows = eventRows(), rh = _evRowH(rows.length);
     rows.forEach((r,i)=>menuItem(r.t, EV_PAGE.ROWS_TOP + i*rh, ui.sel===i, ctx, !eventRowOk(r)));
@@ -2526,8 +2529,9 @@ function drawEventChooser(){
         from = Math.max(0, Math.min(want, rows.length - fits));
     }
     const shown = Math.min(fits, rows.length - from);
-    ct(rows.length > fits ? 'PICK A ROOM   ' + (from + 1) + '-' + (from + shown) + ' OF ' + rows.length
-                          : 'PICK A ROOM', CW/2, 52, '#4a7a4a', FONT.HINT);
+    // Only a list longer than the screen says where in it you are; the title
+    // already says what the list is.
+    if(rows.length > fits) drawSubhead((from + 1) + '-' + (from + shown) + ' OF ' + rows.length);
     for(let k = 0; k < shown; k++){
         const r = rows[from + k], y = EV_CHOOSE.TOP + k*EV_CHOOSE.ROW;
         const e = r.e;
@@ -2555,7 +2559,7 @@ function drawEventMembers(){
     drawTitle('MEMBERS');
     const rows = eventMemberRows(), sel = eventMemberSel(), ui = eventUi(), org = eventIsOrganizer();
     const ask = eventMemberAsk();
-    const startY = 80, rowH = 24;
+    const startY = MENU_TOP, rowH = 24;
     rows.forEach((m,i)=>{
         const y = startY + i*rowH, on = sel===i, st = String(m.state || 'member');
         // THREE COLUMNS, and they have to clear each other at their widest. The name

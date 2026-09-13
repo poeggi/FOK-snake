@@ -54,24 +54,26 @@ runTest('SMOKE-INPUT', `
     // MULTIPLAYER menu: 5 rows + BACK with wrap; ADD FRIEND opens the hex entry (camera denied in
     // the harness -> manual path), hex-only filter, submit adds the friend.
     localStorage.removeItem('fok-snake-friends');
+    // Rows are found by what they open, never by a number: the order is the menu's to change.
+    const mrow = go => { const i = multiRows().findIndex(r => r.go === go); if(i < 0) throw 'no MULTIPLAYER row opens ' + go; return i; };
     phase='multiplayer'; multiSel=0;
     press('ArrowUp'); if(multiSel!==5) throw 'duel menu nav did not wrap up';   // 5 = BACK row
     press('Enter'); if(phase!=='menu') throw 'duel menu BACK did not return to main';
     phase='multiplayer'; multiSel=0;
     press('ArrowUp'); press('ArrowDown'); if(multiSel!==0) throw 'duel menu nav did not wrap down';
-    multiSel=2; press('Enter'); if(phase!=='myId') throw 'SHOW MY ID did not open';   // MULTIPLAYER order: 0 1vs1 DUEL, 1 TOURNAMENT, 2 MY ID, 3 ADD FRIEND, 4 FRIENDS
+    multiSel=mrow('myid'); press('Enter'); if(phase!=='myId') throw 'SHOW MY ID did not open';
     press('Escape'); if(phase!=='multiplayer') throw 'myId ESC did not return';
     // 1vs1 DUEL submenu: opens from row 0; TOURNAMENT (row 1) is greyed and stays put.
-    multiSel=0; press('Enter'); if(phase!=='duelMenu') throw '1vs1 DUEL did not open its submenu';
+    multiSel=mrow('duel'); press('Enter'); if(phase!=='duelMenu') throw '1vs1 DUEL did not open its submenu';
     press('ArrowUp'); if(duelSel!==2) throw 'duelMenu nav did not wrap up';   // 2 = BACK row
     press('Enter'); if(phase!=='multiplayer') throw 'duelMenu BACK did not return';
-    multiSel=1; press('Enter'); if(phase!=='multiplayer') throw 'TOURNAMENT must stay put (coming soon)';
+    multiSel=mrow('tourney'); press('Enter'); if(phase!=='multiplayer') throw 'TOURNAMENT must stay put (coming soon)';
     // Same screen from SETTINGS > USER: returns to settings instead.
     phase='settings'; settingsCat=SETTINGS_CATS.findIndex(c=>c.label==='USER'); settingsSel=1;
     press('Enter'); if(phase!=='myId') throw 'SHOW MY ID from settings did not open';
     press('Escape'); if(phase!=='settings') throw 'myId ESC did not return to settings';
     phase='multiplayer';
-    multiSel=3; press('Enter');
+    multiSel=mrow('addfriend'); press('Enter');
     if(phase!=='nameEntry'||entryMode!=='friend') throw 'ADD FRIEND did not open the entry (phase='+phase+' mode='+entryMode+')';
     press('g'); if(nameStr!=='') throw 'non-hex char must be ignored in friend mode';
     for(const ch of '00ff00b') press(ch);
@@ -90,7 +92,7 @@ runTest('SMOKE-INPUT', `
     if(_duelMsg.indexOf('FRIEND ADDED')!==0) throw 'missing FRIEND ADDED confirmation';
     // Short/invalid code: submit refuses. Backspace deletes a digit; ESC is BACK --
     // one press leaves ADD FRIEND even with a digit still in the field.
-    multiSel=3; press('Enter'); press('a'); press('Enter');
+    multiSel=mrow('addfriend'); press('Enter'); press('a'); press('Enter');
     if(phase!=='nameEntry') throw 'short friend code must not submit';
     press('Backspace'); if(nameStr!=='') throw 'Backspace must delete a friend digit';
     press('a'); press('Escape');
@@ -98,7 +100,7 @@ runTest('SMOKE-INPUT', `
     log('friend add flow ok (hex filter, submit gated on 8 digits, back)');
 
     // A verified scanner hit locks first (field filled, success shown), then submits.
-    multiSel=3; press('Enter');
+    multiSel=mrow('addfriend'); press('Enter');
     _scanHit('https://poeggi.github.io/FOK-snake/#friend=00ff00cc');
     if(phase!=='nameEntry'||nameStr!=='00FF00CC') throw 'scan hit did not fill the field';
     if(_scanOk!=='00FF-00CC') throw 'scan hit did not show the success message';
@@ -118,7 +120,7 @@ runTest('SMOKE-INPUT', `
     const _oNetOk=_netOk, _oVerify=netFriendVerify;
     _netOk=()=>true; let _vRes=null; netFriendVerify=()=>({ then:f=>f(_vRes) });
     _vRes={ error:'unknown' };
-    phase='multiplayer'; multiSel=3; press('Enter');
+    phase='multiplayer'; multiSel=mrow('addfriend'); press('Enter');
     for(const ch of '00ff0099') press(ch);
     press('Enter');
     if(phase!=='nameEntry') throw 'an unknown friend id must not leave ADD FRIEND';
@@ -143,7 +145,7 @@ runTest('SMOKE-INPUT', `
     log('full-field backspace ok');
 
     // Viewfinder tap CYCLES the camera on-x1 -> on-x2 -> off -> on-x1; taps elsewhere do not touch it.
-    multiSel=3; press('Enter');
+    multiSel=mrow('addfriend'); press('Enter');
     _scanState='live'; _scanVideo=null; _scanZoom=1;   // pretend the camera runs at x1 (no stream in the harness)
     if(_scanTapAt(50,50)) throw 'tap outside the viewfinder must not cycle';
     if(!_scanTapAt(SCAN_VF.x+20,SCAN_VF.y+20)) throw 'viewfinder tap not registered';

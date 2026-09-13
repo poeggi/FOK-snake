@@ -53,8 +53,8 @@ function multiRows(){
         { t:'1vs1 DUEL',  en:true, go:'duel' },
         { t:'TOURNAMENT', en:tt, note:tt ? null : (notice || 'TOURNAMENTS NEED A CONNECTION'), go:'tourney' },
         { t:'MY ID',      en:true, go:'myid' },
-        { t:'ADD FRIEND', en:true, go:'addfriend' },
         { t:'FRIENDS',    en:true, go:'friends', badge:fresh.length, note:fresh.length ? netFriendsNewNote(fresh) : null },
+        { t:'ADD FRIEND', en:true, go:'addfriend' },
     ];
     if(typeof eventAny === 'function' && eventAny()) rows.push({ t:'EVENTS', en:true, go:'events' });
     return rows;

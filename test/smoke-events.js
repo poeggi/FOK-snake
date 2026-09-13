@@ -247,10 +247,10 @@ const DRIVER = `
     };
     _evList = [];
     const without = walk();
-    if(without.join(',') !== 'duel,tourney,myid,addfriend,friends,BACK') throw 'unexpected rows without events: '+without;
+    if(without.join(',') !== 'duel,tourney,myid,friends,addfriend,BACK') throw 'unexpected rows without events: '+without;
     _netEvApply([{ eid:'K7QM', name:'x', state:'active', you:{state:'member'} }]);
     const withEv = walk();
-    if(withEv.join(',') !== 'duel,tourney,myid,addfriend,friends,events,BACK') throw 'unexpected rows with events: '+withEv;
+    if(withEv.join(',') !== 'duel,tourney,myid,friends,addfriend,events,BACK') throw 'unexpected rows with events: '+withEv;
     // The row is appended, so nothing that was already there moved -- and BACK is
     // still the row past the end, which is the one an index would have got wrong.
     for(let i=0;i<5;i++) if(without[i] !== withEv[i]) throw 'the existing rows moved: '+withEv;

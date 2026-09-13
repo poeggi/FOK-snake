@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.52';
+const APP_VERSION = 'v4.4.53';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -23,7 +23,7 @@ const UI = (() => {
         MENU_TOP: v('--ui-menu-top',90), MENU_ROW: v('--ui-menu-row',28),
         STATUS_Y: v('--ui-status-y',324), BACK_Y: v('--ui-back-y',348),
         BAND_Y:   v('--ui-band-y',370),   HINT_Y: v('--ui-hint-y',390),
-        CORNER_Y: v('--ui-corner-y',382),
+        CORNER_Y: v('--ui-corner-y',384),
     };
 })();
 // The three title rows. Never drawn at directly: drawTitle / drawDialogTitle /
