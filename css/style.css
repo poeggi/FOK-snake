@@ -22,10 +22,13 @@
    each carry a title of their own. They are only recognisable AS the same furniture if
    they are at the same height on every screen, so the heights live here and nowhere else
    -- change one, once, and the whole game follows. Each row is drawn by ONE painter in
-   js/screens.js (drawTitle, drawDialogTitle, drawOverlayTitle, menuItem, drawStatus ...)
+   js/screens.js (drawTitle, drawDialogTitle, drawOverlayTitle, drawSubhead, menuItem,
+   drawStatus ...)
    and test/check-layout.js refuses a row written as a number. */
 :root {
     --ui-title-y:   24px;   /* the screen headline, centre                          */
+    --ui-subhead-y: 50px;   /* the one line under it: state, notice, who you are     */
+    --ui-body-y:    72px;   /* the first body line under the subhead (motto, hint)   */
     --ui-dialog-title-y: 116px;  /* a modal's title (INVITE, REMOVE FRIEND, ...)    */
     --ui-overlay-title-y: 182px; /* an in-game overlay's title (LEVEL n, PAUSED ...) */
     --ui-menu-top:  90px;   /* first menu item: one empty line below the headline   */

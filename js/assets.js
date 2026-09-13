@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.51';
+const APP_VERSION = 'v4.4.52';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -18,6 +18,7 @@ const UI = (() => {
     const v = (n, def) => { try { return parseInt(rt.getPropertyValue(n)) || def; } catch(_) { return def; } };
     return {
         TITLE_Y:  v('--ui-title-y',24),   DLG_TITLE_Y: v('--ui-dialog-title-y',116),
+        SUBHEAD_Y: v('--ui-subhead-y',50), BODY_Y: v('--ui-body-y',72),
         OVL_TITLE_Y: v('--ui-overlay-title-y',182),
         MENU_TOP: v('--ui-menu-top',90), MENU_ROW: v('--ui-menu-row',28),
         STATUS_Y: v('--ui-status-y',324), BACK_Y: v('--ui-back-y',348),
@@ -28,6 +29,8 @@ const UI = (() => {
 // The three title rows. Never drawn at directly: drawTitle / drawDialogTitle /
 // drawOverlayTitle (js/screens.js) are the one place each row's font, glow and colour live.
 const TITLE_Y = UI.TITLE_Y, DLG_TITLE_Y = UI.DLG_TITLE_Y, OVL_TITLE_Y = UI.OVL_TITLE_Y;
+// The line under the headline (drawSubhead), and the first body line under that.
+const SUBHEAD_Y = UI.SUBHEAD_Y, BODY_Y = UI.BODY_Y;
 const MENU_TOP = UI.MENU_TOP, MENU_ROW = UI.MENU_ROW;
 const BACK_Y = UI.BACK_Y;     // BACK / the last row of a list
 const BAND_Y = UI.BAND_Y;     // SHOP balance, ACHIEVEMENTS tally, lobby summary, menu DIFF

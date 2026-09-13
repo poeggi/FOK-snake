@@ -42,6 +42,11 @@ function drawStatus(msg, y){
 function drawTitle(text, col){ ctg(text, CW/2, TITLE_Y, col || '#7fff7f', FONT.TITLE, GLOW.TITLE); }
 function drawDialogTitle(text, col){ ctg(text, CW/2, DLG_TITLE_Y, col || '#ffd700', FONT.TITLE, GLOW.TITLE); }
 function drawOverlayTitle(text, col, glow){ ctg(text, CW/2, OVL_TITLE_Y, col || '#7fff7f', FONT.TITLE, glow || GLOW.TITLE); }
+// THE SUBHEAD: the one line under the headline that says what is true of this screen
+// now -- an event's state, a lobby's notice, who you are. HINT size, centred, the
+// colour the screen's meaning gives it (a fault red, a state its own). The first body
+// line under it sits on BODY_Y.
+function drawSubhead(text, col, font){ ct(text, CW/2, SUBHEAD_Y, col || '#4a7a4a', font || FONT.HINT); }
 // A list whose rows can be greyed out and have to say why. The reason is a status message
 // like any other, so it goes to the ONE line above -- never to a height measured off the top
 // of the list. A note parked a fixed number of rows down IS the last row the moment the list
@@ -542,7 +547,7 @@ function eventChooserFits(){
 // fit between it and the status band. The PITCH shrinks only when the set needs
 // it: an organizer's page carries eight rows and the menu pitch does not hold
 // eight in that room. Named here so the guard reads the same numbers the draw does.
-const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, KEEP: 14, HEAD_Y: 50, BODY_Y: 72, BODY_STEP: 22 };
+const EV_PAGE = { ROWS_TOP: MENU_TOP + 40, KEEP: 14, BODY_STEP: 22 };
 function _evRowH(n){
     const room = (STATUS_Y - EV_PAGE.KEEP) - EV_PAGE.ROWS_TOP;
     return (n < 2 || n*MENU_ROW <= room) ? MENU_ROW : Math.floor(room / n);
@@ -1526,7 +1531,7 @@ function drawMyId() {
     _netMyIdAt = Date.now();   // an incoming request while our QR shows auto-accepts (see net-session.js)
     drawGrid(); drawOvBg(0.92);
     drawTitle('MY ID');
-    ct(fmtPlayerId()+'   FRIENDS: '+getFriends().length, CW/2, 50, '#ffd700', FONT.MENU);
+    drawSubhead(fmtPlayerId()+'   FRIENDS: '+getFriends().length, '#ffd700', FONT.MENU);
     // Scanning this opens the game with #friend=<this player's ID> in the hash.
     const card=drawQrCard(friendUrl(), 64);
     if(_netFr.msg) ct(_netFr.msg, CW/2, card.bottom+12, '#ffd700', FONT.HINT);   // e.g. X ADDED YOU AS A FRIEND (see _netFrCelebrate)
@@ -1543,7 +1548,7 @@ function drawDuelLobby(){
     if(notice){ stat=notice; statCol='#ff8888'; }
     else if(typeof RTCPeerConnection!=='function'){ stat='WEBRTC NOT SUPPORTED ON THIS DEVICE'; statCol='#ff8888'; }
     else stat='ONLINE: '+_netCounts.online+'   IN 1vs1: '+_netCounts.playing;
-    ct(stat, CW/2, 50, statCol, FONT.HINT);
+    drawSubhead(stat, statCol);
     const fr=getFriends();
     const rowH=26;
     // QUICK MATCH leads and is the default selection (sel 0): the common case is "just
@@ -1613,8 +1618,8 @@ function drawFriends(){
     // ends on, where the eye already looks for it; a second copy up here was a
     // second place to keep in step.
     const notice=(typeof netStatusNotice==='function')?netStatusNotice():null;
-    if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
-    else if(_netFr.loading && !_netFr.list) ct('LOADING...', CW/2, 50, '#4a7a4a', FONT.HINT);
+    if(notice) drawSubhead(notice, '#ff8888');
+    else if(_netFr.loading && !_netFr.list) drawSubhead('LOADING...');
     const rows=_netFrRows();
     // What changed since the last look, for the WHOLE visit: the mark is written when
     // the screen is left, so a row that was news on the way in stays news until then.
@@ -1659,7 +1664,7 @@ function drawFriends(){
 function drawDuelInvite() {
     drawGrid(); drawOvBg(0.92);
     drawTitle('FRIEND INVITE');
-    ct("YOUR FRIEND'S CODE:", CW/2, 74, '#aaa', FONT.HINT);
+    ct("YOUR FRIEND'S CODE:", CW/2, BODY_Y, '#aaa', FONT.HINT);
     ctg(fmtFriendId(_inviteFid||''), CW/2, 102, '#ffd700', FONT.TITLE, GLOW.TEXT);   // layout-ok: the code itself, content in title size, not a heading
     ct('GOT THE GAME ON YOUR HOME SCREEN?', CW/2, 148, '#7fff7f', FONT.HINT);
     ct('OPEN IT: 1vs1 DUEL > ADD FRIEND', CW/2, 166, '#aaa', FONT.HINT);
@@ -1874,7 +1879,7 @@ function _ttDrawRows(startY, rowH){
 function drawTourneySetup(){
     drawGrid(); drawOvBg(0.92);
     drawTitle('NEW TOURNAMENT');
-    ct('SET BEFORE THE ROOM OPENS - PLAYERS JOIN AFTERWARDS', CW/2, 50, '#4a7a4a', FONT.HINT);
+    drawSubhead('SET BEFORE THE ROOM OPENS - PLAYERS JOIN AFTERWARDS');
     _ttDrawRows(MENU_TOP, MENU_ROW);
     // What the settings AMOUNT TO, on the line the lobby puts its own summary on: the level
     // in the row above is round 1, and this is the ladder the whole tournament climbs from it.
@@ -1888,9 +1893,9 @@ function drawTourneyLobby(){
     const t = tourneyView(), ui = tourneyUi();
     if(!t){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
-        if(notice) ct(notice, CW/2, 50, '#ff8888', FONT.HINT);
-        else if(!netTourneyOk()) ct('TOURNAMENTS NEED A NEWER SERVER', CW/2, 50, '#ff8888', FONT.HINT);
-        else ct('2-' + tourneyMax() + ' PLAYERS - ONE 1vs1, EVERYONE ELSE WATCHES', CW/2, 50, '#4a7a4a', FONT.HINT);
+        if(notice) drawSubhead(notice, '#ff8888');
+        else if(!netTourneyOk()) drawSubhead('TOURNAMENTS NEED A NEWER SERVER', '#ff8888');
+        else drawSubhead('2-' + tourneyMax() + ' PLAYERS - ONE 1vs1, EVERYONE ELSE WATCHES');
         _ttDrawRows(MENU_TOP, MENU_ROW);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
         // real message -- both at that band would overdraw each other.
@@ -1981,8 +1986,8 @@ function _ttBracketBoard(t, walk){
         if(walk) segs.push(['  -  ' + walk, '#ffaa44']);
         _ttRun(segs, 46, FONT.HINT);
     }
-    else ct('WAITING FOR THE NEXT MATCH' + _ttDots(), CW/2, 46, '#888', FONT.HINT);
-    if(t.frozen) ct('A MATCH IS FROZEN - THE TWO REPORTS DISAGREED', CW/2, 60, '#ff5555', FONT.HINT);
+    else drawSubhead('WAITING FOR THE NEXT MATCH' + _ttDots(), '#888');
+    if(t.frozen) ct('A MATCH IS FROZEN - THE TWO REPORTS DISAGREED', CW/2, BODY_Y, '#ff5555', FONT.HINT);
     if(!ko){
         const rows = t.standings || [], adv = (t.advancers || []).map(String);
         _ttCol('#',      TT_X_COL,  78, '#666', FONT.HINT);
@@ -2240,8 +2245,7 @@ function drawTourneyCeremony(){
     drawGrid(); drawOvBg(0.92);
     const ps = r.players || [], you = String(r.you || 'idle');
     _ttWhere(r.round, t);
-    ct(_ttStage(r.stage, r.round) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''),
-       CW/2, 60, '#888', FONT.HINT);
+    drawSubhead(_ttStage(r.stage, r.round) + (r.match ? ('  -  MATCH ' + r.match + ' OF ' + (r.of | 0)) : ''), '#888');
     ctg(_ttName(ps[0]).slice(0, 12), CW/2, 116, '#7fff7f', FONT.TITLE, GLOW.TITLE);   // layout-ok: the two names are the ceremony's content, not a heading
     ct('vs', CW/2, 146, '#666', FONT.MENU);
     ctg(_ttName(ps[1]).slice(0, 12), CW/2, 176, '#7fff7f', FONT.TITLE, GLOW.TITLE);   // layout-ok: see above
@@ -2297,7 +2301,7 @@ function drawTourneyPodium(){
         if(typeof Snd !== 'undefined') Snd.sfxPlay('perfect', cfg.music);   // the voice the perfect-level burst rides
     }
     const host = _ttRealName(t.host).slice(0, 12);
-    if(host) ct('HOSTED BY ' + host, CW/2, 46, '#888', FONT.HINT);
+    if(host) drawSubhead('HOSTED BY ' + host, '#888');
     // ONE size for all three places: a podium is a ranking and the colours already carry it.
     // Drawing first place bigger than the rest made the screen top-heavy and left the other
     // two looking like a footnote to it.
@@ -2372,8 +2376,7 @@ function drawEventPage(){
     drawTitle(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT');
     if(!e){
         const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
-        ct(notice || (ui.busy ? 'READING...' : 'NOTHING TO SHOW'), CW/2, 50,
-           notice ? '#ff8888' : '#4a7a4a', FONT.HINT);
+        drawSubhead(notice || (ui.busy ? 'READING...' : 'NOTHING TO SHOW'), notice ? '#ff8888' : '#4a7a4a');
         menuItem('BACK', BACK_Y, true);
         if(ui.msg) drawStatus(ui.msg);
         ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -2384,11 +2387,11 @@ function drawEventPage(){
     // the times are why -- and both are derived here rather than pushed, so a
     // scheduled event flips on this frame with nothing having arrived.
     const when = eventWhen(e);
-    if(word) ct(when ? word + '  ' + when : word, CW/2, EV_PAGE.HEAD_Y, wcol, FONT.HINT);
+    if(word) drawSubhead(when ? word + '  ' + when : word, wcol);
     // ONE STEP for the whole header block, so the gap under the description is the
     // same as the gap above it. It was 18 against 22 and the last line sat visibly
     // closer to the one before it than that one did to the state.
-    let y = EV_PAGE.BODY_Y;
+    let y = BODY_Y;
     if(e.descr){ ct(String(e.descr).substring(0, 46), CW/2, y, '#aaa', FONT.HINT); y += EV_PAGE.BODY_STEP; }
     // WHO IS IN IT AND WHOSE IT IS, on ONE line. They are two halves of the same
     // fact -- the size of the room and the person running it -- and a line each
@@ -2429,7 +2432,7 @@ function drawEventStats(){
     drawGrid(); drawOvBg(0.92);
     drawTitle('EVENT STATISTICS');
     const e = eventView(), st = eventStatsView(), ui = eventUi();
-    if(e && e.name) ct(String(e.name).toUpperCase().substring(0, 26), CW/2, 46, '#4a7a4a', FONT.HINT);
+    if(e && e.name) drawSubhead(String(e.name).toUpperCase().substring(0, 26));
     // The two summary lines: how much has been played here, and the shape of it.
     const bits = [];
     bits.push(st.tourneys + (st.tourneys === 1 ? ' TOURNAMENT' : ' TOURNAMENTS'));
@@ -2507,8 +2510,8 @@ function drawEventChooser(){
     drawTitle('EVENTS');
     const rows = eventChooserRows(), ui = eventUi(), sel = ui.sel;
     if(!rows.length){
-        ct('YOU ARE IN NO EVENT', CW/2, 50, '#4a7a4a', FONT.HINT);
-        ct('SCAN AN EVENT QR TO GET IN', CW/2, 74, '#555', FONT.HINT);
+        drawSubhead('YOU ARE IN NO EVENT');
+        ct('SCAN AN EVENT QR TO GET IN', CW/2, BODY_Y, '#555', FONT.HINT);
         menuItem('BACK', BACK_Y, true);
         if(ui.msg) drawStatus(ui.msg);
         ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
@@ -2711,10 +2714,10 @@ function drawEventMonitor(){
     drawTitle(String(m.name || 'EVENT').toUpperCase().substring(0, 22));
     const [word, wcol] = _evStateLine(m);
     const when = eventWhen(m);
-    ct(when ? word + '  ' + when : word, CW/2, 58, wcol, FONT.HINT);
+    drawSubhead(when ? word + '  ' + when : word, wcol);
     // The motto, exactly where the page puts it: it is the one line the organizer
     // wrote for the room, so the room's screen says it.
-    if(m.descr) ct(String(m.descr).substring(0, 46), CW/2, 78, '#aaa', FONT.HINT);
+    if(m.descr) ct(String(m.descr).substring(0, 46), CW/2, BODY_Y, '#aaa', FONT.HINT);
     // The two figures an operator wants visible across a room, side by side and the
     // same size: who is in, and who is here. Big, because they are read from the far
     // side of one. ONLINE is the monitor answer's count of members heard within the

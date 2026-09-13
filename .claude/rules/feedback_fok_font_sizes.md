@@ -15,15 +15,18 @@ One scale, declared once in `css/fonts.css` `:root`:
 
 # Rows come from the --ui-* scale, drawn by one painter each, never a number
 
-`css/style.css` `:root`: `--ui-title-y 24`, `--ui-dialog-title-y 116`,
-`--ui-overlay-title-y 182`, `--ui-menu-top 90`, `--ui-menu-row 28`,
-`--ui-status-y 324`, `--ui-back-y 348`, `--ui-band-y 370`, `--ui-corner-y
-382`, `--ui-hint-y 390`, read once into `UI.*` (js/assets.js).
+`css/style.css` `:root`: `--ui-title-y 24`, `--ui-subhead-y 50`,
+`--ui-body-y 72`, `--ui-dialog-title-y 116`, `--ui-overlay-title-y 182`,
+`--ui-menu-top 90`, `--ui-menu-row 28`, `--ui-status-y 324`, `--ui-back-y
+348`, `--ui-band-y 370`, `--ui-corner-y 382`, `--ui-hint-y 390`, read once
+into `UI.*` (js/assets.js).
 - A row has ONE painter that owns its font, glow and default colour:
-  `drawTitle` (every screen headline), `drawDialogTitle` (a modal),
+  `drawTitle` (every screen headline), `drawSubhead` (the one line under
+  it: state, notice, who you are), `drawDialogTitle` (a modal),
   `drawOverlayTitle` (an in-game overlay, a wall's blank face), `menuItem`,
   `drawStatus`. A screen passes text and, if it is an accent, a colour;
-  it never writes the y, the font or the glow.
+  it never writes the y, the font or the glow. `BODY_Y` is the first body
+  line under the subhead (a motto, a second notice), a constant, no painter.
 - `test/check-layout.js` (FAST) refuses a FONT.TITLE draw on a numbered
   row outside the painters and centred text on a scale row as a number.
   Title-sized CONTENT (a code, a name) marks its line `layout-ok: <why>`.
