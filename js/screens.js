@@ -2663,7 +2663,7 @@ function _evPassCard(slot, now, qy, mod){
 // seconds eventMonitorFace gives it. The card at the size that fits between the
 // figures and the hint line (5 px modules: 185 px, a hand's width on a TV), the
 // invitation in the margin beside it, where nothing else is.
-const EV_MON_QR_Y = 180, EV_MON_QR_MOD = 5;
+const EV_MON_QR_Y = 180, EV_MON_QR_MOD = 5, EV_MON_FIG_DX = 70;
 function _evMonQr(now){
     const card = _evPassCard(eventPassSlot(now), now, EV_MON_QR_Y, EV_MON_QR_MOD);
     const mx = Math.round((card.x + card.size + CW) / 2), my = Math.round(card.y + card.size / 2);
@@ -2735,11 +2735,13 @@ function drawEventMonitor(){
     // side of one. ONLINE is the monitor answer's count of members heard within the
     // online window (API 4.15, an optional field); a server without it leaves the
     // server-wide count the 1vs1 lobby shows, off hello/poll.
+    // EV_MON_FIG_DX either side of the centre: a three-digit count at DISPLAY size is
+    // 120 px wide, so 70 keeps two of them 20 px apart.
     const online = typeof m.online === 'number' ? m.online|0 : _netCounts.online|0;
-    ctg(String(m.members|0), CW/2 - 100, 120, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
-    ct('JOINED', CW/2 - 100, 150, '#888', FONT.HINT);
-    ctg(String(online), CW/2 + 100, 120, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
-    ct('ONLINE', CW/2 + 100, 150, '#888', FONT.HINT);
+    ctg(String(m.members|0), CW/2 - EV_MON_FIG_DX, 120, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
+    ct('JOINED', CW/2 - EV_MON_FIG_DX, 150, '#888', FONT.HINT);
+    ctg(String(online), CW/2 + EV_MON_FIG_DX, 120, '#7fff7f', FONT.DISPLAY, GLOW.TITLE);
+    ct('ONLINE', CW/2 + EV_MON_FIG_DX, 150, '#888', FONT.HINT);
     // Who is still at the door is the organizer's cue, so it is on the wall too.
     if((m.pending|0) > 0) ct((m.pending|0) + ' WAITING AT THE DOOR', CW/2, 168, '#ffd700', FONT.HINT);
     const t = m.tourney;
