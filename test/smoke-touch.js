@@ -82,7 +82,7 @@ runTest('SMOKE-TOUCH', `
     if (dirs(s) !== 'RIGHT UP' || boosted(s)) throw 'modern, long stroke then up: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
     s = swipe(T_D());
     if (dirs(s) !== 'RIGHT UP' || boosted(s)) throw 'modern, rounded corner: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
-    if (upAt(s) > 30) throw 'modern, rounded corner: UP sent only after ' + upAt(s) + ' px of up travel';
+    if (upAt(s) > 42) throw 'modern, rounded corner: UP sent only after ' + upAt(s) + ' px of up travel';   // legacy: 45 px, with a false boost
     s = swipe(T_J());
     if (dirs(s) !== 'RIGHT UP') throw 'modern, drift then up: ' + dirs(s);
     s = swipe(T_K());
@@ -92,9 +92,20 @@ runTest('SMOKE-TOUCH', `
     for (let n = 20; n <= 120; n += 10){
       s = swipe(poly([[0,0],[n,0],[n,-40]], F, DT));
       const u = upAt(s);
-      if (u == null || u > 30) throw 'modern, right ' + n + ' then up 40: UP at ' + u + ' px';
+      if (u == null || u > 32) throw 'modern, right ' + n + ' then up 40: UP at ' + u + ' px';
     }
     log('modern: overshoot, rounded corner, drift and creep read as the finger meant; a turn costs 24 px at every stroke length');
+
+    // A slanted stroke is ONE stroke: its sideways component never piles up into a second turn
+    // while the finger still runs within 50 degrees of the sent direction. Below the turn
+    // distance nothing turns at all, however many small steps add up.
+    s = swipe(poly([[0,0],[50,-87]], F, DT));                       // 100 px at 30 deg off vertical
+    if (turns(s) !== 'UP') throw 'modern, 100 px stroke 30 deg off vertical sent: ' + dirs(s);
+    s = swipe(poly([[0,0],[40,0],[65,-43]], F, DT));                // right 40, then 50 px at 30 deg off vertical
+    if (turns(s) !== 'RIGHT UP') throw 'modern, right then a slanted up sent: ' + dirs(s);
+    s = swipe(poly([[0,0],[20,0],[20,-20],[40,-20],[40,-40],[60,-40],[60,-60]], F, DT));   // 20 px staircase
+    if (dirs(s) !== 'RIGHT') throw 'modern, 20 px staircase (below the turn distance) sent: ' + dirs(s);
+    log('modern: a slanted stroke is one turn, a sub-threshold staircase is none');
 
     // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
     // duel wire counts on one same-direction record per SWIPE_SAME, never more.

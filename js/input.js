@@ -994,6 +994,7 @@ if (typeof window !== 'undefined' && window.PointerEvent) {
 }
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
+const _HOP_TAN=Math.tan(DZ_HI*Math.PI/180);   // a checkpoint hop within DZ_HI of the sent axis still agrees with the sent direction (MODERN reader)
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=48;
@@ -1095,29 +1096,38 @@ function _inControlMask(x,y){
 // table judges out; null while nothing is readable. Both readers share the CHORD from the
 // anchor, classified by its angle through the dead zone: the first swipe of a touch, the swipe
 // after a pause, and every menu swipe. They part once a direction has been sent in play:
-//   MODERN (default): three distances from the commit point, each on its own axis. ACROSS the
-//     sent axis is the 90-degree turn, whatever the finger did along the axis, so a turn always
-//     costs SWIPE_N of across travel however long the stroke before it. ALONG the axis, while
-//     still advancing and within a turn's width of it, is the same direction (the boost slide).
-//     BACK from the furthest point the finger reached (_swipeFollow) is the reverse (the brake).
+//   MODERN (default): three distances, each on its own axis. ACROSS the sent axis is the
+//     90-degree turn, measured from where the finger's motion last agreed with the sent
+//     direction: a slanted stroke is a slide, a stroke that has turned is a turn, and the turn
+//     costs SWIPE_N of across travel however long the stroke before it. ALONG the axis from
+//     the commit point, with the finger still running the sent way, is the same direction
+//     (the boost slide). BACK from the furthest point the finger reached is the reverse (the
+//     brake). Both references live in _swipeFollow.
 //   LEGACY (cfg.touchLegacy): the chord again, from a commit point that stays put while the
 //     finger keeps sliding, with the dead zone leaning 5 degrees toward the axis just sent. The
 //     overshoot of the previous stroke sits inside every chord, so a turn costs anything from
 //     SWIPE_N to never, and a 48px chord in the old direction reads as a boost slide first.
 // The threshold table, the anti-spiral guard and the boost gate are the same for both.
-function _swipeRead(x,y,sf){
+function _swipeRead(x,y,sf,hop){
     if(_inPlay()&&!cfg.touchLegacy&&_swipeLastDir){
-        const d=GDIRS[_swipeLastDir];
-        const adv=d.x?(x-_swipeFollow.x)*d.x:(y-_swipeFollow.y)*d.y;
-        const atExtreme=adv>0;
-        if(atExtreme) _swipeFollow={x,y};
-        const sdx=x-_swipeBase.x, sdy=y-_swipeBase.y;
-        const along=d.x?sdx*d.x:sdy*d.y;
-        const across=d.x?sdy:sdx;
-        const back=d.x?(_swipeFollow.x-x)*d.x:(_swipeFollow.y-y)*d.y;
-        if(atExtreme&&along>=Math.round(SWIPE_SAME*sf)&&Math.abs(across)<Math.round(SWIPE_N*sf)) return {key:_swipeLastDir, dist:along};
-        if(Math.abs(across)>=Math.round(SWIPE_N*sf)) return {key:d.x?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)};
-        if(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across)) return {key:d.x?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back};
+        const d=GDIRS[_swipeLastDir], ax=d.x!==0;
+        // _swipeFollow: its ALONG coordinate is the furthest the finger has reached along the
+        // sent axis; its ACROSS coordinate moves with the finger only on a checkpoint hop that
+        // agrees with the sent direction (within DZ_HI of the axis), so a slanted stroke piles
+        // up no across travel, while a stroke that has turned leaves the reference standing
+        // where the turn began.
+        const pa=ax?x*d.x:y*d.y, fa=ax?_swipeFollow.x*d.x:_swipeFollow.y*d.y;
+        if(pa>fa){ if(ax) _swipeFollow.x=x; else _swipeFollow.y=y; }
+        let agrees=false;   // this sample sets a checkpoint, and the hop to it runs the sent way
+        if(hop){ const ha=ax?hop.dx*d.x:hop.dy*d.y, hc=ax?hop.dy:hop.dx; agrees=ha>0&&Math.abs(hc)<=ha*_HOP_TAN; if(agrees){ if(ax) _swipeFollow.y=y; else _swipeFollow.x=x; } }
+        const along=pa-(ax?_swipeBase.x*d.x:_swipeBase.y*d.y);
+        const across=ax?y-_swipeFollow.y:x-_swipeFollow.x;
+        const back=(ax?_swipeFollow.x*d.x:_swipeFollow.y*d.y)-pa;
+        // The same direction (the boost slide) is a finger still running the sent way, SWIPE_SAME
+        // along from the commit point; a stroke curving away is a turn in the making, never a slide.
+        if(agrees&&along>=Math.round(SWIPE_SAME*sf)) return {key:_swipeLastDir, dist:along};
+        if(Math.abs(across)>=Math.round(SWIPE_N*sf)) return {key:ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)};
+        if(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across)) return {key:ax?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back};
         return null;
     }
     const dx=x-_swipeBase.x, dy=y-_swipeBase.y;
@@ -1169,9 +1179,10 @@ document.addEventListener('touchmove',e=>{
         // from where it starts. LEGACY and the menus keep the anchor where it is.
         if(_inPlay()&&!cfg.touchLegacy&&_swipeLastMovePos){ _swipeBase={x:_swipeLastMovePos.x,y:_swipeLastMovePos.y}; _swipeFollow={x:_swipeBase.x,y:_swipeBase.y}; }
     }
-    if(!_swipeLastMovePos||moved>=6){_swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
+    let hop=null;   // the step from the last 6px checkpoint, on the sample that sets a new one
+    if(!_swipeLastMovePos||moved>=6){ if(_swipeLastMovePos) hop={dx:t.clientX-_swipeLastMovePos.x,dy:t.clientY-_swipeLastMovePos.y}; _swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
     const sf=_touchSensF();
-    const rd=_swipeRead(t.clientX,t.clientY,sf);
+    const rd=_swipeRead(t.clientX,t.clientY,sf,hop);
     if(!rd) return;
     const key=rd.key, dist=rd.dist;
     // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
