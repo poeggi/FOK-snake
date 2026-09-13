@@ -1089,13 +1089,21 @@ const DRIVER = `
       if(at(50000) !== 'SLOT05') throw 'the last slot: '+at(50000);
       if(at(69999) !== 'SLOT05') throw 'the last slot lives its full validity: '+at(69999);
       if(at(70000) !== '') throw 'past the last slot nothing is shown';
-      // The bar is the life left in the code ON SCREEN, not in the minute.
+      // The bar is the time the code has left ON SCREEN -- one step, not its validity:
+      // full when it appears, empty the instant before the next one takes its place.
       if(Math.abs(eventPassLeft(T0) - 1) > 0.001) throw 'a fresh code is full';
-      if(Math.abs(eventPassLeft(T0+15000) - 0.75) > 0.001) throw 'five seconds into the second slot leaves three quarters: '+eventPassLeft(T0+15000);
-      // ...and the bar empties only on the LAST slot: every earlier one is
-      // superseded at full life by the next, which is what the overlap is for.
-      if(eventPassLeft(T0+69999) > 0.001) throw 'the last code is spent the instant before it dies: '+eventPassLeft(T0+69999);
+      if(Math.abs(eventPassLeft(T0+15000) - 0.5) > 0.001) throw 'five seconds into the second slot leaves half: '+eventPassLeft(T0+15000);
+      if(eventPassLeft(T0+19999) > 0.001) throw 'spent the instant before the third begins: '+eventPassLeft(T0+19999);
+      if(Math.abs(eventPassLeft(T0+20000) - 1) > 0.001) throw 'and the third begins full';
+      // The last slot has no successor in hand: it stays up through its validity with
+      // the bar empty, rather than a screen with nothing on it.
+      if(eventPassLeft(T0+65000) !== 0) throw 'the last code past its step shows spent';
       if(eventPassLeft(T0+70000) !== 0) throw 'a dead code has nothing left';
+      // THE WALL'S TURNS: even slots are the wall's, odd ones the room's, off the slot
+      // number, so every screen in the room agrees.
+      const E0 = 1784182400000;   // an even slot number (178418240)
+      const turn = (ms) => eventPassTurn({ at:E0 + ms });
+      if(!turn(0) || turn(10000) || !turn(20000) || turn(30000)) throw 'even slots shown, odd slots the room';
       // A MISSING step/valid falls back rather than dividing by nothing, and an
       // absurd one is bounded -- neither is a second opinion on the server's
       // numbers, both stop a wrong one turning this screen into a request loop.
@@ -1666,18 +1674,18 @@ const DRIVER = `
       }
       log('monitor slot ok: room beside two primaries, costs nobody a slot, never an alt, granted off the sheet and the patch, forgotten with the tournament');
 
-      // ---- THE IDLE WALL TAKES TURNS UNDER ITS HEADER: THE ROOM'S LINES, THEN THE QR
+      // ---- THE IDLE WALL TAKES TURNS UNDER ITS HEADER, ON THE PASS'S OWN CLOCK
       // Between tournaments the monitor page keeps its header (name, state, JOINED and
-      // ONLINE) and its lower half alternates the room's lines with the event's live
-      // pass, EV_MON_FLIP_MS each from the frame the room came up, so somebody walking
-      // in joins off the TV. The pass is asked for only where it would be shown (idle,
-      // live; a reserved monitor row included, API 4.15), one minute per call like
-      // the QR screen, and a refusal is not asked again every second.
+      // ONLINE) and its lower half shows every even slot's code for its whole step, the
+      // room's lines through the odd ones, so somebody walking in joins off the TV and
+      // the bar runs out exactly when the card goes. The pass is asked for only where
+      // it would be shown (idle, live; a reserved monitor row included, API 4.15), one
+      // minute per call like the QR screen, and a refusal is not asked again every second.
       {
         const _oNow = _msgNow, _oPts = netPts, _oPost = _evPost, _oCt = ct, _oCtg = ctg, _oQr = drawQrCard, _oPh = phase, _oMon = _evMon, _oEid = _evEid, _oMonT = _evMonT, _oSpec = netSpectating, _oMsg = _evUi.msg;
         netSpectating = () => false;
         let tnow = 900000; _msgNow = () => tnow;
-        const T0 = 1784182410000; let pts = T0; netPts = () => pts;
+        const T0 = 1784182400000; let pts = T0; netPts = () => pts;   // an even slot number: the wall's turn
         let passReqs = 0, passOk = true;
         _evPost = async (a) => {
           if(a !== 'pass') return { json:{ ok:true }, status:200, body:{} };
@@ -1693,7 +1701,7 @@ const DRIVER = `
         const face = () => eventMonitorFace(pts);
         const draw = () => { drawn.length = 0; drawEventMonitor(); return drawn; };
         const _oCounts = _netCounts; _netCounts = { online:7, playing:0 };
-        _evEid = 'K7QM'; _evMonT = 1; _evMonErr = ''; _evMonOver = null; _evMonIdleAt = 0; _evMonNid = ''; _evMonAt = tnow;
+        _evEid = 'K7QM'; _evMonT = 1; _evMonErr = ''; _evMonOver = null; _evMonNid = ''; _evMonAt = tnow;
         _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evUi.msg = '';
         _evMon = { eid:'K7QM', name:'Room', state:'active', you:{ state:'member' }, members:3, tourney:null };
         phase = 'eventMonitor';
@@ -1704,13 +1712,17 @@ const DRIVER = `
         if(passReqs !== 1 || !_evPass || _evPass.slots.length !== 6) throw 'the tick arms the pass and asks for the first minute, got ' + passReqs;
         _evMonTick(); _evMonPass(); await settle();
         if(passReqs !== 1) throw 'armed is armed: no second ask, got ' + passReqs;
-        // Ten seconds each way, counted from the frame the room came up.
-        if(face() !== 'room') throw 'the room first';
-        tnow += 9999; if(face() !== 'room') throw 'the room for its ten seconds';
-        tnow += 1;    if(face() !== 'qr') throw 'then the QR';
-        tnow += 9999; if(face() !== 'qr') throw 'the QR for its ten seconds';
-        tnow += 1;    if(face() !== 'room') throw 'then the room again';
-        tnow += 10000; if(face() !== 'qr') throw 'and so on';
+        // The turns follow the slots: T0 is an even slot (the wall's), T0+10 s odd (the
+        // room's), T0+20 s the wall's again -- a whole step each, on the synced clock,
+        // whatever the frame the room came up on.
+        if(Math.floor(T0 / 10000) % 2 !== 0) throw 'T0 is an even slot by construction';
+        if(face() !== 'qr') throw 'an even slot: the QR';
+        pts = T0 + 9999; if(face() !== 'qr') throw 'for its whole step';
+        pts = T0 + 10000; if(face() !== 'room') throw 'the odd slot: the room';
+        pts = T0 + 19999; if(face() !== 'room') throw 'for its whole step';
+        pts = T0 + 20000; if(face() !== 'qr') throw 'and the next code';
+        pts = T0 + 12000; if(face() !== 'room') throw 'mid-slot reads the same schedule';
+        pts = T0;
         // What each turn draws. The HEADER on both: the name, the state, JOINED and
         // ONLINE side by side, the same size. The QR turn puts the pass card (the live
         // slot's code, the card painter the EVENT QR screen uses) in the lower half,
@@ -1730,9 +1742,9 @@ const DRIVER = `
         const card = drawQrCard(eventUrl('K7QM', 'WAL0XX'), EV_MON_QR_Y, EV_MON_QR_MOD);
         if(!(card.y > geo['JOINED'].y + 6 && card.bottom + 10 < HINT_Y - 8)) throw 'the card sits between the figures and the hint line: ' + JSON.stringify(card);
         if(!(geo['SCAN TO JOIN'].x > card.x + card.size && geo['SCAN TO JOIN'].x < CW && geo['SCAN TO JOIN'].y > card.y && geo['THIS EVENT'].y < card.bottom)) throw 'the invitation stands in the margin beside the card: ' + JSON.stringify([geo['SCAN TO JOIN'], card]);
-        pts = T0 + 10000; d = draw();
-        if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL1XX')) < 0) throw 'the card follows the slot: ' + JSON.stringify(d);
-        tnow += 10000; d = draw(); header(d);
+        pts = T0 + 20000; d = draw();
+        if(d.indexOf('QR:' + eventUrl('K7QM', 'WAL2XX')) < 0) throw 'the next turn is the code of the next even slot: ' + JSON.stringify(d);
+        pts = T0 + 10000; d = draw(); header(d);
         if(d.indexOf('NO TOURNAMENT RUNNING') < 0 || d.join('|').indexOf('QR:') >= 0) throw 'the room turn is the room lines: ' + JSON.stringify(d);
         // ONLINE is the monitor answer's own count when it carries one (members heard
         // within the online window, API 4.15 optional field); without it, the server-wide
@@ -1741,15 +1753,14 @@ const DRIVER = `
         if(!geo['2'] || geo['2'].x !== geo['ONLINE'].x || d.indexOf('7') >= 0) throw 'the answer carrying online is the figure: ' + JSON.stringify(d);
         delete _evMon.online;
         // No code in hand: the overview stays up rather than an empty card.
-        tnow += 10000; pts = T0 + 70000;
+        pts = T0 + 80000;
         if(face() !== 'room') throw 'no live code, no QR face';
         d = draw(); if(d.join('|').indexOf('QR:') >= 0) throw 'nothing to scan is not drawn';
         pts = T0;
         if(face() !== 'qr') throw 'the code back, the QR face back';
-        // A TOURNAMENT FORMING OR RUNNING is not idle: the room, the pass let go,
-        // the flip re-counted from the frame the room comes back.
+        // A TOURNAMENT FORMING OR RUNNING is not idle: the room, the pass let go.
         _evMon.tourney = { tid:'t1', state:'open', players:[] };
-        if(eventMonitorIdle() || face() !== 'room' || _evMonIdleAt) throw 'a forming tournament takes the wall';
+        if(eventMonitorIdle() || face() !== 'room') throw 'a forming tournament takes the wall';
         if(_evMonPassWant()) throw 'and wants no pass';
         _evPassTick();
         if(_evPass !== null || _evPassT !== null) throw 'the codes go with the picture';
@@ -1761,8 +1772,7 @@ const DRIVER = `
         _evMon.tourney = null; tnow += 5000;
         _evMonTick(); await settle();
         if(passReqs !== 2 || !_evPass) throw 'the room back asks for the pass again, got ' + passReqs;
-        if(face() !== 'room' || _evMonIdleAt !== tnow) throw 'and the flip counts from now';
-        tnow += 10000; if(face() !== 'qr') throw 'ten seconds later the QR';
+        if(face() !== 'qr') throw 'and rejoins the slot schedule where it stands';
         // Not live: the room lines only, and no ask. A RESERVED monitor row asks like a
         // member (API 4.15 hands it the pass).
         _evMon.state = 'paused';
@@ -1790,12 +1800,12 @@ const DRIVER = `
         _evMonPass(); await settle();
         if(!_evPass) throw 'armed again for the exit';
         eventMonitorStop();
-        if(_evPass !== null || _evPassT !== null || _evMonIdleAt) throw 'the exit drops the codes and the flip';
+        if(_evPass !== null || _evPassT !== null) throw 'the exit drops the codes';
         if(phase !== 'eventPage') throw 'and goes back to the page';
         _msgNow = _oNow; netPts = _oPts; _evPost = _oPost; ct = _oCt; ctg = _oCtg; drawQrCard = _oQr; phase = _oPh; _evMon = _oMon; _evEid = _oEid; _evMonT = _oMonT; netSpectating = _oSpec; _evUi.msg = _oMsg; _netCounts = _oCounts;
-        _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evMonIdleAt = 0; _evMonAt = 0;
+        _evPass = null; _evPassT = null; _evPassBusy = false; _evPassDenyAt = 0; _evMonAt = 0;
       }
-      log('idle wall ok: the header stays, the lower half takes turns ten seconds each from the frame the room came up, JOINED and ONLINE side by side, the pass asked once and only where it shows, a refusal backed off, the exit drops it');
+      log('idle wall ok: the header stays, the lower half shows every even slot for its whole step and the room through the odd ones, JOINED and ONLINE side by side, the pass asked once and only where it shows, a refusal backed off, the exit drops it');
 
 
       // ---- AND SCANNING A POSTER EARLY LANDS ON THE LIST --------------------

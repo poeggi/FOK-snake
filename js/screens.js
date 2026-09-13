@@ -2632,9 +2632,9 @@ function drawEventQr(){
 // Returns the card box plus `by`, the bar's y, so the caller puts its own line
 // beside or under it.
 //
-// The bar is the life left in the code on screen. It is the honest thing to draw
-// here: the code is refused the moment this reaches the left edge, and somebody
-// walking over with a phone can see whether they have time.
+// The bar is the time the code has left ON SCREEN: it runs out exactly when the
+// next code takes its place, so somebody walking over with a phone can see whether
+// to wait for the next one. (The door accepts a code a little longer than that.)
 function _evPassCard(slot, now, qy, mod){
     const card = drawQrCard(eventUrl(_evEid, slot.code), qy, mod);
     const left = eventPassLeft(now), by = card.bottom + 6;
