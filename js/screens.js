@@ -1399,6 +1399,7 @@ function drawGameBoard(now) {
 // run count (x2/x3...), and HOLD>NN when the anti-spiral guard blocked the turn -- so a spiral
 // can be read back off the board for a few seconds after the fact. Render-only; never the sim.
 function drawTurnDebug(){
+    drawTouchDebug();
     if(typeof _dbgTurns==='undefined' || !_dbgTurns.length) return;
     const nowMs=performance.now(), TTL=3500;
     ctx.save();
@@ -1427,6 +1428,31 @@ function drawTurnDebug(){
         ctx.globalAlpha=a*0.6; ctx.fillStyle='#000'; ctx.fillRect(lx-2,ly-6,w+4,12);
         ctx.globalAlpha=a; ctx.fillStyle=col; ctx.fillText(txt,lx,ly);
     }
+    ctx.restore();
+}
+
+// DEBUG LEVEL 3 readout, bottom-left: the finger and the swipe reader's anchors in CSS px from
+// the canvas centre (the units every swipe threshold is in), how long ago the anchor was placed,
+// REST while the last sample counted as a resting finger, the MODERN across reference (REF), and
+// the last direction the touch layer sent in play with its age. Render-only; never the sim.
+function drawTouchDebug(){
+    if(typeof _swipeBase==='undefined' || typeof canvas==='undefined') return;
+    const r=canvas.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const nowMs=performance.now();
+    const sg=v=>(v>=0?'+':'')+Math.round(v);
+    const rel=p=>p?sg(p.x-cx)+' '+sg(p.y-cy):'---';
+    const lines=['TOUCH  '+rel(_dbgTouch),
+                 'ANCHOR '+rel(_swipeBase)+(_swipeBase?'  '+Math.round(nowMs-_swipeBaseAt)+'MS'+(_dbgResting?' REST':''):'')];
+    if(!cfg.touchLegacy && _swipeFollow && _swipeLastDir) lines.push('REF    '+rel(_swipeFollow));
+    lines.push('SENT   '+(_dbgSent?_dbgSent.key.replace('Arrow','').toUpperCase()+' '+Math.round(nowMs-_dbgSent.at)+'MS':'---')+'  '+(cfg.touchLegacy?'LEGACY':'MODERN'));
+    ctx.save();
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font=`${FONT.HINT}px "Press Start 2P"`;
+    const lh=FONT.HINT+3, x=6, y0=CH-8-(lines.length-1)*lh;
+    let w=0; for(const l of lines) w=Math.max(w,ctx.measureText(l).width);
+    ctx.globalAlpha=0.6; ctx.fillStyle='#000'; ctx.fillRect(x-3,y0-lh/2-1,w+6,lines.length*lh+2);
+    ctx.globalAlpha=1; ctx.fillStyle='#40c8ff';
+    for(let i=0;i<lines.length;i++) ctx.fillText(lines[i],x,y0+i*lh);
     ctx.restore();
 }
 
