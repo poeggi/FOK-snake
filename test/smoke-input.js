@@ -264,7 +264,7 @@ runTest('SMOKE-INPUT', `
     phase='dying';                                       // the snake dies under the finger...
     document.__emit('touchend', touch(300,200));         // ...and the finger lifts during the animation
     if(!_armSlots[0]||!_armSlots[0].off) throw 'REGRESSION: finger-up in dying was swallowed -- the snake respawns boosting';
-    _swipeBase={x:300,y:200}; gameBoostStart(0,{x:1,y:0});   // same rule for a cancelled touch (iOS system gesture)
+    document.__emit('touchstart', touch(300,200)); gameBoostStart(0,{x:1,y:0});   // same rule for a cancelled touch (iOS system gesture)
     document.__emit('touchcancel', touch(300,200));
     if(!_armSlots[0]||!_armSlots[0].off) throw 'touchcancel in dying was swallowed -- the boost arm leaks';
     players=null; phase='menu'; inGame=false; _armSlots=[];

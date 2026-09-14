@@ -128,6 +128,73 @@ runTest('SMOKE-TOUCH', `
     if (s.some(e => e.k === 'DOWN')) throw 'modern, an 80 px/s drift of 19 px across sent DOWN';
     log('modern: a drifting hold does not tax the next move the other way');
 
+    // LOW sensitivity lengthens the time gates and the anti-spiral guard by the distance factor
+    // (1.33); HIGH leaves them at their MED values, never shorter. Legs of 70 px: held on LOW
+    // (guard 85), sent on MED and HIGH (guard 64). A hold whose next sample lands 64 ms after
+    // the last checkpoint: a rest on MED and HIGH (window 50 ms), still a slide on LOW (67 ms).
+    const spiral70 = () => poly([[0,0],[70,0],[70,-70],[0,-70],[0,0]], F, DT);
+    cfg.touchSens = 0; s = swipe(spiral70());
+    if (turns(s) !== 'RIGHT UP LEFT') throw 'LOW: a 70 px third turn must be held by the 85 px guard, sent: ' + dirs(s);
+    cfg.touchSens = 2; s = swipe(spiral70());
+    if (turns(s) !== 'RIGHT UP LEFT DOWN') throw 'HIGH: the guard must stay at 64 px, sent: ' + dirs(s);
+    const hold56 = () => poly([[0,0],[30,0],[30,0.5,0.5/56],[30,-40]], F, DT);   // right 30, hold 56 ms, up 40
+    cfg.touchSens = 0; s = swipe(hold56()); u = s.find(e => e.k === 'UP');
+    if (!u || -u.y < 30) throw 'LOW: a 64 ms gap must not count as rest (window 67 ms), UP after ' + (u ? -u.y : 'never') + ' px';
+    cfg.touchSens = 2; s = swipe(hold56()); u = s.find(e => e.k === 'UP');
+    if (!u || -u.y > 15) throw 'HIGH: a 64 ms gap must count as rest (window 50 ms), UP after ' + (u ? -u.y : 'never') + ' px';
+    cfg.touchSens = 1;
+    log('LOW lengthens the resting window and the guard by 1.33, HIGH keeps the MED values');
+
+    // THE STEERING FINGER is named by its identifier; the newest finger to land takes over.
+    // A holding thumb that landed first neither steers with its wobble nor ends the gesture
+    // by lifting; a takeover releases the old finger's boost; a finger that vanishes from the
+    // touch list without an end event ends the gesture like a lift.
+    const T = (id, x, y) => ({ identifier: id, clientX: x, clientY: y });
+    const mev = (touches, changed) => ({ touches, changedTouches: changed, preventDefault(){}, stopPropagation(){}, stopImmediatePropagation(){} });
+    function reset(){ players = null; phase = 'playing'; inGame = true; dir = { x:1, y:0 }; boostDir = null; boosting = false; _swipeEnd(); _turnRun = 0; _turnSense = 0; sent.length = 0; clk = 0; }
+    const holding = T(1, 60, 300);                      // a thumb resting low on the glass
+    let f2 = T(2, 300, 200);                            // the steering thumb
+    reset();
+    document.__emit('touchstart', mev([holding], [holding]));
+    clk = 20; document.__emit('touchstart', mev([holding, f2], [f2]));
+    for (let i = 1; i <= 10; i++){ clk = 20 + i * 8; f2 = T(2, 300 + i * 4.8, 200); cur = f2; document.__emit('touchmove', mev([holding, f2], [f2])); }
+    for (let i = 1; i <= 10; i++){ clk = 100 + i * 8; f2 = T(2, 348, 200 - i * 4.8); cur = f2; document.__emit('touchmove', mev([holding, f2], [f2])); }
+    if (dirs(sent) !== 'RIGHT UP') throw 'newest finger must steer while a thumb rests: ' + dirs(sent);
+    let before = sent.length;
+    for (let i = 1; i <= 8; i++){ clk = 180 + i * 8; const h = T(1, 60 + i * 4.8, 300 + i * 2); document.__emit('touchmove', mev([h, f2], [h])); }   // the resting thumb wobbles 40 px
+    if (sent.length !== before) throw 'a resting thumb wobble must not steer: ' + sent.slice(before).map(e => e.k).join(' ');
+    clk = 260; document.__emit('touchend', mev([f2], [T(1, 98, 316)]));   // the resting thumb lifts
+    if (sent.length !== before) throw 'a resting thumb lifting must end nothing: ' + sent.slice(before).map(e => e.k).join(' ');
+    for (let i = 1; i <= 10; i++){ clk = 260 + i * 8; f2 = T(2, 348 - i * 4.8, 152); cur = f2; document.__emit('touchmove', mev([f2], [f2])); }
+    if (dirs(sent) !== 'RIGHT UP LEFT') throw 'the gesture must survive the other thumb lifting: ' + dirs(sent);
+    before = sent.length;
+    clk = 350; document.__emit('touchend', mev([], [f2]));
+    if (sent[sent.length - 1].k !== 'boost-' || _swipeBase) throw 'the steering finger lifting must end the gesture';
+    log('steering finger: newest lands and steers, a resting thumb neither steers nor ends the gesture');
+
+    // A takeover mid-boost: the boost of the sliding finger is released when a new finger
+    // lands, further moves of the old finger are ignored, the new finger steers.
+    reset();
+    f2 = T(2, 100, 200);
+    document.__emit('touchstart', mev([f2], [f2]));
+    for (let i = 1; i <= 28; i++){ clk = i * 8; f2 = T(2, 100 + i * 4.8, 200); cur = f2; document.__emit('touchmove', mev([f2], [f2])); }   // 134 px slide
+    if (!boosted(sent)) throw 'a 134 px slide must engage boost';
+    before = sent.length;
+    let f3 = T(3, 400, 300);
+    clk = 240; document.__emit('touchstart', mev([f2, f3], [f3]));
+    if (sent[sent.length - 1].k !== 'boost-') throw 'a takeover must release the boost of the old finger: ' + sent.slice(before).map(e => e.k).join(' ');
+    before = sent.length;
+    for (let i = 1; i <= 10; i++){ clk = 240 + i * 8; f2 = T(2, 234 + i * 4.8, 200); document.__emit('touchmove', mev([f2, f3], [f2])); }   // the old finger keeps sliding
+    if (sent.length !== before) throw 'the old finger must be ignored after a takeover: ' + sent.slice(before).map(e => e.k).join(' ');
+    for (let i = 1; i <= 10; i++){ clk = 320 + i * 8; f3 = T(3, 400, 300 - i * 4.8); cur = f3; document.__emit('touchmove', mev([f2, f3], [f3])); }
+    if (dirs(sent.slice(before)) !== 'UP') throw 'the new finger must steer after a takeover: ' + dirs(sent.slice(before));
+    // The steering finger vanishes from the touch list without an end event: the gesture ends.
+    before = sent.length;
+    clk = 420; document.__emit('touchmove', mev([f2], [f2]));
+    if (sent[sent.length - 1].k !== 'boost-' || _swipeBase) throw 'a vanished steering finger must end the gesture';
+    reset(); phase = 'menu'; inGame = false;
+    log('steering finger: a takeover releases the boost and hands over, a vanished finger ends the gesture');
+
     // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
     // duel wire counts on one same-direction record per SWIPE_SAME, never more.
     const slide = poly([[0,0],[130,0]], F, DT);
@@ -145,6 +212,13 @@ runTest('SMOKE-TOUCH', `
     s = swipe(poly([[0,0],[70,0],[70,-70],[0,-70],[0,0]], F, DT));   // a 70 px leg also passes the 48 px same-direction mark
     if (turns(s) !== 'RIGHT UP LEFT DOWN') throw 'modern spiral guard, 70 px legs: ' + dirs(s);
     log('modern: the anti-spiral guard holds a 30 px third turn and lets a 70 px one through');
+
+    // A held turn must not shadow the brake: right, up, left, a 40 px down the guard holds, then
+    // the finger pulls back right 50 px. Back outgrows the held across, so the reverse of LEFT
+    // is sent as the brake (the sim refuses it) and the held DOWN never fires.
+    s = swipe(poly([[0,0],[30,0],[30,-30],[0,-30],[0,10],[50,10]], F, DT));
+    if (turns(s) !== 'RIGHT UP LEFT RIGHT') throw 'modern, brake under a held turn sent: ' + dirs(s);
+    log('modern: pulling back under a held spiral turn still brakes');
 
     // The brake: while boosting right, a slide back from the furthest point ends the boost at
     // SWIPE_1 (the sim refuses the reverse, so it never turns the snake).

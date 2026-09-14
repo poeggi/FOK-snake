@@ -1013,9 +1013,14 @@ function _dialSwipe(key){
 }
 // Touch steering sensitivity (settings > CONTROLS): scales every swipe distance, in-play and in
 // menus alike. A higher setting shortens the travel a swipe needs, so both steering and menu
-// scrolling get twitchier together.
+// scrolling get twitchier together. LOW also lengthens the time gates and the anti-spiral guard
+// (_touchLowF); HIGH leaves those at their MED values.
 const _TOUCH_SENS_F=[1.33,1.0,0.66];
 function _touchSensF(){ return _TOUCH_SENS_F[(cfg&&cfg.touchSens!=null)?cfg.touchSens:1]||1; }
+// The LOW-only factor: the time gates (the resting window, the boost gate) and the anti-spiral
+// guard grow with LOW sensitivity by the same 1.33 as the distances, and never shrink below
+// their MED values on HIGH. A twitchier setting must not buy a shorter guard or a hastier rest.
+function _touchLowF(){ return Math.max(1, _touchSensF()); }
 // Anti-spiral touch guard: three quick same-way 90-degree turns in one gesture curl the head
 // straight onto the body -- the classic fat-finger death. So the THIRD (and any further)
 // same-way turn in a row demands a longer, deliberate swipe (SWIPE_GUARD, 64px) than a free
@@ -1033,7 +1038,7 @@ function _spiralHold(key, dist, sf){
     const kd=GDIRS[key];
     const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
     if(sense===0) return false;
-    if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*sf)) return true;   // hold the third same-way turn until the swipe clears the guard
+    if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*_touchLowF())) return true;   // hold the third same-way turn until the swipe clears the guard (LOW: 85px, MED and HIGH: 64px)
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
     return false;
 }
@@ -1082,6 +1087,14 @@ function _dbgSteerLog(p, d){
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 let _swipeFollow=null;   // the furthest point the finger has reached along the last sent axis (MODERN reader)
+// THE STEERING FINGER, by identifier. One finger steers; every sample and every lift is matched
+// against it, so a thumb resting on the glass neither pollutes the gesture with its wobble nor
+// ends it by lifting. The newest finger to land on the play surface takes over (a holding thumb
+// is usually there first, the steering thumb arrives later); a takeover releases the old
+// finger's boost, since that finger's own lift is no longer ours to hear.
+let _swipeId=null;
+function _touchById(list,id){ for(let i=0;i<list.length;i++){ if(list[i].identifier===id) return list[i]; } return null; }
+function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _dbgTouch=null; _dbgResting=false; }
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
 // DEBUG L3 readout state (drawTouchDebug in screens.js). The touch layer accumulates every sample
 // between two readout refreshes and the painter takes ONE snapshot per refresh, so the numbers
@@ -1160,8 +1173,10 @@ function _swipeRead(x,y,sf,hop){
         // The same direction (the boost slide) is a finger still running the sent way, SWIPE_SAME
         // along from the commit point; a stroke curving away is a turn in the making, never a slide.
         if(agrees&&along>=Math.round(SWIPE_SAME*sf)) return {key:_swipeLastDir, dist:along};
-        if(Math.abs(across)>=Math.round(SWIPE_N*sf)) return {key:ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)};
+        // Whichever of across and back is larger is the motion; a turn the anti-spiral guard is
+        // holding must not shadow a finger pulling back to brake.
         if(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across)) return {key:ax?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back};
+        if(Math.abs(across)>=Math.round(SWIPE_N*sf)) return {key:ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)};
         return null;
     }
     const dx=x-_swipeBase.x, dy=y-_swipeBase.y;
@@ -1180,7 +1195,8 @@ function _swipeRead(x,y,sf,hop){
     return {key:horiz?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'), dist:along};
 }
 document.addEventListener('touchstart',e=>{
-    const t=e.touches[0];
+    // The newest finger: e.changedTouches lists the fingers that just landed.
+    const t=(e.changedTouches&&e.changedTouches.length)?e.changedTouches[e.changedTouches.length-1]:e.touches[0];
     // A panel that is up owns the pointer, exactly as it owns the keyboard. Arming a gesture
     // here would preventDefault() the tap -- and a prevented touchstart is a click the browser
     // never synthesises, so the panel's own buttons go dead -- and then answer finger-up with
@@ -1197,6 +1213,8 @@ document.addEventListener('touchstart',e=>{
         const onVf = _scanFor() && _scanTapAt(t.clientX, t.clientY);   // a viewfinder tap cycles the camera
         if(!onVf && _entryInField(t.clientX, t.clientY)) nameInp.focus(); else nameInp.blur();
     }
+    if(_swipeBase&&_swipeId!==t.identifier) gameBoostEnd(0);   // a takeover: the finger that steered so far hands over, its boost released here
+    _swipeId=t.identifier;
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
@@ -1204,7 +1222,11 @@ document.addEventListener('touchmove',e=>{
     if(!_swipeBase||phase==='splash') return;
     e.preventDefault();
     const now=performance.now();
-    const t=e.touches[0];
+    // Only the steering finger's samples are read. Another finger moving is ignored; the
+    // steering finger missing from the touch list altogether (an end the browser never
+    // delivered) ends the gesture the way a lift does, boost included.
+    const t=e.changedTouches?_touchById(e.changedTouches,_swipeId):e.touches[0];
+    if(!t){ if(!_touchById(e.touches,_swipeId)){ gameBoostEnd(0); _swipeEnd(); } return; }
     if((cfg.debug|0)>=3){
         if(_dbgTouch) _dbgAcc.len+=Math.hypot(t.clientX-_dbgTouch.x,t.clientY-_dbgTouch.y);
         _dbgTouch={x:t.clientX,y:t.clientY}; _dbgAcc.sx+=t.clientX; _dbgAcc.sy+=t.clientY; _dbgAcc.n++;
@@ -1216,7 +1238,7 @@ document.addEventListener('touchmove',e=>{
     // the next move as a fresh first swipe. Distance travelled, not the event-delivery gap,
     // tells a real pause from a coalesced slide. Boost is untouched here: the boost gate is
     // anchored to touchdown, so a forgotten heading cannot restart it.
-    const resting=now-_swipeLastMoveAt>SWIPE_COOLDOWN&&moved<SWIPE_N;
+    const resting=now-_swipeLastMoveAt>SWIPE_COOLDOWN*_touchLowF()&&moved<SWIPE_N;
     _dbgResting=resting; if(resting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
     if(resting){
         _swipeLastDir=null;
@@ -1248,7 +1270,7 @@ document.addEventListener('touchmove',e=>{
         :isBrake?SWIPE_1
         :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_mbT.on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N))*sf);
     if(dist<thresh) return;
-    if(_spiralHold(key,dist,sf)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,Math.round(SWIPE_GUARD*sf)); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
+    if(_spiralHold(key,dist,sf)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,Math.round(SWIPE_GUARD*_touchLowF())); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
@@ -1268,7 +1290,7 @@ document.addEventListener('touchmove',e=>{
             // exactly once per touch -- pauses and forgotten headings never restart it -- and its
             // ONLY effect is to hold boost off; steering is untouched. A finger already resting on
             // the pad past the gate therefore boosts on its first sustained slide, no penalty.
-            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_swipeTouchStartAt>=BOOST_GATE_MS) gameBoostStart(0,d,true); }
+            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_swipeTouchStartAt>=BOOST_GATE_MS*_touchLowF()) gameBoostStart(0,d,true); }
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }
@@ -1281,18 +1303,20 @@ document.addEventListener('touchend',e=>{
         triggerSplashExit();
         return;
     }
-    // Only a touch we armed runs the cleanup, so a tap on a masked control can't end an active boost.
+    // Only the steering finger's lift runs the cleanup: a tap on a masked control, or a
+    // holding thumb lifting, ends neither the gesture nor an active boost.
     if(_swipeBase){
+        const t=e.changedTouches?_touchById(e.changedTouches,_swipeId):null;
+        if(!t) return;
         e.preventDefault();
         // Menu left/right gesture: fire ONE key now, on finger-up. Otherwise, tap -> select.
         if(!_inPlay()&&phase!=='credits'&&phase!=='nameEntry'&&_menuHDir){
             handleKey(_menuHDir,null);
         } else {
-            const t=e.changedTouches[0];
             const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
             if(!_inPlay()&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
         }
-        _swipeBase=null; _swipeFollow=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _dbgTouch=null; _dbgResting=false;
+        _swipeEnd();
         // The release is NEVER phase-gated (engage is): finger-up is a device fact, and
         // swallowing it during 'dying' left the arm slot held -- the snake respawned
         // boosting with no finger down. Keyboard keyup and the dpad touchend already
@@ -1305,8 +1329,9 @@ document.addEventListener('touchend',e=>{
 // boost here so it cannot stick on with the finger already gone.
 document.addEventListener('touchcancel',e=>{
     if(!_swipeBase) return;
+    if(e.changedTouches&&e.changedTouches.length&&!_touchById(e.changedTouches,_swipeId)) return;   // another finger's cancel
     gameBoostEnd(0);   // release is never phase-gated -- same rule as touchend above
-    _swipeBase=null; _swipeFollow=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _dbgTouch=null; _dbgResting=false;
+    _swipeEnd();
 },{passive:true});
 
 // ================================================================
