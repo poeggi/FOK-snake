@@ -107,6 +107,27 @@ runTest('SMOKE-TOUCH', `
     if (dirs(s) !== 'RIGHT') throw 'modern, 20 px staircase (below the turn distance) sent: ' + dirs(s);
     log('modern: a slanted stroke is one turn, a sub-threshold staircase is none');
 
+    // The first swipe is judged by its portion along the chosen axis: a 60 px stroke 38 degrees
+    // off vertical sends UP only once it has 16 px of UP in it (the 5th 4.8 px sample); LEGACY
+    // fires on the 16 px chord, one sample earlier, with 15 px of UP in it.
+    s = swipe(poly([[0,0],[37,-47]], F, DT));
+    let u = s.find(e => e.k === 'UP');
+    if (!u || -u.y < 16) throw 'modern, slanted first swipe: UP after ' + (u ? -u.y : 'never') + ' px of up travel';
+    if (turns(s) !== 'UP') throw 'modern, slanted first swipe sent: ' + dirs(s);
+    cfg.touchLegacy = true; s = swipe(poly([[0,0],[37,-47]], F, DT)); cfg.touchLegacy = false;
+    u = s.find(e => e.k === 'UP');
+    if (!u || -u.y >= 16) throw 'legacy, slanted first swipe must fire on the chord, got UP after ' + (u ? -u.y : 'never') + ' px of up travel';
+    log('modern: the first swipe fires on 16 px along its axis, legacy on 16 px of chord');
+
+    // A thumb that drifts one way while waiting (too fast to count as resting, too slanted to
+    // count as the sent direction) never has to undo the drift: the across reference re-anchors
+    // where the across motion reverses, so the next move the other way is a turn at SWIPE_N.
+    s = swipe(poly([[0,0],[30,0],[44.4,19.2,0.08],[44.4,-20.8]], F, DT));   // right 30, 300 ms creep down-right at 80 px/s, up 40
+    u = s.find(e => e.k === 'UP');
+    if (!u || 19.2 - u.y > 32) throw 'modern, drift then flick: UP after ' + (u ? Math.round(19.2 - u.y) : 'never') + ' px of up travel';
+    if (s.some(e => e.k === 'DOWN')) throw 'modern, an 80 px/s drift of 19 px across sent DOWN';
+    log('modern: a drifting hold does not tax the next move the other way');
+
     // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
     // duel wire counts on one same-direction record per SWIPE_SAME, never more.
     const slide = poly([[0,0],[130,0]], F, DT);

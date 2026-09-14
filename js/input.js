@@ -1083,9 +1083,23 @@ function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
 let _swipeFollow=null;   // the furthest point the finger has reached along the last sent axis (MODERN reader)
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
-// DEBUG L3 readout state (drawTouchDebug in screens.js): the live finger, whether the last sample
-// counted as resting, and the last direction the touch layer sent in play.
+// DEBUG L3 readout state (drawTouchDebug in screens.js). The touch layer accumulates every sample
+// between two readout refreshes and the painter takes ONE snapshot per refresh, so the numbers
+// hold still long enough to be read: the finger's mean position and mean speed over the window,
+// whether it counted as resting for most of it, the anchors, and the last direction sent in play.
 let _dbgTouch=null, _dbgResting=false, _dbgSent=null;
+const _dbgAcc={sx:0,sy:0,n:0,len:0,rest:0};
+function _dbgAccReset(){ _dbgAcc.sx=0; _dbgAcc.sy=0; _dbgAcc.n=0; _dbgAcc.len=0; _dbgAcc.rest=0; }
+function _dbgTouchSnapshot(winMs){
+    const a=_dbgAcc, nowMs=performance.now();
+    const s={ touch: a.n?{x:a.sx/a.n,y:a.sy/a.n}:_dbgTouch, speed:(a.n>1&&winMs>0)?a.len/winMs*1000:null,
+              rest: a.n?(a.rest*2>=a.n):_dbgResting,
+              anchor:_swipeBase, anchorAge:_swipeBase?nowMs-_swipeBaseAt:0,
+              ref:(!cfg.touchLegacy&&_swipeLastDir)?_swipeFollow:null,
+              sent:_dbgSent, sentAge:_dbgSent?nowMs-_dbgSent.at:0, legacy:!!cfg.touchLegacy };
+    _dbgAccReset();
+    return s;
+}
 // Swipes are read on the whole document; a touch starting on a live control (the gamepad cluster,
 // the MUTE/FPS boxes, or the level-3 SNAP button) is excluded, grown by a margin so a near-miss
 // isn't stolen as a swipe.
@@ -1101,9 +1115,10 @@ function _inControlMask(x,y){
     return false;
 }
 // THE SWIPE READER: one finger sample in, the key it asks for and the distance the threshold
-// table judges out; null while nothing is readable. Both readers share the CHORD from the
+// table judges out; null while nothing is readable. Both readers open with the CHORD from the
 // anchor, classified by its angle through the dead zone: the first swipe of a touch, the swipe
-// after a pause, and every menu swipe. They part once a direction has been sent in play:
+// after a pause, and every menu swipe (MODERN judges that first swipe by its portion along the
+// chosen axis, LEGACY by the chord). They part once a direction has been sent in play:
 //   MODERN (default): three distances, each on its own axis. ACROSS the sent axis is the
 //     90-degree turn, measured from where the finger's motion last agreed with the sent
 //     direction: a slanted stroke is a slide, a stroke that has turned is a turn, and the turn
@@ -1127,7 +1142,18 @@ function _swipeRead(x,y,sf,hop){
         const pa=ax?x*d.x:y*d.y, fa=ax?_swipeFollow.x*d.x:_swipeFollow.y*d.y;
         if(pa>fa){ if(ax) _swipeFollow.x=x; else _swipeFollow.y=y; }
         let agrees=false;   // this sample sets a checkpoint, and the hop to it runs the sent way
-        if(hop){ const ha=ax?hop.dx*d.x:hop.dy*d.y, hc=ax?hop.dy:hop.dx; agrees=ha>0&&Math.abs(hc)<=ha*_HOP_TAN; if(agrees){ if(ax) _swipeFollow.y=y; else _swipeFollow.x=x; } }
+        if(hop){
+            const ha=ax?hop.dx*d.x:hop.dy*d.y, hc=ax?hop.dy:hop.dx;
+            agrees=ha>0&&Math.abs(hc)<=ha*_HOP_TAN;
+            if(agrees){ if(ax) _swipeFollow.y=y; else _swipeFollow.x=x; }
+            else {
+                // A reversal of the across motion re-anchors the reference at the turning point, so a
+                // thumb that drifted one way while waiting never has to undo the drift before a
+                // move the other way counts: the turn is SWIPE_N from where the drift ended.
+                const acc=ax?y-_swipeFollow.y:x-_swipeFollow.x, before=acc-hc;
+                if(before!==0&&Math.sign(hc)===-Math.sign(before)){ if(ax) _swipeFollow.y=y-hc; else _swipeFollow.x=x-hc; }
+            }
+        }
         const along=pa-(ax?_swipeBase.x*d.x:_swipeBase.y*d.y);
         const across=ax?y-_swipeFollow.y:x-_swipeFollow.x;
         const back=(ax?_swipeFollow.x*d.x:_swipeFollow.y*d.y)-pa;
@@ -1146,7 +1172,12 @@ function _swipeRead(x,y,sf,hop){
     const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
     const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
     if(ang>=dzLo&&ang<=dzHi) return null;
-    return {key:ang<dzLo?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'), dist};
+    const horiz=ang<dzLo;
+    // The chord's angle picks the axis (it needs the SWIPE_1 of travel to be reliable). MODERN
+    // then judges the portion of the travel along that axis, so a slanted first swipe needs
+    // SWIPE_1 in the direction being sent; LEGACY and the menus judge the chord itself.
+    const along=(_inPlay()&&!cfg.touchLegacy)?(horiz?Math.abs(dx):Math.abs(dy)):dist;
+    return {key:horiz?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'), dist:along};
 }
 document.addEventListener('touchstart',e=>{
     const t=e.touches[0];
@@ -1167,14 +1198,17 @@ document.addEventListener('touchstart',e=>{
         if(!onVf && _entryInField(t.clientX, t.clientY)) nameInp.focus(); else nameInp.blur();
     }
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
-    _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false;
+    _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
 document.addEventListener('touchmove',e=>{
     if(!_swipeBase||phase==='splash') return;
     e.preventDefault();
     const now=performance.now();
     const t=e.touches[0];
-    if((cfg.debug|0)>=3) _dbgTouch={x:t.clientX,y:t.clientY};
+    if((cfg.debug|0)>=3){
+        if(_dbgTouch) _dbgAcc.len+=Math.hypot(t.clientX-_dbgTouch.x,t.clientY-_dbgTouch.y);
+        _dbgTouch={x:t.clientX,y:t.clientY}; _dbgAcc.sx+=t.clientX; _dbgAcc.sy+=t.clientY; _dbgAcc.n++;
+    }
     const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
     // Forget the heading only on a GENUINE finger pause. A large jump since the last processed
     // move means the finger kept sliding and the browser merely coalesced touchmove under
@@ -1183,7 +1217,7 @@ document.addEventListener('touchmove',e=>{
     // tells a real pause from a coalesced slide. Boost is untouched here: the boost gate is
     // anchored to touchdown, so a forgotten heading cannot restart it.
     const resting=now-_swipeLastMoveAt>SWIPE_COOLDOWN&&moved<SWIPE_N;
-    _dbgResting=resting;
+    _dbgResting=resting; if(resting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
     if(resting){
         _swipeLastDir=null;
         // MODERN reader: the anchor follows a paused finger (to the last checkpoint, at most

@@ -1431,25 +1431,33 @@ function drawTurnDebug(){
     ctx.restore();
 }
 
-// DEBUG LEVEL 3 readout, bottom-left: the finger and the swipe reader's anchors in CSS px from
-// the canvas centre (the units every swipe threshold is in), how long ago the anchor was placed,
-// REST while the last sample counted as a resting finger, the MODERN across reference (REF), and
-// the last direction the touch layer sent in play with its age. Render-only; never the sim.
+// DEBUG LEVEL 3 readout, bottom centre, refreshed DBG_TOUCH_REFRESH_MS apart so it can be read: the
+// finger's mean position and speed over the window, in CSS px from the canvas centre (the units
+// every swipe threshold is in), the swipe reader's anchor with its age and REST while the finger
+// counted as resting for most of the window, the MODERN across reference (REF), and the last
+// direction the touch layer sent in play with its age. Render-only; never the sim.
+const DBG_TOUCH_REFRESH_MS=250;
+let _dbgTouchShown=null, _dbgTouchShownAt=0;
 function drawTouchDebug(){
-    if(typeof _swipeBase==='undefined' || typeof canvas==='undefined') return;
-    const r=canvas.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+    if(typeof _dbgTouchSnapshot!=='function' || typeof canvas==='undefined') return;
     const nowMs=performance.now();
+    if(!_dbgTouchShown || nowMs-_dbgTouchShownAt>=DBG_TOUCH_REFRESH_MS){ _dbgTouchShown=_dbgTouchSnapshot(nowMs-_dbgTouchShownAt); _dbgTouchShownAt=nowMs; }
+    const s=_dbgTouchShown;
+    const r=canvas.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
     const sg=v=>(v>=0?'+':'')+Math.round(v);
     const rel=p=>p?sg(p.x-cx)+' '+sg(p.y-cy):'---';
-    const lines=['TOUCH  '+rel(_dbgTouch),
-                 'ANCHOR '+rel(_swipeBase)+(_swipeBase?'  '+Math.round(nowMs-_swipeBaseAt)+'MS'+(_dbgResting?' REST':''):'')];
-    if(!cfg.touchLegacy && _swipeFollow && _swipeLastDir) lines.push('REF    '+rel(_swipeFollow));
-    lines.push('SENT   '+(_dbgSent?_dbgSent.key.replace('Arrow','').toUpperCase()+' '+Math.round(nowMs-_dbgSent.at)+'MS':'---')+'  '+(cfg.touchLegacy?'LEGACY':'MODERN'));
+    const ms=v=>Math.round(v/10)*10+'MS';
+    const lines=['TOUCH  '+rel(s.touch)+(s.speed!=null?'  '+Math.round(s.speed/10)*10+' PX/S':''),
+                 'ANCHOR '+rel(s.anchor)+(s.anchor?'  '+ms(s.anchorAge)+(s.rest?' REST':''):'')];
+    if(s.ref) lines.push('REF    '+rel(s.ref));
+    lines.push('SENT   '+(s.sent?s.sent.key.replace('Arrow','').toUpperCase()+' '+ms(s.sentAge):'---')+'  '+(s.legacy?'LEGACY':'MODERN'));
     ctx.save();
     ctx.textAlign='left'; ctx.textBaseline='middle';
     ctx.font=`${FONT.HINT}px "Press Start 2P"`;
-    const lh=FONT.HINT+3, x=6, y0=CH-8-(lines.length-1)*lh;
+    // Bottom centre: the level 2 corner docks own the four screen corners.
+    const lh=FONT.HINT+3, y0=CH-8-(lines.length-1)*lh;
     let w=0; for(const l of lines) w=Math.max(w,ctx.measureText(l).width);
+    const x=Math.round((CW-w)/2);
     ctx.globalAlpha=0.6; ctx.fillStyle='#000'; ctx.fillRect(x-3,y0-lh/2-1,w+6,lines.length*lh+2);
     ctx.globalAlpha=1; ctx.fillStyle='#40c8ff';
     for(let i=0;i<lines.length;i++) ctx.fillText(lines[i],x,y0+i*lh);
