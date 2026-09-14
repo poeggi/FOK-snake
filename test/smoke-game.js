@@ -339,7 +339,8 @@ runTest('SMOKE-GAME', `
       t = _layoutT0 + 10; delete globalThis.screen; _lastCw = -1; canvas.style.width = ''; layout();
       if(canvas.style.width === '') throw 'without the orientation API nothing may be skipped';
       performance.now = oNow; document.documentElement = oDe; _lastCw = -1;
-      log('launch-lag layout: a portrait-shaped window on a landscape device is skipped for LAYOUT_SETTLE_MS, laid out once the numbers agree, never skipped without the API'); }
+      if (!_layoutTrace.some(e => e.what === 'layout skipped') || !_layoutTrace.some(e => e.what === 'layout' && e.cw > 0)) throw 'the launch trace must record the skipped pass and a sized pass: ' + JSON.stringify(_layoutTrace);
+      log('launch-lag layout: a portrait-shaped window on a landscape device is skipped for LAYOUT_SETTLE_MS, laid out once the numbers agree, never skipped without the API; the launch trace records each pass'); }
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

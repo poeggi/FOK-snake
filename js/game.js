@@ -392,7 +392,9 @@ function _canvasInfo(){
         canvasDisplay:{ width:Math.round(cr.width), height:Math.round(cr.height), left:Math.round(cr.left), top:Math.round(cr.top) },
         wrap:{ clientWidth:wrap.clientWidth, clientHeight:wrap.clientHeight, top:Math.round(wr.top) },
         cssVars:{ uiScale:cv('--ui-scale'), stageW:cv('--stage-w') },
-        fontScale:FONT
+        fontScale:FONT,
+        standalone: !!(navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)),
+        launchTrace: _layoutTrace.slice()
     };
 }
 // The full debug state (extend freely): canvas/layout, config, fps recorder state, sim
@@ -1560,6 +1562,25 @@ let _lastCw = -1, _layoutDbg = {};
 // is skipped.
 const LAYOUT_SETTLE_MS = 1500;
 const _layoutT0 = performance.now();
+// The LAUNCH TRACE: every reading layout() and the viewport events see in the first passes,
+// kept for EXPORT CANVAS INFO (DEBUGGING settings), so a launch that comes up at the wrong
+// size on a device can be read afterwards instead of guessed at. LAYOUT_TRACE_MAX entries,
+// then it stops recording.
+const LAYOUT_TRACE_MAX = 24;
+const _layoutTrace = [];
+function _layoutNote(what, extra){
+    if (_layoutTrace.length >= LAYOUT_TRACE_MAX) return;
+    const vv = window.visualViewport;
+    const e = { t: Math.round(performance.now() - _layoutT0), what,
+                de: [document.documentElement.clientWidth, document.documentElement.clientHeight],
+                win: [window.innerWidth, window.innerHeight],
+                vv: vv ? [Math.round(vv.width), Math.round(vv.height), vv.scale] : null,
+                so: (typeof screen !== 'undefined' && screen.orientation && screen.orientation.type) || null,
+                mq: (window.matchMedia ? window.matchMedia('(orientation: landscape)').matches : null),
+                lsq: _lsq.matches, dpr: window.devicePixelRatio };
+    if (extra) Object.assign(e, extra);
+    _layoutTrace.push(e);
+}
 function _layoutStale(vpW, vpH){
     if (performance.now() - _layoutT0 > LAYOUT_SETTLE_MS) return false;
     const t = (typeof screen !== 'undefined' && screen.orientation && screen.orientation.type) || '';
@@ -1571,7 +1592,7 @@ function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
         const vpW = document.documentElement.clientWidth, vpH = document.documentElement.clientHeight;
-        if (_layoutStale(vpW, vpH)) return;   // launch-lag metrics: let the settle's resize run this pass
+        if (_layoutStale(vpW, vpH)) { _layoutNote('layout skipped'); return; }   // launch-lag metrics: let the settle's resize run this pass
         let wW, wH, m, scale, mode;
         if (!_lsq.matches) {
             // COLUMN (desktop + portrait touch): #wrap shrink-wraps the JS-sized canvas, so the
@@ -1602,6 +1623,7 @@ function layout() {
         // this + the live FPS. (#debug in the URL only enables debug mode; the
         // DEBUG LEVEL 2+ gate on drawing lives in the overlay.)
         _layoutDbg = { mode, vpW, vpH, wW, wH, m, scale, cw, ch: CH*scale };
+        _layoutNote('layout', { mode, wW: Math.round(wW), wH: Math.round(wH), scale: +scale.toFixed(3), cw: Math.round(cw), same: Math.abs(cw - _lastCw) < 0.5 });
         if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
         canvas.style.width = cw + 'px';
@@ -1678,11 +1700,11 @@ function _syncSafeArea(){
     } catch(_) {}
 })();
 const _reflow = () => { _syncSafeArea(); layout(); };
-window.addEventListener('resize', () => requestAnimationFrame(_reflow));
+window.addEventListener('resize', () => { _layoutNote('resize'); requestAnimationFrame(_reflow); });
 // React the moment the orientation actually changes (the precise signal), plus a short burst
 // across the settle window as a backstop. The cached side above already keeps repeat rotations
 // instant; these tighten the first flip after a fresh load.
-window.addEventListener('orientationchange', () => { [0,150,350,600].forEach(ms => setTimeout(_reflow, ms)); });
+window.addEventListener('orientationchange', () => { _layoutNote('orientationchange'); [0,150,350,600].forEach(ms => setTimeout(_reflow, ms)); });
 if (typeof screen !== 'undefined' && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', _reflow);
 if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
 // Startup can race the web font and the browser's first CSS layout, which occasionally
