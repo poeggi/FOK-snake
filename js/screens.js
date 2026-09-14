@@ -1441,7 +1441,7 @@ let _dbgTouchShown=null, _dbgTouchShownAt=0;
 function drawTouchDebug(){
     if(typeof _dbgTouchSnapshot!=='function' || typeof canvas==='undefined') return;
     const nowMs=performance.now();
-    if(!_dbgTouchShown || nowMs-_dbgTouchShownAt>=DBG_TOUCH_REFRESH_MS){ _dbgTouchShown=_dbgTouchSnapshot(nowMs-_dbgTouchShownAt); _dbgTouchShownAt=nowMs; }
+    if(!_dbgTouchShown || nowMs-_dbgTouchShownAt>=DBG_TOUCH_REFRESH_MS){ _dbgTouchShown=_dbgTouchSnapshot(); _dbgTouchShownAt=nowMs; }
     const s=_dbgTouchShown;
     const r=canvas.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
     const sg=v=>(v>=0?'+':'')+Math.round(v);

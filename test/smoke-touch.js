@@ -195,6 +195,48 @@ runTest('SMOKE-TOUCH', `
     reset(); phase = 'menu'; inGame = false;
     log('steering finger: a takeover releases the boost and hands over, a vanished finger ends the gesture');
 
+    // A touchstart with the SAME identifier while a gesture is armed (an end the browser never
+    // delivered) releases the boost too.
+    reset(); f2 = T(2, 100, 200);
+    document.__emit('touchstart', mev([f2], [f2]));
+    for (let i = 1; i <= 28; i++){ clk = i * 8; f2 = T(2, 100 + i * 4.8, 200); cur = f2; document.__emit('touchmove', mev([f2], [f2])); }
+    if (!boosted(sent)) throw 'a 134 px slide must engage boost';
+    clk = 240; document.__emit('touchstart', mev([f2], [f2]));
+    if (sent[sent.length - 1].k !== 'boost-') throw 'a touchstart with the same identifier while armed must release the boost';
+    log('steering finger: the same identifier landing again releases the boost');
+
+    // A dialog that opens under a finger planted in play must not take the lift as its answer,
+    // with or without TOUCH AUTOSELECT; a tap that begins and ends on the same screen still does.
+    const keys2 = []; const oH2 = handleKey; handleKey = function(k, pde){ keys2.push(k); return oH2(k, pde); };
+    reset(); f2 = T(2, 300, 200); clk = 0;
+    document.__emit('touchstart', mev([f2], [f2]));
+    cfg.touchSelect = true; prevPhase = 'playing'; quitConfirmSel = 1; phase = 'quitConfirm';
+    clk = 100; document.__emit('touchend', mev([], [T(2, 302, 201)]));
+    if (keys2.indexOf('Enter') >= 0) throw 'a lift on a dialog that opened under a planted finger pressed Enter';
+    cfg.touchSelect = false;
+    phase = 'scores'; inGame = false; scoresTab = 0; keys2.length = 0; clk = 0;
+    document.__emit('touchstart', mev([f2], [f2])); clk = 60; document.__emit('touchend', mev([], [f2]));
+    if (keys2.indexOf('Enter') < 0) throw 'a tap that begins and ends on the same screen must still press Enter';
+    handleKey = oH2; phase = 'menu';
+    log('a lift answers only the screen the touch began on');
+
+    // A slide carried from GET READY into play is a fresh first swipe after GO, never an instant
+    // boost: the gesture re-anchors at the finger and forgets its direction on the flip.
+    reset(); phase = 'levelReady'; inGame = true; f2 = T(2, 300, 300); clk = 0;
+    document.__emit('touchstart', mev([f2], [f2]));
+    for (let i = 1; i <= 20; i++){ clk = i * 8; f2 = T(2, 300, 300 - i * 4.8); cur = f2; document.__emit('touchmove', mev([f2], [f2])); }   // 96 px up before GO
+    phase = 'playing';
+    for (let i = 21; i <= 30; i++){ clk = i * 8; f2 = T(2, 300, 300 - i * 4.8); cur = f2; document.__emit('touchmove', mev([f2], [f2])); }  // 48 px more after GO
+    if (boosted(sent)) throw 'a slide carried from GET READY into play boosted at once';
+    if (dirs(sent) !== 'UP') throw 'the slide after GO must be read as a first swipe: ' + dirs(sent);
+    reset(); phase = 'menu'; inGame = false;
+    log('a touch running from GET READY into play carries nothing over');
+
+    // A thumb curling back-and-up (mostly up) is a turn, not a brake.
+    s = swipe(poly([[0,0],[60,0],[40,-34.6]], F, DT));
+    if (turns(s) !== 'RIGHT UP') throw 'a thumb curling back-and-up must turn, sent: ' + dirs(s);
+    log('modern: a thumb curling back-and-up turns rather than brakes');
+
     // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
     // duel wire counts on one same-direction record per SWIPE_SAME, never more.
     const slide = poly([[0,0],[130,0]], F, DT);

@@ -1031,12 +1031,25 @@ function _touchLowF(){ return Math.max(1, _touchSensF()); }
 // pause has cleared it, our own snake's heading seeds the first turn -- _myDir(), so the guard
 // arms off the same heading in single player, local 1vs1 and online 1vs1 alike.
 let _turnSense=0, _turnRun=0;
+// The direction a candidate turn is judged against: the last sent one, or the live heading when
+// nothing has been sent in this gesture. A brake the sim refused therefore seeds the next sense
+// as if it had turned the snake (the run is off by one after a brake); judging against the live
+// heading instead is worse, since the heading lags the turn queue by up to a move.
+function _spiralPrev(){ return _swipeLastDir?GDIRS[_swipeLastDir]:_myDir(); }
+function _spiralSense(key){
+    const prev=_spiralPrev(), kd=GDIRS[key];
+    return (prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
+}
+// Pure: would the guard hold this turn right now? (_swipeRead asks before the run is updated.)
+function _spiralHeld(key, dist){
+    if(!_inPlay()||!_swipeLastDir) return false;
+    const sense=_spiralSense(key);
+    return sense!==0&&sense===_turnSense&&_turnRun>=2&&dist<Math.round(SWIPE_GUARD*_touchLowF());
+}
 function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;
     if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
-    const prev=_swipeLastDir?GDIRS[_swipeLastDir]:_myDir();
-    const kd=GDIRS[key];
-    const sense=(prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
+    const sense=_spiralSense(key);
     if(sense===0) return false;
     if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*_touchLowF())) return true;   // hold the third same-way turn until the swipe clears the guard (LOW: 85px, MED and HIGH: 64px)
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
@@ -1093,6 +1106,10 @@ let _swipeFollow=null;   // the furthest point the finger has reached along the 
 // is usually there first, the steering thumb arrives later); a takeover releases the old
 // finger's boost, since that finger's own lift is no longer ours to hear.
 let _swipeId=null;
+// Where the touch began: the phase it landed in (a lift is a tap or an autoselect only on that
+// same screen, never on a dialog that opened under a finger planted in play) and whether it was
+// in play (a touch running from GET READY or the death hold into play carries nothing over).
+let _swipePhase0=null, _swipeInPlay=false;
 function _touchById(list,id){ for(let i=0;i<list.length;i++){ if(list[i].identifier===id) return list[i]; } return null; }
 function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _dbgTouch=null; _dbgResting=false; }
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
@@ -1101,14 +1118,23 @@ let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readou
 // hold still long enough to be read: the finger's mean position and mean speed over the window,
 // whether it counted as resting for most of it, the anchors, and the last direction sent in play.
 let _dbgTouch=null, _dbgResting=false, _dbgSent=null;
-const _dbgAcc={sx:0,sy:0,n:0,len:0,rest:0};
-function _dbgAccReset(){ _dbgAcc.sx=0; _dbgAcc.sy=0; _dbgAcc.n=0; _dbgAcc.len=0; _dbgAcc.rest=0; }
-function _dbgTouchSnapshot(winMs){
+const _dbgAcc={sx:0,sy:0,n:0,len:0,rest:0,t0:0,t1:0};
+function _dbgAccReset(){ _dbgAcc.sx=0; _dbgAcc.sy=0; _dbgAcc.n=0; _dbgAcc.len=0; _dbgAcc.rest=0; _dbgAcc.t0=0; _dbgAcc.t1=0; }
+// One snapshot for the painter: copies, never the live anchors (the reader mutates those in
+// place between two refreshes); the speed is travel over the span the samples actually cover.
+// REST is what the reader is doing to the finger, not the last sample's flag (that flag flickers
+// off for one resting window after every checkpoint, and a still finger sends no samples at
+// all): the window's speed is under the resting floor, or no checkpoint has been dropped for a
+// whole resting window.
+function _dbgTouchSnapshot(){
     const a=_dbgAcc, nowMs=performance.now();
-    const s={ touch: a.n?{x:a.sx/a.n,y:a.sy/a.n}:_dbgTouch, speed:(a.n>1&&winMs>0)?a.len/winMs*1000:null,
-              rest: a.n?(a.rest*2>=a.n):_dbgResting,
-              anchor:_swipeBase, anchorAge:_swipeBase?nowMs-_swipeBaseAt:0,
-              ref:(!cfg.touchLegacy&&_swipeLastDir)?_swipeFollow:null,
+    const cp=p=>p?{x:p.x,y:p.y}:null;
+    const win=SWIPE_COOLDOWN*_touchLowF(), floor=((_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY)/win*1000;
+    const speed=(a.n>1&&a.t1>a.t0)?a.len/(a.t1-a.t0)*1000:null;
+    const s={ touch: a.n?{x:a.sx/a.n,y:a.sy/a.n}:cp(_dbgTouch), speed,
+              rest: !!_swipeBase&&(speed!=null?speed<floor:nowMs-_swipeLastMoveAt>win),
+              anchor:cp(_swipeBase), anchorAge:_swipeBase?nowMs-_swipeBaseAt:0,
+              ref:(!cfg.touchLegacy&&_swipeLastDir)?cp(_swipeFollow):null,
               sent:_dbgSent, sentAge:_dbgSent?nowMs-_dbgSent.at:0, legacy:!!cfg.touchLegacy };
     _dbgAccReset();
     return s;
@@ -1173,11 +1199,12 @@ function _swipeRead(x,y,sf,hop){
         // The same direction (the boost slide) is a finger still running the sent way, SWIPE_SAME
         // along from the commit point; a stroke curving away is a turn in the making, never a slide.
         if(agrees&&along>=Math.round(SWIPE_SAME*sf)) return {key:_swipeLastDir, dist:along};
-        // Whichever of across and back is larger is the motion; a turn the anti-spiral guard is
-        // holding must not shadow a finger pulling back to brake.
-        if(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across)) return {key:ax?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back};
-        if(Math.abs(across)>=Math.round(SWIPE_N*sf)) return {key:ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)};
-        return null;
+        const turn=Math.abs(across)>=Math.round(SWIPE_N*sf)?{key:ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)}:null;
+        const brake=(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across))?{key:ax?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back}:null;
+        // A turn outranks the brake (a thumb curling back-and-up is turning), except a turn the
+        // anti-spiral guard is holding: that one must not shadow a finger pulling back to brake.
+        if(turn&&!(brake&&_spiralHeld(turn.key,turn.dist))) return turn;
+        return brake;
     }
     const dx=x-_swipeBase.x, dy=y-_swipeBase.y;
     const dist=Math.hypot(dx,dy);
@@ -1213,8 +1240,11 @@ document.addEventListener('touchstart',e=>{
         const onVf = _scanFor() && _scanTapAt(t.clientX, t.clientY);   // a viewfinder tap cycles the camera
         if(!onVf && _entryInField(t.clientX, t.clientY)) nameInp.focus(); else nameInp.blur();
     }
-    if(_swipeBase&&_swipeId!==t.identifier) gameBoostEnd(0);   // a takeover: the finger that steered so far hands over, its boost released here
-    _swipeId=t.identifier;
+    // A touchstart while a gesture is armed is a takeover (another finger lands), or the same
+    // identifier back after an end the browser never delivered; either way the arm held so far
+    // is released here, since the old finger's lift is no longer ours to hear.
+    if(_swipeBase) gameBoostEnd(0);
+    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay();
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
@@ -1229,8 +1259,16 @@ document.addEventListener('touchmove',e=>{
     if(!t){ if(!_touchById(e.touches,_swipeId)){ gameBoostEnd(0); _swipeEnd(); } return; }
     if((cfg.debug|0)>=3){
         if(_dbgTouch) _dbgAcc.len+=Math.hypot(t.clientX-_dbgTouch.x,t.clientY-_dbgTouch.y);
+        if(!_dbgAcc.n) _dbgAcc.t0=now;
+        _dbgAcc.t1=now;
         _dbgTouch={x:t.clientX,y:t.clientY}; _dbgAcc.sx+=t.clientX; _dbgAcc.sy+=t.clientY; _dbgAcc.n++;
     }
+    // A touch that began off the play rules (GET READY, the death hold, a menu) and runs into
+    // play carries nothing over: it re-anchors at the finger and forgets its direction, so a
+    // slide from before GO is a fresh first swipe, never an instant boost.
+    const ip=_inPlay();
+    if(ip&&!_swipeInPlay){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; _swipeLastDir=null; _menuHDir=null; _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeLastMoveAt=now; }
+    _swipeInPlay=ip;
     const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
     // Forget the heading only on a GENUINE finger pause. A large jump since the last processed
     // move means the finger kept sliding and the browser merely coalesced touchmove under
@@ -1309,12 +1347,15 @@ document.addEventListener('touchend',e=>{
         const t=e.changedTouches?_touchById(e.changedTouches,_swipeId):null;
         if(!t) return;
         e.preventDefault();
-        // Menu left/right gesture: fire ONE key now, on finger-up. Otherwise, tap -> select.
-        if(!_inPlay()&&phase!=='credits'&&phase!=='nameEntry'&&_menuHDir){
+        // Menu left/right gesture: fire ONE key now, on finger-up. Otherwise, tap -> select. Both
+        // only on the screen the touch began on: a dialog that opened under a planted finger
+        // (a death, a match end, a quit question) must not take the lift as its answer.
+        const same=phase===_swipePhase0;
+        if(same&&!_inPlay()&&phase!=='credits'&&phase!=='nameEntry'&&_menuHDir){
             handleKey(_menuHDir,null);
         } else {
             const isTap=Math.hypot(t.clientX-_swipeBase.x,t.clientY-_swipeBase.y)<SWIPE_1&&!_swipeLastDir&&!_swipedThisTouch&&performance.now()-_swipeTouchStartAt>20;
-            if(!_inPlay()&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
+            if(same&&!_inPlay()&&phase!=='nameEntry'&&(isTap||cfg.touchSelect)) handleKey('Enter',null);
         }
         _swipeEnd();
         // The release is NEVER phase-gated (engage is): finger-up is a device fact, and
