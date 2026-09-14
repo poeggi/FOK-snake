@@ -256,6 +256,24 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'RIGHT UP') throw 'a thumb curling back-and-up must turn, sent: ' + dirs(s);
     log('modern: a thumb curling back-and-up turns rather than brakes');
 
+    // A slide along a BRAKE direction re-anchors like any slide (the reverse is re-sent every
+    // SWIPE_SAME, refused by the sim) but never arms a boost: the snake will not take that
+    // heading. A slide along a direction that was a real turn still arms, and a brake as the
+    // first key of a touch (judged against the heading) arms nothing either.
+    s = swipe(poly([[0,0],[40,0],[-80,0],[-80,-40]], F, DT), { boost: { x:1, y:0 } });   // boosting right: pull back 120, up 40
+    let li = s.findIndex(e => e.k === 'LEFT');
+    if (li < 0 || !s[li + 1] || s[li + 1].k !== 'boost-') throw 'a pull-back must brake: ' + s.map(e => e.k).join(' ');
+    if (s.filter(e => e.k === 'LEFT').length < 2) throw 'a continued pull-back must keep re-anchoring (the reverse re-sent every 48 px): ' + dirs(s);
+    if (s.some((e, i) => e.k === 'boost+')) throw 'a slide along the brake direction armed a boost: ' + s.map(e => e.k).join(' ');
+    u = s.find(e => e.k === 'UP');
+    if (!u || -u.y > 30) throw 'a turn out of a pull-back must cost the turn distance from the finger, UP after ' + (u ? -u.y : 'never') + ' px';
+    s = swipe(poly([[0,0],[40,0],[40,-40],[-60,-40]], F, DT));   // right, up, then a long slide left: a real turn, then its slide
+    if (!boosted(s)) throw 'a slide along a real turn must still arm the boost: ' + s.map(e => e.k).join(' ');
+    s = swipe(poly([[0,0],[-70,0]], F, DT));   // first key of the touch is the reverse of the heading
+    if (dirs(s).indexOf('LEFT') < 0) throw 'a first-swipe brake must be sent: ' + dirs(s);
+    if (boosted(s)) throw 'a slide along a first-swipe brake armed a boost: ' + s.map(e => e.k).join(' ');
+    log('a slide along a brake direction re-anchors and never arms a boost; a slide along a real turn still does');
+
     // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
     // duel wire counts on one same-direction record per SWIPE_SAME, never more.
     const slide = poly([[0,0],[130,0]], F, DT);

@@ -1116,8 +1116,18 @@ let _swipePhase0=null, _swipeInPlay=false;
 // slow drift is read exactly like a still finger: the next move is a first swipe from where it
 // starts, at the first-swipe distance.
 let _swipeResting=false;
+// The direction sent before _swipeLastDir in this gesture. A key that is the reverse of it (or
+// of the live heading, for the first key of a touch) is a BRAKE: the sim refuses it, so a slide
+// continuing along it re-anchors like any slide but must never arm a boost for a direction the
+// snake will not take. Keyed on the sent sequence, not the live heading: the heading lags the
+// turn queue, and a queued turn is not a brake.
+let _swipePrevDir=null;
+function _swipeIsBrake(key){
+    const p=_swipePrevDir?GDIRS[_swipePrevDir]:_myDir(), d=GDIRS[key];
+    return !!(p&&d&&d.x===-p.x&&d.y===-p.y);
+}
 function _touchById(list,id){ for(let i=0;i<list.length;i++){ if(list[i].identifier===id) return list[i]; } return null; }
-function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _dbgTouch=null; _dbgResting=false; }
+function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipePrevDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _dbgTouch=null; _dbgResting=false; }
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
 // DEBUG L3 readout state (drawTouchDebug in screens.js). The touch layer accumulates every sample
 // between two readout refreshes and the painter takes ONE snapshot per refresh, so the numbers
@@ -1248,7 +1258,7 @@ document.addEventListener('touchstart',e=>{
     // is released here, since the old finger's lift is no longer ours to hear.
     if(_swipeBase) gameBoostEnd(0);
     _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false;
-    _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
+    _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipePrevDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
 document.addEventListener('touchmove',e=>{
@@ -1270,7 +1280,7 @@ document.addEventListener('touchmove',e=>{
     // play carries nothing over: it re-anchors at the finger and forgets its direction, so a
     // slide from before GO is a fresh first swipe, never an instant boost.
     const ip=_inPlay();
-    if(ip&&!_swipeInPlay){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; _swipeLastDir=null; _menuHDir=null; _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeLastMoveAt=now; _swipeResting=false; }
+    if(ip&&!_swipeInPlay){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; _swipeLastDir=null; _swipePrevDir=null; _menuHDir=null; _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeLastMoveAt=now; _swipeResting=false; }
     _swipeInPlay=ip;
     const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
     // Rest is entered on a GENUINE finger pause only. A large jump since the last checkpoint
@@ -1286,7 +1296,7 @@ document.addEventListener('touchmove',e=>{
     else if(now-_swipeLastMoveAt>win&&moved<SWIPE_N) _swipeResting=true;
     _dbgResting=_swipeResting; if(_swipeResting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
     if(_swipeResting){
-        _swipeLastDir=null;
+        _swipeLastDir=null; _swipePrevDir=null;
         // MODERN reader: the anchor follows a resting finger (to the last checkpoint, at most
         // SWIPE_STEP behind it), so a creep never accumulates into a commit and the next swipe is
         // measured from where it starts. LEGACY and the menus keep the anchor where it is.
@@ -1337,10 +1347,14 @@ document.addEventListener('touchmove',e=>{
             // exactly once per touch -- pauses and forgotten headings never restart it -- and its
             // ONLY effect is to hold boost off; steering is untouched. A finger already resting on
             // the pad past the gate therefore boosts on its first sustained slide, no penalty.
-            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_swipeTouchStartAt>=BOOST_GATE_MS*_touchLowF()) gameBoostStart(0,d,true); }
+            // A slide along a BRAKE direction re-anchors like any slide but arms nothing: the sim
+            // refused that direction, so the arm could only sit there waiting for a heading the
+            // snake never takes.
+            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_swipeTouchStartAt>=BOOST_GATE_MS*_touchLowF()&&!_swipeIsBrake(key)) gameBoostStart(0,d,true); }
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }
+    if(key!==_swipeLastDir) _swipePrevDir=_swipeLastDir;   // a same-direction slide keeps the direction before it
     _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now;
     if(_inPlay()) _dbgSent={key, at:now};
 },{passive:false});
