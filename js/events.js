@@ -1337,7 +1337,7 @@ function eventWakeHeld(){ return !!_evWake; }
 function _evGrantAch(a){
     if(!a || typeof a !== 'object') return;
     const id = String(a.id || '');
-    if(!/^ev_[A-Z2-9]{4}$/.test(id)) return;
+    if(!/^ev_[A-Z0-9]{4}$/.test(id)) return;
     if(typeof achEventPut === 'function') achEventPut(id, a);
     if(typeof unlockAch === 'function') unlockAch(id);
 }

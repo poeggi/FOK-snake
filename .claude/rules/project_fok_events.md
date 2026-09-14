@@ -1,4 +1,4 @@
-# Events - the client half (server API 4.14; contract: FOK-server docs/API.md "Events")
+# Events - the client half (server API 4.16; contract: FOK-server docs/API.md "Events")
 
 An EVENT is a room an operator opens on the server. You get in by scanning
 its QR (straight in when OPEN, after organizer approval when CLOSED). Inside:
@@ -20,7 +20,8 @@ Both 11 chars -> 53-byte URL, which is what the game's own fixed QR decoder
 the poster at exactly v3/L/mask 0. DO NOT generalise the decoder (tried:
 qrDecodeImage 4.8 -> 13 ms/frame, thrown away); an overflowing payload hands
 the budget back to the server. `EVENT_HASH_RE` captures the code as scanned,
-dot and all; its class is the contract's `A-Z2-9` (a shape filter; the
+dot and all; the eid uses `A-Z0-9`, while the pass and printed key keep
+`A-Z2-9` (API 4.16 allows named event ids with 0 and 1; a shape filter; the
 server answers a wrong code 404). The scanner answers an event link from ANY
 camera window, before the mode-specific patterns.
 

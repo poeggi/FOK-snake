@@ -173,7 +173,7 @@ const EGG_ACHS = new Set(EGG_ACHIEVEMENTS.map(a=>a.id));   // found outside a ru
 // neither is a player who is no longer in the event, which is the right answer.
 const ACH_EV_KEY = 'fok-snake-ach-ev';
 let achEvents = {};
-function _achIsEvent(id) { return /^ev_[A-Z2-9]{4}$/.test(String(id || '')); }
+function _achIsEvent(id) { return /^ev_[A-Z0-9]{4}$/.test(String(id || '')); }
 function loadAchEvents() { try { achEvents = JSON.parse(localStorage.getItem(ACH_EV_KEY) || '{}'); } catch (e) {} }
 function achEventDefs() { return achEvents; }
 function achEventPut(id, a) {

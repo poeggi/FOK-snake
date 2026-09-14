@@ -1,4 +1,4 @@
-// EVENTS smoke (server API 4.11): the deep link and the scanner, the 53-byte QR
+// EVENTS smoke (server API 4.16): the deep link and the scanner, the 53-byte QR
 // budget, and the derived event state. Everything here is the CLIENT half of
 // FOK-server docs/API.md "Events (4.11)".
 // Run: node test/smoke-events.js
@@ -13,7 +13,7 @@ const DRIVER = `
     // ---- the third hash pattern -------------------------------------------
     // ONE regex serves both entry points -- the boot hash (game.js) and the
     // camera (input.js _scanHit) -- so this is the parser itself, not a copy of
-    // it. The two code lengths are the printed key (16) and the live pass (6),
+    // it. The two code shapes are the printed key (11) and the dotted live pass (4+1+6),
     // and nothing here has to tell them apart: both go out as \`code\`.
     const hit = (s) => EVENT_HASH_RE.exec(s);
     // ONE capture: the code exactly as scanned, dot and all, because that is what
@@ -22,6 +22,17 @@ const DRIVER = `
     if(!m || m[1] !== 'K7QM.H3KM9P') throw 'a PASS keeps its dot and its eid: '+JSON.stringify(m&&m[1]);
     m = hit(U + '#event=ABCDEFGHJKM');
     if(!m || m[1] !== 'ABCDEFGHJKM') throw 'a KEY is 11 characters and no dot: '+JSON.stringify(m&&m[1]);
+    // API 4.16 broadens only the event id, including entirely numeric names.
+    for(const eid of ['SRV0', 'LAN1', '2026', '0101']){
+      const code = eid + '.H3KM9P';
+      const parsed = hit(U + '#event=' + code);
+      if(!parsed || parsed[1] !== code) throw 'named eid was lost: '+code;
+    }
+    for(const digit of ['0', '1']){
+      if(hit(U + '#event=0101.H3KM9' + digit)) throw 'pass alphabet must not broaden';
+      if(hit(U + '#event=ABCDEFGHJK' + digit)) throw 'printed key alphabet must not broaden';
+    }
+    if(hit(U + '#event=01012.H3KM9P')) throw 'a 5-char eid must not parse';
     // THE DOT IS THE ONLY THING that tells them apart, and the lengths are exact.
     if(hit(U + '#event=K7QM.H3KM9')) throw 'a 5-char pass must not parse';
     if(hit(U + '#event=K7QM.H3KM9PQ')) throw 'a 7-char pass must not parse';
@@ -33,7 +44,7 @@ const DRIVER = `
     if(hit(U + '#event=K7QM.ABCDEFGHJKMNPQRS')) throw 'the 4.11 key shape must no longer parse';
     if(hit(U + '#event=K7QM.H3KM9P&x=1')) throw 'a trailing query must not parse (anchored)';
     if(hit(U + '#event=k7qm.h3km9p')) throw 'lowercase is not a code';
-    // The class is the CONTRACT'S (A-Z2-9), one character wider than the alphabet,
+    // The classes are the CONTRACT'S (eid A-Z0-9, pass/key A-Z2-9), wider than the alphabet,
     // which also drops I, L and O. Deliberate: this is a SHAPE filter, and what a
     // code really is belongs to the server, which answers a wrong one 404.
     if(!hit(U + '#event=KOQM.H3KM9P')) throw 'the shape filter is the contract regex, not the alphabet';
@@ -164,6 +175,13 @@ const DRIVER = `
     if(!achUnlocked['ev_K7QM']) throw 'an event achievement must not be gated by difficulty';
     const defs = achEventDefs();
     if(!defs['ev_K7QM'] || defs['ev_K7QM'].name !== 'NIGHT OWL') throw 'the definition was not kept';
+    for(const eid of ['SRV0', 'LAN1', '0101']){
+      const id = 'ev_' + eid;
+      _evGrantAch({ id:id, name:'NAMED EVENT', desc:'Joined named event' });
+      if(!achUnlocked[id]) throw 'named event achievement must unlock on Easy: '+id;
+      if(!achEventDefs()[id]) throw 'named event achievement definition missing: '+id;
+      if(JSON.stringify(_saveSnapshot()).indexOf(id) < 0) throw 'named event unlock missing from backup';
+    }
     cfg.diff = _d0;
     // Garbage never becomes an achievement, and neither does somebody else's id shape.
     _evGrantAch({ id:'ev_lower', name:'X', desc:'X' });
