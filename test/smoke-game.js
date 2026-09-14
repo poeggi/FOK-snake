@@ -318,29 +318,24 @@ runTest('SMOKE-GAME', `
     if(_crashFx.length!==0) throw 'the wreck outlived CRASH_DUR';
     log('crash wreck: deferred, gated on gfx mode, a compaction front that zigzags and holds, scales in depth with impact speed at a front speed of its own, stops at the crush budget, damps at every corner and never reaches past the head ok');
 
-    // LAUNCH-LAG LAYOUT: a pass whose measured window contradicts the device orientation is
-    // skipped inside the first LAYOUT_SETTLE_MS (the canvas keeps its size); a pass on agreeing
-    // numbers sizes it; past the settle window a contradiction is laid out anyway (a split view);
-    // without the orientation API nothing is ever skipped.
-    { let vw = 834, vh = 1194;   // the harness has no documentElement: stand one in with the two readings layout takes
-      const oDe = document.documentElement;
-      document.documentElement = { get clientWidth(){ return vw; }, get clientHeight(){ return vh; }, style: { setProperty(){} }, classList: { add(){}, remove(){}, contains(){ return false; } } };
-      for (const id of ['hud','topbar','gamepad']) { const el = document.getElementById(id); if (el) el.offsetHeight = 0; }   // chrome rows: a number, so the fit is one too
-      const oNow = performance.now; let t = _layoutT0 + 10; performance.now = () => t;   // the clock the settle window is measured on
+    // Fit a narrow viewport immediately even on a landscape screen (iPad split view).
+    { let vw = 834, vh = 1194;
+      const oDe = document.documentElement, oScreen = globalThis.screen;
+      document.documentElement = { get clientWidth(){ return vw; }, get clientHeight(){ return vh; }, style: { setProperty(){} } };
+      const chrome = ['hud','topbar','gamepad'].map(id => document.getElementById(id));
+      const heights = chrome.map(el => el && el.offsetHeight);
+      chrome.forEach(el => { if(el) el.offsetHeight = 0; });
       globalThis.screen = { orientation: { type: 'landscape-primary' } };
       _lastCw = -1; canvas.style.width = '';
       layout();
-      if(canvas.style.width !== '') throw 'launch lag: a portrait-shaped window on a landscape device must be skipped, sized ' + canvas.style.width;
+      const first = parseFloat(canvas.style.width);
+      if (!(first > 0 && first <= vw && parseFloat(canvas.style.height) <= vh)) throw 'narrow viewport must fit immediately';
       vw = 1194; vh = 834; layout();
-      if(canvas.style.width === '') throw 'agreeing numbers must lay out';
-      const sized = canvas.style.width;
-      vw = 834; vh = 1194; t = _layoutT0 + LAYOUT_SETTLE_MS + 1; _lastCw = -1; layout();
-      if(canvas.style.width === sized) throw 'past the settle window a contradiction must lay out anyway (a split view)';
-      t = _layoutT0 + 10; delete globalThis.screen; _lastCw = -1; canvas.style.width = ''; layout();
-      if(canvas.style.width === '') throw 'without the orientation API nothing may be skipped';
-      performance.now = oNow; document.documentElement = oDe; _lastCw = -1;
-      if (!_layoutTrace.some(e => e.what === 'layout skipped') || !_layoutTrace.some(e => e.what === 'layout' && e.cw > 0)) throw 'the launch trace must record the skipped pass and a sized pass: ' + JSON.stringify(_layoutTrace);
-      log('launch-lag layout: a portrait-shaped window on a landscape device is skipped for LAYOUT_SETTLE_MS, laid out once the numbers agree, never skipped without the API; the launch trace records each pass'); }
+      const second = parseFloat(canvas.style.width);
+      if (!(second > 0 && second !== first && second <= vw && parseFloat(canvas.style.height) <= vh)) throw 'changed viewport must refit';
+      chrome.forEach((el,i) => { if(el) el.offsetHeight = heights[i]; });
+      document.documentElement = oDe; globalThis.screen = oScreen; _lastCw = -1;
+      log('layout fits the available viewport immediately regardless of screen orientation'); }
 
     R.ok = true;
   } catch(e) { R.err = String(e && e.stack || e); }

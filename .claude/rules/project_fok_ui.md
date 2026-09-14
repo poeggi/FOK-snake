@@ -6,9 +6,9 @@ canvas to the largest 600:400 box that fits: `scale = min((wW-2m)/CW,
 (wH-2m)/CH, CANVAS_MAX_H/CH)`, CANVAS_MAX_H=1600, margin
 `m = clamp(round(min(wW,wH)*0.02),4,48)`, wH clamped to
 `min(wrap.clientHeight, vpH - wrapTop)`. Publishes `--ui-scale` and
-`--stage-w`. Triggers: ResizeObserver on #wrap (guarded by `_lastCw`), window
-resize, orientationchange burst, screen.orientation, initial rAF,
-fonts.ready, load.
+`--stage-w`. Triggers: ResizeObserver on the document root, #wrap and chrome
+(guarded by `_lastCw`), window resize, screen.orientation, initial rAF and
+fonts.ready. No startup orientation gate, forced double passes or timed retries.
 - COLUMN mode (desktop + portrait touch): fits into viewportWidth x
   (viewportHeight - measured chromeH), #wrap `flex:0 0 auto`; desktop
   centres, portrait bottom-aligns. LANDSCAPE touch: #wrap `flex:1 1 0`

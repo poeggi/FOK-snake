@@ -1539,9 +1539,6 @@ function syncLandscapePanels() {
     si.style.paddingBottom = b + 'px';
     fe.style.bottom = b + 'px';
 }
-window.addEventListener('resize', syncLandscapePanels);
-window.addEventListener('orientationchange', () => setTimeout(syncLandscapePanels, 120));
-requestAnimationFrame(syncLandscapePanels);
 
 // layout(): size the canvas to the largest CW:CH box that fits its #wrap region (flex hands
 // it whatever the shown chrome leaves), minus a 4px margin -- R1 "fit" + R2 "maximize on the
@@ -1552,15 +1549,6 @@ requestAnimationFrame(syncLandscapePanels);
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
 const _pmq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: portrait)') : { matches:false };
 let _lastCw = -1, _layoutDbg = {};
-// A home-screen app launched on its side runs its first frames on the launch screen's metrics:
-// the window still measures portrait while the device has been in landscape all along, and a
-// canvas sized from that overflows the real viewport until the settle's resize corrects it.
-// The device orientation is the reading that is right from the first frame, so a pass whose
-// measured shape contradicts it is skipped and the next trigger runs it on settled numbers.
-// Bounded to the first LAYOUT_SETTLE_MS: a window that is legitimately narrower than tall on a
-// landscape device (a split view) must not wait for ever. Without the orientation API nothing
-// is skipped.
-const LAYOUT_SETTLE_MS = 1500;
 const _layoutT0 = performance.now();
 // The LAUNCH TRACE: every reading layout() and the viewport events see in the first passes,
 // kept for EXPORT CANVAS INFO (DEBUGGING settings), so a launch that comes up at the wrong
@@ -1581,18 +1569,11 @@ function _layoutNote(what, extra){
     if (extra) Object.assign(e, extra);
     _layoutTrace.push(e);
 }
-function _layoutStale(vpW, vpH){
-    if (performance.now() - _layoutT0 > LAYOUT_SETTLE_MS) return false;
-    const t = (typeof screen !== 'undefined' && screen.orientation && screen.orientation.type) || '';
-    if (!t || !(vpW > 0) || !(vpH > 0)) return false;
-    return (t.indexOf('landscape') === 0) !== (vpW > vpH);
-}
 let _safeIns = { t:0, r:0, b:0, l:0 }, _notchSide = '-';
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
         const vpW = document.documentElement.clientWidth, vpH = document.documentElement.clientHeight;
-        if (_layoutStale(vpW, vpH)) { _layoutNote('layout skipped'); return; }   // launch-lag metrics: let the settle's resize run this pass
         let wW, wH, m, scale, mode;
         if (!_lsq.matches) {
             // COLUMN (desktop + portrait touch): #wrap shrink-wraps the JS-sized canvas, so the
@@ -1699,24 +1680,18 @@ function _syncSafeArea(){
         if(h >= 2 && h < 11) document.documentElement.classList.add('no-flexgap');   // 12 with the gap, 2 without; a 0 means no layout at all (harness) -> leave it alone
     } catch(_) {}
 })();
-const _reflow = () => { _syncSafeArea(); layout(); };
-window.addEventListener('resize', () => { _layoutNote('resize'); requestAnimationFrame(_reflow); });
-// React the moment the orientation actually changes (the precise signal), plus a short burst
-// across the settle window as a backstop. The cached side above already keeps repeat rotations
-// instant; these tighten the first flip after a fresh load.
-window.addEventListener('orientationchange', () => { _layoutNote('orientationchange'); [0,150,350,600].forEach(ms => setTimeout(_reflow, ms)); });
+// Observe the actual layout inputs, including chrome whose scaled text changes its height.
+// Screen orientation does not determine the available viewport (e.g. iPad split view).
+const _reflow = () => { _syncSafeArea(); layout(); syncLandscapePanels(); };
+window.addEventListener('resize', () => { _layoutNote('resize'); _reflow(); });
 if (typeof screen !== 'undefined' && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', _reflow);
-if (window.ResizeObserver) new ResizeObserver(layout).observe(canvas.parentElement);
-// Startup can race the web font and the browser's first CSS layout, which occasionally
-// locked a too-small canvas on reload: layout() sets the --fs-* vars it also measures, and
-// the _lastCw "converged" guard then froze a bad early value (the RO on #wrap never re-fires
-// once the canvas has a fixed px size). _relayout forces two passes past that guard -- the
-// 2nd pass re-measures the chrome with the vars the 1st set, so the feedback converges.
-// Run it now, once the font is ready, and again on full load.
-function _relayout(){ _syncSafeArea(); _lastCw = -1; layout(); _lastCw = -1; layout(); }
-requestAnimationFrame(_relayout);
-if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_relayout);
-window.addEventListener('load', _relayout);
+if (window.ResizeObserver) {
+    const ro = new ResizeObserver(_reflow);
+    [document.documentElement, canvas.parentElement, document.getElementById('hud'),
+        document.getElementById('topbar'), document.getElementById('gamepad')].forEach(el => { if (el) ro.observe(el); });
+}
+requestAnimationFrame(_reflow);
+if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_reflow);
 
 // The version of the CODE that is actually running -- stamped into APP_VERSION (assets.js)
 // by the pre-commit hook alongside sw.js, so the display names the bundle this page was
