@@ -128,6 +128,25 @@ runTest('SMOKE-TOUCH', `
     if (s.some(e => e.k === 'DOWN')) throw 'modern, an 80 px/s drift of 19 px across sent DOWN';
     log('modern: a drifting hold does not tax the next move the other way');
 
+    // REST is a state: a slow drift (under the 60 px/s floor) is read exactly like a still
+    // finger. The state holds through the drift, the anchor follows it, and the next move is a
+    // first swipe at 16 px from where it starts; the state ends when the finger moves again.
+    s = swipe(poly([[0,0],[30,0],[37.2,9.6,0.04],[37.2,-30.4]], F, DT));   // right 30, 300 ms drift down-right at 40 px/s, up 40
+    u = s.find(e => e.k === 'UP');
+    if (!u || 9.6 - u.y > 21) throw 'modern, a move after a slow drift must be a first swipe (16 px), UP after ' + (u ? Math.round(9.6 - u.y) : 'never') + ' px';
+    if (s.some(e => e.k === 'DOWN' || e.k === 'RIGHT' && s.indexOf(e) > 1)) throw 'modern, a slow drift sent: ' + dirs(s);
+    if (_swipeResting) throw 'rest must end once the finger moves again';
+    // ...and holds while the drift lasts (checked mid-drift, before the flick).
+    const drift = poly([[0,0],[30,0],[37.2,9.6,0.04]], F, DT);
+    players = null; phase = 'playing'; inGame = true; dir = { x:1, y:0 }; _swipeEnd(); sent.length = 0;
+    cur = drift[0]; clk = drift[0].t; document.__emit('touchstart', ev(drift[0].x, drift[0].y));
+    for (let i = 1; i < drift.length; i++){ cur = drift[i]; clk = drift[i].t; document.__emit('touchmove', ev(drift[i].x, drift[i].y)); }
+    if (!_swipeResting) throw 'rest must hold while the finger drifts under the floor';
+    if (_swipeLastDir !== null) throw 'the direction must stay forgotten through a drift';
+    if (Math.hypot(_swipeBase.x - 37.2, _swipeBase.y - 9.6) > 6) throw 'the anchor must follow a drifting finger, it is ' + Math.round(Math.hypot(_swipeBase.x - 37.2, _swipeBase.y - 9.6)) + ' px behind';
+    clk += 8; document.__emit('touchend', ev(37.2, 9.6)); phase = 'menu'; inGame = false;
+    log('modern: a slow drift is a resting finger, the state holds and the next move is a first swipe');
+
     // LOW sensitivity lengthens the time gates and the anti-spiral guard by the distance factor
     // (1.33); HIGH leaves them at their MED values, never shorter. Legs of 70 px: held on LOW
     // (guard 85), sent on MED and HIGH (guard 64). A hold whose next sample lands 64 ms after

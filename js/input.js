@@ -1110,8 +1110,14 @@ let _swipeId=null;
 // same screen, never on a dialog that opened under a finger planted in play) and whether it was
 // in play (a touch running from GET READY or the death hold into play carries nothing over).
 let _swipePhase0=null, _swipeInPlay=false;
+// REST is a state the reader holds: entered when the finger has not covered a checkpoint grain
+// within the resting window, left when it covers one faster than that. While it lasts the
+// direction stays forgotten and (MODERN) every sample re-anchors at the last checkpoint, so a
+// slow drift is read exactly like a still finger: the next move is a first swipe from where it
+// starts, at the first-swipe distance.
+let _swipeResting=false;
 function _touchById(list,id){ for(let i=0;i<list.length;i++){ if(list[i].identifier===id) return list[i]; } return null; }
-function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _dbgTouch=null; _dbgResting=false; }
+function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _dbgTouch=null; _dbgResting=false; }
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
 // DEBUG L3 readout state (drawTouchDebug in screens.js). The touch layer accumulates every sample
 // between two readout refreshes and the painter takes ONE snapshot per refresh, so the numbers
@@ -1122,17 +1128,14 @@ const _dbgAcc={sx:0,sy:0,n:0,len:0,rest:0,t0:0,t1:0};
 function _dbgAccReset(){ _dbgAcc.sx=0; _dbgAcc.sy=0; _dbgAcc.n=0; _dbgAcc.len=0; _dbgAcc.rest=0; _dbgAcc.t0=0; _dbgAcc.t1=0; }
 // One snapshot for the painter: copies, never the live anchors (the reader mutates those in
 // place between two refreshes); the speed is travel over the span the samples actually cover.
-// REST is what the reader is doing to the finger, not the last sample's flag (that flag flickers
-// off for one resting window after every checkpoint, and a still finger sends no samples at
-// all): the window's speed is under the resting floor, or no checkpoint has been dropped for a
-// whole resting window.
+// REST is the reader's own state, plus the still finger the reader has not sampled yet (no
+// touchmove arrives while nothing moves): no checkpoint for a whole resting window.
 function _dbgTouchSnapshot(){
     const a=_dbgAcc, nowMs=performance.now();
     const cp=p=>p?{x:p.x,y:p.y}:null;
-    const win=SWIPE_COOLDOWN*_touchLowF(), floor=((_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY)/win*1000;
     const speed=(a.n>1&&a.t1>a.t0)?a.len/(a.t1-a.t0)*1000:null;
     const s={ touch: a.n?{x:a.sx/a.n,y:a.sy/a.n}:cp(_dbgTouch), speed,
-              rest: !!_swipeBase&&(speed!=null?speed<floor:nowMs-_swipeLastMoveAt>win),
+              rest: !!_swipeBase&&(_swipeResting||nowMs-_swipeLastMoveAt>SWIPE_COOLDOWN*_touchLowF()),
               anchor:cp(_swipeBase), anchorAge:_swipeBase?nowMs-_swipeBaseAt:0,
               ref:(!cfg.touchLegacy&&_swipeLastDir)?cp(_swipeFollow):null,
               sent:_dbgSent, sentAge:_dbgSent?nowMs-_dbgSent.at:0, legacy:!!cfg.touchLegacy };
@@ -1244,7 +1247,7 @@ document.addEventListener('touchstart',e=>{
     // identifier back after an end the browser never delivered; either way the arm held so far
     // is released here, since the old finger's lift is no longer ours to hear.
     if(_swipeBase) gameBoostEnd(0);
-    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay();
+    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false;
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
@@ -1267,27 +1270,33 @@ document.addEventListener('touchmove',e=>{
     // play carries nothing over: it re-anchors at the finger and forgets its direction, so a
     // slide from before GO is a fresh first swipe, never an instant boost.
     const ip=_inPlay();
-    if(ip&&!_swipeInPlay){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; _swipeLastDir=null; _menuHDir=null; _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeLastMoveAt=now; }
+    if(ip&&!_swipeInPlay){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; _swipeLastDir=null; _menuHDir=null; _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeLastMoveAt=now; _swipeResting=false; }
     _swipeInPlay=ip;
     const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
-    // Forget the heading only on a GENUINE finger pause. A large jump since the last processed
-    // move means the finger kept sliding and the browser merely coalesced touchmove under
-    // main-thread load -- reading that as a pause would wrongly wipe _swipeLastDir and re-seed
-    // the next move as a fresh first swipe. Distance travelled, not the event-delivery gap,
-    // tells a real pause from a coalesced slide. Boost is untouched here: the boost gate is
-    // anchored to touchdown, so a forgotten heading cannot restart it.
-    const resting=now-_swipeLastMoveAt>SWIPE_COOLDOWN*_touchLowF()&&moved<SWIPE_N;
-    _dbgResting=resting; if(resting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
-    if(resting){
+    // Rest is entered on a GENUINE finger pause only. A large jump since the last checkpoint
+    // means the finger kept sliding and the browser merely coalesced touchmove under main-thread
+    // load -- reading that as a pause would wrongly wipe _swipeLastDir and re-seed the next move
+    // as a fresh first swipe. Distance travelled, not the event-delivery gap, tells a real pause
+    // from a coalesced slide. Boost is untouched here: the boost gate is anchored to touchdown,
+    // so a forgotten heading cannot restart it.
+    const win=SWIPE_COOLDOWN*_touchLowF();
+    const step=(_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY;
+    const grain=!!_swipeLastMovePos&&moved>=step;   // this sample covers a checkpoint grain
+    if(grain&&now-_swipeLastMoveAt<=win) _swipeResting=false;   // covered inside the window: the finger is moving again
+    else if(now-_swipeLastMoveAt>win&&moved<SWIPE_N) _swipeResting=true;
+    _dbgResting=_swipeResting; if(_swipeResting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
+    if(_swipeResting){
         _swipeLastDir=null;
-        // MODERN reader: the anchor follows a paused finger (to the last checkpoint, at most
+        // MODERN reader: the anchor follows a resting finger (to the last checkpoint, at most
         // SWIPE_STEP behind it), so a creep never accumulates into a commit and the next swipe is
         // measured from where it starts. LEGACY and the menus keep the anchor where it is.
         if(_inPlay()&&!cfg.touchLegacy&&_swipeLastMovePos){ _swipeBase={x:_swipeLastMovePos.x,y:_swipeLastMovePos.y}; _swipeFollow={x:_swipeBase.x,y:_swipeBase.y}; _swipeBaseAt=now; }
     }
     let hop=null;   // the step from the last checkpoint, on the sample that sets a new one
-    const step=(_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY;
-    if(!_swipeLastMovePos||moved>=step){ if(_swipeLastMovePos) hop={dx:t.clientX-_swipeLastMovePos.x,dy:t.clientY-_swipeLastMovePos.y}; _swipeLastMoveAt=now;_swipeLastMovePos={x:t.clientX,y:t.clientY};}
+    if(!_swipeLastMovePos||grain){
+        if(_swipeLastMovePos) hop={dx:t.clientX-_swipeLastMovePos.x,dy:t.clientY-_swipeLastMovePos.y};
+        _swipeLastMoveAt=now; _swipeLastMovePos={x:t.clientX,y:t.clientY};
+    }
     const sf=_touchSensF();
     const rd=_swipeRead(t.clientX,t.clientY,sf,hop);
     if(!rd) return;
