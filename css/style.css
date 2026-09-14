@@ -66,14 +66,6 @@ body {
     /* whole-screen swipes: keep the browser from claiming any of it for scroll/zoom */
     touch-action: none;
 }
-/* A home-screen launch on iOS and iPadOS starts before the dynamic viewport unit is
-   initialised: 100dvh reads wrong until the first geometry change (the resize a few hundred
-   ms in), and the page comes up laid out for a height it does not have. Standalone has no
-   browser toolbar, so 100vh is exact there and is right from the first frame; a browser tab
-   keeps 100dvh for its toolbar. An engine without display-mode ignores the block. */
-@media (display-mode: standalone) {
-    body { height: 100vh; min-height: 100vh; }
-}
 #hud {
     /* 2x2 grid: cells a b / c d. Classic: LIVES SCORE / GEMS LEVEL. Duel: P1-lives
        P2-lives / P1-score P2-score (what each cell SHOWS is swapped by updateHUD). */
