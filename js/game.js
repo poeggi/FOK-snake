@@ -1550,11 +1550,28 @@ requestAnimationFrame(syncLandscapePanels);
 const CANVAS_MAX_H = 1600;   // cap canvas height (= 4x native 400) so huge screens keep a margin
 const _pmq = window.matchMedia ? window.matchMedia('(pointer: coarse) and (orientation: portrait)') : { matches:false };
 let _lastCw = -1, _layoutDbg = {};
+// A home-screen app launched on its side runs its first frames on the launch screen's metrics:
+// the window still measures portrait while the device has been in landscape all along, and a
+// canvas sized from that overflows the real viewport until the settle's resize corrects it.
+// The device orientation is the reading that is right from the first frame, so a pass whose
+// measured shape contradicts it is skipped and the next trigger runs it on settled numbers.
+// Bounded to the first LAYOUT_SETTLE_MS: a window that is legitimately narrower than tall on a
+// landscape device (a split view) must not wait for ever. Without the orientation API nothing
+// is skipped.
+const LAYOUT_SETTLE_MS = 1500;
+const _layoutT0 = performance.now();
+function _layoutStale(vpW, vpH){
+    if (performance.now() - _layoutT0 > LAYOUT_SETTLE_MS) return false;
+    const t = (typeof screen !== 'undefined' && screen.orientation && screen.orientation.type) || '';
+    if (!t || !(vpW > 0) || !(vpH > 0)) return false;
+    return (t.indexOf('landscape') === 0) !== (vpW > vpH);
+}
 let _safeIns = { t:0, r:0, b:0, l:0 }, _notchSide = '-';
 function layout() {
     try {
         const wrap = canvas.parentElement;                 // #wrap
         const vpW = document.documentElement.clientWidth, vpH = document.documentElement.clientHeight;
+        if (_layoutStale(vpW, vpH)) return;   // launch-lag metrics: let the settle's resize run this pass
         let wW, wH, m, scale, mode;
         if (!_lsq.matches) {
             // COLUMN (desktop + portrait touch): #wrap shrink-wraps the JS-sized canvas, so the

@@ -993,7 +993,7 @@ if (typeof window !== 'undefined' && window.PointerEvent) {
     canvas.addEventListener('mouseup', _canvasUp);
 }
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100;
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100, REST_GATE_MS=50;   // REST_GATE_MS: the boost guard after a rest ends (MODERN), a shorter twin of the touchdown gate
 const _HOP_TAN=Math.tan(DZ_HI*Math.PI/180);   // a checkpoint hop within DZ_HI of the sent axis still agrees with the sent direction (MODERN reader)
 // The checkpoint grain: a finger that has not travelled this far since its last checkpoint within
 // SWIPE_COOLDOWN is resting. With MODERN's 3px a finger slower than 60px/s rests, and a resting
@@ -1116,6 +1116,7 @@ let _swipePhase0=null, _swipeInPlay=false;
 // slow drift is read exactly like a still finger: the next move is a first swipe from where it
 // starts, at the first-swipe distance.
 let _swipeResting=false;
+let _swipeRestEndAt=0;   // when the last rest ended; the MODERN boost guard after a rest runs from it
 // The reference a key is judged against: the last direction sent in this touch that was not
 // itself a brake, or the live heading before any. A key that is the reverse of it is a BRAKE:
 // the sim refuses it (a 180 is illegal), so it only ends the boost, and a finger sliding on
@@ -1128,7 +1129,7 @@ function _swipeIsBrake(key){
     return !!(p&&d&&d.x===-p.x&&d.y===-p.y);
 }
 function _touchById(list,id){ for(let i=0;i<list.length;i++){ if(list[i].identifier===id) return list[i]; } return null; }
-function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeRefDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _dbgTouch=null; _dbgResting=false; }
+function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeRefDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _swipeRestEndAt=0; _dbgTouch=null; _dbgResting=false; }
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
 // DEBUG L3 readout state (drawTouchDebug in screens.js). The touch layer accumulates every sample
 // between two readout refreshes and the painter takes ONE snapshot per refresh, so the numbers
@@ -1258,7 +1259,7 @@ document.addEventListener('touchstart',e=>{
     // identifier back after an end the browser never delivered; either way the arm held so far
     // is released here, since the old finger's lift is no longer ours to hear.
     if(_swipeBase) gameBoostEnd(0);
-    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false;
+    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false; _swipeRestEndAt=0;
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeRefDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
@@ -1293,8 +1294,10 @@ document.addEventListener('touchmove',e=>{
     const win=SWIPE_COOLDOWN*_touchLowF();
     const step=(_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY;
     const grain=!!_swipeLastMovePos&&moved>=step;   // this sample covers a checkpoint grain
+    const wasResting=_swipeResting;
     if(grain&&now-_swipeLastMoveAt<=win) _swipeResting=false;   // covered inside the window: the finger is moving again
     else if(now-_swipeLastMoveAt>win&&moved<SWIPE_N) _swipeResting=true;
+    if(wasResting&&!_swipeResting) _swipeRestEndAt=now;   // the rest ended here: the boost guard after a rest runs from now
     _dbgResting=_swipeResting; if(_swipeResting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
     if(_swipeResting){
         _swipeLastDir=null; _swipeRefDir=null;
@@ -1309,9 +1312,23 @@ document.addEventListener('touchmove',e=>{
         _swipeLastMoveAt=now; _swipeLastMovePos={x:t.clientX,y:t.clientY};
     }
     const sf=_touchSensF();
+    // MODERN: the slide that arms the boost counts from the boost gate, never before it. While
+    // the touch is younger than BOOST_GATE_MS, or a rest ended less than REST_GATE_MS ago, BASE
+    // follows the finger, so nothing pushed inside a guard is credited to a slide. Steering is
+    // untouched: the first swipe reads its chord from BASE only while no direction is committed,
+    // and after a commit the turn and the brake read REF. Once the guard is over, 48 px along the
+    // direction arm the boost.
+    const boostGuard=now-_swipeTouchStartAt<BOOST_GATE_MS*_touchLowF()||(_swipeRestEndAt>0&&now-_swipeRestEndAt<REST_GATE_MS*_touchLowF());
+    if(_inPlay()&&!cfg.touchLegacy&&_swipeLastDir&&boostGuard){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; }
     const rd=_swipeRead(t.clientX,t.clientY,sf,hop);
     if(!rd) return;
     const key=rd.key, dist=rd.dist;
+    // MODERN: a first movement ALONG THE HEADING, after touchdown or a rest, is a slide from where
+    // it started. Its first SWIPE_1 only re-detect a direction the snake already has (the sim
+    // ignores the key), so BASE stays put and the boost arms 48 px from the start of the movement,
+    // the same 48 a slide after a turn costs. A first movement in any other direction is a turn:
+    // it commits at SWIPE_1 and the slide counts from there.
+    const alongHeading=(()=>{ if(!_inPlay()||cfg.touchLegacy||_swipeLastDir) return false; const h=_myDir(), kd=GDIRS[key]; return !!(h&&kd&&h.x===kd.x&&h.y===kd.y); })();
     // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
     // one-gesture handling below, so every menu scrolls by the same rule -- no per-screen tuning.
     const inMenu=!_inPlay()&&phase!=='credits';
@@ -1358,7 +1375,8 @@ document.addEventListener('touchmove',e=>{
         }
     }
     if(_inPlay()&&!_swipeIsBrake(key)) _swipeRefDir=key;   // a brake never becomes the reference
-    _swipeLastDir=key; _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now;
+    _swipeLastDir=key; _swipeFollow={x:t.clientX,y:t.clientY};
+    if(!alongHeading){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; }
     if(_inPlay()) _dbgSent={key, at:now};
 },{passive:false});
 document.addEventListener('touchend',e=>{

@@ -20,9 +20,9 @@ runTest('SMOKE-TOUCH', `
     let cur = { x:0, y:0 };
     const sent = [];
     const oSteer = gameSteer, oBs = gameBoostStart, oBe = gameBoostEnd;
-    gameSteer = function(p, d){ sent.push({ k: d.y<0?'UP':d.y>0?'DOWN':d.x<0?'LEFT':'RIGHT', x: cur.x, y: cur.y }); };
-    gameBoostStart = function(){ sent.push({ k:'boost+', x: cur.x, y: cur.y }); };
-    gameBoostEnd = function(){ sent.push({ k:'boost-', x: cur.x, y: cur.y }); };
+    gameSteer = function(p, d){ sent.push({ k: d.y<0?'UP':d.y>0?'DOWN':d.x<0?'LEFT':'RIGHT', x: cur.x, y: cur.y, t: clk }); };
+    gameBoostStart = function(){ sent.push({ k:'boost+', x: cur.x, y: cur.y, t: clk }); };
+    gameBoostEnd = function(){ sent.push({ k:'boost-', x: cur.x, y: cur.y, t: clk }); };
     const ev = (x, y) => ({ touches:[{clientX:x, clientY:y}], changedTouches:[{clientX:x, clientY:y}], preventDefault(){}, stopPropagation(){}, stopImmediatePropagation(){} });
     // A polyline sampled every dt ms at speed px/ms; a third value on a point overrides the speed to it.
     function poly(pts, speed, dt){
@@ -46,7 +46,7 @@ runTest('SMOKE-TOUCH', `
     // One finger path through the real handlers, heading right in a live classic game.
     function swipe(trace, o){
       o = o || {};
-      players = null; phase = 'playing'; inGame = true; dir = { x:1, y:0 };
+      players = null; phase = 'playing'; inGame = true; dir = o.heading || { x:1, y:0 };
       boostDir = o.boost || null; boosting = !!o.boost; snake = [{x:5,y:5},{x:4,y:5}];
       _swipeBase = null; _swipeFollow = null; _swipeLastDir = null; _swipeLastMovePos = null; _turnRun = 0; _turnSense = 0;
       sent.length = 0;
@@ -287,14 +287,54 @@ runTest('SMOKE-TOUCH', `
     if (!boosted(s)) throw 'the turn sent again after its brake must arm on its slide: ' + s.map(e => e.k).join(' ');
     log('a brake never becomes the reference: the push forward after it, and a turn re-sent after its brake, arm again');
 
-    // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
-    // duel wire counts on one same-direction record per SWIPE_SAME, never more.
+    // A straight slide re-sends the direction once per 48 px; the duel wire counts on one
+    // same-direction record per SWIPE_SAME, never more. MODERN counts the slide from the boost
+    // gate: at 0.6 px/ms the finger is at 60 px when the gate opens 100 ms into the touch, so the
+    // re-send that arms the boost lands at 108. LEGACY keeps its shape: 16, 64, 112.
     const slide = poly([[0,0],[130,0]], F, DT);
     cfg.touchLegacy = false; const sm = swipe(slide);
     cfg.touchLegacy = true;  const sl = swipe(slide);
-    if (dirs(sm) !== dirs(sl) || dirs(sm) !== 'RIGHT RIGHT RIGHT') throw 'slide cadence differs: modern ' + dirs(sm) + ' vs legacy ' + dirs(sl);
-    if (!boosted(sm) || !boosted(sl)) throw 'a sustained slide must engage boost in both readers';
-    log('a straight slide sends the same direction every 48 px and engages boost, identically in both readers');
+    if (dirs(sm) !== 'RIGHT RIGHT') throw 'modern slide cadence: ' + dirs(sm);
+    const smb = sm.find(e => e.k === 'boost+');
+    if (!smb || smb.x < 100 || smb.x > 112) throw 'modern: the boost must arm 48 px past the gate, got ' + (smb ? Math.round(smb.x) : 'none');
+    if (dirs(sl) !== 'RIGHT RIGHT RIGHT' || !boosted(sl)) throw 'legacy slide cadence: ' + dirs(sl);
+    log('a straight slide re-sends every 48 px; modern arms the boost 48 px past the gate, legacy at its old 64');
+
+    // THE BOOST SLIDE, three cases the user set (heading LEFT throughout):
+    //  1. pen down, rest, 16 px along the heading (sent, the sim ignores it), rest 500 ms, then a
+    //     slide along the heading: the first 50 ms out of the rest are guarded, then 48 px arm the
+    //     boost. At 0.6 px/ms the guard ends about 39 px into the slide, so the boost lands near 87.
+    //  2. pen down and at once a turn plus its slide, all inside the first 100 ms: one UP, no boost.
+    //  3. pen down, a turn at 40 ms, the push continues: what was pushed before the gate opened
+    //     is not credited; the boost arms 48 px after the gate.
+    const H = { heading: { x:-1, y:0 } };
+    const at = (trace, ms) => trace.map(p => ({ x:p.x, y:p.y, t:p.t + ms }));
+    const cat = (a, b) => a.concat(b.slice(1));
+    cfg.touchLegacy = false;
+    let tr = [{ x:0, y:0, t:0 }];
+    tr = cat(tr, at(poly([[0,0],[-18,0]], F, DT), 100));
+    tr = cat(tr, at(poly([[-18,0],[-110,0]], F, DT), 630));
+    s = swipe(tr, H);
+    let bb = s.find(e => e.k === 'boost+');
+    if (s[0].k !== 'LEFT' || !bb || bb.x > -100 || bb.x < -110) throw 'boost after a rest along the heading must arm 48 px past the 50 ms rest guard: ' + s.map(e => e.k + '@' + Math.round(e.x)).join(' ');
+    if (bb.t - 646 < 50) throw 'the rest guard must hold the boost for 50 ms after the rest ended, armed after ' + (bb.t - 646) + ' ms';
+    s = swipe(poly([[0,0],[0,-64]], 1.0, DT), H);
+    if (dirs(s) !== 'UP' || boosted(s)) throw 'a turn and its slide inside the first 100 ms: one UP and no boost, got ' + s.map(e => e.k + '@' + Math.round(e.y)).join(' ');
+    tr = cat([{ x:0, y:0, t:0 }], at(poly([[0,0],[0,-140]], F, DT), 40));
+    s = swipe(tr, H);
+    bb = s.find(e => e.k === 'boost+');
+    if (dirs(s).indexOf('UP') !== 0 || !bb || -bb.y < 78 || -bb.y > 88 || bb.t < 100) throw 'the boost must arm 48 px after the gate opened, not 48 px after the turn: ' + s.map(e => e.k + '@' + Math.round(-e.y) + '/' + e.t + 'ms').join(' ');
+    log('the boost slide: 48 px past the 50 ms rest guard, nothing inside the first 100 ms of a touch, 48 px past the gate after a turn');
+
+    // Both guards hold the BOOST only. Steering inside them is untouched: a first swipe at 16 px
+    // and a further turn at 24 px, both inside the touchdown gate and both inside the rest guard.
+    s = swipe(poly([[0,0],[0,-20],[-30,-20]], 1.0, DT));   // heading right: up 20 then left 30, all within 50 ms
+    if (dirs(s) !== 'UP LEFT' || boosted(s)) throw 'steering inside the touchdown gate: ' + s.map(e => e.k + '@' + Math.round(e.x) + ',' + Math.round(e.y) + '/' + e.t).join(' ');
+    if (s[s.length - 2].t > 100) throw 'the two turns must land inside the gate to prove it: ' + s.map(e => e.k + '/' + e.t).join(' ');
+    tr = cat([{ x:0, y:0, t:0 }], at(poly([[0,0],[0,-20],[-30,-20]], 1.0, DT), 400));   // pen down, rest 400 ms, the same two turns within 50 ms of moving again
+    s = swipe(tr, H);
+    if (dirs(s) !== 'UP LEFT' || boosted(s)) throw 'steering inside the rest guard: ' + s.map(e => e.k + '@' + Math.round(e.x) + ',' + Math.round(e.y) + '/' + e.t).join(' ');
+    log('both boost guards leave steering alone: a first swipe and a further turn land at their normal distances inside them');
 
     // The anti-spiral guard is shared: the third same-way turn in one gesture needs SWIPE_GUARD
     // (64 px); a shorter one is held.
