@@ -520,7 +520,13 @@ async function _netRequestStart(s, reason){
     // path below stays for the match-IDENTITY moments (first start, rematch), which register and
     // verify the pair's epoch line.
     if(reason === 'level'){ _netOpenBoundary(s, reason); return; }
-    if(!_netOk()){ _netSessionEnd('OFFLINE - CANNOT START'); return; }
+    // The JOINER'S rematch ask is for its match identity only (the 'go' handler issues it):
+    // tick 0 came on the go and the pair's clock is the burst's business, so its clock is not
+    // nudged and its startPts not touched. It fails SOFT: the go starts the match either way,
+    // and an unattested rematch (no claims from this side, the server settles the peer's past
+    // its grace) beats a session ended over one refused request.
+    const identityOnly = (reason === 'rematch' && s.role !== 'host');
+    if(!_netOk()){ if(!identityOnly) _netSessionEnd('OFFLINE - CANNOT START'); return; }
     // The anchor is refreshed by AGE, not by the start: the pts below is computed at send
     // time from whatever anchor is held, so it is fresh by construction, and the server's
     // stale gate is coarse enough to pass any client that ever synced. A FIRST start sweeps
@@ -528,11 +534,11 @@ async function _netRequestStart(s, reason){
     // by half; the pair's residual is the P2P burst's job, not this one's -- or when the
     // server's resync hint (4.4) says this pair's two anchors disagree by more than it can
     // account for. A REMATCH never sweeps: the anchor it holds carried the match just ended.
-    const _force = _netResync;
-    _netResync = false;
+    const _force = _netResync && !identityOnly;
+    if(!identityOnly) _netResync = false;   // the identity ask sweeps nothing: the hint stays for the next first start
     if(reason !== 'rematch') await _netAnchorRefresh({ n:3, nudge:true }, _force);
     if(_netSess !== s || !s.game) return;
-    if(netPts() == null){ _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
+    if(netPts() == null){ if(!identityOnly) _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
     // Through the gate, and BEFORE the pts is read: the server measured this very request
     // leaving beside a tournament.php and both paying the full queue wait for it (see the
     // gate in net-api.js). The gate is a wait, and a pts read before it would be a wait old
@@ -550,12 +556,12 @@ async function _netRequestStart(s, reason){
     const r = await _netPostRes('/api/start.php', _sb);
     const _rtt = performance.now() - _t0;
     if(_netSess !== s || !s.game) return;
-    if(!r.json){
-        if(r.status === 400 && /pts/.test(r.err)){ _netSessionEnd('CLOCK SYNC FAILED - CANNOT START'); return; }
+    if(!r.json || typeof r.json.start_pts !== 'number'){
+        if(identityOnly){ _netSigLog('! rematch identity not issued -> unattested'); return; }
+        if(!r.json && r.status === 400 && /pts/.test(r.err)){ _netSessionEnd('CLOCK SYNC FAILED - CANNOT START'); return; }
         _netSessionEnd('NO START TIME - CANNOT START'); return;
     }
     const d = r.json;
-    if(typeof d.start_pts !== 'number'){ _netSessionEnd('NO START TIME - CANNOT START'); return; }
     // The contract ships `now` for a free clock re-check, and this is the moment it
     // matters most: both clients convert the SAME start_pts through their OWN offset,
     // so any error here lands directly in how far apart they begin. Same min-RTT rule
@@ -565,19 +571,22 @@ async function _netRequestStart(s, reason){
     // ...and never off a round trip the server spent queueing: q_ms says how much of this
     // rtt was a wait for a worker rather than time on the wire, and that part is not
     // symmetric -- halving it puts the whole error into the offset instead of half of it.
-    if(typeof d.now === 'number' && !(d.q_ms > NET_QMS_BUSY) && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
+    if(!identityOnly && typeof d.now === 'number' && !(d.q_ms > NET_QMS_BUSY) && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
         _netSync = { ofs: _netSync.ofs + ((d.now + _rtt/2 - _wall()) - _netSync.ofs) / 2, rtt: _rtt, at: Date.now() };
     // The pair cross-check: the server proved BOTH clients' clocks against the same start
     // and found them too far apart -- the one thing neither client can see for itself.
     // Nothing is wrong with this start; the next one sweeps regardless of the anchor's age.
     if(d.resync === true) _netResync = true;
-    s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
+    if(!identityOnly) s.startPts = d.start_pts;   // tick 0 of the shared timeline, for THIS epoch
     // The item-registry match handle plus THIS side's attestation secret. duel-core MACs its
     // ownership digest with the secret once a second, which is what lets the server verify a
     // steal it did not witness (see _wsAttest, items.js). Additive: a server that does not
     // send them leaves the duel unattested, exactly as it ran before the registry.
     if(typeof d.mid === 'string') s.mid = d.mid;
     if(typeof d.secret === 'string') s.secret = d.secret;
+    // The identity usually lands before the begin, which seeds it into the core. A begin that
+    // already fired seeded the empty identity: seed the real one into the running core now.
+    if(identityOnly){ if(!s.beginFn && typeof duelClaimSeed === 'function') duelClaimSeed(); return; }
     _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
     // Ship the shared start, then schedule tick 0. `theta` is the SHARED-clock residual the host's
     // burst settled on (null when it starved or did not burst); the joiner applies its half from
@@ -618,6 +627,11 @@ async function _netRequestStart(s, reason){
     // does; the first start is no longer the one path that skipped it and left each client anchored on
     // its own independent server-sync offset -- the widest the clocks ever sit apart, right at level 1
     // where the snakes are closest and a dropped/late input is most likely to force a visible rollback.
+    // A server-registered start is a NEW match, the first or a rematch alike: the raw offset the
+    // previous boundary remembered is minutes old by the time the PLAY AGAIN dialog is answered,
+    // and a parked page freezes a device's raw clock meanwhile. The low-pass memory is dropped,
+    // this burst applies unmodified, and the level boundaries after it low-pass against it.
+    s.bsPrev = null;
     if(s.role === 'host') _netBurstThenStart(s, shipAndSchedule);
     else shipAndSchedule(null);
 }
@@ -879,6 +893,15 @@ function _netHandleParsed(m, srcIdx){
             // one rebuild input, so both sims build the identical (seed, level) board however
             // their private counters drifted. `why` picks the rebuild; the begin stays CLOCK-
             // driven (armed here, fired at startPts), never gated on our echo landing.
+            // A rematch is a NEW match on the server: the host's ask minted a match id and two
+            // attestation secrets, and a side's secret rides only its own start answer. Ask for
+            // ours now, on the (epoch, reason) the host settled, with the played identity dropped
+            // first: attesting the new match with the old identity is what the server reads as
+            // tampering (it freezes the item). BEFORE the begin is armed: a tick 0 already past
+            // begins right here, and the begin seeds whatever identity the session holds. The
+            // answer usually lands before the begin; a later one is seeded into the running core
+            // (_netRequestStart). A spectator holds no identity.
+            if(m.why === 'rematch' && !netSpectating()){ s.mid = ''; s.secret = ''; _netRequestStart(s, 'rematch'); }
             _netArmBegin(s, gPts, () => {
                 if(m.why === 'level') beginOnlineDuelLevel(false, m.lvl);
                 else if(m.why === 'respawn') beginOnlineDuelRespawn(false);
@@ -1064,7 +1087,7 @@ function _netMaybeRestart(){
     // clock sweep: its pts is computed at send time from the anchor already held.
     // _netRequestStart owns that whole sequence -- epoch, reason, the failure handling and
     // the `now` re-check. Reuse it rather than re-implement a second, subtly different
-    // start path here.
+    // start path here. The joiner asks for ITS identity on the go (see the 'go' handler).
     _netRequestStart(s, 'rematch');
 }
 // Advance to the next duel level online. EITHER player's OK press triggers it; the level

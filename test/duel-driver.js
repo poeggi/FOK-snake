@@ -55,6 +55,13 @@ const HOOKS = (id) => `
   // timeline must ignore, since netPts rides _wall() = timeOrigin + performance.now(). __wallNow
   // exposes this client's raw wall clock so a test can confirm the step really landed.
   globalThis.__clkStep = (ms)=>{ __clkE0 += ms; };
+  // A RAW-CLOCK PAUSE: this device's monotonic clock stood still for ms (iOS parks the page
+  // while the PLAY AGAIN dialog waits), so every reading after it is ms behind -- the raw
+  // offset a previous boundary remembered is stale by that much. The wall clock (Date.now)
+  // keeps running, as on the device.
+  globalThis.__rawPause = (ms)=>{ performance.timeOrigin -= ms; };
+  globalThis.__rawOrigin = ()=> performance.timeOrigin;
+  globalThis.__keepBsPrev = false; globalThis.__bsPrevSeed = null;
   globalThis.__wallNow = ()=> Date.now();
   globalThis.__ivals = [];
   globalThis.setInterval = (fn, ms)=>{ __ivals.push({ fn, ms, next: __now + ms }); return __ivals.length; };
@@ -162,6 +169,13 @@ const HOOKS = (id) => `
   globalThis.__rematchHost = (epoch, seed)=>{
     const s = _netSess; if(!s || s.role !== 'host' || !s.game) return;
     s.epoch = epoch|0; s.seed = seed>>>0; s.lvlPending = true;
+    // A server-registered start drops the burst's low-pass memory (net-session.js
+    // _netRequestStart): a rematch is a new match and its burst applies unmodified. The
+    // falsification knob keeps a memory instead, the pre-fix behaviour: the raw offset the
+    // previous boundary would have measured (the driver seeds it from the two clock origins,
+    // since a short first match may hold no boundary of its own), to prove the drop is what
+    // holds a rematch after a raw-clock pause.
+    s.bsPrev = __keepBsPrev ? __bsPrevSeed : null;
     _netBurstThenStart(s, (theta)=>{
       if(_netSess !== s || !s.game){ s.lvlPending = false; return; }
       const sp = netPts() + 250;   // author on the now-midpoint clock (production uses NET_BURST_LEAD_MS)
@@ -532,6 +546,7 @@ function runMatch(opts){
     const A = mk('aaaaaaaa', seed, 'host', opts.hookA, WS.A, WS.B),
           B = mk('bbbbbbbb', seed, 'peer', opts.hookB, WS.B, WS.A);
     if(opts.noBurst){ A.__disableBurst(); B.__disableBurst(); }   // falsification control (see __disableBurst)
+    if(opts.keepBsPrev){ A.__keepBsPrev = true; }                 // falsification control (see __rematchHost)
     const TICK = A.__TICK;
     const wire = { AB:[], BA:[] };
     let rndS = (opts.rndSeed || 0x51ED) >>> 0;
@@ -892,6 +907,10 @@ function runMatch(opts){
                 rematchDone = true;
                 bank('A', A.__rbDbg()); bank('B', B.__rbDbg());   // pre-rematch tallies before _rbReset wipes them
                 const ep = ++levelEpoch;    // the host bursts + authors the shared start_pts (server would, in the field)
+                // opts.rematch.rawPause = { who, ms }: that client's raw clock stood still for ms
+                // while the dialog was up, right before the rematch's burst measures the pair.
+                A.__bsPrevSeed = A.__rawOrigin() - B.__rawOrigin();   // what a boundary before the pause measured (o > 0: the host's raw clock leads)
+                if(rematch.rawPause) (rematch.rawPause.who === 'A' ? A : B).__rawPause(rematch.rawPause.ms | 0);
                 A.__rematchHost(ep, (seed ^ 0x9e3779b9) >>> 0);
                 levelUps++;
             }

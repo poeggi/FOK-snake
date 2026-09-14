@@ -1171,6 +1171,15 @@ function _duelClaimArgs(hosting){
              ids: hosting ? [me, peer] : [peer, me],
              seqs: itemMatchSeqs(s.peerProfile) };
 }
+// The attestation identity seeded again after the begin: a joiner's rematch answer can land
+// after the host's go began the match (net-session.js _netRequestStart), and that begin
+// seeded the core with an empty identity. Same fields the begin ships, to whichever home runs
+// the core.
+function duelClaimSeed(){
+    const ca = _duelClaimArgs(netHosting());
+    if(_wDuel && _useWorker()) _worker.postMessage(Object.assign({ t:'duelClaim' }, ca));
+    else if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
+}
 function beginGame(){
     if(typeof netEndSession==='function') netEndSession();   // a lingering online session must never eat the local game's frames
     inGame = true; Snd.musicFadeOut(0.5);   // menu music fades out; READY/GO runs silent

@@ -43,7 +43,7 @@ const HEAVY = [
     ['test/duel-suspend.js',     58700, 'one-sided suspend recovery (a backgrounded client re-anchors its tick base; the live side never jumps)'],
     ['test/duel-boundary.js',    58100, 'P2P level boundary holds lockstep (host bursts to the shared midpoint, ships bth on the go)'],
     ['test/duel-outage.js',      44700, 'connection-interruption recovery (a sub-4s wire outage is survived; an over-long one still kills)'],
-    ['test/duel-rematch.js',     43400, 'server-path restart (rematch) holds lockstep (host bursts to the shared midpoint on every start)'],
+    ['test/duel-rematch.js',     58000, 'server-path restart (rematch) holds lockstep (host bursts to the shared midpoint on every start; a raw-clock pause before it is corrected in full)'],
     ['test/duel-epoch.js',       32900, 'a lost boundary begin is repaired, not survived silently (no split onto separate tick bases)'],
     ['test/duel-drift.js',       28900, 'wall-clock drift immunity (the lockstep timeline rides the monotonic clock; an NTP slew/step is inert)'],
     ['test/duel-asym.js',        29600, 'rollback is one-sided under a clock offset (it falls on the AHEAD client; a modest skew is absorbed)'],

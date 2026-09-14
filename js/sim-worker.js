@@ -268,6 +268,9 @@ onmessage = (e) => {
             _dcOfs = m.ofs; if (m.startPts != null) _dcStartPts = m.startPts;
             _dcSeedPhase();    // the grid moved: re-set the phase to it (one pset event)
             break;
+        case 'duelClaim':      // the attestation identity, landed after the begin (a late rematch answer)
+            if (_dcOn) _wsClaimReset(m.mid, m.sec, m.ids, m.seqs);
+            break;
         case 'duelLevelNet':   // online level-up (mirrors duelStartNet, but keeps players/score/lives)
             if (!_dcOn) break;
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? _dcOfs : m.ofs); _dcStartPts = m.startPts || _dcStartPts;

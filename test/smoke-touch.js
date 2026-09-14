@@ -256,14 +256,14 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'RIGHT UP') throw 'a thumb curling back-and-up must turn, sent: ' + dirs(s);
     log('modern: a thumb curling back-and-up turns rather than brakes');
 
-    // A slide along a BRAKE direction re-anchors like any slide (the reverse is re-sent every
-    // SWIPE_SAME, refused by the sim) but never arms a boost: the snake will not take that
-    // heading. A slide along a direction that was a real turn still arms, and a brake as the
-    // first key of a touch (judged against the heading) arms nothing either.
+    // A slide along a BRAKE direction is dead movement: the reverse is sent once (the sim
+    // refuses it, the boost ends), and the finger sliding on sends nothing more and arms no
+    // boost. A slide along a direction that was a real turn still arms; a brake as the first
+    // key of a touch (judged against the heading) is sent once and arms nothing, in both readers.
     s = swipe(poly([[0,0],[40,0],[-80,0],[-80,-40]], F, DT), { boost: { x:1, y:0 } });   // boosting right: pull back 120, up 40
     let li = s.findIndex(e => e.k === 'LEFT');
     if (li < 0 || !s[li + 1] || s[li + 1].k !== 'boost-') throw 'a pull-back must brake: ' + s.map(e => e.k).join(' ');
-    if (s.filter(e => e.k === 'LEFT').length < 2) throw 'a continued pull-back must keep re-anchoring (the reverse re-sent every 48 px): ' + dirs(s);
+    if (s.filter(e => e.k === 'LEFT').length !== 1) throw 'a slide along the brake direction must send the reverse exactly once: ' + dirs(s);
     if (s.some((e, i) => e.k === 'boost+')) throw 'a slide along the brake direction armed a boost: ' + s.map(e => e.k).join(' ');
     u = s.find(e => e.k === 'UP');
     if (!u || -u.y > 30) throw 'a turn out of a pull-back must cost the turn distance from the finger, UP after ' + (u ? -u.y : 'never') + ' px';
@@ -272,7 +272,20 @@ runTest('SMOKE-TOUCH', `
     s = swipe(poly([[0,0],[-70,0]], F, DT));   // first key of the touch is the reverse of the heading
     if (dirs(s).indexOf('LEFT') < 0) throw 'a first-swipe brake must be sent: ' + dirs(s);
     if (boosted(s)) throw 'a slide along a first-swipe brake armed a boost: ' + s.map(e => e.k).join(' ');
-    log('a slide along a brake direction re-anchors and never arms a boost; a slide along a real turn still does');
+    if (s.filter(e => e.k === 'LEFT').length !== 1) throw 'a first-swipe brake must be sent exactly once: ' + dirs(s);
+    cfg.touchLegacy = true; s = swipe(poly([[0,0],[-70,0]], F, DT)); cfg.touchLegacy = false;
+    if (s.filter(e => e.k === 'LEFT').length !== 1 || boosted(s)) throw 'legacy: a first-swipe brake must be sent once and arm nothing: ' + s.map(e => e.k).join(' ');
+    log('a slide along a brake direction sends the reverse once and never arms a boost; a slide along a real turn still does');
+
+    // A brake never becomes the reference: pull back to brake, push forward again, and the push
+    // is the heading, so its slide arms the boost. Same for a turn, its brake and the turn again.
+    s = swipe(poly([[0,0],[40,0],[0,0],[100,0]], F, DT), { boost: { x:1, y:0 } });   // boosting right: pull back 40, push forward 100
+    if (turns(s) !== 'RIGHT LEFT RIGHT') throw 'brake then forward, sent: ' + dirs(s);
+    if (!boosted(s)) throw 'a push forward after a brake must arm the boost again: ' + s.map(e => e.k).join(' ');
+    s = swipe(poly([[0,0],[40,0],[40,-40],[40,0],[40,-100]], F, DT));   // right, up, back down (the brake of UP), up again
+    if (turns(s) !== 'RIGHT UP DOWN UP') throw 'turn, its brake, turn again, sent: ' + dirs(s);
+    if (!boosted(s)) throw 'the turn sent again after its brake must arm on its slide: ' + s.map(e => e.k).join(' ');
+    log('a brake never becomes the reference: the push forward after it, and a turn re-sent after its brake, arm again');
 
     // A straight slide keeps its same-direction cadence (the boost slide) in both readers: the
     // duel wire counts on one same-direction record per SWIPE_SAME, never more.

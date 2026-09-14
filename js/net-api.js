@@ -1766,7 +1766,7 @@ function netFetchScores(){
     if(!_netOk() || _netScoresLoading) return;
     if(Date.now() - _netScoresAt < (_netScores ? NET_SCORES_TTL_MS : (_netScoresErr ? NET_SCORES_RETRY_MS : 0))) return;
     _netScoresLoading = true; _uiDirty = true;
-    _netGet('/api/scores.php?limit=100', undefined, false, true).then(r => {
+    _netGet('/api/scores.php?limit=' + SCORES_SHOWN, undefined, false, true).then(r => {   // the tab draws SCORES_SHOWN rows: ask for exactly those
         _netScoresLoading = false; _netScoresAt = Date.now();
         if(r && Array.isArray(r.scores)){ _netScores = r.scores; _netScoresErr = false; }
         else _netScoresErr = true;

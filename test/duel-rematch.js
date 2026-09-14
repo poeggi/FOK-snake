@@ -33,15 +33,24 @@ const LB = { name:'loss+drift e=150 ', secs:24, seed:0x77C0, p2pBoundary:true, w
 // while a collapse of the effect still can.
 const LB_MARGIN = 80;
 
-const CONVERGE = [LB];
+// A rematch after a RAW-CLOCK PAUSE: the joiner's monotonic clock stood still for 300 ms while
+// the PLAY AGAIN dialog was up (iOS parks the page), so the raw offset the previous boundary
+// remembered is 300 ms stale. A rematch is a NEW match: its burst applies unmodified and the
+// pair restarts aligned. The control keeps the low-pass memory across the rematch (the
+// pre-fix reader) and restarts ~150 ms apart: the skew storm, read off the rb it adds.
+const RP = Object.assign({}, LB, { name:'rawPause 300 ms ', rematch:{ at:8, rawPause:{ who:'B', ms:300 } } });
+const RP_MARGIN = 80;
+
+const CONVERGE = [LB, RP];
 
 const steps = [];
 let failed = 0;
 
-let withBurst = null;
+let withBurst = null, withDrop = null;
 for(const sc of CONVERGE){
     const r = runMatch(sc);
     if(sc === LB) withBurst = r;   // the treatment arm of the falsification pair
+    if(sc === RP) withDrop = r;    // the treatment arm of the memory-drop pair
     // A clean rematch: the restart actually fired, converged, no refused inputs (drop=0 -> no
     // CONNECTION LOST flash), no ring split, no product desync, no DESYNC session-end, no local
     // teleport. A gameplay duelOver in the SECOND match is fine; only a session-end is a failure.
@@ -72,6 +81,16 @@ steps.push('burst load-bearing'.padEnd(18)
     + '  | noBurst(ctrl): rb=' + noBurst.rb
     + '   ' + (lbBad ? 'FAIL' : 'ok'));
 if(lbBad) failed++;
+
+// Load-bearing: WITH the memory dropped the paused rematch must hold (drop=0, asserted above);
+// the keepBsPrev control must add the skew storm's rb on top of it.
+const kept = runMatch(Object.assign({}, RP, { keepBsPrev:true }));
+const rpBad = kept.rb < withDrop.rb + RP_MARGIN;
+steps.push('memory drop l-b'.padEnd(18)
+    + ' WITH: drop=' + withDrop.drop + ' rb=' + withDrop.rb + ' conv=' + (withDrop.converged ? 'yes' : 'NO')
+    + '  | keepBsPrev(ctrl): rb=' + kept.rb + ' drop=' + kept.drop
+    + '   ' + (rpBad ? 'FAIL' : 'ok'));
+if(rpBad) failed++;
 
 console.log(steps.join('\n'));
 if(failed){
