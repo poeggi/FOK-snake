@@ -409,14 +409,14 @@ The ring snapshot at a tick that is already IMMUTABLE (no accepted input can sti
 rewrite it) is the real equality test -- that is what both the driver's detector and
 the product's own 1Hz detector compare.
 
-### smoke-events.js  (FAST tier -- the client half of events, server API 4.14)
+### smoke-events.js  (FAST tier -- the client half of events, server API 4.16)
 
 Twenty-eight lanes over `js/events.js` and the screens around it. What each one
 exists to stop, in the order they run (the 4.11 set first, then what came after):
 
 - **The hash parser.** `EVENT_HASH_RE` is the parser for BOTH entry points -- the boot
   hash in game.js and the camera in input.js -- so this is the thing itself, not a copy
-  of it. Note the class is the CONTRACT'S (`[A-Z2-9]`) and is one character wider than
+  of it. Note the classes are the CONTRACT'S (eid `[A-Z0-9]`, pass and key `[A-Z2-9]`), wider than
   the code alphabet, which also drops I, L and O. Deliberate: this is a shape filter,
   and what a code really is belongs to the server, which answers a wrong one 404.
 - **The 53-byte budget.** `GAME_URL#event=<eid>.<pass>` is exactly 42 + 4 + 1 + 6, and
