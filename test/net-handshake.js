@@ -598,7 +598,7 @@ try {
     const A = mk(A_ID);
     const r = await A.__syncCold();
     if(!r.anchored) throw new Error('the sweep must anchor');
-    if(r.calls !== 6) throw new Error('a 5-sample sweep is six requests, the first a throwaway: got ' + r.calls);
+    if(r.calls !== 4) throw new Error('a sweep is four requests, the first a throwaway: got ' + r.calls);
     if(r.rtt !== 30) throw new Error('the anchor must come from a warm sample (rtt 30), got rtt ' + r.rtt);
     if(!r.reported || r.lat !== 30) throw new Error('the latency report is the warm samples only, got ' + r.lat);
   });

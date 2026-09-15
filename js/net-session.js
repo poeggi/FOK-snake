@@ -530,13 +530,13 @@ async function _netRequestStart(s, reason){
     // The anchor is refreshed by AGE, not by the start: the pts below is computed at send
     // time from whatever anchor is held, so it is fresh by construction, and the server's
     // stale gate is coarse enough to pass any client that ever synced. A FIRST start sweeps
-    // only when the anchor is older than NET_ANCHOR_MAX_AGE_MS (three samples; the pair's
-    // residual is the P2P burst's job, not this one's) or when the server's resync hint
+    // only when the anchor is older than NET_ANCHOR_MAX_AGE_MS (the pair's residual is the
+    // P2P burst's job, not this one's) or when the server's resync hint
     // (4.4) says this pair's two anchors disagree by more than it can account for. A
     // REMATCH never sweeps: the anchor it holds carried the match just ended.
     const _force = _netResync && !identityOnly;
     if(!identityOnly) _netResync = false;   // the identity ask sweeps nothing: the hint stays for the next first start
-    if(reason !== 'rematch') await _netAnchorRefresh({ n:3 }, _force);
+    if(reason !== 'rematch') await _netAnchorRefresh(_force);
     if(_netSess !== s || !s.game) return;
     if(netPts() == null){ if(!identityOnly) _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
     // Through the gate, and BEFORE the pts is read: the server measured this very request

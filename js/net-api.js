@@ -543,7 +543,7 @@ function _netClampProfile(p){
 
 // ---- PTS clock sync (API: time synchronization). The server clock in unix
 // MILLISECONDS is the one PTS reality; we measure our offset via t.txt
-// (3-5 samples, keep the lowest-RTT one) and adjust ourselves. REQUIRED before
+// (a warm-up plus NET_SYNC_N samples, the lowest-RTT one wins). REQUIRED before
 // an online game starts; refreshed by AGE (NET_ANCHOR_MAX_AGE_MS). ----
 let _netSync = { ofs:null, rtt:-1, at:0 };
 // The lockstep timeline rides the MONOTONIC clock, never Date.now(). Date.now() is the wall
@@ -595,7 +595,7 @@ async function _netClockMs(){
 // door, a game over, a return to the menu), or when a caller forces one (a foreground, a
 // "future pts" refusal, the server's resync hint).
 function _netAnchorStale(){ return _netSync.ofs == null || Date.now() - _netSync.at > NET_ANCHOR_MAX_AGE_MS; }
-async function _netAnchorRefresh(opts, force){ if(force || _netAnchorStale()) await _netTimeSync(true, opts); }
+async function _netAnchorRefresh(force){ if(force || _netAnchorStale()) await _netTimeSync(true); }
 // Adopt a sample. A reading within the sample's own round trip of the current anchor is
 // noise: move halfway, the residual is left to the next sweep and to the P2P burst. A
 // reading further off than that is a wrong anchor, not a noisy one: take it outright.
@@ -610,9 +610,10 @@ function _netAnchorAdopt(smp){
 // of a cold socket, an uplink waking from doze. All of it makes the estimate read AHEAD,
 // and the cold first request carries most of it. So sample 0 only warms the socket and is
 // never a candidate; of the samples after it the one with the lowest round trip is the
-// least polluted and wins. opts.n = candidate samples (default 5), NET_GAP_MS apart so a
-// momentary stall cannot slow them all.
-async function _netTimeSync(force, opts){
+// least polluted and wins. NET_SYNC_N candidates, NET_GAP_MS apart so a momentary stall
+// cannot slow them all: four requests, ~0.3 s.
+const NET_SYNC_N = 3;
+async function _netTimeSync(force){
     if(_netSyncBusy || !_netOk()) return;
     // NEVER re-anchor while a duel is being played. netPts() DRIVES the tick number, so
     // moving the anchor moves the whole timeline under our feet -- a periodic
@@ -622,7 +623,7 @@ async function _netTimeSync(force, opts){
     // across a match is invisible; a step mid-game is not.
     if(phase === 'duel' || phase === 'duelPaused') return;
     if(!force && _netSync.ofs != null) return;   // anchored: it holds until age or a caller re-anchors it
-    const n = (opts && opts.n) || 5;
+    const n = NET_SYNC_N;
     _netSyncBusy = true;
     let best = null;
     const rtts = [];

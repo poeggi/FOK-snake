@@ -68,10 +68,11 @@ the PEER version (answerer knows it from the offer, host from the answer).
   half of what sat on the way in and not on the way out (DNS, TCP+TLS,
   radio wake): every bad sample reads AHEAD, and the cold first request
   carries most of it (measured: 276 ms cold vs 30 ms warm = 117 ms ahead).
-- One sweep shape (`_netTimeSync`): request 0 warms the socket and is never
-  a candidate; then n samples (default 5, first start and spectator boot 3)
-  NET_GAP_MS apart; the lowest-RTT one wins; the latency report is their
-  average. No cleanliness flag of any kind (no q_ms, no own-flight gate).
+- One sweep shape (`_netTimeSync`), no caller options: request 0 warms the
+  socket and is never a candidate; then NET_SYNC_N = 3 samples NET_GAP_MS
+  apart (four requests, ~0.3 s); the lowest-RTT one wins; the latency
+  report is their average. No cleanliness flag of any kind (no q_ms, no
+  own-flight gate).
 - Adopt (`_netAnchorAdopt`): within the sample's own RTT of the current
   anchor = noise, move halfway; further = a wrong anchor, take it outright.
 - Refreshed by AGE at quiet moments, never by event: boot, foreground, a
