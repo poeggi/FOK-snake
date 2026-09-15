@@ -193,6 +193,27 @@ function runBrakeSwipe() {
     return { bs, be, boostOn, boostOff: !A.__view().boosting };
 }
 
+// Answerer (player 1): the same guard routes through real touch input and shared sim arming.
+{
+    const {A,B,adv}=boot(0xD0E1);
+    for(const id of ['gamepad','btn-mute','fps-el','dbg-snap'])
+        B.document.getElementById(id).getBoundingClientRect=()=>({left:0,top:0,width:0,height:0,right:0,bottom:0});
+    ok(B.__me()===1,'boost guard lane controls the answerer at index 1');
+    const t0=B.__simTick();
+    B.document.__emit('touchstart',ev(300,300));
+    adv(10); // touchdown is old; the turn guard must protect this on its own.
+    const boosts=()=>B.__logRange(t0,B.__simTick()+5).reduce((n,row)=>n+row[1].filter(c=>c.startsWith('boost/p1')).length,0);
+    for(let k=1;k<=3;k++){
+        adv(1,()=>B.document.__emit('touchmove',ev(300,300-k*32)));
+        ok(!B.__view().boosting&&boosts()===0,'answerer turn cannot boost inside its first 50 ms, sample '+k);
+    }
+    for(let k=4;k<=8;k++) adv(1,()=>B.document.__emit('touchmove',ev(300,300-k*32)));
+    adv(3);
+    ok(boosts()===1&&B.__view().boosting,'answerer authors one boost after the guard and fresh slide');
+    ok(!A.__view().boosting,'answerer boost never arms the host snake');
+    B.document.__emit('touchend',ev(300,44));
+}
+
 const dpad = runDpad();
 const sw30 = runSwipe(30);
 const sw60 = runSwipe(60);

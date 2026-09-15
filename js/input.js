@@ -993,7 +993,7 @@ if (typeof window !== 'undefined' && window.PointerEvent) {
     canvas.addEventListener('mouseup', _canvasUp);
 }
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100, REST_GATE_MS=50;   // REST_GATE_MS: the boost guard after a rest ends (MODERN), a shorter twin of the touchdown gate
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100, TURN_GATE_MS=50;   // MODERN boost guard after each committed axis change
 const _HOP_TAN=Math.tan(DZ_HI*Math.PI/180);   // a checkpoint hop within DZ_HI of the sent axis still agrees with the sent direction (MODERN reader)
 // The checkpoint grain: a finger that has not travelled this far since its last checkpoint within
 // SWIPE_COOLDOWN is resting. With MODERN's 3px a finger slower than 60px/s rests, and a resting
@@ -1075,6 +1075,19 @@ function _dbgTurnLog(cell, key, dist, run, held, thresh){
     _dbgTurns.push({ cx:cell.x, cy:cell.y, key, dist:dist<0?-1:Math.round(dist), run, held, thresh:Math.round(thresh), at:now });
     while(_dbgTurns.length>16) _dbgTurns.shift();
 }
+// Observe the displayed snake state, including worker-hosted play. Repeated arm requests
+// are not transitions and must not flood the trace. Each local snake has its own state.
+const _dbgBoostSeen=[false,false];
+function _dbgBoostTrace(){
+    if((cfg.debug|0)<3){ _dbgBoostSeen[0]=false; _dbgBoostSeen[1]=false; return; }
+    for(let p=0;p<2;p++){
+        const i=_armIndex(p);
+        const P=(typeof players!=='undefined'&&players)?(i>=0?players[i]:null):(p===0?{snake,boosting}:null);
+        const on=!!(P&&P.boosting), sn=P&&P.snake;
+        if(on!==_dbgBoostSeen[p]&&sn&&sn[0]) _dbgTurnLog(sn[0],on?'BoostStart':'BoostEnd',-1,0,false,0);
+        _dbgBoostSeen[p]=on;
+    }
+}
 // DEBUG L3 (ANY input): a real 90-degree turn from any source -- keyboard, TV remote, dpad or
 // touch -- drops the same on-board marker, so the trace is no longer touch-only. handleKey
 // calls this at each steer; touch fills _dbgTurnCtx first with its gesture distance/run/guard,
@@ -1116,7 +1129,8 @@ let _swipePhase0=null, _swipeInPlay=false;
 // slow drift is read exactly like a still finger: the next move is a first swipe from where it
 // starts, at the first-swipe distance.
 let _swipeResting=false;
-let _swipeRestEndAt=0;   // when the last rest ended; the MODERN boost guard after a rest runs from it
+let _swipeIntentDir=null;   // last sent movement direction survives rests and queued-heading lag
+let _swipeTurnAt=-Infinity;   // last committed axis change, independent of rest
 // The reference a key is judged against: the last direction sent in this touch that was not
 // itself a brake, or the live heading before any. A key that is the reverse of it is a BRAKE:
 // the sim refuses it (a 180 is illegal), so it only ends the boost, and a finger sliding on
@@ -1129,7 +1143,7 @@ function _swipeIsBrake(key){
     return !!(p&&d&&d.x===-p.x&&d.y===-p.y);
 }
 function _touchById(list,id){ for(let i=0;i<list.length;i++){ if(list[i].identifier===id) return list[i]; } return null; }
-function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeRefDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _swipeRestEndAt=0; _dbgTouch=null; _dbgResting=false; }
+function _swipeEnd(){ _swipeBase=null; _swipeFollow=null; _swipeId=null; _swipeLastDir=null; _swipeRefDir=null; _swipeLastMovePos=null; _menuHDir=null; _swipeResting=false; _swipeTurnAt=-Infinity; _swipeIntentDir=null; _dbgTouch=null; _dbgResting=false; }
 let _swipeBaseAt=0;      // when _swipeBase was last placed; the DEBUG L3 readout shows its age
 // DEBUG L3 readout state (drawTouchDebug in screens.js). The touch layer accumulates every sample
 // between two readout refreshes and the painter takes ONE snapshot per refresh, so the numbers
@@ -1259,7 +1273,7 @@ document.addEventListener('touchstart',e=>{
     // identifier back after an end the browser never delivered; either way the arm held so far
     // is released here, since the old finger's lift is no longer ours to hear.
     if(_swipeBase) gameBoostEnd(0);
-    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false; _swipeRestEndAt=0;
+    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false; _swipeTurnAt=-Infinity; _swipeIntentDir=null;
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeRefDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
@@ -1282,6 +1296,7 @@ document.addEventListener('touchmove',e=>{
     // play carries nothing over: it re-anchors at the finger and forgets its direction, so a
     // slide from before GO is a fresh first swipe, never an instant boost.
     const ip=_inPlay();
+    if(ip&&!_swipeInPlay){ _swipeIntentDir=null; _swipeTurnAt=-Infinity; }
     if(ip&&!_swipeInPlay){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; _swipeLastDir=null; _swipeRefDir=null; _menuHDir=null; _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeLastMoveAt=now; _swipeResting=false; }
     _swipeInPlay=ip;
     const moved=_swipeLastMovePos?Math.hypot(t.clientX-_swipeLastMovePos.x,t.clientY-_swipeLastMovePos.y):0;
@@ -1294,10 +1309,8 @@ document.addEventListener('touchmove',e=>{
     const win=SWIPE_COOLDOWN*_touchLowF();
     const step=(_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY;
     const grain=!!_swipeLastMovePos&&moved>=step;   // this sample covers a checkpoint grain
-    const wasResting=_swipeResting;
     if(grain&&now-_swipeLastMoveAt<=win) _swipeResting=false;   // covered inside the window: the finger is moving again
     else if(now-_swipeLastMoveAt>win&&moved<SWIPE_N) _swipeResting=true;
-    if(wasResting&&!_swipeResting) _swipeRestEndAt=now;   // the rest ended here: the boost guard after a rest runs from now
     _dbgResting=_swipeResting; if(_swipeResting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
     if(_swipeResting){
         _swipeLastDir=null; _swipeRefDir=null;
@@ -1313,12 +1326,13 @@ document.addEventListener('touchmove',e=>{
     }
     const sf=_touchSensF();
     // MODERN: the slide that arms the boost counts from the boost gate, never before it. While
-    // the touch is younger than BOOST_GATE_MS, or a rest ended less than REST_GATE_MS ago, BASE
+    // a touch that changed axis is younger than BOOST_GATE_MS, or the axis changed
+    // less than TURN_GATE_MS ago, BASE
     // follows the finger, so nothing pushed inside a guard is credited to a slide. Steering is
     // untouched: the first swipe reads its chord from BASE only while no direction is committed,
     // and after a commit the turn and the brake read REF. Once the guard is over, 48 px along the
     // direction arm the boost.
-    const boostGuard=now-_swipeTouchStartAt<BOOST_GATE_MS*_touchLowF()||(_swipeRestEndAt>0&&now-_swipeRestEndAt<REST_GATE_MS*_touchLowF());
+    const boostGuard=(_swipeTurnAt!==-Infinity&&now-_swipeTouchStartAt<BOOST_GATE_MS*_touchLowF())||now-_swipeTurnAt<TURN_GATE_MS*_touchLowF();
     if(_inPlay()&&!cfg.touchLegacy&&_swipeLastDir&&boostGuard){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; }
     const rd=_swipeRead(t.clientX,t.clientY,sf,hop);
     if(!rd) return;
@@ -1328,7 +1342,7 @@ document.addEventListener('touchmove',e=>{
     // ignores the key), so BASE stays put and the boost arms 48 px from the start of the movement,
     // the same 48 a slide after a turn costs. A first movement in any other direction is a turn:
     // it commits at SWIPE_1 and the slide counts from there.
-    const alongHeading=(()=>{ if(!_inPlay()||cfg.touchLegacy||_swipeLastDir) return false; const h=_myDir(), kd=GDIRS[key]; return !!(h&&kd&&h.x===kd.x&&h.y===kd.y); })();
+    const alongHeading=(()=>{ if(!_inPlay()||cfg.touchLegacy||_swipeLastDir) return false; const h=_swipeIntentDir?GDIRS[_swipeIntentDir]:_myDir(), kd=GDIRS[key]; return !!(h&&kd&&h.x===kd.x&&h.y===kd.y); })();
     // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
     // one-gesture handling below, so every menu scrolls by the same rule -- no per-screen tuning.
     const inMenu=!_inPlay()&&phase!=='credits';
@@ -1357,6 +1371,10 @@ document.addEventListener('touchmove',e=>{
     if(inMenu&&(key==='ArrowLeft'||key==='ArrowRight')){ _menuHDir=key; return; }
     _swipedThisTouch=true;
     if(_inPlay()) _dbgTurnCtx={dist, run:_turnRun, thresh};   // DEBUG L3: hand this gesture's distance/run/guard to the shared steer logger (fires inside handleKey)
+    // Only an axis change starts a guard. A brake and the forward push stay on one axis.
+    const priorDir=_swipeIntentDir?GDIRS[_swipeIntentDir]:_myDir();
+    if(_inPlay()&&!cfg.touchLegacy&&priorDir&&GDIRS[key]&&(priorDir.x*GDIRS[key].y-priorDir.y*GDIRS[key].x!==0)) _swipeTurnAt=now;
+    if(_inPlay()) _swipeIntentDir=key;
     handleKey(_dialSwipe(key),null);
     if(_inPlay()){
         const d=GDIRS[key];
@@ -1365,12 +1383,9 @@ document.addEventListener('touchmove',e=>{
             // duel snake -- gameBoostEnd routes to the right player in both modes.
             const _mb=_myBoost();
             if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){gameBoostEnd(0);}
-            // Panic-flick guard: a same-direction continue can engage boost only once the finger
-            // has been down for BOOST_GATE_MS. Anchored to touchdown (_swipeTouchStartAt) so it arms
-            // exactly once per touch -- pauses and forgotten headings never restart it -- and its
-            // ONLY effect is to hold boost off; steering is untouched. A finger already resting on
-            // the pad past the gate therefore boosts on its first sustained slide, no penalty.
-            else if(_swipeLastDir&&key===_swipeLastDir){ if(now-_swipeTouchStartAt>=BOOST_GATE_MS*_touchLowF()) gameBoostStart(0,d,true); }
+            // MODERN guards only an axis change; a fresh same-heading slide counts
+            // immediately. LEGACY retains its original unconditional touchdown gate.
+            else if(_swipeLastDir&&key===_swipeLastDir){ if(cfg.touchLegacy?now-_swipeTouchStartAt>=BOOST_GATE_MS*_touchLowF():!boostGuard) gameBoostStart(0,d,true); }
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }

@@ -1391,6 +1391,7 @@ function drawGameBoard(now) {
     }
     // HUD sync is done once per frame in loop() (after applyWorkerFrame makes the globals
     // current); drawDuelBoard relies on that too, so a second call here was pure duplication.
+    _dbgBoostTrace();
     if((cfg.debug|0)>=3) drawTurnDebug();
 }
 
@@ -1410,10 +1411,10 @@ function drawTurnDebug(){
         if(age>TTL) continue;
         const a=Math.max(0,1-age/TTL);
         const px=m.cx*CS+CS/2, py=m.cy*CS+CS/2;
-        const col=m.held?'#ff5050':(m.run>=3?'#ffd24a':'#40c8ff');   // red held, gold spiral turn, blue normal
+        const col=m.key==='BoostStart'?'#80ff40':m.key==='BoostEnd'?'#ff9f40':m.held?'#ff5050':(m.run>=3?'#ffd24a':'#40c8ff');   // green boost start, orange boost end, red held, gold spiral turn, blue normal
         ctx.globalAlpha=a; ctx.fillStyle=col;
         ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
-        const arrow={ArrowUp:'U',ArrowDown:'D',ArrowLeft:'L',ArrowRight:'R'}[m.key]||'?';
+        const arrow={ArrowUp:'U',ArrowDown:'D',ArrowLeft:'L',ArrowRight:'R',BoostStart:'BOOST+',BoostEnd:'BOOST-'}[m.key]||'?';
         let txt=arrow+(m.dist>=0?' '+m.dist:'');   // touch shows swipe px; keyboard/other (dist -1) just the direction
         if(m.run>=1) txt+=' x'+m.run;   // always show the run so a skipped turn (x2 -> x4) is obvious
         if(m.held) txt+=' HOLD>'+m.thresh;
@@ -1795,6 +1796,7 @@ function drawDuelBoard(now) {
                 ct('WAITING FOR OPPONENT...', CW/2, CH/2+64, '#ffd700', FONT.HINT);
         }
     }
+    _dbgBoostTrace();
     if((cfg.debug|0)>=3) drawTurnDebug();
     _drawDuelWarn();   // last: it must sit over the board, not under it
 }

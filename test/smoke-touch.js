@@ -20,7 +20,7 @@ runTest('SMOKE-TOUCH', `
     let cur = { x:0, y:0 };
     const sent = [];
     const oSteer = gameSteer, oBs = gameBoostStart, oBe = gameBoostEnd;
-    gameSteer = function(p, d){ sent.push({ k: d.y<0?'UP':d.y>0?'DOWN':d.x<0?'LEFT':'RIGHT', x: cur.x, y: cur.y, t: clk }); };
+    gameSteer = function(p, d){ sent.push({ k: d.y<0?'UP':d.y>0?'DOWN':d.x<0?'LEFT':'RIGHT', x: cur.x, y: cur.y, t: clk, guard:_swipeTurnAt }); };
     gameBoostStart = function(){ sent.push({ k:'boost+', x: cur.x, y: cur.y, t: clk }); };
     gameBoostEnd = function(){ sent.push({ k:'boost-', x: cur.x, y: cur.y, t: clk }); };
     const ev = (x, y) => ({ touches:[{clientX:x, clientY:y}], changedTouches:[{clientX:x, clientY:y}], preventDefault(){}, stopPropagation(){}, stopImmediatePropagation(){} });
@@ -79,12 +79,12 @@ runTest('SMOKE-TOUCH', `
     // MODERN: the turn costs SWIPE_N of across travel, whatever the stroke before it.
     cfg.touchLegacy = false;
     let s = swipe(T_B());
-    if (dirs(s) !== 'RIGHT UP' || boosted(s)) throw 'modern, long stroke then up: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
+    if (turns(s) !== 'RIGHT UP' || !boosted(s)) throw 'modern, long stroke then up: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
     s = swipe(T_D());
-    if (dirs(s) !== 'RIGHT UP' || boosted(s)) throw 'modern, rounded corner: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
+    if (turns(s) !== 'RIGHT UP') throw 'modern, rounded corner: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
     if (upAt(s) > 42) throw 'modern, rounded corner: UP sent only after ' + upAt(s) + ' px of up travel';   // legacy: 45 px, with a false boost
     s = swipe(T_J());
-    if (dirs(s) !== 'RIGHT UP') throw 'modern, drift then up: ' + dirs(s);
+    if (turns(s) !== 'RIGHT UP') throw 'modern, drift then up: ' + dirs(s);
     s = swipe(T_K());
     if (dirs(s) !== 'RIGHT') throw 'modern, a creeping finger sent: ' + dirs(s);
     s = swipe(T_A());
@@ -104,7 +104,7 @@ runTest('SMOKE-TOUCH', `
     s = swipe(poly([[0,0],[40,0],[65,-43]], F, DT));                // right 40, then 50 px at 30 deg off vertical
     if (turns(s) !== 'RIGHT UP') throw 'modern, right then a slanted up sent: ' + dirs(s);
     s = swipe(poly([[0,0],[20,0],[20,-20],[40,-20],[40,-40],[60,-40],[60,-60]], F, DT));   // 20 px staircase
-    if (dirs(s) !== 'RIGHT') throw 'modern, 20 px staircase (below the turn distance) sent: ' + dirs(s);
+    if (turns(s) !== 'RIGHT') throw 'modern, 20 px staircase (below the turn distance) sent: ' + dirs(s);
     log('modern: a slanted stroke is one turn, a sub-threshold staircase is none');
 
     // The first swipe is judged by its portion along the chosen axis: a 60 px stroke 38 degrees
@@ -178,14 +178,14 @@ runTest('SMOKE-TOUCH', `
     clk = 20; document.__emit('touchstart', mev([holding, f2], [f2]));
     for (let i = 1; i <= 10; i++){ clk = 20 + i * 8; f2 = T(2, 300 + i * 4.8, 200); cur = f2; document.__emit('touchmove', mev([holding, f2], [f2])); }
     for (let i = 1; i <= 10; i++){ clk = 100 + i * 8; f2 = T(2, 348, 200 - i * 4.8); cur = f2; document.__emit('touchmove', mev([holding, f2], [f2])); }
-    if (dirs(sent) !== 'RIGHT UP') throw 'newest finger must steer while a thumb rests: ' + dirs(sent);
+    if (turns(sent) !== 'RIGHT UP') throw 'newest finger must steer while a thumb rests: ' + dirs(sent);
     let before = sent.length;
     for (let i = 1; i <= 8; i++){ clk = 180 + i * 8; const h = T(1, 60 + i * 4.8, 300 + i * 2); document.__emit('touchmove', mev([h, f2], [h])); }   // the resting thumb wobbles 40 px
     if (sent.length !== before) throw 'a resting thumb wobble must not steer: ' + sent.slice(before).map(e => e.k).join(' ');
     clk = 260; document.__emit('touchend', mev([f2], [T(1, 98, 316)]));   // the resting thumb lifts
     if (sent.length !== before) throw 'a resting thumb lifting must end nothing: ' + sent.slice(before).map(e => e.k).join(' ');
     for (let i = 1; i <= 10; i++){ clk = 260 + i * 8; f2 = T(2, 348 - i * 4.8, 152); cur = f2; document.__emit('touchmove', mev([f2], [f2])); }
-    if (dirs(sent) !== 'RIGHT UP LEFT') throw 'the gesture must survive the other thumb lifting: ' + dirs(sent);
+    if (turns(sent) !== 'RIGHT UP LEFT') throw 'the gesture must survive the other thumb lifting: ' + dirs(sent);
     before = sent.length;
     clk = 350; document.__emit('touchend', mev([], [f2]));
     if (sent[sent.length - 1].k !== 'boost-' || _swipeBase) throw 'the steering finger lifting must end the gesture';
@@ -267,7 +267,7 @@ runTest('SMOKE-TOUCH', `
     if (s.some((e, i) => e.k === 'boost+')) throw 'a slide along the brake direction armed a boost: ' + s.map(e => e.k).join(' ');
     u = s.find(e => e.k === 'UP');
     if (!u || -u.y > 30) throw 'a turn out of a pull-back must cost the turn distance from the finger, UP after ' + (u ? -u.y : 'never') + ' px';
-    s = swipe(poly([[0,0],[40,0],[40,-40],[-60,-40]], F, DT));   // right, up, then a long slide left: a real turn, then its slide
+    s = swipe(poly([[0,0],[40,0],[40,-40],[-100,-40]], F, DT));   // right, up, then a long slide left: a real turn, then its slide
     if (!boosted(s)) throw 'a slide along a real turn must still arm the boost: ' + s.map(e => e.k).join(' ');
     s = swipe(poly([[0,0],[-70,0]], F, DT));   // first key of the touch is the reverse of the heading
     if (dirs(s).indexOf('LEFT') < 0) throw 'a first-swipe brake must be sent: ' + dirs(s);
@@ -279,34 +279,39 @@ runTest('SMOKE-TOUCH', `
 
     // A brake never becomes the reference: pull back to brake, push forward again, and the push
     // is the heading, so its slide arms the boost. Same for a turn, its brake and the turn again.
-    s = swipe(poly([[0,0],[40,0],[0,0],[100,0]], F, DT), { boost: { x:1, y:0 } });   // boosting right: pull back 40, push forward 100
+    s = swipe(poly([[0,0],[40,0],[0,0],[140,0]], F, DT), { boost: { x:1, y:0 } });   // boosting right: pull back 40, push forward 140
     if (turns(s) !== 'RIGHT LEFT RIGHT') throw 'brake then forward, sent: ' + dirs(s);
     if (!boosted(s)) throw 'a push forward after a brake must arm the boost again: ' + s.map(e => e.k).join(' ');
-    s = swipe(poly([[0,0],[40,0],[40,-40],[40,0],[40,-100]], F, DT));   // right, up, back down (the brake of UP), up again
+    s = swipe(poly([[0,0],[40,0],[40,-40],[40,0],[40,-140]], F, DT));   // right, up, back down (the brake of UP), up again
     if (turns(s) !== 'RIGHT UP DOWN UP') throw 'turn, its brake, turn again, sent: ' + dirs(s);
     if (!boosted(s)) throw 'the turn sent again after its brake must arm on its slide: ' + s.map(e => e.k).join(' ');
-    log('a brake never becomes the reference: the push forward after it, and a turn re-sent after its brake, arm again');
+    // Brake and forward push share an axis: neither starts a guard, even on a fresh touch.
+    s = swipe(poly([[0,0],[40,0],[0,0],[140,0]], 2, DT), {boost:{x:1,y:0}});
+    const brakeMark=s.find(e=>e.k==='LEFT');
+    const forwardMark=s.find(e=>e.k==='RIGHT' && e.t>brakeMark.t);
+    const afterBrakeBoost=s.find(e=>e.k==='boost+' && e.t>forwardMark.t);
+    if(brakeMark.guard!==-Infinity || forwardMark.guard!==-Infinity) throw 'brake and forward push must not stamp an axis-change guard';
+    if(!afterBrakeBoost || afterBrakeBoost.t-forwardMark.t>=50 || afterBrakeBoost.t>=100) throw 'forward push must boost without either guard delay';
+    log('brake ends boost immediately; same-axis forward push boosts without a guard delay');
 
     // A straight slide re-sends the direction once per 48 px; the duel wire counts on one
-    // same-direction record per SWIPE_SAME, never more. MODERN counts the slide from the boost
-    // gate: at 0.6 px/ms the finger is at 60 px when the gate opens 100 ms into the touch, so the
-    // re-send that arms the boost lands at 108. LEGACY keeps its shape: 16, 64, 112.
+    // same-direction record per SWIPE_SAME, never more. MODERN counts a same-heading slide
+    // immediately, without a touchdown guard. LEGACY keeps its shape: 16, 64, 112.
     const slide = poly([[0,0],[130,0]], F, DT);
     cfg.touchLegacy = false; const sm = swipe(slide);
     cfg.touchLegacy = true;  const sl = swipe(slide);
-    if (dirs(sm) !== 'RIGHT RIGHT') throw 'modern slide cadence: ' + dirs(sm);
+    if (dirs(sm) !== 'RIGHT RIGHT RIGHT') throw 'modern slide cadence: ' + dirs(sm);
     const smb = sm.find(e => e.k === 'boost+');
-    if (!smb || smb.x < 100 || smb.x > 112) throw 'modern: the boost must arm 48 px past the gate, got ' + (smb ? Math.round(smb.x) : 'none');
+    if (!smb || smb.x < 48 || smb.x > 54 || smb.t >= 100) throw 'modern: a fresh same-heading touch must boost at 48 px before 100 ms, got ' + (smb ? Math.round(smb.x) : 'none');
     if (dirs(sl) !== 'RIGHT RIGHT RIGHT' || !boosted(sl)) throw 'legacy slide cadence: ' + dirs(sl);
-    log('a straight slide re-sends every 48 px; modern arms the boost 48 px past the gate, legacy at its old 64');
+    log('a straight slide re-sends every 48 px; modern same-heading boost at 48 px without a gate, legacy at its old 64');
 
     // THE BOOST SLIDE, three cases the user set (heading LEFT throughout):
     //  1. pen down, rest, 16 px along the heading (sent, the sim ignores it), rest 500 ms, then a
-    //     slide along the heading: the first 50 ms out of the rest are guarded, then 48 px arm the
-    //     boost. At 0.6 px/ms the guard ends about 39 px into the slide, so the boost lands near 87.
+    //     slide along the heading: 48 px arm the boost, with no post-rest distance discarded.
     //  2. pen down and at once a turn plus its slide, all inside the first 100 ms: one UP, no boost.
     //  3. pen down, a turn at 40 ms, the push continues: what was pushed before the gate opened
-    //     is not credited; the boost arms 48 px after the gate.
+    //     is not credited; boost needs 48 px after max(touchdown + 100 ms, turn + 50 ms).
     const H = { heading: { x:-1, y:0 } };
     const at = (trace, ms) => trace.map(p => ({ x:p.x, y:p.y, t:p.t + ms }));
     const cat = (a, b) => a.concat(b.slice(1));
@@ -316,24 +321,62 @@ runTest('SMOKE-TOUCH', `
     tr = cat(tr, at(poly([[-18,0],[-110,0]], F, DT), 630));
     s = swipe(tr, H);
     let bb = s.find(e => e.k === 'boost+');
-    if (s[0].k !== 'LEFT' || !bb || bb.x > -100 || bb.x < -110) throw 'boost after a rest along the heading must arm 48 px past the 50 ms rest guard: ' + s.map(e => e.k + '@' + Math.round(e.x)).join(' ');
-    if (bb.t - 646 < 50) throw 'the rest guard must hold the boost for 50 ms after the rest ended, armed after ' + (bb.t - 646) + ' ms';
+    if (s[0].k !== 'LEFT' || !bb || bb.x > -66 || bb.x < -72) throw 'boost after a rest along the heading must arm at 48 px plus at most one checkpoint: ' + s.map(e => e.k + '@' + Math.round(e.x)).join(' ');
+    // A fast continuation must also boost BEFORE the direction-change guard would expire.
+    tr = [{x:0,y:0,t:0}, {x:0,y:0,t:400}];
+    tr = cat(tr, at(poly([[0,0],[-80,0]], 2, DT), 400));
+    s = swipe(tr, H); bb = s.find(e => e.k === 'boost+');
+    if(!bb || bb.x > -48 || bb.x < -64 || bb.t >= 450) throw 'same heading must keep the full 48 px even inside 50 ms';
+    // Both reported cases: 128 px up in 50 ms, after continuous right movement or rest.
+    for(const resting of [false,true]){
+      let lead = resting ? [{x:0,y:0,t:0},{x:0,y:0,t:400}] : poly([[0,0],[40,0]], 0.1, 10);
+      const x=lead[lead.length-1].x;
+      const flick=at(poly([[x,0],[x,-128]], 2.56, 10),400);
+      let events=swipe(cat(lead,flick));
+      if(turns(events).indexOf('UP')<0 || boosted(events)) throw '128 px / 50 ms turn must not boost, resting='+resting;
+      // Continued travel after the turn guard expires must eventually arm boost.
+      events=swipe(cat(lead,at(poly([[x,0],[x,-300]],2.56,10),400)));
+      const turn=events.find(e=>e.k==='UP'), boost=events.find(e=>e.k==='boost+');
+      if(!boost || boost.t-turn.t<50 || -boost.y<173 || -boost.y>198) throw 'turn guard must expire and retain a fresh boost distance: '+JSON.stringify(events);
+    }
+    // Changing direction still discards travel during the direction-change guard.
+    tr = [{x:0,y:0,t:0}, {x:0,y:0,t:400}];
+    tr = cat(tr, at(poly([[0,0],[0,-180]], 2, DT), 400));
+    s = swipe(tr, H); bb = s.find(e => e.k === 'boost+');
+    if(!bb || bb.t < 458 || -bb.y < 140) throw 'a changed direction must retain the direction-change guard';
     s = swipe(poly([[0,0],[0,-64]], 1.0, DT), H);
     if (dirs(s) !== 'UP' || boosted(s)) throw 'a turn and its slide inside the first 100 ms: one UP and no boost, got ' + s.map(e => e.k + '@' + Math.round(e.y)).join(' ');
     tr = cat([{ x:0, y:0, t:0 }], at(poly([[0,0],[0,-140]], F, DT), 40));
     s = swipe(tr, H);
     bb = s.find(e => e.k === 'boost+');
-    if (dirs(s).indexOf('UP') !== 0 || !bb || -bb.y < 78 || -bb.y > 88 || bb.t < 100) throw 'the boost must arm 48 px after the gate opened, not 48 px after the turn: ' + s.map(e => e.k + '@' + Math.round(-e.y) + '/' + e.t + 'ms').join(' ');
-    log('the boost slide: 48 px past the 50 ms rest guard, nothing inside the first 100 ms of a touch, 48 px past the gate after a turn');
+    if (dirs(s).indexOf('UP') !== 0 || !bb || -bb.y < 94 || -bb.y > 100 || bb.t < 122) throw 'boost needs 48 px after max(touchdown + 100 ms, turn + 50 ms): ' + s.map(e => e.k + '@' + Math.round(-e.y) + '/' + e.t + 'ms').join(' ');
+    log('the boost slide: no turn guard along the heading, turn guard after a direction change, same-heading touchdown ungated; changed direction waits for both guards');
 
+    // A queued UP survives a rest even while the simulated heading still reads RIGHT.
+    tr=[{x:0,y:0,t:0},{x:0,y:-20,t:400},{x:0,y:-20,t:650}];
+    tr=cat(tr,at(poly([[0,-20],[128,-20]],2.56,10),700));
+    s=swipe(tr); // gameSteer records intent without advancing the live RIGHT heading.
+    const queuedUp=s.find(e=>e.k==='UP'), queuedRight=s.find(e=>e.k==='RIGHT');
+    if(!queuedUp || !queuedRight || queuedRight.guard!==queuedRight.t || boosted(s)) throw 'RIGHT after queued UP and rest is a guarded direction change';
+    // LOW stretches the 50 ms guard to 66.5 ms (67 rounded); HIGH retains 50 ms.
+    for(const sens of [0,2]){
+      cfg.touchSens=sens;
+      const gate=TURN_GATE_MS*_touchLowF();
+      if(Math.round(gate)!==(sens===0?67:50)) throw 'turn guard sensitivity duration';
+      tr=cat([{x:0,y:0,t:0},{x:0,y:0,t:400}],at(poly([[0,0],[0,-300]],2,1),400));
+      s=swipe(tr); const turn=s.find(e=>e.k==='UP'), b=s.find(e=>e.k==='boost+');
+      const travel=Math.round(SWIPE_SAME*_touchSensF());
+      if(!b || b.t-turn.t<gate || b.t-turn.t>gate+travel/2+3) throw 'sensitivity guard must expire, then allow the boost slide';
+    }
+    cfg.touchSens=1;
     // Both guards hold the BOOST only. Steering inside them is untouched: a first swipe at 16 px
-    // and a further turn at 24 px, both inside the touchdown gate and both inside the rest guard.
+    // and a further turn at 24 px, both inside the touchdown gate and both inside the turn guard.
     s = swipe(poly([[0,0],[0,-20],[-30,-20]], 1.0, DT));   // heading right: up 20 then left 30, all within 50 ms
     if (dirs(s) !== 'UP LEFT' || boosted(s)) throw 'steering inside the touchdown gate: ' + s.map(e => e.k + '@' + Math.round(e.x) + ',' + Math.round(e.y) + '/' + e.t).join(' ');
     if (s[s.length - 2].t > 100) throw 'the two turns must land inside the gate to prove it: ' + s.map(e => e.k + '/' + e.t).join(' ');
     tr = cat([{ x:0, y:0, t:0 }], at(poly([[0,0],[0,-20],[-30,-20]], 1.0, DT), 400));   // pen down, rest 400 ms, the same two turns within 50 ms of moving again
     s = swipe(tr, H);
-    if (dirs(s) !== 'UP LEFT' || boosted(s)) throw 'steering inside the rest guard: ' + s.map(e => e.k + '@' + Math.round(e.x) + ',' + Math.round(e.y) + '/' + e.t).join(' ');
+    if (dirs(s) !== 'UP LEFT' || boosted(s)) throw 'steering inside the turn guard: ' + s.map(e => e.k + '@' + Math.round(e.x) + ',' + Math.round(e.y) + '/' + e.t).join(' ');
     log('both boost guards leave steering alone: a first swipe and a further turn land at their normal distances inside them');
 
     // The anti-spiral guard is shared: the third same-way turn in one gesture needs SWIPE_GUARD
@@ -385,6 +428,17 @@ runTest('SMOKE-TOUCH', `
     if (keys.join(' ') !== 'ArrowUp ArrowUp') throw 'menu swipe steps: ' + keys.join(' ');
     log('menus keep the chord reader: one step at 24 px, the next at 48 px');
 
+    // Displayed boost transitions produce one marker each, at the current head cell.
+    players=null; snake=[{x:5,y:5}]; boosting=false; cfg.debug=3;
+    _dbgBoostSeen[0]=false; _dbgBoostSeen[1]=false; _dbgTurns.length=0;
+    _dbgBoostTrace(); boosting=true; _dbgBoostTrace(); _dbgBoostTrace();
+    snake[0]={x:7,y:5}; boosting=false; _dbgBoostTrace(); _dbgBoostTrace();
+    if(_dbgTurns.length!==2 || _dbgTurns[0].key!=='BoostStart' || _dbgTurns[1].key!=='BoostEnd' || _dbgTurns[1].cx!==7) throw 'boost markers must track transitions once, at the head';
+    drawTurnDebug();
+    cfg.debug=2; boosting=true; _dbgBoostTrace();
+    if(_dbgTurns.length!==2) throw 'boost markers must be debug level 3 only';
+    cfg.debug=0; boosting=false;
+    log('debug boost markers: one per displayed start/end, current head cell, level 3 only');
     gameSteer = oSteer; gameBoostStart = oBs; gameBoostEnd = oBe;
     cfg.touchLegacy = false; phase = 'menu'; inGame = false; players = null;
     R.ok = true;
