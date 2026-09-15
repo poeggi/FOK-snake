@@ -148,7 +148,7 @@ function netSpecNames(){ return (_spOn && _spCtx && Array.isArray(_spCtx.names))
 function netSpecLook(){ return (_spOn && _spCtx && _spCtx.look && typeof _spCtx.look === 'object') ? _spCtx.look : null; }
 
 // ---- small helpers -------------------------------------------------------
-function _spNow(){ return (typeof _wall === 'function') ? _wall() : Date.now(); }
+function _spNow(){ return _wall(); }
 function _spRtcOk(){ return typeof RTCPeerConnection === 'function'; }
 // A fan-out serializes the envelope ONCE and shares the string: the same bytes go to every
 // subscribed link, and serializing per link would re-encode one packet as many times as there
@@ -311,7 +311,7 @@ function specHandshaking(){
 // `l.ver` is the peer's build, empty until it names it -- the batcher then sends singles,
 // which is the contract's rule and heals itself the moment the offer or answer lands.
 function _spIceOut(l, cand){
-    if(typeof _netIceOut === 'function'){ _netIceOut(l.peer, { c:cand, sp:1 }, l.ver || ''); return; }
+    _netIceOut(l.peer, { c:cand, sp:1 }, l.ver || ''); return;
     _spSignal(l.peer, 'ice', { c:cand });
 }
 function _spMkPc(peer, arr, kind){
@@ -320,7 +320,7 @@ function _spMkPc(peer, arr, kind){
                 openAt:0, lastAt:_spNow(), live:false, ver:'' };
     // A fresh pc gathers afresh, so whatever is still buffered for this peer belongs to a
     // connection that no longer exists.
-    if(typeof _netIceTxReset === 'function') _netIceTxReset(peer);
+    _netIceTxReset(peer);
     pc.onicecandidate = e => { if(e.candidate) _spIceOut(l, e.candidate); };
     pc.onconnectionstatechange = () => {
         if(pc.connectionState !== 'failed' && pc.connectionState !== 'closed') return;
@@ -656,7 +656,7 @@ function _spOnServeMsg(l, txt){
 // that space. It carries _spSeen: the number of the newest envelope already folded into
 // the state, which is precisely what the checkpoint asserts. A fresh subscriber (seen
 // -1) takes it and every later relay outranks it; a dual-connected one still dedups.
-function _spWorker(){ return typeof netWorkerDuelOn === 'function' && netWorkerDuelOn(); }
+function _spWorker(){ return netWorkerDuelOn(); }
 // A checkpoint also NAMES the line it belongs to. A relaying primary is minting into
 // somebody else's numbering on purpose (see above), so it says whose; a player is
 // minting its own and says so.
@@ -829,7 +829,7 @@ function _spBoot(){
     // !_spOn gate in _spOnFeedMsg. No silence, no error, nothing for either end's ladder to
     // find -- a watcher on CONNECTING until the tournament dealt the next node.
     if(netPts() == null){
-        if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ n:3, nudge:true });
+        _netAnchorRefresh({ n:3, nudge:true });
         if(typeof setTimeout === 'function' && ++_spBootTry <= SPEC_BOOT_TRIES){
             _spBootT = setTimeout(_spBoot, SPEC_BOOT_RETRY_MS); _spArm(); return;
         }
@@ -1039,7 +1039,7 @@ function _spServeEnd(){
 function specStandDown(){
     const had = _spOut.length;
     _spServeEnd();
-    if(had && _spTid && typeof tourneyStandDown === 'function') tourneyStandDown(_spTid, _spNid);
+    if(had && _spTid) tourneyStandDown(_spTid, _spNid);
 }
 // Local recovery is out of options: the feeder is gone, no standby answered, and the
 // other player is not serving either. The server deals roles, so it is the only thing
@@ -1049,5 +1049,5 @@ function _spOrphan(){
     if(_spOrphanG === (_spGen | 0)) return;
     _spOrphanG = _spGen | 0;
     _netSigLog('~ SPEC ORPHAN');
-    if(_spTid && typeof tourneyOrphan === 'function') tourneyOrphan(_spTid, _spNid);
+    if(_spTid) tourneyOrphan(_spTid, _spNid);
 }

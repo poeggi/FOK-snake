@@ -374,7 +374,7 @@ function drawMenu(now) {
     ctx.drawImage(_menuCanvas,0,0);           // static layer (one blit)
     _drawMenuSnake(now);                       // decorative ambient wanderer (under the title)
     drawSplashText(now);                       // animated overlay
-    const _upd=(typeof netUpdateNotice==='function')?netUpdateNotice():null;   // server contract ahead of this build
+    const _upd=netUpdateNotice();   // server contract ahead of this build
     if(_upd) ct(_upd, CW/2, 12, _netApiNewer?'#ff6666':'#ffcc44', FONT.HINT);   // pin to the very top, clear of the title/DEBUG stamp
     if(ANNOUNCEMENT) _drawNewspaperBadge(now, !announceSeen());
 }
@@ -424,9 +424,9 @@ const SETTINGS_CATS = [
           act:()=>{cfg.snakeColor=(cfg.snakeColor+1)%SNAKE_COLORS.length;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.snakeColor=(cfg.snakeColor+(r?1:-1)+SNAKE_COLORS.length)%SNAKE_COLORS.length;} },
         { lbl:()=>'KEEP SCREEN AWAKE: '+(cfg.keepAwake!==false?'ON':'OFF'),   // hold a wake lock during play so the display never dims mid-run
-          act:()=>{cfg.keepAwake=cfg.keepAwake===false?true:false;Snd.sfxPlay('select',cfg.music);if(typeof wakeReconcile==='function')wakeReconcile();} },
+          act:()=>{cfg.keepAwake=cfg.keepAwake===false?true:false;Snd.sfxPlay('select',cfg.music);wakeReconcile();} },
         { lbl:()=>'SHOW FPS: '+(cfg.showFps!==false?'ON':'OFF'),
-          act:()=>{cfg.showFps=cfg.showFps===false?true:false;if(typeof applyFpsBox==='function')applyFpsBox();Snd.sfxPlay('select',cfg.music);} },
+          act:()=>{cfg.showFps=cfg.showFps===false?true:false;applyFpsBox();Snd.sfxPlay('select',cfg.music);} },
     ]},
     { label:'GRAPHICS', items:[
         _tog('REDUCE MOTION','reduceMotion'),   // suppress decorative motion (near-miss shake, future FX)
@@ -447,7 +447,7 @@ const SETTINGS_CATS = [
     { label:'NETWORK', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
           dis:()=>_runFromFile(),   // file:// has a null origin: the server is unreachable, so offline is forced (greyed)
-          act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline&&typeof netOfflineClear==='function')netOfflineClear();} },
+          act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline)netOfflineClear();} },
         _tog('RELAY ONLY (NO P2P)','noP2P'),
         _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
         _tog('MAKE DUELS PRIVATE','privateDuels'),
@@ -458,7 +458,7 @@ const SETTINGS_CATS = [
         { lbl:()=>'BACKUP CONFIG TO CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudBackup();} },
         { lbl:()=>'RESTORE CONFIG FROM CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudRestore();} },
         { lbl:()=>'AUTO CLOUD BACKUP: '+(cfg.autoCloud?'ON':'OFF'),
-          act:()=>{cfg.autoCloud=!cfg.autoCloud;saveCfg();Snd.sfxPlay('select',cfg.music);if(cfg.autoCloud&&typeof _maybeAutoCloudBackup==='function')_maybeAutoCloudBackup();} },
+          act:()=>{cfg.autoCloud=!cfg.autoCloud;saveCfg();Snd.sfxPlay('select',cfg.music);if(cfg.autoCloud)_maybeAutoCloudBackup();} },
         { lbl:()=>'RESET STATS', act:()=>{_resetKind='stats';quitConfirmSel=1;phase='resetConfirm';} },
         { lbl:()=>'RESET SETTINGS', act:()=>{_resetKind='settings';quitConfirmSel=1;phase='resetConfirm';} },
         { lbl:()=>'RESET ID', act:()=>{_resetKind='id';quitConfirmSel=1;phase='resetConfirm';} },
@@ -669,7 +669,7 @@ function drawScores() {
             ct('GLOBAL SCORES',CW/2,CH/2-14,'#ffd24a',FONT.MENU);
             ct('DISABLED IN OFFLINE MODE (SETTINGS > NETWORK)',CW/2,CH/2+12,'#aaa',FONT.HINT);
         } else {
-            if(typeof netFetchScores==='function') netFetchScores();   // cached 60s, a failure retried, single-flight
+            netFetchScores();   // cached 60s, a failure retried, single-flight
             const gs=(typeof _netScores!=='undefined')?_netScores:null;
             const failed = typeof _netScoresErr!=='undefined' && _netScoresErr;
             // LOADING only until the first answer. A failed ask says so and stays said
@@ -677,7 +677,7 @@ function drawScores() {
             if(!gs && !failed && typeof _netScoresLoading!=='undefined' && _netScoresLoading){
                 ct('LOADING GLOBAL SCORES...',CW/2,CH/2,'#aaa',FONT.HINT);
             } else if(!gs){
-                const notice = (typeof netStatusNotice==='function') ? netStatusNotice() : null;
+                const notice = netStatusNotice();
                 ct(notice || 'SERVER UNREACHABLE - RETRYING',CW/2,CH/2-14,'#ff8888',FONT.MENU);
                 ct('GLOBAL SCORES NEED A CONNECTION',CW/2,CH/2+12,'#aaa',FONT.HINT);
             } else if(!gs.length){
@@ -1252,7 +1252,7 @@ function _drawFireworks(now){
 // profiles. Local duel (one screen, one config): my colour + the next index.
 const _LOOK_BARE = {};   // shared: the item map of a snake drawn with no cosmetics at all
 function _duelLook(){
-    const lk=(typeof netDuelLook==='function')?netDuelLook():null;
+    const lk=netDuelLook();
     // HIDE REMOTE COSMETICS hides the WHOLE peer, windswept gear included. A profile the
     // look zeroed is not enough on its own: _wsLook paints the sim's worn list back on top,
     // and that list is the crowns and hats -- the most visible cosmetics in the game. An
@@ -1290,8 +1290,8 @@ function _wsLook(items, idx){
 // to netMyIndex) -- so it shows only the local player's scheme, in that player's colour.
 function _drawDuelControls(lk){
     ctx.save(); ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
-    if(typeof netGameActive==='function' && netGameActive()){
-        const me=(typeof netMyIndex==='function')?netMyIndex():0;
+    if(netGameActive()){
+        const me=netMyIndex();
         ctx.textAlign='center'; ctx.fillStyle=SNAKE_COLORS[me===0?lk.c0:lk.c1].head;
         ctx.fillText(_hasKeyboard?'ARROWS TO MOVE':'SWIPE / D-PAD', CW/2, CH/2+38);
     } else {
@@ -1305,7 +1305,6 @@ function _drawDuelControls(lk){
 // device) has no platforms to compare, so it draws nothing. A peer on an older client
 // sends no platform -> that side is blank; you still see your own.
 function _drawDuelPlatforms(lk){
-    if(typeof netDuelPlatforms!=='function') return;
     const pl=netDuelPlatforms(); if(!pl) return;
     const y=CH/2+62;
     ctx.save(); ctx.font=`${FONT.HINT}px "Press Start 2P"`; ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -1374,7 +1373,7 @@ function drawLevelDoneFx(now){
     }
     // A watcher is not offered the advance: the players decide when the next level opens,
     // so its only key is the way out, and it does not blink -- a blink is an invitation.
-    if(typeof netSpectating==='function' && netSpectating()){
+    if(netSpectating()){
         ctx.save(); ctx.shadowBlur=0; ct('ESC:back',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
     } else if(levelDoneWaiting&&Math.floor(now/520)%2===0){
         ctx.save(); ctx.shadowBlur=0; ct('A:next  TAP:next',CW/2,HINT_Y,'#888',FONT.HINT); ctx.restore();
@@ -1479,7 +1478,7 @@ function drawTurnDebug(){
 const DBG_TOUCH_REFRESH_MS=250;
 let _dbgTouchShown=null, _dbgTouchShownAt=0;
 function drawTouchDebug(){
-    if(typeof _dbgTouchSnapshot!=='function' || typeof canvas==='undefined') return;
+    if(typeof canvas==='undefined') return;
     const nowMs=performance.now();
     if(!_dbgTouchShown || nowMs-_dbgTouchShownAt>=DBG_TOUCH_REFRESH_MS){ _dbgTouchShown=_dbgTouchSnapshot(); _dbgTouchShownAt=nowMs; }
     const s=_dbgTouchShown;
@@ -1546,8 +1545,8 @@ function drawQuitConfirm() {
     // tournament's own board (tourneyExitPhase), never the menu, and a watcher goes there
     // too. The note is the price of leaving, and it is read off the very predicate
     // tourneyMatchLeft gates its loss report on -- a warning nobody can leave behind.
-    const tt = typeof tourneyExitPhase==='function' && !!tourneyExitPhase();
-    const lose = tt && typeof tourneyMatchAtStake==='function' && tourneyMatchAtStake();
+    const tt = !!tourneyExitPhase();
+    const lose = tt && tourneyMatchAtStake();
     // LIVE board behind the dialog -- the game keeps running while the player decides
     // (an online duel cannot freeze the opponent; local matches the same semantics).
     drawConfirm({ title: tt?'QUIT TO TOURNAMENT?':'QUIT TO MENU?',
@@ -1566,7 +1565,7 @@ function drawQuitConfirm() {
 // The TOURNAMENT row needs a 4.1 server to mean anything, and until the first hello lands
 // we do not know what we are talking to -- so it greys out rather than promising something
 // the server may not have.
-function _ttMenuOk(){ return typeof netTourneyOk === 'function' && netTourneyOk(); }
+function _ttMenuOk(){ return netTourneyOk(); }
 function drawMultiplayer() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline
     // at y=24 with glow 16, items from MENU_TOP in MENU_ROW steps, #888 hint at HINT_Y.
@@ -1626,7 +1625,7 @@ function drawDuelLobby(){
     drawGrid(); drawOvBg(0.92);
     drawTitle('ONLINE 1vs1');
     let stat, statCol='#4a7a4a';
-    const notice=(typeof netStatusNotice==='function')?netStatusNotice():null;
+    const notice=netStatusNotice();
     if(notice){ stat=notice; statCol='#ff8888'; }
     else if(typeof RTCPeerConnection!=='function'){ stat='WEBRTC NOT SUPPORTED ON THIS DEVICE'; statCol='#ff8888'; }
     else stat='ONLINE: '+_netCounts.online+'   IN 1vs1: '+_netCounts.playing;
@@ -1641,13 +1640,13 @@ function drawDuelLobby(){
         const on=_netFriendsOnline[id]===true;
         const y=startY+i*rowH;
         menuItem(fmtFriendId(id), y, _netLb.sel===i+1);   // the ID stays centered + selected
-        _drawRowName((typeof netFriendName==='function')?netFriendName(id):null, y, _netLb.sel===i+1);
+        _drawRowName(netFriendName(id), y, _netLb.sel===i+1);
         // The ms figure is the estimated one-way path THEIR update travels to
         // reach us (their reported latency/2 + ours/2), not an RTT.
-        const e2e=on&&typeof netFriendE2E==='function'?netFriendE2E(id):null;
+        const e2e=on?netFriendE2E(id):null;
         // A friend mid-duel cannot take an invite, so the row offers the other thing you
         // can do with them: watch. The status column IS the action label here.
-        const busy=typeof netFriendPlaying==='function'&&netFriendPlaying(id);
+        const busy=netFriendPlaying(id);
         if(busy) ct('IN 1vs1 - WATCH', CW/2+170, y, '#ffd700', FONT.HINT);
         else ct(on?('ONLINE'+(e2e!=null?' ~'+e2e+'ms':'')):'OFF', CW/2+170, y, on?'#7fff7f':'#555', FONT.HINT);
     });
@@ -1699,19 +1698,19 @@ function drawFriends(){
     // nothing else. Which key does what belongs in the one key line every screen
     // ends on, where the eye already looks for it; a second copy up here was a
     // second place to keep in step.
-    const notice=(typeof netStatusNotice==='function')?netStatusNotice():null;
+    const notice=netStatusNotice();
     if(notice) drawSubhead(notice, '#ff8888');
     else if(_netFr.loading && !_netFr.list) drawSubhead('LOADING...');
     const rows=_netFrRows();
     // What changed since the last look, for the WHOLE visit: the mark is written when
     // the screen is left, so a row that was news on the way in stays news until then.
     const fresh={};
-    if(typeof netFriendsNew==='function') for(const f of netFriendsNew()) fresh[f.id]=f.kind;
+    for(const f of netFriendsNew()) fresh[f.id]=f.kind;
     const startY=MENU_TOP, rowH=26;   // the first row where MULTIPLAYER puts its first item
     rows.forEach((r,i)=>{
         const y=startY+i*rowH;
         menuItem(fmtFriendId(r.id), y, _netFr.sel===i);   // the ID stays centered + selected
-        _drawRowName((typeof netFriendName==='function')?netFriendName(r.id):null, y, _netFr.sel===i);
+        _drawRowName(netFriendName(r.id), y, _netFr.sel===i);
         let st, col='#555';
         // A request of yours that was accepted since you looked says so, in place of the
         // presence it would otherwise show -- that it is a friendship at all is the news.
@@ -1731,7 +1730,7 @@ function drawFriends(){
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
         drawDialogTitle('REMOVE FRIEND', '#ff8888');
-        const nm=(typeof netFriendName==='function')?netFriendName(_netFr.confirm):null;
+        const nm=netFriendName(_netFr.confirm);
         ct((nm?nm+'  ':'')+fmtFriendId(_netFr.confirm), CW/2, CH/2-48, '#aaa', FONT.MENU);
         ct('THE SERVER FORGETS THE RELATION TOO', CW/2, CH/2-22, '#888', FONT.HINT);
         _drawModalYesNo(_netFr.confirmSel);
@@ -1763,7 +1762,7 @@ function drawDuelInvite() {
 // but a hash disagreed, so a resync is in flight. Both pulse the same way and read as "the
 // opponent is not really there", rather than letting it look like they are standing still.
 function _drawDuelWarn(){
-    const w = (typeof netDuelWarn==='function') ? netDuelWarn() : null;
+    const w = netDuelWarn();
     if(!w) return;
     const sync = (w === 'OUT OF SYNC');   // world divergence: amber, distinct from a red link loss
     ctx.save();
@@ -1773,7 +1772,7 @@ function _drawDuelWarn(){
     ctg(w, CW/2, 22, sync ? '#ffe066' : '#ff6666', FONT.HINT, GLOW.TEXT);
 }
 function drawDuelBoard(now) {
-    if(typeof netRelayActive==='function' && netRelayActive())   // DEPRECATED(relay)
+    if(netRelayActive())   // DEPRECATED(relay)
         ct('RELAY MODE', CW/2, 8, '#ffd24a', FONT.HINT);   // latency self-explains
     const _sh=shakeOffset(now);   // arming happens sim-side via the 'nearmiss' event (see armNearMiss)
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
@@ -1791,7 +1790,7 @@ function drawDuelBoard(now) {
         ctx.restore();
     }
     const lk=_duelLook();     // colours reused by the duelReady controls and the winner banner
-    const _rTitle=(typeof netGameActive==='function'&&netGameActive())?'1vs1 DUEL':'LOCAL 1vs1';
+    const _rTitle=netGameActive()?'1vs1 DUEL':'LOCAL 1vs1';
     const _rSub=()=>{ _drawDuelControls(lk); _drawDuelPlatforms(lk); };
     if(phase==='duelReady') drawReadyGo(now, _rTitle, _rSub);
     // Level-up cover: hold the pre-GO get-ready splash while start_pts is negotiated, so it never
@@ -1823,15 +1822,15 @@ function drawDuelBoard(now) {
         // tourneyActive(), which covered a tournament spectator only because that
         // one IS in the tournament -- an event MONITOR is deliberately in no
         // participant list, fell straight through, and was asked to PLAY AGAIN.
-        if(typeof netSpectating === 'function' && netSpectating()){
+        if(netSpectating()){
             ctg('WATCHING' + _ttDots(), CW/2, CH/2-18, '#ff9900', FONT.MENU, GLOW.TITLE);
             ctx.save(); ctx.shadowBlur=0; ct('ESC:back', CW/2, HINT_Y, '#888', FONT.HINT); ctx.restore();
-        } else if(typeof tourneyActive === 'function' && tourneyActive()){
+        } else if(tourneyActive()){
             ctg('BACK TO THE TOURNAMENT' + _ttDots(), CW/2, CH/2-18, '#ff9900', FONT.MENU, GLOW.TITLE);
             ctx.save(); ctx.shadowBlur=0; ct('A:ok  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT); ctx.restore();
         } else {
             drawConfirmYesNo('PLAY AGAIN?', quitConfirmSel);
-            if(typeof netWaitingAgain==='function' && netWaitingAgain())
+            if(netWaitingAgain())
                 ct('WAITING FOR OPPONENT...', CW/2, CH/2+64, '#ffd700', FONT.HINT);
         }
     }
@@ -1975,7 +1974,7 @@ function drawTourneyLobby(){
     drawTitle('TOURNAMENT');
     const t = tourneyView(), ui = tourneyUi();
     if(!t){
-        const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
+        const notice = netStatusNotice();
         if(notice) drawSubhead(notice, '#ff8888');
         else if(!netTourneyOk()) drawSubhead('TOURNAMENTS NEED A NEWER SERVER', '#ff8888');
         else drawSubhead('2-' + tourneyMax() + ' PLAYERS - ONE 1vs1, EVERYONE ELSE WATCHES');
@@ -2354,7 +2353,7 @@ function drawTourneyCeremony(){
     // A watch that has not started is one of five different situations with five different
     // causes. Say which: a watcher staring at one word cannot tell anyone what they are
     // looking at.
-    const st = (you === 'spectate' && typeof specStatus === 'function' && specStatus()) || 'CONNECTING';
+    const st = (you === 'spectate' && specStatus()) || 'CONNECTING';
     drawStatus(tourneyUi().msg || (st + _ttDots()));
     // The player being called up has no key here and is offered none: a hint naming a way
     // off this screen is the reason somebody takes it.
@@ -2458,7 +2457,7 @@ function drawEventPage(){
     const e = eventView(), ui = eventUi();
     drawTitle(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT');
     if(!e){
-        const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
+        const notice = netStatusNotice();
         drawSubhead(notice || (ui.busy ? 'READING...' : 'NOTHING TO SHOW'), notice ? '#ff8888' : '#4a7a4a');
         menuItem('BACK', BACK_Y, true);
         if(ui.msg) drawStatus(ui.msg);
@@ -2704,7 +2703,7 @@ function drawEventQr(){
     const e = eventView();
     drawTitle(e && e.name ? String(e.name).toUpperCase().substring(0, 22) : 'EVENT QR');
     if(e && e.descr) drawSubhead(String(e.descr).substring(0, 46), '#ffd700');
-    const ui = eventUi(), now = (typeof netPts === 'function') ? netPts() : null;
+    const ui = eventUi(), now = netPts();
     const slot = eventPassSlot(now);
     if(!slot){
         ct(ui.msg || (eventPassView() ? 'WAITING FOR THE NEXT CODE...' : 'ASKING FOR A CODE...'),
@@ -2799,7 +2798,7 @@ function drawEventMonitor(){
     // event's QR. Asked every frame, whatever is up, so the turn's clock runs and
     // resets. One reading of the clock for the turn and the card, so the slot the
     // turn saw is the one drawn.
-    const pts = (typeof netPts === 'function') ? netPts() : null;
+    const pts = netPts();
     const face = eventMonitorFace(pts);
     drawTitle(String(m.name || 'EVENT').toUpperCase().substring(0, 22));
     const [word, wcol] = _evStateLine(m);
@@ -2840,7 +2839,7 @@ function drawEventMonitor(){
         const roles = t.roles;
         const nm = id => String(((roles && roles.names) || {})[id] || fmtFriendId(String(id))).substring(0, 12);
         const ps = (roles && roles.players) || [];
-        const feed = (typeof specStatus === 'function') ? specStatus() : '';
+        const feed = specStatus();
         drawStatus(ps.length === 2
             ? (nm(ps[0]) + '  VS  ' + nm(ps[1]) + (feed ? '   ' + feed : ''))
             : ('EVENT MONITOR' + (feed ? '   ' + feed : '')));

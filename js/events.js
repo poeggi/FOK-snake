@@ -85,7 +85,7 @@ function eventAny(){ return _evList.length > 0; }
 // same stamp, same sound, same band on screen. All this adds is `bad`, which the
 // event page reads to colour it.
 function _evMsg(m, bad){ uiMsg(_evUi, m, bad ? 'fail' : ''); _evUi.bad = !!bad; }
-function _evOk(){ return typeof _netOk === 'function' && _netOk() && typeof _netPostRes === 'function'; }
+function _evOk(){ return _netOk(); }
 
 // ---- the endpoint ----------------------------------------------------------
 // event.php is the same shape of endpoint as tournament.php and goes out through
@@ -161,7 +161,7 @@ async function eventJoin(code){
         // happens on the read that opens the page on the night.
         _evGrantAch(r.json.ach);
     }
-    if(early && typeof eventsEnter === 'function'){
+    if(early){
         const msg = _evUi.msg;
         eventsEnter();
         _evUi.msg = msg;               // eventsEnter clears it, and this one is the answer
@@ -243,8 +243,8 @@ function eventListTag(e){
 // the synced reading; without one there is nothing to derive against and the
 // mode the server named stands.
 function _evNow(){
-    if(typeof netPts === 'function'){ const p = netPts(); if(p != null) return p; }
-    return null;
+    const p = netPts();
+    return p != null ? p : null;
 }
 
 // ---- reading it ------------------------------------------------------------
@@ -363,7 +363,7 @@ function eventsEnter(){
     // The list is a picture of the last answer, so freshen it on the way in: a row
     // that has gone is a room we have been removed from, and the chooser is where
     // that shows.
-    if(typeof _netHello === 'function' && _netOk()) _netHello();
+    if(_netOk()) _netHello();
     _uiDirty = true;
 }
 // THE DOOR into events, and the one place a parked deep link is spent. It waits
@@ -383,14 +383,14 @@ function eventEnter(){
         _eventLink = null;
         eventJoin(l);
     };
-    if(typeof _netHello === 'function' && _netOk()){
+    if(_netOk()){
         const h = _netHello();
         if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
     } else spend();
     // An event link is a multiplayer door like any other: the same age-gated
     // anchor refresh, so the schedule is derived against a clock worth deriving
     // against.
-    if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });
+    _netAnchorRefresh({ nudge:true });
     _uiDirty = true;
 }
 // Leaving the page. The picture goes with it -- the next open reads again.
@@ -522,7 +522,7 @@ async function eventLeave(){
     const gone = _evEid;
     _ev = null; _evEid = '';
     _evList = _evList.filter(x => String(x.eid) !== String(gone));
-    if(typeof _netHello === 'function' && _netOk()) _netHello();   // the list is the record: read it again
+    if(_netOk()) _netHello();   // the list is the record: read it again
     phase = eventAny() ? 'eventChooser' : 'multiplayer';
     _evUi.sel = 0; _evMsg('YOU HAVE LEFT');
     _uiDirty = true;
@@ -617,7 +617,6 @@ function eventFriendCan(m){ return String((m && m.friend) || 'none') === 'none'
                                 && String(m.id) !== getPlayerId(); }
 async function eventAskFriend(m){
     if(!eventFriendCan(m) || _evUi.busy) return false;
-    if(typeof netFriendRequest !== 'function'){ _evMsg('NOT RIGHT NOW', true); return false; }
     _evUi.busy = true; _evMsg('ASKING...');
     // netFriendRequest declines with null where it already holds the answer -- a
     // request out, a friendship, a ban, its own 30 s retry gap. That is not a
@@ -638,7 +637,7 @@ async function eventAskFriend(m){
 // second implementation of anything -- both of these hand over to tourney.js.
 async function eventTourneyGo(){
     const t = _ev && _ev.tourney;
-    if(!t || !t.tid || typeof tourneyJoin !== 'function'){ _evMsg('NO TOURNAMENT RIGHT NOW', true); return false; }
+    if(!t || !t.tid){ _evMsg('NO TOURNAMENT RIGHT NOW', true); return false; }
     if(_evUi.busy) return false;
     // THE PAGE HOLDS UNTIL THE JOIN LANDS. Moving to the tournament screen first shows
     // the room-PICKING screen -- CREATE TOURNAMENT, JOIN BY CODE, the list of open
@@ -646,7 +645,7 @@ async function eventTourneyGo(){
     // a player who is already in the room they wanted, and pressable while it stands.
     // The join says what happened; until it does, this page says JOINING.
     _ttUi.home = 'eventPage';   // ...and this is the room the tournament gives back
-    if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });   // a tournament door like any other
+    _netAnchorRefresh({ nudge:true });   // a tournament door like any other
     _evUi.busy = true; _evMsg('JOINING...');
     // By tid, which is what the state answer names it by. A non-member is refused
     // 403 by the server -- that refusal IS the secrecy, and it is the server's to
@@ -655,7 +654,7 @@ async function eventTourneyGo(){
     if(t.state === 'running') await tourneyResume(t.tid);
     else await tourneyJoin(t.tid);
     _evUi.busy = false;
-    if(typeof tourneyActive !== 'function' || !tourneyActive()){
+    if(!tourneyActive()){
         // tourneyJoin has already worked out what went wrong and sounded it. This puts
         // the same words where the player is actually looking, without a second sound.
         uiMsg(_evUi, (tourneyUi() && tourneyUi().msg) || 'COULD NOT JOIN', ''); _evUi.bad = true;
@@ -673,7 +672,6 @@ async function eventTourneyGo(){
 // dialog opens -- but the dialog is the same one, and the settings on it are the
 // same settings.
 function eventTourneyNew(){
-    if(typeof tourneySetupOpen !== 'function'){ _evMsg('NOT RIGHT NOW', true); return false; }
     tourneySetupOpen(_evEid);
     return true;
 }
@@ -884,7 +882,7 @@ async function eventStatsEnter(){
 function eventStatsLeave(){ _evStatsTop = 0; phase = 'eventPage'; _uiDirty = true; }
 function eventStatsScroll(d){
     const n = eventStatsView().archive.length;
-    const fits = (typeof eventStatsFits === 'function') ? eventStatsFits() : n;
+    const fits = eventStatsFits();
     const max = Math.max(0, n - Math.max(1, fits));
     const was = _evStatsTop;
     _evStatsTop = Math.min(max, Math.max(0, _evStatsTop + d));
@@ -1014,7 +1012,7 @@ async function eventMonitorRead(){
             // back to the event page and is told why. A feed it was watching ends
             // through the ordinary session end, which asks eventExitPhase.
             if(_evMon){
-                const watching = typeof netSpectating === 'function' && netSpectating();
+                const watching = netSpectating();
                 _evMonGone = watching;
                 eventMonitorStop();
                 _evMsg('THE EVENT SCREEN TOOK OVER', !watching);   // a feed's end already sounds
@@ -1036,26 +1034,26 @@ async function eventMonitorRead(){
 // tournament spectator does -- and when the cursor moves, follow it to the next
 // pair. Every line of this hands over to net-spec.js.
 function _evMonFollow(){
-    if(typeof specWatch !== 'function' || typeof netSpectating !== 'function') return;
+    
     const t = _evMon && _evMon.tourney, roles = t && t.roles;
     const nid = roles ? String(roles.nid || '') : '';
     if(!nid){
         // Nothing is being played. Let go of a feed for a match that has ended,
         // so the next one starts clean.
-        if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
+        if(_evMonNid && netSpectating()) specStop('');
         _evMonNid = ''; _evMonAskAt = 0; _evMonRolesAt = 0;
         return;
     }
     if(nid !== _evMonNid){
         // A NEW match. Drop the old feed before asking for the next: the two are
         // different timelines and a spectator boots from a checkpoint off the feed.
-        if(_evMonNid && typeof specStop === 'function' && netSpectating()) specStop('');
+        if(_evMonNid && netSpectating()) specStop('');
         _evMonNid = nid; _evMonAskAt = 0; _evMonTry = 0; _evMonRolesAt = _msgNow();
     }
     if(netSpectating()) return;                       // already watching this one
     // An ask still on net-spec's own ladder is being re-sent and waited on there; asking
     // again here would only restart its deadline. The ladder giving up is the re-ask.
-    if(typeof specAsking === 'function' && specAsking()) return;
+    if(specAsking()) return;
     const now = _msgNow();
     if(_evMonAskAt && now - _evMonAskAt < EV_MON_WATCH_MS) return;
     // The sheet's stagger: the whole field was dealt in one instant, and a watcher owes
@@ -1119,7 +1117,7 @@ function _evMonTick(){
     // feed: the lease stopped being renewed, the re-ask ladder stopped running, and
     // when the match ended eventExitPhase had nothing to answer with, so the screen
     // landed on the 1vs1 menu instead of going back to watching.
-    const watching = typeof netSpectating === 'function' && netSpectating();
+    const watching = netSpectating();
     if(phase !== 'eventMonitor' && !watching){ eventMonitorStop(); return; }
     _evMonPass();
     // TWO CADENCES ON ONE TIMER. The lease is the expensive call -- it claims or
@@ -1148,7 +1146,7 @@ function eventMonitorEnter(){
 function eventMonitorStop(keep){
     eventWakeSet(false);
     if(_evMonT != null){ if(typeof clearInterval === 'function') clearInterval(_evMonT); _evMonT = null; }
-    if(_evMonNid && typeof specStop === 'function' && typeof netSpectating === 'function' && netSpectating())
+    if(_evMonNid && netSpectating())
         specStop('');
     _evMonNid = ''; _evMonRolesAt = 0; _evMonAskAt = 0; _evMonAt = 0; _evMonTry = 0; _evMonAfter = 0; _evMonAgain = false; _evMonOver = null;
     if(phase !== 'eventQr') eventPassLeave();
@@ -1329,6 +1327,6 @@ function _evGrantAch(a){
     if(!a || typeof a !== 'object') return;
     const id = String(a.id || '');
     if(!/^ev_[A-Z0-9]{4}$/.test(id)) return;
-    if(typeof achEventPut === 'function') achEventPut(id, a);
-    if(typeof unlockAch === 'function') unlockAch(id);
+    achEventPut(id, a);
+    unlockAch(id);
 }

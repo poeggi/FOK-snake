@@ -47,11 +47,11 @@ let multiSel = 0;   // MULTIPLAYER submenu selection -- an index into multiRows(
 // when we are not -- which is also how a removed member finds out. Hard-coded indices in the
 // draw and the input would drift apart the first time that row appeared, so both read this.
 function multiRows(){
-    const tt = typeof _ttMenuOk === 'function' && _ttMenuOk();
+    const tt = _ttMenuOk();
     // What changed on the friends list since you last looked: a dot on the row, and
     // the one-line reason in the band while the row is armed.
-    const fresh = (typeof netFriendsNew === 'function') ? netFriendsNew() : [];
-    const notice = (typeof netStatusNotice === 'function') ? netStatusNotice() : null;
+    const fresh = netFriendsNew();
+    const notice = netStatusNotice();
     const rows = [
         { t:'1vs1 DUEL',  en:true, go:'duel' },
         { t:'TOURNAMENT', en:tt, note:tt ? null : (notice || 'TOURNAMENTS NEED A CONNECTION'), go:'tourney' },
@@ -59,7 +59,7 @@ function multiRows(){
         { t:'FRIENDS',    en:true, go:'friends', badge:fresh.length, note:fresh.length ? netFriendsNewNote(fresh) : null },
         { t:'ADD FRIEND', en:true, go:'addfriend' },
     ];
-    if(typeof eventAny === 'function' && eventAny()) rows.push({ t:'EVENTS', en:true, go:'events' });
+    if(eventAny()) rows.push({ t:'EVENTS', en:true, go:'events' });
     return rows;
 }
 let duelSel = 0; // 1vs1 DUEL submenu selection (0 = 1vs1 ONLINE, 1 = 1vs1 LOCAL)
@@ -138,11 +138,11 @@ function updateSplashExit() {
         const dest = _inviteFid ? 'duelInvite' : _tourneyLink ? 'tourneyLobby' : _eventLink ? 'eventPage' : 'menu';
         phase = dest;
         inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
-        if (phase === 'tourneyLobby' && typeof tourneyEnter === 'function') tourneyEnter();
-        if (phase === 'eventPage' && typeof eventEnter === 'function'){ _eventBack = 'menu'; eventEnter(); }
+        if (phase === 'tourneyLobby') tourneyEnter();
+        if (phase === 'eventPage'){ _eventBack = 'menu'; eventEnter(); }
         // Hold menu music briefly for the clock sync (started during the coin drop), so it
         // opens on the globally-shared bar. Only when online and not yet synced; else no wait.
-        if(typeof _netOk === 'function' && _netOk() && (typeof netPts !== 'function' || netPts() == null))
+        if(_netOk() && (netPts() == null))
             _musicSyncWaitUntil = performance.now() + MUSIC_SYNC_WAIT_MS;
         _wsend({ t:'phase', phase:'menu' });   // sync the worker: it owns phaseAt
         // A player who never named themselves is PLAYER to every peer and a dash in every
@@ -154,13 +154,13 @@ function updateSplashExit() {
         // LAST in this function on purpose, and off `dest` rather than `phase`: the sim owns
         // `phase` and the menu hand-over above writes it again on the no-worker fallback, so
         // reading it here would both undo an earlier hand-over and lose the deep link.
-        if (dest === 'menu' && !getPlayerName() && typeof _entryOpen === 'function') _entryOpen('user', '', 'menu');
+        if (dest === 'menu' && !getPlayerName()) _entryOpen('user', '', 'menu');
     }
 }
 // Set the in-process tick phase to the shared grid (mid-window firing), only on an
 // anchor change -- the file:// fallback's twin of sim-worker _dcSeedPhase.
 function _fbSeedPhase(){
-    const _ft = (typeof netTickTargetF === 'function') ? netTickTargetF() : null;
+    const _ft = netTickTargetF();
     if(_ft === null) return;
     _fbAcc = Math.max(-TICK_MS, Math.min(TICK_MS, (_ft - simTick - 0.5) * TICK_MS));
     _netDbg.psetN = (_netDbg.psetN|0) + 1; _netDbg.psetAt = performance.now();
@@ -182,7 +182,7 @@ function achEggFound(){ return EGG_ACHIEVEMENTS.some(a=>achUnlocked[a.id]) || ac
 // (name, desc, an optional icon) and is kept locally only so the page can be drawn
 // offline; the icon falls back when the operator named none.
 function achEventList(){
-    const defs = (typeof achEventDefs === 'function') ? achEventDefs() : {};
+    const defs = achEventDefs();
     const out = [];
     for(const id in defs){
         if(!achUnlocked[id]) continue;
@@ -260,10 +260,10 @@ function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGam
 // It hands us the track id; menu tracks seek to absolute PTS, the game track to its
 // start-PTS offset. null when unsynced/offline -> the audio layer leaves it be.
 if (typeof Snd !== 'undefined' && Snd.setMusicSeekProvider) Snd.setMusicSeekProvider((trackId) => {
-    if (typeof netPts !== 'function' || netPts() == null) return null;
+    if (netPts() == null) return null;
     if (trackId === 'ambient' || trackId === 'classicMenu')
-        return (typeof netMenuSeekSec === 'function') ? netMenuSeekSec() : null;
-    return (typeof netMusicSeekSec === 'function') ? netMusicSeekSec() : null;
+        return netMenuSeekSec();
+    return netMusicSeekSec();
 });
 
 // ================================================================
@@ -338,12 +338,12 @@ function drainSimEvents(){
             case 'ach':      unlockAch(e.id); break;
             case 'bars':     renderBarsOffscreen(); break;
             case 'blog':     // classic boost transition: replay-log it at its authored tick
-                if(typeof netLogBoost === 'function'){ if(e.k === 'bs') netLogBoost(e.d, e.tk); else netLogBoostEnd(e.tk); }
+                if(e.k === 'bs') netLogBoost(e.d, e.tk); else netLogBoostEnd(e.tk);
                 break;
             case 'duelHalt':   // online duel death: the sim holds in 'dying'; the host opens the respawn boundary
-                if(typeof netDuelHalt === 'function') netDuelHalt(); break;
+                netDuelHalt(); break;
             case 'duelRecovered':   // worker home: a full resync burst settled -- the net layer opens the resume boundary
-                if(typeof _netResyncSettled === 'function') _netResyncSettled(); break;
+                _netResyncSettled(); break;
             case 'lvlreset': fireworks=[]; _crushEffects=[]; _crashFx=[]; break;   // clear leftover particles at level begin
             case 'showhud':  if(e.v && !inGame) break;   // a stale worker "show" (e.g. a late level-reset frame) must never raise the HUD on a menu; hides always honoured
                              showHUD(e.v); break;
@@ -363,7 +363,7 @@ function drainSimEvents(){
 }
 
 function togglePause() {
-    if(typeof netGameActive==='function' && netGameActive()) return;   // online: no pause (quit via ESC works)
+    if(netGameActive()) return;   // online: no pause (quit via ESC works)
     // Phase (playing<->paused, duel<->duelPaused) and the clock freeze/thaw are handled by
     // the worker; main only gates the input and drives the music. Pause exists in classic
     // and LOCAL duel; a future ONLINE duel disables it (one player must not freeze the peer).
@@ -411,7 +411,7 @@ function _debugState(){
         sim: { phase, level, score, lives, simTick, inGame, worker: !!_worker },
         fps: { recording:_fpsRec, worst:_fpsSnap, maxSustained:_fpsMaxAvg||null },
         player: { id: getPlayerId(), friends: getFriends().length },
-        net: (typeof netDebugInfo === 'function') ? netDebugInfo() : null,
+        net: netDebugInfo(),
         overlay: { tl:_dbgTxt.tl, tr:_dbgTxt.tr, bl:_dbgTxt.bl, br:_dbgTxt.br },
     };
 }
@@ -466,7 +466,7 @@ function _flashDbgSnapBtn(){
 }
 async function sendDebugSnapshot(){
     if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=_msgNow(); return; }
-    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
+    if(!_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
     _dbgSending=true; _dbgPinShow=false; _dbgPinCopied=false; _dataMsg=''; _uiDirty=true;   // clear old PIN; the persistent UPLOADING indicator takes over
     try {
         const r=await fetch(NET_BASE+'/debug/submit.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_dbgSnap)});
@@ -560,14 +560,13 @@ function updateNetDebugOverlay(rafNow){
     // the worker owns it, so a frozen counter is a stalled worker. mseek lets two clients
     // verify menu-music sync on-device (same audio style => same seek, mod the loop length).
     const lvl = cfg.debug || 0;
-    const online = typeof netGameActive === 'function' && netGameActive();
-    let netQ, timeQ, simQ;
-    if(typeof netDebugQuad === 'function'){ const q = netDebugQuad(); netQ = q.net; timeQ = q.time; simQ = q.sim; }
-    else { netQ = { main:['net: not loaded'], more:[] }; timeQ = { main:['pts ' + simTick], more:[] }; simQ = { main:[], more:[] }; }
+    const online = netGameActive();
+    const q = netDebugQuad();
+    let netQ = q.net, timeQ = q.time, simQ = q.sim;
     if(!online){
-        const _off = (typeof netOffline === 'function') && netOffline();
-        const _synced = (typeof netPts === 'function') && netPts() != null;
-        const _mseek = (typeof netMenuSeekSec === 'function') ? netMenuSeekSec() : 0;
+        const _off = netOffline();
+        const _synced = netPts() != null;
+        const _mseek = netMenuSeekSec();
         // Offline the sync line is the only clock signal, so it is essential; when merely
         // online-in-lobby the anc/wall lines already carry it, so sync drops to the extras.
         (_off ? timeQ.main : timeQ.more).push('sync ' + (_synced ? 'ok mseek ' + _mseek.toFixed(2) + 's' : (_off ? 'offline' : '...')));
@@ -684,7 +683,7 @@ function _shopToggleWear(item){
 function _duelWsLists(hosting){
     // Spectating: neither list is ours to derive. Both players' worn gear comes off the wire
     // in the bootstrap context, already in PLAYER order -- exactly what this returns.
-    const sw = (typeof netSpecWs === 'function') ? netSpecWs() : null;
+    const sw = netSpecWs();
     if(sw) return sw;
     const wu = itemWornUids();
     const mine = _wsWorn(cfg.wornItems).map(id => ({ id, uid:wu.uids[id] || '' }));
@@ -702,9 +701,9 @@ function _duelWsLists(hosting){
 // whether the result outlives the match differs.
 function _wsTransfer(e){
     if(e.from === e.to) return;                       // took their own item straight back
-    if(typeof netGameActive !== 'function' || !netGameActive()) return;
+    if(!netGameActive()) return;
     if(_netSess && _netSess.stakes === false) return;   // stakes off: the steal is real on the board, but nothing outlives the match
-    const me = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
+    const me = netMyIndex();
     if(e.from !== me && e.to !== me) return;
     // NEW objects, not in-place edits: netDuelLook memoizes on cfg.wornItems by reference.
     const si = Object.assign({}, cfg.shopItems || {});
@@ -875,11 +874,11 @@ let _dimKey = null;
 function _updateBtnDim() {
     // Keyed on phase AND online-ness: the same duel phase has a different live set
     // online, so phase alone would cache the wrong one.
-    const online = typeof netGameActive==='function' && netGameActive();
+    const online = netGameActive();
     // The ceremony screen's ESC is the way to the board, and the player it is calling up
     // does not get one (UI_INPUT.tourneyCeremony). Same phase, two different live sets, so
     // it has to be in the key or the first one drawn would be cached for both.
-    const up = phase==='tourneyCeremony' && typeof tourneyUp==='function' && tourneyUp();
+    const up = phase==='tourneyCeremony' && tourneyUp();
     const key = phase + (online ? '|net' : '') + (up ? '|up' : '');
     if(key===_dimKey) return;
     _dimKey=key;
@@ -992,7 +991,7 @@ function loop(rafNow) {
         // Re-assert the shared-clock seek on EVERY menu entry (from splash OR from a game), not
         // just at boot: hold the menu track until the clock is synced so it opens on the globally
         // shared bar. Only actually waits when online and not yet synced; otherwise no delay.
-        if(menuPhase && !_wasMenuPhase && typeof _netOk==='function' && _netOk() && (typeof netPts!=='function' || netPts()==null))
+        if(menuPhase && !_wasMenuPhase && _netOk() && (netPts()==null))
             _musicSyncWaitUntil = performance.now() + MUSIC_SYNC_WAIT_MS;
         _wasMenuPhase = menuPhase;
         const gamePhase=_GAME_PHASES.indexOf(phase)>=0;
@@ -1000,13 +999,13 @@ function loop(rafNow) {
         // Hold menu music at first entry until the clock syncs (started during the coin drop)
         // or the 2s wall passes -- so it opens on the globally-shared bar. Once playing,
         // musicPlay no-ops, so this only gates the START.
-        const holdMenu = menuPhase && performance.now() < _musicSyncWaitUntil && (typeof netPts==='function' && netPts()==null);
+        const holdMenu = menuPhase && performance.now() < _musicSyncWaitUntil && (netPts()==null);
         // Menu music fades in 0.5s (splash entry + return from game); the game track punches
         // in at GO. BOTH are seeked to the shared clock -- the duel track to its start PTS,
         // the menu track to absolute PTS -- so clients hear the same bar at the same moment.
         if(cfg.music&&wt&&!holdMenu) Snd.musicPlay(wt, menuPhase?0.5:0,
-            menuPhase ? (typeof netMenuSeekSec==='function' ? netMenuSeekSec() : 0)
-                      : (typeof netMusicSeekSec==='function' ? netMusicSeekSec() : 0));
+            menuPhase ? netMenuSeekSec()
+                      : netMusicSeekSec());
         else if(!wt&&!menuPhase&&!gamePhase) Snd.musicStop();
     }
     Snd.musicTick(cfg.music);
@@ -1040,7 +1039,7 @@ function loop(rafNow) {
             let ran=0;
             let fb=frameMs; if(fb>250) fb=250;
             _fbAcc+=fb;
-            while(_fbAcc>=TICK_MS && ran<MAX_CATCHUP){ _fbAcc-=TICK_MS; if(typeof netTickPre==='function') netTickPre(); update(); if(typeof netTickPost==='function') netTickPost(); ran++; }
+            while(_fbAcc>=TICK_MS && ran<MAX_CATCHUP){ _fbAcc-=TICK_MS; netTickPre(); update(); netTickPost(); ran++; }
             if(ran>=MAX_CATCHUP) _fbAcc=0;
             // The shared clock STEERS this, it does not gate it (gating stalled the game at
             // every start). Gross INTEGER tick lag is closed by one extra tick per frame
@@ -1048,9 +1047,9 @@ function loop(rafNow) {
             // beginOnlineDuel seed + _fbSeedPhase), never polled -- the phase measure sweeps
             // a full unit each tick, so a poll would fire every frame. A gap over ~2s means
             // a wrong origin; run free (rollback recovers drift, a dead game does not).
-            const _tgt = (typeof netTickTarget==='function') ? netTickTarget() : null;
+            const _tgt = netTickTarget();
             const _d = _tgt === null ? 0 : _tgt - simTick;
-            if(_tgt !== null && _d > 1 && _d <= 120 && ran < MAX_CATCHUP){ if(typeof netTickPre==='function') netTickPre(); update(); if(typeof netTickPost==='function') netTickPost(); }   // behind: one extra tick
+            if(_tgt !== null && _d > 1 && _d <= 120 && ran < MAX_CATCHUP){ netTickPre(); update(); netTickPost(); }   // behind: one extra tick
             if(simEvents.length) drainSimEvents();
             if(dlg){
                 prevPhase = phase;   // the game behind the dialog may have evolved (death, level change)
@@ -1079,10 +1078,10 @@ function loop(rafNow) {
             // A tournament match is over the instant the sim says so: report it now, from
             // the one place that sees every ending (a win, a loss and a double knockout all
             // land here), rather than from any of the paths that lead to it.
-            if(typeof tourneyMatchOver==='function') tourneyMatchOver();
+            tourneyMatchOver();
         }
         if(phase==='menu'){
-            if(typeof _menuSnakeEnter==='function') _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
+            _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
             // Leaving 1vs1 to the main menu: some exit paths (e.g. multiplayer Back) drop straight
             // to 'menu' without tearing down the duel HUD, so its names/hearts linger. _wsend
             // reaches only the worker (which may already be paused at menu and never post a
@@ -1090,7 +1089,7 @@ function loop(rafNow) {
             // -- ownership-safe (a sim command, not a bare write) -- and hide the HUD.
             if(players){
                 _wsend({t:'phase',phase:'menu'});                                          // reset the worker's own duel state
-                if(typeof simCommand==='function') simCommand({t:'phase',phase:'menu'});   // clear the MAIN mirror: players=null
+                simCommand({t:'phase',phase:'menu'});   // clear the MAIN mirror: players=null
                 showHUD(false);
             }
         }
@@ -1142,8 +1141,8 @@ function _wsend(m){
     // Online duels run the sim in-process on BOTH ends (prediction + replay need
     // synchronous access): commands go straight to it, not to the worker (which
     // idles on its menu phase until the session ends).
-    if(inGame && typeof netGameActive==='function' && netGameActive() && !netWorkerDuelOn() && typeof simCommand==='function'){ simCommand(m); return; }
-    if(_useWorker()) _worker.postMessage(m); else if(typeof simCommand==='function') simCommand(m);
+    if(inGame && netGameActive() && !netWorkerDuelOn()){ simCommand(m); return; }
+    if(_useWorker()) _worker.postMessage(m); else simCommand(m);
 }
 function _cfgForWorker(){ return { diff: cfg.diff|0, turbo: cfg.turbo!==false, x10: !!cfg.x10 }; }
 // What duel-core's item attestation needs for a match: the registry's match handle, THIS
@@ -1168,21 +1167,21 @@ function _duelClaimArgs(hosting){
 function duelClaimSeed(){
     const ca = _duelClaimArgs(netHosting());
     if(_wDuel && _useWorker()) _worker.postMessage(Object.assign({ t:'duelClaim' }, ca));
-    else if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
+    else _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
 }
 function beginGame(){
-    if(typeof netEndSession==='function') netEndSession();   // a lingering online session must never eat the local game's frames
+    netEndSession();   // a lingering online session must never eat the local game's frames
     inGame = true; Snd.musicFadeOut(0.5);   // menu music fades out; READY/GO runs silent
     _scoreTainted = !!cfg.x10;   // latch debug-odds taint before the first frame
     const seed = (Math.random()*0x100000000)>>>0;   // main-made so the score submission can carry it
-    if(typeof netNoteGameStart === 'function') netNoteGameStart(seed);
+    netNoteGameStart(seed);
     _wsend({ t:'start', seed, bestScore:bestScore() });
 }
 // duel-core's rollback presentation hook (main-thread home only; the worker home has no
 // renderer and its sim phase never holds the quit overlay). Re-renders bars the re-sim
 // moved and keeps the quit overlay up across a rewind.
 function _rbPostRollback(barsChanged, keep){
-    if(barsChanged && typeof renderBarsOffscreen === 'function') renderBarsOffscreen();
+    if(barsChanged) renderBarsOffscreen();
     if(keep === 'quitConfirm'){                  // the quit overlay survives a rewind
         if(phase !== 'duelOver'){ prevPhase = phase; phase = keep; }
         else Snd.duck(false);
@@ -1233,14 +1232,14 @@ function beginOnlineDuel(seed, hosting){
         // message above rebases the worker, so main's dormant core must adopt the same
         // base epoch HERE -- a frozen mirror stamps/gates a stale epoch and splits the
         // pair onto separate tick bases against a peer whose epoch advances.
-        if(typeof _rbReset === 'function') _rbReset();
+        _rbReset();
         return;
     }
     _fbAcc = 0;                                   // fresh in-process tick accumulator
     _wsend({ t:'startDuel', seed:seed>>>0, net:true, ws:_duelWsLists(hosting), hearts:_duelMatchHearts(), lvl:_duelMatchLvl(), speed:_duelMatchSpeed() });   // routes to the LOCAL sim on both ends; net: deaths hold for the respawn boundary
     const ca = _duelClaimArgs(hosting);
-    if(typeof _wsClaimReset === 'function') _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
-    if(typeof _rbReset === 'function') _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
+    _wsClaimReset(ca.mid, ca.sec, ca.ids, ca.seqs);
+    _rbReset();   // AFTER startDuel: it rewinds simTick, and the base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();   // set the phase to the shared grid (pset -> 1x)
     _netBoundarySettle();   // tick 0 is the agreed startPts, not whenever our own timer fired
@@ -1266,12 +1265,12 @@ function beginOnlineDuelLevel(hosting, lvl){
             startPts: (_netSess && _netSess.startPts) || 0 });
         // Main must mirror the worker's rebase (see beginOnlineDuel): the epoch
         // stamp/gate read main's _rbEpoch.
-        if(typeof _rbReset === 'function') _rbReset();
+        _rbReset();
         return;
     }
     _fbAcc = 0;
     _wsend({ t:'startDuelLevel', level: lvn });
-    if(typeof _rbReset === 'function') _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
+    _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();
     _netBoundarySettle();   // tick 0 is the agreed startPts, not whenever our own timer fired
@@ -1292,12 +1291,12 @@ function beginOnlineDuelRespawn(hosting){
             startPts: (_netSess && _netSess.startPts) || 0 });
         // Main must mirror the worker's rebase (see beginOnlineDuel): the epoch
         // stamp/gate read main's _rbEpoch.
-        if(typeof _rbReset === 'function') _rbReset();
+        _rbReset();
         return;
     }
     _fbAcc = 0;
     _wsend({ t:'startDuelRespawn' });
-    if(typeof _rbReset === 'function') _rbReset();   // startDuelRespawn rewound simTick; the rollback base reads it
+    _rbReset();   // startDuelRespawn rewound simTick; the rollback base reads it
     _netDbg.psetN = 0; _netDbg.psetAt = 0;
     _fbSeedPhase();
     _netBoundarySettle();   // tick 0 is the agreed startPts, not whenever our own timer fired
@@ -1309,19 +1308,19 @@ function beginOnlineDuelRespawn(hosting){
 // _rbAdoptEpoch moves the epoch stamp/gate onto the new line WITHOUT touching the rollback base
 // or ring, so wire ticks keep their meaning straight across the boundary.
 function resumeOnlineDuel(){
-    if(typeof _rbAdoptEpoch === 'function') _rbAdoptEpoch();   // worker mode too: main's mirror is the stamp/gate authority (see beginOnlineDuel)
-    if(typeof _netClockPush === 'function') _netClockPush();   // unconditional: a starved burst (a go without bth) skips _netBurstApply's own push
+    _rbAdoptEpoch();   // worker mode too: main's mirror is the stamp/gate authority (see beginOnlineDuel)
+    _netClockPush();   // unconditional: a starved burst (a go without bth) skips _netBurstApply's own push
 }
 // In-process home of duel-core's recovery hook: the settle happened here on main, so call the
 // net layer directly. The worker home posts the same moment as a 'duelRecovered' duel event
 // instead (sim-worker.js), which lands in the drainSimEvents case above.
-function _rbRecovered(){ if(typeof _netResyncSettled === 'function') _netResyncSettled(); }
+function _rbRecovered(){ _netResyncSettled(); }
 // In-process home of duel-core's item-handover hook: the registry client is right here, so
 // hand the claim straight to it. The worker home posts an 'iclaim' message instead.
-function _wsClaimOut(c){ if(typeof itemClaim === 'function') itemClaim(c); }
+function _wsClaimOut(c){ itemClaim(c); }
 // Local 1vs1 entry (one screen, two keyboards): no network and no seed sharing --
 // just start the deterministic duel sim in-process.
-function beginDuel(){ if(typeof netEndSession==='function') netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
+function beginDuel(){ netEndSession(); inGame = true; Snd.musicFadeOut(0.5); _sfxQ.length = 0; _fxQ.length = 0;   // startDuel rewinds simTick to 0: stale queue entries would never flush
     _wsend({ t:'startDuel', seed:null, ws:_duelWsLists(null) }); }
 function _initWorker(){
     // Headless harness has no Worker: _wsend falls back to simCommand and the tests drive
@@ -1343,16 +1342,16 @@ function _initWorker(){
     // so main-thread work is bounded by the draw rate, not the worker's post rate.
     _worker.onmessage = (e)=>{
         const m = e.data;
-        if(m.t==='wire'){ if(netWorkerDuelOn() && typeof _netSend==='function') _netSend(m.o); return; }   // duel-core's outbound packet
-        if(m.t==='dsig'){ if(typeof _netSigLog==='function') _netSigLog(m.line); return; }
+        if(m.t==='wire'){ if(netWorkerDuelOn()) _netSend(m.o); return; }   // duel-core's outbound packet
+        if(m.t==='dsig'){ _netSigLog(m.line); return; }
         // A checkpoint minted off the worker's ring for a spectator we serve (net-spec.js asked
         // for it). Not a wire packet -- it goes down the spectator tree, never toward the two
         // players -- so it has its own message.
-        if(m.t==='spCkpt'){ if(typeof _spCkptLand==='function') _spCkptLand(m.rs); return; }
+        if(m.t==='spCkpt'){ _spCkptLand(m.rs); return; }
         // An item handover the worker's duel-core attested and released. Only MAIN can post
         // it (the registry client owns cfg and the fetch), so it comes out as a message the
         // same way the wire packets do.
-        if(m.t==='iclaim'){ if(typeof itemClaim==='function') itemClaim(m.c); return; }
+        if(m.t==='iclaim'){ itemClaim(m.c); return; }
         // A tick threw inside the worker; its loop caught it and re-armed itself (throttled
         // to one post per 5s). Same prefix as onerror below: this line IS the root cause.
         if(m.t==='err'){ console.error('sim worker error', m.msg + (m.n > 1 ? ' (x' + m.n + ')' : ''), m.stack); return; }
@@ -1427,7 +1426,7 @@ function _demoteWorker(){
     const wasDuel = _wDuel;
     try { if(_worker) _worker.terminate(); } catch(e) {}
     _worker = null; _pendingSnap = null; _pendingEvents = []; _wDuel = false; _pendingDuel = null;
-    if(wasDuel && typeof netEndSession === 'function') netEndSession();
+    if(wasDuel) netEndSession();
 }
 // Inverse of the worker's transport packing (see sim-worker.js _post -- keep in sync).
 // The snake unpacks into a pooled object array so 60Hz unpacking does not churn the GC;

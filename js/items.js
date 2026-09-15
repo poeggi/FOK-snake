@@ -143,7 +143,7 @@ function itemClaim(c){
 
 // ---- delivery --------------------------------------------------------------
 function _itemOnline(){
-    return typeof _netOk === 'function' && _netOk() && typeof getPlayerId === 'function';
+    return _netOk();
 }
 // A status the server answers when it simply cannot take this body YET: no
 // connection at all, a load-shed 5xx, the hourly mint ceiling, or a server that
@@ -171,7 +171,7 @@ function _itemSeqOfUid(uid){
 const ITEM_FORM_MS = 1000;
 function itemKick(){
     if(_itemBusy || !_itemOnline() || _itemTimer) return;
-    const forming = typeof netForming === 'function' && netForming();
+    const forming = netForming();
     const wait = Math.max(0, _itemRetryAt - Date.now(), forming ? ITEM_FORM_MS : 0);
     _itemTimer = setTimeout(() => { _itemTimer = 0; itemFlush(); }, wait);
 }

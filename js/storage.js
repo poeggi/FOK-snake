@@ -220,7 +220,7 @@ function resetSettings() {
     applyHandedness();
     Snd.musicSetVolume(cfg.volume==null?1:cfg.volume); Snd.sfxSetVolume(cfg.sfxVol==null?0.5:cfg.sfxVol);
     if(cfg.music){ Snd.audioResume(); Snd.musicUnmute('mute'); } else Snd.musicMute('mute');
-    updateMuteBtn(); if(typeof applyFpsBox==='function')applyFpsBox();
+    updateMuteBtn(); applyFpsBox();
 }
 
 // ================================================================
@@ -340,7 +340,7 @@ function addFriend(id) {
         a.push(id);
         try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(a.slice(-64))); } catch(e) {}
     }
-    if (typeof netFriendRequest === 'function') netFriendRequest(id);   // server handshake (soft, offline-safe)
+    netFriendRequest(id);   // server handshake (soft, offline-safe)
     return true;   // already-known counts as success (idempotent add)
 }
 function removeFriend(id) {
@@ -385,15 +385,15 @@ function _applyRestoredConfig(d){
     // marker we hold was recorded against a DIFFERENT identity. Keeping them would suppress
     // exactly the requests this save now needs, and the restored player would silently have
     // no friendships on the server at all.
-    if(typeof netFriendMarkersReset === 'function') netFriendMarkersReset();
+    netFriendMarkersReset();
     if(d.tok) setCloudToken(d.tok);                            // and the cloud-restore credential
     _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
     if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
     // A restored backup carries a SNAPSHOT of the item registry, which is exactly
     // what must not be trusted: re-reconcile against the server now rather than
     // next session, so a restore cannot resurrect an instance for this whole run.
-    if(typeof itemResync==='function') itemResync();
-    applyHandedness(); updateMuteBtn(); if(typeof applyFpsBox==='function')applyFpsBox(); _scoreboardCache=null;
+    itemResync();
+    applyHandedness(); updateMuteBtn(); applyFpsBox(); _scoreboardCache=null;
     Snd.musicSetVolume((cfg.volume==null?1:cfg.volume)); Snd.sfxSetVolume((cfg.sfxVol==null?0.5:cfg.sfxVol));
     return true;
 }
@@ -409,7 +409,7 @@ function backupStats() {
 // Cloud backup: POST the whole config to the vault. First time mints a token (store it in
 // both stores + cookie); later backups present it. Payload is opaque to the server.
 async function cloudBackup(silent) {
-    if(typeof _netOk!=='function' || !_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); } return false; }
+    if(!_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); } return false; }
     if(!silent){ _dataMsg='CLOUD BACKUP...'; _dataMsgAt=_msgNow(); }
     let ok=false;
     try {
@@ -438,7 +438,7 @@ async function cloudBackup(silent) {
 // lives here, so callers can fire it freely. Silent -- no menu feedback line for the auto path.
 const AUTOCLOUD_KEY='fok-snake-autocloud-at';
 async function _maybeAutoCloudBackup(){
-    if(!cfg.autoCloud || typeof _netOk!=='function' || !_netOk()) return;
+    if(!cfg.autoCloud || !_netOk()) return;
     let at=0; try{ at=parseInt(localStorage.getItem(AUTOCLOUD_KEY)||'0',10)||0; }catch(e){}
     if(Date.now()-at < 86400000) return;                                   // at most once per day
     if(await cloudBackup(true)){ try{ localStorage.setItem(AUTOCLOUD_KEY, String(Date.now())); }catch(e){} }
@@ -446,7 +446,7 @@ async function _maybeAutoCloudBackup(){
 // Cloud restore: GET the vault with id + token, apply it. Needs the token (from the cookie/
 // localStorage, or a prior file restore) -- id alone cannot read someone else's backup.
 async function cloudRestore() {
-    if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
+    if(!_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
     const tok=getCloudToken();
     if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=_msgNow(); return; }
     _dataMsg='CLOUD RESTORE...'; _dataMsgAt=_msgNow();

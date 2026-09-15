@@ -115,7 +115,7 @@ function _netCandAddr(cand){
 // keeps matching us exactly the way it does today.
 function _netNetsGather(){
     if(_netNetsBusy || typeof RTCPeerConnection !== 'function' || typeof setTimeout !== 'function') return;
-    if(typeof netOffline === 'function' && netOffline()) return;
+    if(netOffline()) return;
     _netNetsBusy = true;
     let pc = null, tmr = null, done = false;
     // Best address per family. A SERVER-REFLEXIVE candidate is what the STUN server actually saw,
@@ -134,7 +134,7 @@ function _netNetsGather(){
         _netNets = out.slice(0, NET_NETS_MAX);
         _netNetsAt = Date.now();
         _netNetsBusy = false;
-        if(typeof _netSigLog === 'function') _netSigLog('nets ' + (out.join(' ') || 'none'));
+        _netSigLog('nets ' + (out.join(' ') || 'none'));
     };
     try{
         pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
@@ -211,7 +211,7 @@ function _netMkSess(peer, role){
     // A tournament match's parameters live on the ROLES SHEET, and the offer carries none
     // of them. Both sides mint their session here, so this is the one point both paths
     // share -- and the answerer, which never gets to speak, is dressed by it too.
-    if(typeof tourneyDressSession === 'function') tourneyDressSession(s);
+    tourneyDressSession(s);
     return s;
 }
 // Stamp a received packet on BOTH clocks. lastRecvWall (Date.now) is the wall clock: it keeps
@@ -438,7 +438,7 @@ function _netSend(o){
     // of it -- and its whole contract with the match it watches is that the match cannot tell it
     // is there. One choke point rather than a condition on each of the eight send sites in the
     // tick schedule: whatever is added there later inherits the silence for free.
-    if(typeof netSpectating === 'function' && netSpectating()) return;
+    if(netSpectating()) return;
     // Tick-stream packets are epoch-scoped (see the gate in _netHandleMsg): simTick and the
     // rollback tick-base reset at every level boundary, so stamp the epoch this copy was
     // authored under. The receiver drops a copy that crossed a boundary instead of mapping
@@ -502,7 +502,7 @@ function _netSend(o){
         // The OUTBOUND spectator tap, at the one point where the packet is finished: a
         // spectator receives the exact object the opponent does, stamps and all. A no-op
         // with nobody watching, which is every duel nobody watches.
-        if(typeof _spTapOut === 'function') _spTapOut(o);
+        _spTapOut(o);
     }catch(e){}
 }
 // ---- boundary clock burst (raw measurement, host residual; see NET_BURST_* above) ----
@@ -725,7 +725,7 @@ function _netLiveCheck(){
     // ladder (silence -> warm standby -> fresh-state ask -> backup feeder). Running the
     // duel ladder here would read permanent silence off a channel that never existed and
     // kill the watch a few seconds in.
-    if(typeof netSpectating === 'function' && netSpectating()) return;
+    if(netSpectating()) return;
     const nowMs = performance.now();
     if(!s.pathAt || nowMs - s.pathAt > 2000){ s.pathAt = nowMs; _netPathStat(s); }   // refresh the ICE-path readout ~0.5Hz
     // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
@@ -783,7 +783,7 @@ function _netReconnect(s){
     // net-spec's, repaired on their own ladder -- and nothing would ever take down the
     // RECONNECTING banner this puts up (_netReconnectDone is the live check's, which a
     // spectator does not run).
-    if(typeof netSpectating === 'function' && netSpectating()) return;
+    if(netSpectating()) return;
     s.reconnectAt = Date.now();   // wall clock: the timeout must survive a suspend too
     s.reconnecting = true;             // _netPollDue() polls again so the re-handshake signals flow
     // The poll in flight is not aborted: an in-match poll is unheld and back within a round

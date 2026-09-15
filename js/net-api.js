@@ -51,7 +51,7 @@ function netUpdateNotice(){
 // EFFECTIVE offline: the stored toggle, OR forced by a file:// install (null origin -- the
 // server is unreachable anyway, so mask it rather than fail every call). Masked at read; the
 // stored cfg.offline is never mutated, so a local install keeps its saved preference.
-function netOffline(){ return !!cfg.offline || (typeof _runFromFile === 'function' && _runFromFile()); }
+function netOffline(){ return !!cfg.offline || _runFromFile(); }
 function _netOk(){ return !netOffline() && !_netApiNewer && typeof fetch === 'function'; }
 const _netTimers = (typeof setInterval === 'function' && typeof clearInterval === 'function');
 // How far a peer's PTS may exceed ours before we call it bogus. We check against
@@ -127,7 +127,7 @@ const NET_INVITE_STALE_MS = 24000;
 function _netSigStale(sig){
     const c = sig && sig.created;
     if(typeof c !== 'number' || !(c > 0)) return false;
-    const p = typeof netPts === 'function' ? netPts() : null;
+    const p = netPts();
     const srv = p != null ? p : Date.now() + (_netDbg.srvOfs || 0);
     return srv - c * 1000 > NET_INVITE_STALE_MS;
 }
@@ -431,7 +431,7 @@ async function netBgFetch(path, opt){
 async function _netSignal(to, type, payload){
     _netSigLog('> '+type+' '+String(to).slice(0,4));   // debug overlay
     const body = { id:getPlayerId(), to, type, payload: payload||'' };
-    const pts = (typeof netPts === 'function') ? netPts() : null;
+    const pts = netPts();
     if(pts != null) body.pts = pts;
     // The solo lane: a signal never goes out beside another request of ours (the deal burst
     // is exactly that -- a sheet, an offer and a start in the same tick), and never waits
@@ -513,7 +513,7 @@ function _detectPlatform(){
 // name the exact instance that moved (see _ws in sim.js, itemWornUids in items.js). Items
 // bought offline have no uid yet and simply do not appear here.
 function _netProfile(){
-    const wu = (typeof itemWornUids === 'function') ? itemWornUids() : { uids:{}, seqs:{} };
+    const wu = itemWornUids();
     return { name:(_netMyName()||'PLAYER').slice(0,MAX_NAME), color:cfg.snakeColor|0, shopItems:cfg.wornItems||{},
              wornUids:wu.uids, wornSeqs:wu.seqs, platform:_detectPlatform() };
 }
@@ -685,7 +685,7 @@ async function _netTimeSync(force, opts){
     else _netLat.at = Date.now();
     // The sweep held the mailbox re-arm back (the gate counts a running sweep as traffic);
     // let it go now rather than on the next 1s tick.
-    if(typeof _netPollOnce === 'function') _netPollOnce();
+    _netPollOnce();
 }
 
 // ---- live network stats (DEBUG LEVEL 2+ overlay and the debug export) ----
@@ -800,7 +800,7 @@ function netPlayerNames(){
     if(!netGameActive()) return null;
     // Spectating: neither name is ours. Both arrive in the bootstrap context, already in
     // player order -- there is no "mine" to place at P0 or P1.
-    const sn = (typeof netSpecNames === 'function') ? netSpecNames() : null;
+    const sn = netSpecNames();
     if(sn) return sn;
     const mine = (_netMyName() || 'YOU').slice(0, MAX_NAME);
     const peer = (_netSess.peerProfile && _netSess.peerProfile.name) || netFriendName(_netSess.peer) || fmtFriendId(_netSess.peer);
@@ -814,7 +814,7 @@ function netPlayerNames(){
 // local duel on one keyboard, where the second player has no account and so has no name.
 function duelSideName(i){
     i = i ? 1 : 0;
-    const nms = (typeof netPlayerNames === 'function') ? netPlayerNames() : null;
+    const nms = netPlayerNames();
     let n = nms ? String(nms[i] || '') : (i === 0 ? String(_netMyName() || '') : '');
     n = n.trim();
     return n ? n.slice(0, MAX_NAME) : ('PLAYER ' + (i + 1));
@@ -844,7 +844,7 @@ function netDuelLook(){
     // Spectating: the feeder already resolved the pair (including its own same-colour nudge),
     // so adopt it verbatim -- deriving it again here from a config that belongs to neither
     // player would show the watcher two snakes the players themselves never saw.
-    const sl = (typeof netSpecLook === 'function') ? netSpecLook() : null;
+    const sl = netSpecLook();
     if(sl) return sl;
     const _pp = _netSess.peerProfile || null, _host = netHosting();
     if(_netLookC && _netLookC.pp === _pp && _netLookC.host === _host && _netLookC.col === (cfg.snakeColor|0)
@@ -929,12 +929,12 @@ let _netTourneys = [];
 // already on screen that a tournament has opened.
 function _netTtApply(v){
     _netTourneys = Array.isArray(v) ? v : [];
-    if(typeof eventTourneySeen === 'function') eventTourneySeen(_netTourneys);
+    eventTourneySeen(_netTourneys);
 }
 // Who wants it. The lobby lists it; the event page needs it as news and rides the
 // poll it is already sending for `ev`, so it costs no request of its own.
 function _netTlWant(){
-    return phase === 'tourneyLobby' || (typeof eventTlWant === 'function' && eventTlWant());
+    return phase === 'tourneyLobby' || eventTlWant();
 }
 // The server's contract MINOR, or -1 before the first hello. Features that need a newer
 // server than 4.0 gate on this rather than on a failed POST.
@@ -1075,11 +1075,9 @@ async function _netHello(){
     // round trips beside the duel's own DataChannel, while the addresses it finds are only
     // ever used to open the NEXT one. What is already known still rides along; the TTL means
     // the first hello after the match refreshes.
-    if(typeof netNetsRefresh === 'function'){
-        if(!(typeof netGameActive === 'function' && netGameActive())) netNetsRefresh();
-        const nets = netPublicNets();
-        if(nets.length) body.nets = nets;
-    }
+    if(!netGameActive()) netNetsRefresh();
+    const nets = netPublicNets();
+    if(nets.length) body.nets = nets;
     // auto_accept: presenting our QR / being on the add-friend screen IS the
     // consent, so the server accepts incoming friend requests immediately (the
     // contract mechanism; complements the client-side QR accept). Expires ~60s.
@@ -1106,7 +1104,7 @@ async function _netHello(){
     // where a wire this client is about to make busy looks quiet, while a hello that just
     // came back is the one moment we know for certain nothing else of ours is out. It also
     // arrives with the pace the server just named already applied.
-    if(!_netHelloSeen){ _netHelloSeen = true; if(typeof itemKick === 'function') itemKick(); }
+    if(!_netHelloSeen){ _netHelloSeen = true; itemKick(); }
     _netSrvSays(r);
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
     _netFrApply(r);   // the counters, and the presence delta where one was asked for
@@ -1169,15 +1167,15 @@ function _netPollDue(){
         // the offer and the ICE behind them each wait a poll, which together outlives the ask
         // itself, and the watcher sits on CONNECTING for the whole match with nothing wrong at
         // either end for any ladder to find.
-        if(typeof specHandshaking === 'function' && specHandshaking()) return true;
+        if(specHandshaking()) return true;
         return _netPollTick % 5 === 0;   // reconnecting: poll so the re-handshake signals flow
     }
     if(phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId') return true;
     // An event screen is a matchmaking screen: the four `event` signals arrive in the
     // ordinary mailbox, and a monitor's watch handshake -- ask, offer, ICE -- has nowhere
     // else to land at all.
-    if(typeof eventScreen === 'function' && eventScreen()) return true;
-    if(typeof tourneyActive === 'function' && tourneyActive()) return true;   // a held tournament reaches us wherever we are
+    if(eventScreen()) return true;
+    if(tourneyActive()) return true;   // a held tournament reaches us wherever we are
     if(phase === 'tourneyLobby') return true;
     if(_netSess) return true;                        // offer/answer/ice in flight
     if(phase === 'menu') return _netPollTick % 10 === 0;
@@ -1228,7 +1226,7 @@ function _netPollResume(){ _netPollAbortNow(); _netPollNotBefore = _netPollHoldE
 // handshake for the same worker pool, and the handshake is the part a player is watching.
 function netForming(){
     return !!(_netHs.offerTo || _netHs.sent || _netHs.accepting || (_netSess && !_netSess.game)
-           || (typeof specHandshaking === 'function' && specHandshaking()));
+           || specHandshaking());
 }
 async function _netPollOnce(){
     if(_netPollBusy || _netSyncBusy || !_netOk() || !_netPollDue()) return;   // a clock sweep is exclusive: no re-arm until its last sample is back
@@ -1240,7 +1238,7 @@ async function _netPollOnce(){
     // during a match either -- _netSess.game short-circuits above, so the eight people
     // watching hold nothing while they watch.
     const _held = (_netSess && (!_netSess.game || _netSess.reconnecting)) || phase === 'duelLobby' || phase === 'multiplayer' || phase === 'duelMenu' || phase === 'friends' || phase === 'myId'
-               || (typeof eventScreen === 'function' && eventScreen())
+               || eventScreen()
                || phase === 'tourneyLobby' || phase === 'tourneyBracket' || phase === 'tourneyRound' || phase === 'tourneyCeremony';   // long-poll during a reconnect so the re-handshake signals arrive fast
     // ONLY while merely browsing is the hold ever given up below, which is also the only
     // tier the server withdraws it from first. Anything with a handshake in flight keeps
@@ -1248,7 +1246,7 @@ async function _netPollOnce(){
     // read that lands seconds late would answer an offer that has already been abandoned at
     // the other end.
     const _idle = !_netSess && !netForming()
-               && !(typeof tourneyActive === 'function' && tourneyActive());
+               && !tourneyActive();
     // ...and only while the server still lets us. `hold:false` withdraws holding outright
     // (a held poll owns a worker for its whole duration -- the single biggest thing one
     // idle client costs a busy host); the 1 Hz tick below then carries the mailbox instead,
@@ -1313,7 +1311,7 @@ async function _netPollOnce(){
     // tournament the doubt -- AFTER the drain above, so what this answer carried is already
     // in. Edge-triggered: once per outage, never per failure.
     if(!r) _netPollDown = true;
-    else if(_netPollDown){ _netPollDown = false; if(typeof tourneyMailboxLost === 'function') tourneyMailboxLost(); }
+    else if(_netPollDown){ _netPollDown = false; tourneyMailboxLost(); }
     // Straight back in, through the slot below. Only on a SUCCESSFUL reply: a failure (or an
     // abort from foregrounding) falls through to the 1s tick, which is the backoff that
     // stops a broken server from spinning this into a hot loop.
@@ -1392,7 +1390,7 @@ if(typeof document !== 'undefined' && document.addEventListener){
         // A long background is where a phone changes network without ever going offline (wifi to
         // cellular, or a different wifi on the way home). Re-gather rather than keep reporting an
         // address that now belongs to somebody else's line.
-        if(typeof netNetsRefresh === 'function') netNetsRefresh(awayMs > NET_NETS_HIDE_MS);
+        netNetsRefresh(awayMs > NET_NETS_HIDE_MS);
     });
 }
 // Coming back online is the other network change worth re-gathering for, and the only one the
@@ -1507,7 +1505,7 @@ function _netFriendApi(action, peer, bg){
 // on whichever social screen is (or gets) opened.
 function _netFrCelebrate(text){
     Snd.sfxPlay('achievement', cfg.music);
-    if(typeof spawnConfetti === 'function') spawnConfetti();
+    spawnConfetti();
     _netFr.msg = text;
     _netLb.msg = text;
     _duelMsg = text; _duelMsgAt = _msgNow();
@@ -1797,6 +1795,6 @@ if(_netTimers){
     setTimeout(()=>{ if(_netOk() && _netSync.ofs == null) _netTimeSync(true); }, 0);
     // Daily automatic cloud backup (opt-in). One check a few seconds after boot, then hourly;
     // the once-a-day throttle lives in _maybeAutoCloudBackup so these fire freely.
-    setTimeout(()=>{ if(typeof _maybeAutoCloudBackup === 'function') _maybeAutoCloudBackup(); }, 6000);
-    setInterval(()=>{ if(typeof _maybeAutoCloudBackup === 'function') _maybeAutoCloudBackup(); }, 3600000);
+    setTimeout(()=>{ _maybeAutoCloudBackup(); }, 6000);
+    setInterval(()=>{ _maybeAutoCloudBackup(); }, 3600000);
 }

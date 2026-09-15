@@ -92,7 +92,7 @@ function _entryLeave(to){ _friendPending=false; scanStop(); _scanOk=''; _scanMan
 let _friendPending=false;
 function _friendAdded(id, state, added){
     if(!added) addFriend(id);
-    if(state==='accepted'&&typeof _netFrCelebrate==='function') _netFrCelebrate((netFriendName(id)||fmtFriendId(id))+' - YOU ARE FRIENDS!');
+    if(state==='accepted') _netFrCelebrate((netFriendName(id)||fmtFriendId(id))+' - YOU ARE FRIENDS!');
     else { _duelMsg='FRIEND ADDED: '+fmtFriendId(id); _duelMsgAt=_msgNow(); }
     _entryLeave('multiplayer'); Snd.sfxPlay('select',cfg.music);
 }
@@ -101,7 +101,7 @@ function _submitName(){
         const code=nameStr.toUpperCase();
         if(code.length!==CODE_LEN){ Snd.sfxPlay('fail',cfg.music); return; }
         _entryLeave('tourneyLobby');
-        if(typeof tourneyJoin==='function') tourneyJoin(code);
+        tourneyJoin(code);
         return;
     }
     if(entryMode==='friend'){
@@ -110,7 +110,7 @@ function _submitName(){
         if(id.length!==8||!/^[0-9a-f]{8}$/.test(id)||id===getPlayerId()){ Snd.sfxPlay('fail',cfg.music); return; }
         if(_friendPending) return;   // one check in flight: a second RETURN must not stack requests
         // Offline (or no net-api at all): nothing to ask, so the add stays instant and local.
-        if(typeof netFriendVerify!=='function'||!_netOk()){ _friendAdded(id); return; }
+        if(!_netOk()){ _friendAdded(id); return; }
         // Do NOT leave the screen on the server's word alone: a typo in an 8-digit ID is
         // invisible, and a friend that does not exist fails much later, at the invite.
         _friendPending=true; _duelMsg='CHECKING ID...'; _duelMsgAt=_msgNow(); _uiDirty=true;
@@ -130,14 +130,14 @@ function _submitName(){
     }
     if(!nameStr.trim()) return;
     try{localStorage.setItem('lastSName',nameStr);}catch (e){}
-    if(typeof netNameChanged==='function') netNameChanged();
+    netNameChanged();
     if(entryMode==='user'){ _entryLeave(_entryTo); Snd.sfxPlay('select',cfg.music); return; }
     if(_scoreTainted){   // x10 debug run: never touches the local board or the global one
         inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; showHUD(false);
         setTimeout(()=>nameInp.blur(),10); Snd.sfxPlay('select',cfg.music); return;
     }
     _scoreFresh={ i:addScore(nameStr,score,level,nameReason==='win'), score };Snd.sfxPlay('select',cfg.music);
-    if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level,nameReason==='win');   // global board (no-op in offline mode)
+    netSubmitScore(nameStr,score,level,nameReason==='win');   // global board (no-op in offline mode)
     inGame=false; _wsend({t:'phase',phase:'menu'});   // leave the gameplay session; main owns phase again
     _scoreboardCache=getScores();scoresTab=0;phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);
 }
@@ -158,13 +158,13 @@ function _duelExit(){
     // Walking out of a tournament match IS losing it, and saying so settles the node at
     // once instead of making everyone wait out the walkover timer. Must run BEFORE the
     // teardown: the report reads the score off the live session.
-    if(typeof tourneyMatchLeft === 'function') tourneyMatchLeft();
-    if(typeof netEndSession === 'function') netEndSession();
+    tourneyMatchLeft();
+    netEndSession();
     // A watch does not end with the session: the links, the ask ladder and netP2POnly
     // are the spectator's own and only specStop puts them down. AFTER the teardown, so
     // that its session-end branch finds nothing left to do -- walking out on purpose is
     // not a lost feed and must not sound like one.
-    if(typeof netSpectating === 'function' && netSpectating() && typeof specStop === 'function') specStop('');
+    if(netSpectating()) specStop('');
     inGame=false; _wsend({t:'phase',phase:'menu'});
     // Leaving on purpose says nothing. _duelMsg is never cleared, only overwritten, so
     // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
@@ -172,8 +172,8 @@ function _duelExit(){
     _duelMsg=''; _duelMsgAt=0;
     // Back to where the match was watched or played FROM, not the main menu: a
     // tournament answers with its own board and an event MONITOR with its screen.
-    phase=(typeof tourneyExitPhase==='function' && tourneyExitPhase())
-        || (typeof eventExitPhase==='function' && eventExitPhase()) || 'duelMenu';
+    phase=tourneyExitPhase()
+        || eventExitPhase() || 'duelMenu';
     showHUD(false); Snd.musicStop(); Snd.sfxPlay('nav',cfg.music);
 }
 function _backToMenu(){ phase='menu'; Snd.sfxPlay('nav',cfg.music); }
@@ -246,7 +246,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
                 case 'SOLO PLAY':    beginGame(); break;
-                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; if(typeof _netAnchorRefresh==='function') _netAnchorRefresh({ nudge:true }); if(typeof netFriendsNudge==='function') netFriendsNudge(); break;   // the multiplayer door: refresh the clock anchor by age, and re-read the roster -- a signal that arrived while this client was elsewhere for over its TTL is gone, and the badge has to come from the rows
+                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; _netAnchorRefresh({ nudge:true }); netFriendsNudge(); break;   // the multiplayer door: refresh the clock anchor by age, and re-read the roster -- a signal that arrived while this client was elsewhere for over its TTL is gone, and the badge has to come from the rows
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;
@@ -263,12 +263,12 @@ const UI_INPUT = {
             const go=multiSel<rows.length ? rows[multiSel].go : '';
             if(go==='duel'){ Snd.sfxPlay('select',cfg.music); phase='duelMenu'; duelSel=0; }
             else if(go==='tourney'){
-                if(typeof netTourneyOk!=='function' || !netTourneyOk()){ Snd.sfxPlay('fail',cfg.music); _duelMsg=netOffline()?'OFFLINE MODE (SETTINGS > NETWORK)':'TOURNAMENTS UNAVAILABLE'; _duelMsgAt=_msgNow(); }
+                if(!netTourneyOk()){ Snd.sfxPlay('fail',cfg.music); _duelMsg=netOffline()?'OFFLINE MODE (SETTINGS > NETWORK)':'TOURNAMENTS UNAVAILABLE'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='tourneyLobby'; tourneyEnter(); }
             }
             else if(go==='myid'){ Snd.sfxPlay('select',cfg.music); _myIdBack='multiplayer'; _netFr.msg=''; phase='myId'; netMyIdEnter(); }
             else if(go==='addfriend'){ Snd.sfxPlay('select',cfg.music); _entryOpen('friend'); scanStart(); }   // in-gesture: camera permission prompt allowed
-            else if(go==='friends'){ Snd.sfxPlay('select',cfg.music); phase='friends'; if(typeof netFriendsEnter==='function') netFriendsEnter(); }
+            else if(go==='friends'){ Snd.sfxPlay('select',cfg.music); phase='friends'; netFriendsEnter(); }
             else if(go==='events'){ Snd.sfxPlay('select',cfg.music); _eventBack='multiplayer'; eventsEnter(); }
             else this.back();   // BACK row (like drawSettings)
         },
@@ -278,7 +278,7 @@ const UI_INPUT = {
         nav(key){ duelSel=_navStep(key, duelSel, 3); },
         confirm(){
             if(duelSel===0){
-                if(netOffline() || typeof netLobbyEnter!=='function'){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
+                if(netOffline()){ Snd.sfxPlay('fail',cfg.music); _duelMsg='OFFLINE MODE (SETTINGS > NETWORK)'; _duelMsgAt=_msgNow(); }
                 else { Snd.sfxPlay('select',cfg.music); phase='duelLobby'; netLobbyEnter(); }
             }
             else if(duelSel===1){ if(_hasKeyboard){Snd.sfxPlay('select',cfg.music);beginDuel();} else Snd.sfxPlay('fail',cfg.music); }   // LOCAL needs a keyboard (PC)
@@ -472,7 +472,7 @@ const UI_INPUT = {
                 Snd.sfxPlay('select',cfg.music);
                 // Playing friend -> ask to watch; free friend -> invite. One row, and the
                 // status column already told the player which of the two it is.
-                if(typeof netFriendPlaying==='function'&&netFriendPlaying(fid)){ specWatch(fid,'',''); _netLb.msg='ASKING TO WATCH '+fmtFriendId(fid)+'...'; }
+                if(netFriendPlaying(fid)){ specWatch(fid,'',''); _netLb.msg='ASKING TO WATCH '+fmtFriendId(fid)+'...'; }
                 else _netInviteSend(fid);
             }
             else this.back();
@@ -665,9 +665,9 @@ const UI_INPUT = {
                 // a tournament match walked out on is a match lost, said before the teardown
                 // (the report reads the score off the live session), and a watch put down
                 // after it. Without them a spectator kept a feed running from the 1vs1 menu.
-                if(typeof tourneyMatchLeft==='function') tourneyMatchLeft();
-                if(typeof netEndSession==='function') netEndSession();   // online duel: bye + teardown (no-op otherwise)
-                if(typeof netSpectating==='function' && netSpectating() && typeof specStop==='function') specStop('');
+                tourneyMatchLeft();
+                netEndSession();   // online duel: bye + teardown (no-op otherwise)
+                if(netSpectating()) specStop('');
                 const wasDuel = (prevPhase && prevPhase.indexOf('duel')===0) || !!players;   // quitting a 1vs1 returns to the 1vs1 menu, not main ('dying' needs the players marker)
                 inGame=false; showHUD(false);
                 Snd.musicFadeOut(0.25); Snd.duck(false);   // leave: fade the game track 0.25s, sfx back to normal (fadeOut cleared the track, so duck skips music)
@@ -681,8 +681,8 @@ const UI_INPUT = {
                 // Back to where the match was started from: a tournament match walked out
                 // on lands on the tournament, not on the 1vs1 menu, so the field is still
                 // there to be re-joined (minus the match just forfeited).
-                phase = (typeof tourneyExitPhase==='function' && tourneyExitPhase())
-                     || (typeof eventExitPhase==='function' && eventExitPhase())
+                phase = tourneyExitPhase()
+                     || eventExitPhase()
                      || (wasDuel ? 'duelMenu' : 'menu');   // set AFTER the worker sync (in-process simCommand would clobber it otherwise)
             }   // quit: leave gameplay, keep the worker clock running for menu animations
             else { phase=prevPhase; Snd.duck(false); }   // back to the game at full volume
@@ -709,9 +709,9 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             // A tournament match has no rematch to offer: the bracket says what comes next,
             // and the only thing left to do here is go back and look at it.
-            if(typeof tourneyActive==='function' && tourneyActive()){ _duelExit(); return; }
+            if(tourneyActive()){ _duelExit(); return; }
             if(quitConfirmSel===0){
-                if(typeof netGameActive==='function' && netGameActive()) netAgain();   // online: agree first
+                if(netGameActive()) netAgain();   // online: agree first
                 else beginDuel();   // local rematch: fresh match, lives + scores reset
             }
             else _duelExit();
@@ -759,8 +759,8 @@ const UI_INPUT = {
 // peer is simply another caller with p = its player index.
 // ================================================================
 function gameSteer(p, d){
-    if(typeof netLocalInput === 'function' && netLocalInput('dir', p, d)) return;   // online: predict locally + send
-    if(typeof netLogDir === 'function') netLogDir(d);          // classic: replay material for score submits
+    if(netLocalInput('dir', p, d)) return;   // online: predict locally + send
+    netLogDir(d);          // classic: replay material for score submits
     _wsend({t:'dir', p, dir:d});
 }
 // Boost input ARMS (device-local, rides to whichever home runs the sim); the real
@@ -772,8 +772,8 @@ function gameSteer(p, d){
 function _armIndex(p){
     // Spectating: NO slot is ours. Both snakes belong to the feed, so every arm is dead --
     // the input end of the same rule netLocalInput enforces at the authoring end.
-    if(typeof netSpectating === 'function' && netSpectating()) return -1;
-    if(typeof netGameActive === 'function' && netGameActive()){ return p === 0 ? netMyIndex() : -1; }
+    if(netSpectating()) return -1;
+    if(netGameActive()){ return p === 0 ? netMyIndex() : -1; }
     return p;
 }
 function gameBoostStart(p, d, now){ const i = _armIndex(p); if(i >= 0) _wsend({ t:'arm', p:i, dir:{ x:d.x, y:d.y }, now:!!now }); }
@@ -828,7 +828,7 @@ function handleKey(key, pde) {
     // advance (see below), a watcher has no advance, and LEVEL COMPLETE lasts until the
     // players press -- so it needs a way out like every other live phase.
     if(key==='Escape' && (phase==='playing'||phase==='paused'||phase==='dying'||phase==='levelReady'||phase==='duel'||phase==='duelReady'||phase==='duelPaused'
-                          || (phase==='levelDone' && typeof netSpectating==='function' && netSpectating()))){
+                          || (phase==='levelDone' && netSpectating()))){
         prevPhase=phase; quitConfirmSel=1;
         Snd.duck(true);   // dialog up: music + sfx at 50% while the game runs behind it
         phase='quitConfirm'; if(pde)pde(); return;
@@ -854,7 +854,7 @@ function handleKey(key, pde) {
     if(phase==='levelDone'){
         if(levelDoneWaiting){
             // Online duel opens the next level via a start_pts negotiation, not a transmitted 'advance'.
-            if(typeof netRequestNextLevel === 'function' && typeof netGameActive === 'function' && netGameActive())
+            if(netGameActive())
                 netRequestNextLevel();
             else
                 _wsend({t:'advance'});
@@ -1718,7 +1718,7 @@ function _scanHit(str){
         // from -- ADD FRIEND and JOIN TOURNAMENT both return to MULTIPLAYER, and
         // leaving it standing from a previous visit sent people somewhere else.
         _eventBack='multiplayer';
-        setTimeout(()=>{ _entryLeave('eventPage'); if(typeof eventJoin==='function') eventJoin(ev[1]); },1400);
+        setTimeout(()=>{ _entryLeave('eventPage'); eventJoin(ev[1]); },1400);
         return;
     }
     const m=mode==='friend' ? /#friend=([0-9a-f]{8})$/.exec(s) : /#tourney=([A-Za-z0-9]{4,12})$/.exec(s);
@@ -2005,12 +2005,12 @@ function onBgHide() {
     // A LOCAL duel backgrounds exactly like a classic game. An ONLINE one must not:
     // freezing our sim while the peer plays on is a guaranteed desync, which is why
     // togglePause() refuses online too.
-    const netLive = typeof netGameActive === 'function' && netGameActive();
+    const netLive = netGameActive();
     if (phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicMute('pause'); }
     // A hidden tab cannot forward packets on time, and everyone downstream of us would
     // spend seconds discovering that. Drop the relay duty the moment we go away; nothing
     // about our OWN watch or duel changes, only what we serve.
-    if (typeof specStandDown === 'function') specStandDown();
+    specStandDown();
     Snd.audioSuspend();
 }
 function onBgShow() {

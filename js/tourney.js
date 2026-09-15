@@ -157,7 +157,7 @@ function _ttRounds(t){
 // The gate on the whole feature: tournaments need a 4.1 server. An older one answers 404
 // to tournament.php and never sends a roles sheet, so the menu row stays grey.
 function netTourneyOk(){
-    return _netOk() && typeof netSrvMinor === 'function' && netSrvMinor() >= 1;
+    return _netOk() && netSrvMinor() >= 1;
 }
 function _ttMsg(m, bad){ uiMsg(_ttUi, m, bad ? 'fail' : 'select'); }
 // A LINE about a match reads better with YOU in it -- "KAI vs YOU" -- so that is what
@@ -182,11 +182,11 @@ function _ttRealName(id){
     // Our own name is not on any list we were handed until the server has sent one back:
     // a create is answered before the roster it creates, and a row drawn in between must
     // still be able to say whose it is.
-    if(id === getPlayerId() && typeof _netMyName === 'function'){
+    if(id === getPlayerId()){
         const mine = String(_netMyName() || '').toUpperCase();
         if(mine) return mine;
     }
-    return (typeof netFriendName === 'function' && netFriendName(id)) ? String(netFriendName(id)).toUpperCase() : fmtFriendId(id);
+    return (netFriendName(id)) ? String(netFriendName(id)).toUpperCase() : fmtFriendId(id);
 }
 // Where _duelExit / _netSessionEnd should land while a tournament is held: back to the
 // picture, never to the 1vs1 menu. '' means "not ours, keep your default".
@@ -204,7 +204,7 @@ function tourneyHome(fallback){ return _ttUi.home || fallback || 'multiplayer'; 
 // page already (DONE drops the tournament, which lands, and then goes home) is not a
 // return and reads nothing.
 function tourneyLand(to){
-    if(to === 'eventPage' && phase !== to && typeof eventReturn === 'function') eventReturn();
+    if(to === 'eventPage' && phase !== to) eventReturn();
     else phase = to;
 }
 function tourneyGoHome(fallback){ tourneyLand(tourneyHome(fallback)); }
@@ -219,7 +219,7 @@ function tourneyWalkoverLeft(roles, sinceMs){
     const at = roles ? +roles.walkover_at : 0;
     if(!(at > 0)) return -1;
     if(!sinceMs || _msgNow() - sinceMs < TT_WALK_GRACE_MS) return -1;
-    const now = (typeof netPts === 'function') ? netPts() : null;
+    const now = netPts();
     if(now == null) return -1;
     return Math.max(0, Math.ceil((at - now) / 1000));
 }
@@ -412,9 +412,9 @@ function _ttDrop(msg){
     _ttHold('');
     _tt = null; _ttNid = ''; _ttRolesAt = 0; _ttEngAt = 0; _ttDone = ''; _ttRep = null; _ttWant = null;
     _ttPlayNid = ''; _ttWatchNid = ''; _ttOverAt = 0;
-    if(typeof specNode === 'function') specNode('', '');
-    if(typeof specGrant === 'function') specGrant([]);
-    if(typeof specMonitor === 'function') specMonitor('');
+    specNode('', '');
+    specGrant([]);
+    specMonitor('');
     _ttDisarm();
     _ttUi.sel = -1; _ttUi.contAt = 0;
     if(_TT_PHASES[phase]) tourneyGoHome('tourneyLobby');
@@ -433,7 +433,7 @@ function _ttOnSignal(d){
     // the signal goes to its screen; anything else is an echo from one we left or a
     // mix-up, and we render what state() says about the one we hold.
     if(!_tt || _tt.tid !== tid){
-        if(typeof eventMonitorSignal === 'function') eventMonitorSignal(d);
+        eventMonitorSignal(d);
         return;
     }
     _ttAfterNote(d);
@@ -527,11 +527,11 @@ function _ttRoles(d){
     // The sheet is the introduction. Everyone on it may connect to us for this node --
     // players, primaries and secondaries alike -- so a spectator link needs no friendship
     // and no invite, exactly as the server's signal gating allows.
-    if(typeof specGrant === 'function') specGrant([].concat(d.players || [], d.primaries || [], d.secondaries || [], d.monitor || []));
-    if(typeof specNode === 'function') specNode(_tt.tid, nid);
+    specGrant([].concat(d.players || [], d.primaries || [], d.secondaries || [], d.monitor || []));
+    specNode(_tt.tid, nid);
     // The event's screen, a spectator in no list: granted like the rest, served beside the
     // tree rather than in it (net-spec.js specMonitor), drawn nowhere.
-    if(typeof specMonitor === 'function') specMonitor(d.monitor);
+    specMonitor(d.monitor);
     // ONE EVENT, ONE CALL. The sheet carries everything a match needs -- nid, hm, lvl,
     // stakes, players, feeder, primaries, secondaries, names and `you` -- so it IS a state
     // read: nothing asks the server to repeat what it just pushed, least of all beside the
@@ -558,12 +558,12 @@ function _ttPatch(d){
     r.primaries   = d.primaries   || [];
     r.secondaries = d.secondaries || [];
     if(d.monitor !== undefined) r.monitor = d.monitor;
-    if(typeof specGrant === 'function') specGrant([].concat(r.players || [], r.primaries, r.secondaries, r.monitor || []));
-    if(typeof specMonitor === 'function') specMonitor(r.monitor);
+    specGrant([].concat(r.players || [], r.primaries, r.secondaries, r.monitor || []));
+    specMonitor(r.monitor);
     // Re-source only if the tree moved US. net-spec repairs a dead link on its own and a
     // patch must never yank a healthy feed out from under a running sim.
-    if(_tt.you === 'spectate' && typeof netSpectating === 'function' && netSpectating()
-       && typeof netSpecFeedAge === 'function' && netSpecFeedAge() > SPEC_SILENCE_MS)
+    if(_tt.you === 'spectate' && netSpectating()
+       && netSpecFeedAge() > SPEC_SILENCE_MS)
         _ttEngage(r);
     _uiDirty = true;
 }
@@ -596,7 +596,6 @@ function _ttEngage(d){
         return;
     }
     if(you === 'spectate'){
-        if(typeof specWatch !== 'function') return;
         const pr = (d.primaries || []).map(String);
         _ttWatchNid = String(d.nid || '');
         if(pr.indexOf(me) >= 0){ _ttAfterDo(d.nid, ()=>specWatch(String(d.feeder), _tt.tid, d.nid)); return; }
@@ -679,7 +678,7 @@ function tourneyMatchOver(){
     if(!_ttPlayNid){ if(_ttWatchNid) _ttDone = _ttWatchNid; return; }
     if(_ttDone === _ttPlayNid) return;
     _ttDone = _ttPlayNid;
-    const my = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
+    const my = netMyIndex();
     const ps = (typeof players !== 'undefined' && players) ? players : null;
     const sc = ps ? [ps[my].score | 0, ps[1 - my].score | 0] : [0, 0];
     const w  = (typeof duelWinner !== 'undefined') ? duelWinner : -1;
@@ -698,7 +697,7 @@ function tourneyMatchAtStake(){
 function tourneyMatchLeft(){
     if(!tourneyMatchAtStake()) return;
     _ttDone = _ttPlayNid;
-    const my = (typeof netMyIndex === 'function') ? netMyIndex() : 0;
+    const my = netMyIndex();
     const ps = (typeof players !== 'undefined' && players) ? players : null;
     _ttReport(_ttPlayNid, 'loss', ps ? [ps[my].score | 0, ps[1 - my].score | 0] : [0, 0]);
 }
@@ -718,9 +717,8 @@ function tourneyOrphan(tid, nid){
 function _ttClearMatch(){
     _ttOverAt = 0; _ttWant = null; _ttPlayNid = ''; _ttWatchNid = '';
     netP2POnlySet(false);
-    if(typeof netSpectating === 'function' && netSpectating() && typeof specStop === 'function') specStop('');
-    if(typeof _duelExit === 'function') _duelExit();   // lands on tourneyExitPhase()
-    else if(_tt) phase = tourneyExitPhase();
+    if(netSpectating()) specStop('');
+    _duelExit();   // lands on tourneyExitPhase()
 }
 // THE RULE that runs a node on this client. The sheet is the truth: for as long as one
 // stands that names us, and the node it names is not finished on our side, it is turned
@@ -792,12 +790,12 @@ function tourneyEnter(){
         if(!_tourneyLink || _tt || !netTourneyOk()) return;
         const c = _tourneyLink; _tourneyLink = ''; tourneyJoin(c);
     };
-    if(typeof _netHello === 'function' && _netOk()){
+    if(_netOk()){
         const h = _netHello();   // picks up the tourneys list
         if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
     }
     // A tournament link is a multiplayer door too: the same age-gated anchor refresh as the 1vs1 one.
-    if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ nudge:true });
+    _netAnchorRefresh({ nudge:true });
     if(_tt) _ttSync(); else _ttProbe();
     _uiDirty = true;
 }

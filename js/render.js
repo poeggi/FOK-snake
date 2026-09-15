@@ -53,7 +53,7 @@ function updateHUD() {
     }
     if(mode==='duel'){
         // P1/P2 hearts in the top cells; GEMS + LEVEL below are the SHARED progression.
-        const _lk=(typeof netDuelLook==='function')?netDuelLook():null;   // online: both clients agree on the pair
+        const _lk=netDuelLook();   // online: both clients agree on the pair
         const c0=_lk?_lk.c0:(cfg.snakeColor||0), c1=_lk?_lk.c1:((cfg.snakeColor||0)+1)%SNAKE_COLORS.length;
         if(players[0].lives!==_hudCache.a){ _hudCache.a=players[0].lives; _drawHearts(_hudLivesCv,_hudLivesCtx,players[0].lives,SNAKE_COLORS[c0].head); }
         if(players[1].lives!==_hudCache.b){ _hudCache.b=players[1].lives; _drawHearts(_hudLives2Cv,_hudLives2Ctx,players[1].lives,SNAKE_COLORS[c1].head); }
@@ -1065,7 +1065,7 @@ function _smFrac(gDue, acc, rate, gPer, sub, cap){
 // the sim last ran. In-process it is the accumulator's remainder; with the sim in the worker
 // it is the time since its last frame arrived, frames being one tick apart.
 function _smSub(){
-    const s = (typeof _useWorker === 'function' && _useWorker())
+    const s = _useWorker()
         ? (performance.now() - _lastWorkerFrameAt) / TICK_MS
         : _fbAcc / TICK_MS;
     return s > 0 ? (s < 1 ? s : 1) : 0;
@@ -1373,8 +1373,8 @@ function _drawGemHeartMark(now) {
 // hotseat screen, it is real as long as EITHER player can still gain it. Duel-only.
 function _gemIsFinisherHeart() {
     if(!players || gemsDone !== GEMS_PER_LEVEL-1) return false;
-    if(typeof netGameActive==='function' && netGameActive()){
-        const me=(typeof netMyIndex==='function') ? netMyIndex() : 0;
+    if(netGameActive()){
+        const me=netMyIndex();
         return !!(players[me] && players[me].lives < _duelHeartsMax);
     }
     return players.some(p=>p.lives < _duelHeartsMax);

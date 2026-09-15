@@ -62,13 +62,13 @@ function netLobbyLeave(){
 }
 function _netRtcAvail(){ return typeof RTCPeerConnection === 'function'; }
 // ---- worker-hosted duel seam (game.js owns the worker; these guard its absence) ----
-function _netWD(){ return typeof netWorkerDuelOn === 'function' && netWorkerDuelOn(); }
+function _netWD(){ return netWorkerDuelOn(); }
 // Push a fresh clock anchor to the worker's core: its tick target derives from ofs +
 // startPts exactly like netTickTarget does here, so every adoption must reach it.
 function _netClockPush(){
     if(_netSync.ofs == null) return;
     if(_netWD()) _wDuelSend({ t:'duelClock', ofs:_netSync.ofs, startPts:(_netSess && _netSess.startPts) || null });
-    else if(inGame && _netSess && _netSess.game && typeof _fbSeedPhase === 'function') _fbSeedPhase();   // in-process: the grid moved, re-set the phase
+    else if(inGame && _netSess && _netSess.game) _fbSeedPhase();   // in-process: the grid moved, re-set the phase
 }
 
 // ---- invites ----
@@ -173,7 +173,7 @@ function _netOnSignal(sig){
         // player id to check and the payload is the whole message. tourney.js decides what
         // is worth acting on -- and asks the server when it is not sure.
         if(sig.type === 'tourney'){
-            if(typeof _ttOnSignal === 'function') _ttOnSignal(_netJson(pl));
+            _ttOnSignal(_netJson(pl));
             return;
         }
         // An ask older than its own ladder is dead at BOTH ends (SPEC_ASK_TTL_MS): the
@@ -183,7 +183,7 @@ function _netOnSignal(sig){
         // -- the same flood the other way round.
         if(sig.type === 'watch'){
             if(_netSigStale(sig)){ _netSigLog('< watch STALE'); return; }
-            if(typeof _spOnWatch === 'function') _spOnWatch(from, _netJson(pl));
+            _spOnWatch(from, _netJson(pl));
             return;
         }
         // 'event' is RESERVED like 'tourney': server-generated, so there is no player id
@@ -191,7 +191,7 @@ function _netOnSignal(sig){
         // eid, and none of them a state change we may apply on its own word -- they say
         // something moved, and events.js reads the server to find out what.
         if(sig.type === 'event'){
-            if(typeof _evOnSignal === 'function') _evOnSignal(_netJson(pl));
+            _evOnSignal(_netJson(pl));
             return;
         }
         // An `ices` payload is a JSON ARRAY, which has nowhere to carry the sp marker that
@@ -202,7 +202,7 @@ function _netOnSignal(sig){
             const sd = _netJson(pl);
             const sp = Array.isArray(sd) ? !!(sd[0] && sd[0].sp) : !!(sd && sd.sp);
             if(sp){
-                if(typeof _spOnSignal === 'function') _spOnSignal(sig.type, from, sd);
+                _spOnSignal(sig.type, from, sd);
                 return;
             }
         }
@@ -267,7 +267,7 @@ function _netOnSignal(sig){
                 }
                 // In a tournament the sheet says who may offer us; an offer from anyone else
                 // is not answered (tourney.js: a match must never start undressed).
-                if(typeof tourneyOfferOk === 'function' && !tourneyOfferOk(from)) break;
+                if(!tourneyOfferOk(from)) break;
                 // Relay when EITHER side wants it -- the same rule the invite path applies
                 // (_netInviteAnswer). Quick match has no invite to carry the bit, so an
                 // offerer without the setting sends a normal sdp offer; routing on that
@@ -350,7 +350,7 @@ function _netOnSignal(sig){
                 // ...and the roster is re-read on the next poll, so the badge on the
                 // MULTIPLAYER menu can derive what changed from the rows themselves --
                 // the toast below lasts 2.6 s, the badge lasts until you look.
-                if(typeof netFriendsNudge === 'function') netFriendsNudge();
+                netFriendsNudge();
                 if(d.event === 'accepted'){
                     const fresh = !_netFrOk[who];
                     _netFrOkMark(who);
@@ -586,7 +586,7 @@ async function _netRequestStart(s, reason){
     if(typeof d.secret === 'string') s.secret = d.secret;
     // The identity usually lands before the begin, which seeds it into the core. A begin that
     // already fired seeded the empty identity: seed the real one into the running core now.
-    if(identityOnly){ if(!s.beginFn && typeof duelClaimSeed === 'function') duelClaimSeed(); return; }
+    if(identityOnly){ if(!s.beginFn) duelClaimSeed(); return; }
     _netClockPush();            // anchor + startPts move TOGETHER: the worker core must see both
     // Ship the shared start, then schedule tick 0. `theta` is the SHARED-clock residual the host's
     // burst settled on (null when it starved or did not burst); the joiner applies its half from
@@ -684,7 +684,7 @@ function _netHandleMsg(txt){
     // downstream costs nothing -- every packet on this wire was produced by JSON.stringify, so
     // re-serializing the parsed object reproduces the original text exactly. A no-op unless
     // someone is actually watching.
-    if(typeof _spTapIn === 'function') _spTapIn(m);
+    _spTapIn(m);
     // Proof of a LIVE peer sim, taken only here: this is the path for packets that came off our
     // own wire from the duel peer. A spectator's forwarded packets reach _netHandleParsed
     // directly and must never vouch for a peer they did not come from.
@@ -708,7 +708,7 @@ function _netNotePeerSim(s, m){
 function _netSimStalled(s, ms){
     if(!s || !s.game || !inGame || s.relay || s.reconnecting || !s.simSeenWall) return false;
     if(s.tx || s.lvlPending) return false;
-    if(typeof netSpectating === 'function' && netSpectating()) return false;
+    if(netSpectating()) return false;
     return Date.now() - s.simSeenWall > ms;
 }
 // The message body proper, split from the parse above so a SPECTATOR can feed it packets that
@@ -1101,7 +1101,7 @@ function netRequestNextLevel(){
     // is synthetic and _netSend drops the req anyway -- what this refuses is the rest of
     // the press: a RE-SYNCING cover over a board that has not moved, and a req parked in
     // the tx slot that nothing will ever echo.
-    if(typeof netSpectating === 'function' && netSpectating()) return;
+    if(netSpectating()) return;
     _lvlCover = true;
     if(s.role === 'host') _netStartNextLevel(s);
     else _netTxShip(s, { t:'req', why:'level', epoch:(s.epoch|0) });   // epoch pins the ask to THIS boundary; retried until echoed (or superseded by the go itself)
@@ -1200,8 +1200,8 @@ function _netSessionEnd(msg, remoteBye){
         // Where a duel that ended puts us back. A tournament answers with its own board;
         // an event MONITOR answers with its screen, because a feed ending under one is the
         // match finishing, not the screen being done with. The 1vs1 menu is the default.
-        phase = (typeof tourneyExitPhase === 'function' && tourneyExitPhase())
-             || (typeof eventExitPhase === 'function' && eventExitPhase())
+        phase = tourneyExitPhase()
+             || eventExitPhase()
              || 'duelMenu';
         showHUD(false); Snd.musicStop();
         _duelMsg = msg; _duelMsgAt = _msgNow();
@@ -1209,7 +1209,7 @@ function _netSessionEnd(msg, remoteBye){
     } else if(phase === 'duelLobby'){ _netLb.msg = msg; _uiDirty = true; }
 }
 function _netTeardown(){
-    if(typeof _wDuelEnd === 'function') _wDuelEnd();   // worker-hosted core: deactivate + reset there too
+    _wDuelEnd();   // worker-hosted core: deactivate + reset there too
     const s = _netSess; _netSess = null;   // nulling this stops the relay loop + liveness (both check _netSess === s)
     // AFTER _netSess is nulled: netEpoch() then reads 0, the line a fresh pair opens on.
     // Resetting while the session is still visible would keep its final epoch in the
@@ -1222,7 +1222,7 @@ function _netTeardown(){
     // Recorded here, carried by the next beat. Teardown sends nothing of its own: a watch ask
     // travels on the solo lane, which refuses to go out beside another request of ours, and
     // teardown is exactly when the next match's spectator is asking.
-    if(s.game && s.peer && !(typeof netSpectating === 'function' && netSpectating())) _netDuelEnd = s.peer;
+    if(s.game && s.peer && !netSpectating()) _netDuelEnd = s.peer;
     if(s.peer) delete _netPeerNet[s.peer];   // the IP hint was for THIS match's path; a new match (or a network switch) gets a fresh one
     s.game = false; s.relay = false;
     if(s.connT) clearTimeout(s.connT);
