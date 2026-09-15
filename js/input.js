@@ -246,7 +246,7 @@ const UI_INPUT = {
             Snd.sfxPlay('select',cfg.music);
             switch(MENU_ITEMS[menuSel]){   // dispatch by label so MENU_ITEMS can be reordered freely
                 case 'SOLO PLAY':    beginGame(); break;
-                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; _netAnchorRefresh({ nudge:true }); netFriendsNudge(); break;   // the multiplayer door: refresh the clock anchor by age, and re-read the roster -- a signal that arrived while this client was elsewhere for over its TTL is gone, and the badge has to come from the rows
+                case 'MULTIPLAYER':  phase='multiplayer'; multiSel=0; _netAnchorRefresh(); netFriendsNudge(); break;   // the multiplayer door: refresh the clock anchor by age, and re-read the roster -- a signal that arrived while this client was elsewhere for over its TTL is gone, and the badge has to come from the rows
                 case 'HIGH SCORES':  phase='scores'; _scoreboardCache=getScores(); scoresTab=0; break;
                 case 'ACHIEVEMENTS': phase='achievements'; achPage=achExpert()?2:1; break;   // expert players land on their page
                 case 'SHOP':         _enterShop(); break;

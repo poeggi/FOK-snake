@@ -269,22 +269,25 @@ const HOOKS = (myId) => `
     finally { globalThis.setTimeout = realST; _netBurstPing = realPing; _netGate = _oGate; }
     return { rtt:_netSync.rtt, sync:__syncArgs.splice(0), order:__order.splice(0) };
   };
-  // The cleanliness rule of the real clock sweep (4.4). A sample taken while our own
-  // requests are in flight measured our own burst, so it may not be REPORTED as latency:
-  // the figure is display-only now (friends and the admin UI), and a wrong one is worse
-  // than none because a friend reads it as the state of the line. Being anchored is not
-  // optional though, so a sweep with nothing clean in it still adopts the least bad sample.
-  globalThis.__syncRough = async (flight)=>{
+  // The real clock sweep against a t.txt whose FIRST answer pays a cold handshake (300 ms
+  // round trip, the stamp taken at its end) and whose later answers are warm (30 ms).
+  // Returns what the sweep adopted and reported.
+  globalThis.__syncCold = async ()=>{
     _netSync = { ofs:null, rtt:-1, at:0 };
     _netLat = { value:0, at:0, pending:false };
-    _netQ = { ms:0, at:0 };
-    _netFlight = flight|0;
     inGame = false; phase = 'menu';
+    let clk = 0, calls = 0;
+    const _oNow = performance.now;
+    performance.now = ()=> clk;
     const _oFetch = globalThis.fetch;
-    globalThis.fetch = async ()=>({ headers: { get: (n)=> n === 'X-Fok-T' ? 't=1700000000000000' : null } });   // a stamped t.txt
+    globalThis.fetch = async ()=>{
+      const rtt = calls++ === 0 ? 300 : 30;
+      clk += rtt;   // the stamp is taken as the request lands: the whole round trip sits before it
+      return { headers: { get: (n)=> n === 'X-Fok-T' ? 't=' + (1700000000000 + clk) * 1000 : null } };
+    };
     try { await _realTimeSync(true); }
-    finally { globalThis.fetch = _oFetch; _netFlight = 0; }
-    return { anchored: _netSync.ofs != null, reported: !!_netLat.pending };
+    finally { globalThis.fetch = _oFetch; performance.now = _oNow; _netFlight = 0; }
+    return { anchored: _netSync.ofs != null, rtt: _netSync.rtt, reported: !!_netLat.pending, lat: _netLat.value, calls };
   };
   globalThis.__state = ()=>({
     sess: _netSess ? { peer:_netSess.peer, role:_netSess.role, relay:!!_netSess.relay,
@@ -591,32 +594,28 @@ try {
     B.__spDrop(A_ID);
   });
 
-  await acheck('4.4: a sweep taken on a busy wire still anchors, but reports no latency', async () => {
+  await acheck('the sweep warms the socket first: the cold sample is never the anchor', async () => {
     const A = mk(A_ID);
-    const dirty = await A.__syncRough(1);
-    if(!dirty.anchored) throw new Error('an unanchored client cannot play at all: the least bad sample must be adopted');
-    if(dirty.reported) throw new Error('a sample that measured our own burst must not be reported as latency');
-    // FALSIFICATION: with the wire quiet the same sweep DOES report -- otherwise the
-    // assertion above would hold just as well for a client that never reports anything.
-    const clean = await A.__syncRough(0);
-    if(!clean.anchored || !clean.reported) throw new Error('a quiet sweep must anchor AND report');
+    const r = await A.__syncCold();
+    if(!r.anchored) throw new Error('the sweep must anchor');
+    if(r.calls !== 6) throw new Error('a 5-sample sweep is six requests, the first a throwaway: got ' + r.calls);
+    if(r.rtt !== 30) throw new Error('the anchor must come from a warm sample (rtt 30), got rtt ' + r.rtt);
+    if(!r.reported || r.lat !== 30) throw new Error('the latency report is the warm samples only, got ' + r.lat);
   });
 
   // ------------------------------------- API 4.4: the clock anchor and its two hints
   // q_ms is the part of this round trip the server spent waiting for a worker. It is not
   // symmetric, so halving it puts the WHOLE error into the offset instead of half of it --
   // and half of a 51ms queue is 1.5 ticks at 60Hz, which is a visibly different start.
-  await acheck('4.4: a start the server queued behind does not move the clock', async () => {
+  await acheck('a start never moves the clock: t.txt is the only source', async () => {
     const A = mk(A_ID);
     A.__gameSess(B_ID, 'host');
     const busy = await A.__startWith({ q_ms: 51 });
-    if(busy.rtt !== 99999) throw new Error('a queued start must not be adopted as the best sample, rtt=' + busy.rtt);
-    // FALSIFICATION: the same response with an idle queue IS adopted -- otherwise the
-    // test above would pass just as well against a client that never adopts anything.
+    if(busy.rtt !== 99999) throw new Error('a queued start must not touch the anchor, rtt=' + busy.rtt);
     const B = mk(B_ID);
     B.__gameSess(A_ID, 'host');
     const idle = await B.__startWith({ q_ms: 0 });
-    if(idle.rtt === 99999) throw new Error('an unqueued start must still anchor the clock');
+    if(idle.rtt !== 99999) throw new Error('an unqueued start must not touch the anchor either, rtt=' + idle.rtt);
   });
 
   // A request that goes out beside another of ours pays the scheduling slice twice over --

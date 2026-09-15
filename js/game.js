@@ -348,6 +348,7 @@ function drainSimEvents(){
             case 'showhud':  if(e.v && !inGame) break;   // a stale worker "show" (e.g. a late level-reset frame) must never raise the HUD on a menu; hides always honoured
                              showHUD(e.v); break;
             case 'gameover':
+                _netAnchorRefresh();   // by age; the score that follows carries the fresher pts
                 entryMode = 'score';
                 nameReason = e.reason || 'over';   // 'win' when set by the level-10 clear, else death
                 nameStr=getPlayerName();
@@ -1082,6 +1083,7 @@ function loop(rafNow) {
         }
         if(phase==='menu'){
             _menuSnakeEnter();   // fresh wanderer colour each main-menu entry
+            _netAnchorRefresh();   // by age: a quiet moment, and a solo player has no other
             // Leaving 1vs1 to the main menu: some exit paths (e.g. multiplayer Back) drop straight
             // to 'menu' without tearing down the duel HUD, so its names/hearts linger. _wsend
             // reaches only the worker (which may already be paused at menu and never post a

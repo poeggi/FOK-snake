@@ -501,7 +501,7 @@ function specWatch(peer, tid, nid){
     _spWant.push({ to:peer, at:_spNow(), sparse:(_spSilent[peer] | 0) > 0 });
     // The feed's startPts is on the shared clock, and a watcher applies none of the players'
     // P2P burst -- this is its ONLY correction, so it gets the same age rule as a match start.
-    _netAnchorRefresh({ n:3, nudge:true });
+    _netAnchorRefresh({ n:3 });
     netP2POnlySet(true);     // every spectator link is direct or nothing
     _spWatchSig(peer, 'req');
     _spArm();
@@ -827,7 +827,7 @@ function _spBoot(){
     // !_spOn gate in _spOnFeedMsg. No silence, no error, nothing for either end's ladder to
     // find -- a watcher on CONNECTING until the tournament dealt the next node.
     if(netPts() == null){
-        _netAnchorRefresh({ n:3, nudge:true });
+        _netAnchorRefresh({ n:3 });
         if(typeof setTimeout === 'function' && ++_spBootTry <= SPEC_BOOT_TRIES){
             _spBootT = setTimeout(_spBoot, SPEC_BOOT_RETRY_MS); _spArm(); return;
         }

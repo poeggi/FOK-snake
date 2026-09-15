@@ -62,19 +62,28 @@ whole array. A NEW signal type, never a reshaped `ice`; the sender gates on
 the PEER version (answerer knows it from the offer, host from the answer).
 
 ## Clock anchor
-- Refreshed by AGE, never by event: one sweep shape, 3-5 samples NET_GAP_MS
-  apart, min-RTT kept, exclusive on the wire. Sites: boot (set), the
-  multiplayer door (nudge when older than NET_ANCHOR_MAX_AGE_MS 10 min),
-  foreground (set), a "future pts" refusal (set), first start and spectator
-  boot (3 samples, nudge by age or `resync:true`). A rematch never sweeps;
-  nothing sweeps on a heartbeat. nudge = half the delta. A sample with our
-  own requests in flight is UNCLEAN: adoptable, never REPORTED as latency.
+- ONE source: the `X-Fok-T` header on the static t.txt (no time.php, no
+  `now` off a worker answer: a worker request carries its queue wait on the
+  way IN). The stamp is taken as the request lands, so a sample's error is
+  half of what sat on the way in and not on the way out (DNS, TCP+TLS,
+  radio wake): every bad sample reads AHEAD, and the cold first request
+  carries most of it (measured: 276 ms cold vs 30 ms warm = 117 ms ahead).
+- One sweep shape (`_netTimeSync`): request 0 warms the socket and is never
+  a candidate; then n samples (default 5, first start and spectator boot 3)
+  NET_GAP_MS apart; the lowest-RTT one wins; the latency report is their
+  average. No cleanliness flag of any kind (no q_ms, no own-flight gate).
+- Adopt (`_netAnchorAdopt`): within the sample's own RTT of the current
+  anchor = noise, move halfway; further = a wrong anchor, take it outright.
+- Refreshed by AGE at quiet moments, never by event: boot, foreground, a
+  "future pts" refusal, the server's `resync` hint (forced); the multiplayer
+  door, a game over (before the score goes out), a return to the main menu,
+  a first start, a spectator boot (only when older than NET_ANCHOR_MAX_AGE_MS
+  10 min). A rematch never sweeps; nothing sweeps on a heartbeat.
 - The server sync and the P2P burst write the same `_netSync.ofs` at
   different targets; never add a sync site that can run mid-match. The burst
   does NOT stamp `_netSync.at`.
 - An outgoing `pts` is never backdated (the server refuses past
   `pts_ahead_max_ms` 200 ms and logs it; the 400 forces a re-sync).
-- The clock SOURCE is static t.txt stamped by the web server; already safe.
 
 ## The beat is a contract constant
 Heartbeat NET_HELLO_MS 60 s, poll NET_POLL_S 5 s, gap NET_GAP_MS 100 ms:

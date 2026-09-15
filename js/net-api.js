@@ -567,15 +567,12 @@ function netPts(){ return _netSync.ofs == null ? null : Math.round(_wall() + _ne
 // game mechanic -- the sim, the tick timeline and every other packet stamp run on netPts().
 function netRawPts(){ return Math.round(_wall()); }
 // OPTIONAL latency report (API: display only -- the admin UI and friends_latency; nothing
-// in gameplay reads it): the same clock samples yield the value -- at least three, an
-// extreme FIRST sample (cold connection: DNS/TCP/TLS) discarded, the rest averaged.
+// in gameplay reads it): the sweep's candidate samples averaged (the cold warm-up request
+// is not among them); at least three, or nothing is said.
 let _netLat = { value:null, at:0, pending:false };
 function _netLatFromSamples(rtts){
     if(rtts.length < 3) return null;
-    const rest = rtts.slice(1);
-    const avgRest = rest.reduce((a,b)=>a+b,0) / rest.length;
-    const use = (rtts[0] > 2.5 * avgRest) ? rest : rtts;   // extreme first value: discard
-    return Math.round(use.reduce((a,b)=>a+b,0) / use.length);
+    return Math.round(rtts.reduce((a,b)=>a+b,0) / rtts.length);
 }
 let _netSyncBusy = false;
 // The clock source, in PTS milliseconds: the X-Fok-T header on a STATIC file, stamped by
@@ -593,35 +590,28 @@ async function _netClockMs(){
     } catch(e){ return null; }
     finally { _netFlight--; }
 }
-// Wait -- briefly -- for our own wire to go quiet before taking a sample. Quiet means
-// quiet, not "mostly idle". Bounded, because a client that is genuinely busy still needs an
-// anchor and a rough one beats none at all; what a busy client does NOT do is report the
-// figure it measured (see below).
-const NET_QUIET_STEP_MS = 20;
-const NET_QUIET_TRIES = 12;   // ~240ms of patience, counted in steps rather than measured
-async function _netQuiet(){
-    if(typeof setTimeout !== 'function') return _netFlight <= 0;
-    // Counted, NOT clock-bounded: a request whose promise never settles would leave a
-    // clock-bounded wait spinning for ever, and this runs on the path that anchors a match.
-    for(let i = 0; i < NET_QUIET_TRIES && _netFlight > 0; i++)
-        await new Promise(res => setTimeout(res, NET_QUIET_STEP_MS));
-    return _netFlight <= 0;
-}
 // The anchor is refreshed by AGE, never by event: a sweep runs when nothing is anchored yet,
-// when the anchor is older than NET_ANCHOR_MAX_AGE_MS, or when a caller forces one (a
-// foreground, a "future pts" refusal, the server's resync hint).
+// when the anchor is older than NET_ANCHOR_MAX_AGE_MS at a quiet moment (the multiplayer
+// door, a game over, a return to the menu), or when a caller forces one (a foreground, a
+// "future pts" refusal, the server's resync hint).
 function _netAnchorStale(){ return _netSync.ofs == null || Date.now() - _netSync.at > NET_ANCHOR_MAX_AGE_MS; }
 async function _netAnchorRefresh(opts, force){ if(force || _netAnchorStale()) await _netTimeSync(true, opts); }
-// Adopt a sample. nudge = move the anchor HALF the way to the reading: the residual is left
-// to the next sweep and to the P2P burst, and one polluted reading can only ever do half
-// its damage. A missing anchor is always set outright -- there is nothing to nudge from.
-function _netAnchorAdopt(smp, nudge){
+// Adopt a sample. A reading within the sample's own round trip of the current anchor is
+// noise: move halfway, the residual is left to the next sweep and to the P2P burst. A
+// reading further off than that is a wrong anchor, not a noisy one: take it outright.
+function _netAnchorAdopt(smp){
     const cur = _netSync.ofs;
-    const ofs = (nudge && cur != null) ? cur + (smp.ofs - cur) / 2 : smp.ofs;
+    const ofs = (cur != null && Math.abs(smp.ofs - cur) <= smp.rtt) ? cur + (smp.ofs - cur) / 2 : smp.ofs;
     _netSync = { ofs, rtt: smp.rtt, at: Date.now() };
     _netClockPush();
 }
-// opts: { n: samples (default 5), nudge: half-delta adoption (default: set outright) }.
+// THE SWEEP. The server stamps t.txt when the request reaches it, so a sample's error is
+// half of whatever sat on the way IN and not on the way OUT: DNS, the TCP+TLS handshake
+// of a cold socket, an uplink waking from doze. All of it makes the estimate read AHEAD,
+// and the cold first request carries most of it. So sample 0 only warms the socket and is
+// never a candidate; of the samples after it the one with the lowest round trip is the
+// least polluted and wins. opts.n = candidate samples (default 5), NET_GAP_MS apart so a
+// momentary stall cannot slow them all.
 async function _netTimeSync(force, opts){
     if(_netSyncBusy || !_netOk()) return;
     // NEVER re-anchor while a duel is being played. netPts() DRIVES the tick number, so
@@ -633,46 +623,30 @@ async function _netTimeSync(force, opts){
     if(phase === 'duel' || phase === 'duelPaused') return;
     if(!force && _netSync.ofs != null) return;   // anchored: it holds until age or a caller re-anchors it
     const n = (opts && opts.n) || 5;
-    const hadAnchor = _netSync.ofs != null;
     _netSyncBusy = true;
-    let best = null, rough = null;
+    let best = null;
     const rtts = [];
     try {
-        for(let i = 0; i < n; i++){
-            // CLEAN = nothing of ours was in flight around this sample. Only a clean sample
-            // may set the offset or be reported as latency. The server's queue figure plays
-            // no part: t.txt is static and never waits for a worker.
-            const quiet = await _netQuiet();
+        for(let i = 0; i <= n; i++){
             const t0 = performance.now();
             const t = await _netClockMs();
             const rtt = performance.now() - t0;
-            const clean = quiet && _netFlight <= 0;
-            if(t != null){
+            if(i > 0 && t != null){
                 const smp = { rtt, ofs: t + rtt/2 - _wall() };
-                // Keep the LOWEST-rtt sample, never an average: a sample delayed by queuing
-                // carries that delay straight into its offset, so averaging spreads the poison
-                // instead of discarding it. The fastest sample is the least polluted one.
-                if(clean){ rtts.push(rtt); if(!best || rtt < best.rtt) best = smp; }
-                else if(!rough || rtt < rough.rtt) rough = smp;
-                // Unanchored: adopt at once, so netPts() is usable after ONE round trip (the
-                // menu-music gate waits on exactly that). Later samples only refine it.
-                if(_netSync.ofs == null){ const u = best || rough; _netSync = { ofs: u.ofs, rtt: u.rtt, at: Date.now() }; }
+                rtts.push(rtt);
+                if(!best || rtt < best.rtt) best = smp;
+                // Unanchored: adopt the first real sample at once, so netPts() is usable after
+                // two round trips (the menu-music gate waits on exactly that). The rest refine it.
+                if(_netSync.ofs == null) _netSync = { ofs: smp.ofs, rtt, at: Date.now() };
             }
-            // SPREAD the samples by the request gap. Back-to-back requests hit the same server
-            // load and can all be slow together, leaving no clean sample to pick.
-            if(i < n - 1 && typeof setTimeout === 'function') await new Promise(res => setTimeout(res, NET_GAP_MS));
+            if(i < n && typeof setTimeout === 'function') await new Promise(res => setTimeout(res, NET_GAP_MS));
         }
     } finally { _netSyncBusy = false; }
-    // Not one clean sample in the whole sweep: take the least bad one anyway. An unanchored
-    // client cannot play at all, and a rough anchor is corrected at the next sweep.
-    if(!best) best = rough;
     // Guard the ADOPTION, not just the start: a sweep begun before a match can land after
     // play began -- and adopting it there would be the very mid-game step we just refused.
     if(_netSync.ofs != null && (phase === 'duel' || phase === 'duelPaused')) best = null;
-    if(best) _netAnchorAdopt(best, !!(opts && opts.nudge) && hadAnchor);
+    if(best) _netAnchorAdopt(best);
     const lat = _netLatFromSamples(rtts);
-    // Nothing clean enough to report: say NOTHING rather than send a figure that measured
-    // our own burst.
     if(lat != null) _netLat = { value: Math.max(0, Math.min(60000, lat)), at: Date.now(), pending: true };
     else _netLat.at = Date.now();
     // The sweep held the mailbox re-arm back (the gate counts a running sweep as traffic);

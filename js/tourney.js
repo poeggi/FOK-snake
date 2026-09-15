@@ -795,7 +795,7 @@ function tourneyEnter(){
         if(h && typeof h.then === 'function') h.then(spend, spend); else spend();
     }
     // A tournament link is a multiplayer door too: the same age-gated anchor refresh as the 1vs1 one.
-    _netAnchorRefresh({ nudge:true });
+    _netAnchorRefresh();
     if(_tt) _ttSync(); else _ttProbe();
     _uiDirty = true;
 }

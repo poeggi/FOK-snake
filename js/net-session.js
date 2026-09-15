@@ -51,7 +51,7 @@ function netLobbyEnter(){
         // Last: every sample waits for our own wire to go quiet, so the requests above
         // clear it first. By AGE only -- a deep link lands here without passing the
         // MULTIPLAYER entry, so the same refresh sits on both doors.
-        _netAnchorRefresh({ nudge:true });
+        _netAnchorRefresh();
     }
 }
 function netLobbyLeave(){
@@ -530,13 +530,13 @@ async function _netRequestStart(s, reason){
     // The anchor is refreshed by AGE, not by the start: the pts below is computed at send
     // time from whatever anchor is held, so it is fresh by construction, and the server's
     // stale gate is coarse enough to pass any client that ever synced. A FIRST start sweeps
-    // only when the anchor is older than NET_ANCHOR_MAX_AGE_MS -- three samples, nudged in
-    // by half; the pair's residual is the P2P burst's job, not this one's -- or when the
-    // server's resync hint (4.4) says this pair's two anchors disagree by more than it can
-    // account for. A REMATCH never sweeps: the anchor it holds carried the match just ended.
+    // only when the anchor is older than NET_ANCHOR_MAX_AGE_MS (three samples; the pair's
+    // residual is the P2P burst's job, not this one's) or when the server's resync hint
+    // (4.4) says this pair's two anchors disagree by more than it can account for. A
+    // REMATCH never sweeps: the anchor it holds carried the match just ended.
     const _force = _netResync && !identityOnly;
     if(!identityOnly) _netResync = false;   // the identity ask sweeps nothing: the hint stays for the next first start
-    if(reason !== 'rematch') await _netAnchorRefresh({ n:3, nudge:true }, _force);
+    if(reason !== 'rematch') await _netAnchorRefresh({ n:3 }, _force);
     if(_netSess !== s || !s.game) return;
     if(netPts() == null){ if(!identityOnly) _netSessionEnd('NO CLOCK SYNC - CANNOT START'); return; }
     // Through the gate, and BEFORE the pts is read: the server measured this very request
@@ -548,13 +548,11 @@ async function _netRequestStart(s, reason){
     // poll, and the stale gate leaves a 1 s budget that a background wait would eat.
     await _netGate(NET_BG_SOLO);
     if(_netSess !== s || !s.game) return;
-    const _t0 = performance.now();
     const _sb = { id: getPlayerId(), peer: s.peer, epoch: s.epoch|0, reason: reason || 'first', pts: netPts() };
     // This request is where the server learns the duel exists, so the privacy of the match
     // has to travel with it -- the heartbeat that refreshes it comes up to a minute later.
     if(cfg.privateDuels) _sb.duel_private = true;
     const r = await _netPostRes('/api/start.php', _sb);
-    const _rtt = performance.now() - _t0;
     if(_netSess !== s || !s.game) return;
     if(!r.json || typeof r.json.start_pts !== 'number'){
         if(identityOnly){ _netSigLog('! rematch identity not issued -> unattested'); return; }
@@ -562,17 +560,8 @@ async function _netRequestStart(s, reason){
         _netSessionEnd('NO START TIME - CANNOT START'); return;
     }
     const d = r.json;
-    // The contract ships `now` for a free clock re-check, and this is the moment it
-    // matters most: both clients convert the SAME start_pts through their OWN offset,
-    // so any error here lands directly in how far apart they begin. Same min-RTT rule
-    // as the clock samples -- only adopt it when this round trip beat our best one,
-    // since a slower one carries a worse estimate -- and nudged in by half like any
-    // in-session reading.
-    // ...and never off a round trip the server spent queueing: q_ms says how much of this
-    // rtt was a wait for a worker rather than time on the wire, and that part is not
-    // symmetric -- halving it puts the whole error into the offset instead of half of it.
-    if(!identityOnly && typeof d.now === 'number' && !(d.q_ms > NET_QMS_BUSY) && (_netSync.rtt < 0 || _rtt < _netSync.rtt))
-        _netSync = { ofs: _netSync.ofs + ((d.now + _rtt/2 - _wall()) - _netSync.ofs) / 2, rtt: _rtt, at: Date.now() };
+    // `now` on the answer is NOT a clock sample: a worker request carries its queue wait on
+    // the way in, the one place a sample must never be taken. t.txt is the only source.
     // The pair cross-check: the server proved BOTH clients' clocks against the same start
     // and found them too far apart -- the one thing neither client can see for itself.
     // Nothing is wrong with this start; the next one sweeps regardless of the anchor's age.

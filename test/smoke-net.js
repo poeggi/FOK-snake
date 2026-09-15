@@ -1352,10 +1352,10 @@ runTest('SMOKE-NET', `
     inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; _netTeardown();
     log('pts layer ok: sync required to start, whole-ms stamping, future drops, tolerance honoured');
 
-    // ---- latency figure (optional, display-only): >=3 samples, extreme first discarded ----
+    // ---- latency figure (optional, display-only): >=3 samples averaged; the cold warm-up
+    // request never reaches this function (the sweep drops it before) ----
     if(_netLatFromSamples([20,22])!==null) throw 'fewer than 3 samples must not report';
-    if(_netLatFromSamples([200,20,22,21,19])!==Math.round((20+22+21+19)/4)) throw 'extreme first sample must be discarded';
-    if(_netLatFromSamples([25,20,22])!==Math.round((25+20+22)/3)) throw 'normal first sample must be kept';
+    if(_netLatFromSamples([25,20,22])!==Math.round((25+20+22)/3)) throw 'three samples are averaged';
     // friends e2e estimate: their reported half plus our half, one way each
     _netLat={value:30, at:1, pending:false}; _netFriendsLat={'00ff00aa':50};
     if(netFriendE2E('00ff00aa')!==40) throw 'e2e estimate wrong: '+netFriendE2E('00ff00aa');

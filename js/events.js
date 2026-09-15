@@ -390,7 +390,7 @@ function eventEnter(){
     // An event link is a multiplayer door like any other: the same age-gated
     // anchor refresh, so the schedule is derived against a clock worth deriving
     // against.
-    _netAnchorRefresh({ nudge:true });
+    _netAnchorRefresh();
     _uiDirty = true;
 }
 // Leaving the page. The picture goes with it -- the next open reads again.
@@ -645,7 +645,7 @@ async function eventTourneyGo(){
     // a player who is already in the room they wanted, and pressable while it stands.
     // The join says what happened; until it does, this page says JOINING.
     _ttUi.home = 'eventPage';   // ...and this is the room the tournament gives back
-    _netAnchorRefresh({ nudge:true });   // a tournament door like any other
+    _netAnchorRefresh();   // a tournament door like any other
     _evUi.busy = true; _evMsg('JOINING...');
     // By tid, which is what the state answer names it by. A non-member is refused
     // 403 by the server -- that refusal IS the secrecy, and it is the server's to
