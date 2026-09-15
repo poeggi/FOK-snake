@@ -412,9 +412,6 @@ const SETTINGS_CATS = [
         { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; also scales menu scroll travel
           act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
-        { lbl:()=>'TOUCH DETECT: '+(cfg.touchLegacy?'LEGACY (DEPRECATED)':'MODERN'),   // how a swipe after the first is read in play (js/input.js _swipeRead); LEGACY is deprecated, kept selectable until it is removed
-          act:()=>{cfg.touchLegacy=!cfg.touchLegacy;Snd.sfxPlay('select',cfg.music);},
-          adj:(r)=>{cfg.touchLegacy=!!r;} },
     ]},
     { label:'GAME', items:[
         { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
@@ -1473,7 +1470,7 @@ function drawTurnDebug(){
 // DEBUG LEVEL 3 readout, bottom centre, refreshed DBG_TOUCH_REFRESH_MS apart so it can be read: the
 // finger's mean position and speed over the window, in CSS px from the canvas centre (the units
 // every swipe threshold is in), the swipe reader's anchor with its age and REST while the finger
-// counted as resting for most of the window, the MODERN across reference (REF), and the last
+// counted as resting for most of the window, the across reference (REF), and the last
 // direction the touch layer sent in play with its age. Render-only; never the sim.
 const DBG_TOUCH_REFRESH_MS=250;
 let _dbgTouchShown=null, _dbgTouchShownAt=0;
@@ -1489,7 +1486,7 @@ function drawTouchDebug(){
     const lines=['TOUCH  '+rel(s.touch)+(s.speed!=null?'  '+Math.round(s.speed/10)*10+' PX/S':''),
                  'ANCHOR '+rel(s.anchor)+(s.anchor?'  '+ms(s.anchorAge)+(s.rest?' REST':''):'')];
     if(s.ref) lines.push('REF    '+rel(s.ref));
-    lines.push('SENT   '+(s.sent?s.sent.key.replace('Arrow','').toUpperCase()+' '+ms(s.sentAge):'---')+'  '+(s.legacy?'LEGACY':'MODERN'));
+    lines.push('SENT   '+(s.sent?s.sent.key.replace('Arrow','').toUpperCase()+' '+ms(s.sentAge):'---'));
     ctx.save();
     ctx.textAlign='left'; ctx.textBaseline='middle';
     ctx.font=`${FONT.HINT}px "Press Start 2P"`;

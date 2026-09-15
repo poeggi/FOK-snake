@@ -1,8 +1,6 @@
-// Swipe readers (js/input.js _swipeRead): the MODERN reader sends the turn the finger made
-// however long the stroke before it, sends nothing for a resting finger's creep, and keeps
-// the same-direction (boost) cadence of a straight slide; LEGACY is deprecated but selectable
-// and keeps its shape (its overshoot and creep readings are what prove the switch picks the
-// old reader).
+// The swipe reader (js/input.js _swipeRead) sends the turn the finger made however long the
+// stroke before it, sends nothing for a resting finger's creep, and keeps the same-direction
+// (boost) cadence of a straight slide.
 // Traces are finger paths in CSS px, sampled every 8 ms at 0.6 px/ms (a brisk thumb, ~120 Hz),
 // driven through the REAL document touch handlers in a live classic game.
 // Run: node test/smoke-touch.js
@@ -68,17 +66,7 @@ runTest('SMOKE-TOUCH', `
     const T_K = () => poly([[0,0],[20,0],[34,18,0.05]], F, DT);          // a resting thumb creeps
     const T_A = () => poly([[0,0],[40,0],[40,-40]], F, DT);              // the textbook corner
 
-    // The setting: MODERN by default, one CONTROLS row flips it.
-    if (cfg.touchLegacy !== false) throw 'touchLegacy must default to false (MODERN), got ' + cfg.touchLegacy;
-    const row = SETTINGS_CATS.find(c => c.label === 'CONTROLS').items.find(it => it.lbl().indexOf('TOUCH DETECT') === 0);
-    if (!row) throw 'CONTROLS has no TOUCH DETECT row';
-    if (row.lbl() !== 'TOUCH DETECT: MODERN') throw 'default label: ' + row.lbl();
-    row.act(); if (!cfg.touchLegacy || row.lbl() !== 'TOUCH DETECT: LEGACY (DEPRECATED)') throw 'act() did not switch to LEGACY: ' + row.lbl();
-    row.act(); if (cfg.touchLegacy) throw 'act() did not switch back to MODERN';
-    log('TOUCH DETECT row: MODERN by default, act() toggles LEGACY, marked deprecated');
-
-    // MODERN: the turn costs SWIPE_N of across travel, whatever the stroke before it.
-    cfg.touchLegacy = false;
+    // The turn costs SWIPE_N of across travel, whatever the stroke before it.
     let s = swipe(T_B());
     if (turns(s) !== 'RIGHT UP' || !boosted(s)) throw 'modern, long stroke then up: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
     s = swipe(T_D());
@@ -109,26 +97,21 @@ runTest('SMOKE-TOUCH', `
     log('modern: a slanted stroke is one turn, a sub-threshold staircase is none');
 
     // The first swipe is judged by its portion along the chosen axis: a 60 px stroke 38 degrees
-    // off vertical sends UP only once it has 16 px of UP in it (the 5th 4.8 px sample); LEGACY
-    // fires on the 16 px chord, one sample earlier, with 15 px of UP in it.
+    // off vertical sends UP only once it has 16 px of UP in it (the 5th 4.8 px sample), not
+    // on the 16 px chord one sample earlier with 15 px of UP in it.
     s = swipe(poly([[0,0],[37,-47]], F, DT));
     let u = s.find(e => e.k === 'UP');
     if (!u || -u.y < 16) throw 'modern, slanted first swipe: UP after ' + (u ? -u.y : 'never') + ' px of up travel';
     if (turns(s) !== 'UP') throw 'modern, slanted first swipe sent: ' + dirs(s);
-    cfg.touchLegacy = true; s = swipe(poly([[0,0],[37,-47]], F, DT)); cfg.touchLegacy = false;
-    u = s.find(e => e.k === 'UP');
-    if (!u || -u.y >= 16) throw 'legacy, slanted first swipe must fire on the chord, got UP after ' + (u ? -u.y : 'never') + ' px of up travel';
-    log('modern: the first swipe fires on 16 px along its axis, legacy on 16 px of chord');
+    log('modern: the first swipe fires on 16 px along its axis, never on the chord');
 
-    // MODERN has no dead zone: a first swipe inside the 40-50 degree band still commits, on
-    // whichever axis the chord leans to. LEGACY keeps the band and stays silent there.
+    // No dead zone in play: a first swipe inside the 40-50 degree band still commits, on
+    // whichever axis the chord leans to.
     s = swipe(poly([[0,0],[72,-69]], F, DT));                       // 100 px at 44 deg
     if (turns(s) !== 'RIGHT') throw 'modern, a 44 deg first swipe sent: ' + (dirs(s) || 'nothing');
     s = swipe(poly([[0,0],[69,-72]], F, DT));                       // 100 px at 46 deg
     if (turns(s) !== 'UP') throw 'modern, a 46 deg first swipe sent: ' + (dirs(s) || 'nothing');
-    cfg.touchLegacy = true; s = swipe(poly([[0,0],[72,-69]], F, DT)); cfg.touchLegacy = false;
-    if (dirs(s) !== '') throw 'legacy, a 44 deg first swipe must sit in the dead zone, sent: ' + dirs(s);
-    log('modern: no dead zone on the first swipe (44 deg is RIGHT, 46 deg is UP); legacy keeps the band');
+    log('modern: no dead zone on the first swipe (44 deg is RIGHT, 46 deg is UP)');
 
     // THE ZIG-ZAG HELPER. Two turns of opposite sense within the turn window lock a zig-zag;
     // from then on the turn that keeps alternating costs 16 px, the same-sense side still 24.
@@ -152,15 +135,13 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'LEFT UP LEFT') throw 'modern, the window must follow the pace (300 ms at level 10), sent: ' + dirs(s);
     gPer = 6;
     // THE SPIRAL GUARD LAPSES with the window too: a third same-way turn 700 ms after the second
-    // is a free 24 px turn again; 400 ms after it is still held (64 px). LEGACY never lapses.
+    // is a free 24 px turn again; 400 ms after it is still held (64 px).
     const spiral = (crawl, sp) => poly([[0,0],[-30,0],[-30,-30],[0,-30],[crawl,-30,sp||0.1],[crawl,-6]], F, DT);
     s = swipe(spiral(40));
     if (turns(s) !== 'LEFT UP RIGHT') throw 'modern, a third same-way turn 400 ms on must be held, sent: ' + dirs(s);
     s = swipe(spiral(70));
     if (turns(s) !== 'LEFT UP RIGHT DOWN') throw 'modern, a third same-way turn 700 ms on must be free (window 600 ms), sent: ' + dirs(s);
-    cfg.touchLegacy = true; s = swipe(spiral(105, 0.15)); cfg.touchLegacy = false;   // 700 ms above LEGACY's 120 px/s rest floor
-    if (turns(s) !== 'LEFT UP RIGHT') throw 'legacy, the spiral run must not lapse, sent: ' + dirs(s);
-    log('modern: a zig-zag locks within 3 moves and its alternating turn costs 16 px, the same-sense side 24; the spiral run lapses past 3 moves; legacy unchanged');
+    log('modern: a zig-zag locks within 3 moves and its alternating turn costs 16 px, the same-sense side 24; the spiral run lapses past 3 moves');
 
     // A PACED STAIRCASE: one stroke per snake move, the thumb still at every corner. The dwell
     // is a rest (the anchor moves to the corner) but not a change of mind: the run, the lock and
@@ -188,8 +169,6 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'UP LEFT') throw 'modern, a same-sense turn after a 700 ms dwell must be a free first swipe, sent: ' + dirs(s);
     s = swipe(paced([[0,-30],[-20,0]], 400));
     if (turns(s) !== 'UP') throw 'modern, a same-sense turn after a 400 ms dwell is still in the run, sent: ' + dirs(s);
-    cfg.touchLegacy = true; s = swipe(paced([[0,-30],[-20,0]], 150)); cfg.touchLegacy = false;
-    if (turns(s) !== 'UP LEFT') throw 'legacy, a pause clears the run (a 20 px same-sense turn is a first swipe), sent: ' + dirs(s);
     // The latch after a dwell (16 px along the direction the snake has, a no-op for the sim)
     // keeps the lock: the fluid 20 px turn straight out of it is still cheap. A push long
     // enough to boost breaks it: the same turn then needs 24.
@@ -197,7 +176,7 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'UP RIGHT UP RIGHT' || boosted(s)) throw 'modern, a 16 px latch after a dwell must keep the lock, sent: ' + dirs(s);
     s = swipe(paced([[0,-30],[30,0],[0,-30],[0,-48],[20,0,0]], 150));
     if (turns(s) !== 'UP RIGHT UP' || !boosted(s)) throw 'modern, a boost slide after a dwell must break the lock (the 20 px turn waits for 24), sent: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
-    log('modern: a corner dwell keeps the run, the lock and the guard, and never refreshes the window; the latch after it keeps the lock, a boost breaks it; legacy: a pause clears the run');
+    log('modern: a corner dwell keeps the run, the lock and the guard, and never refreshes the window; the latch after it keeps the lock, a boost breaks it');
 
     // A thumb that drifts one way while waiting (too fast to count as resting, too slanted to
     // count as the sent direction) never has to undo the drift: the across reference re-anchors
@@ -353,8 +332,6 @@ runTest('SMOKE-TOUCH', `
     if (dirs(s).indexOf('LEFT') < 0) throw 'a first-swipe brake must be sent: ' + dirs(s);
     if (boosted(s)) throw 'a slide along a first-swipe brake armed a boost: ' + s.map(e => e.k).join(' ');
     if (s.filter(e => e.k === 'LEFT').length !== 1) throw 'a first-swipe brake must be sent exactly once: ' + dirs(s);
-    cfg.touchLegacy = true; s = swipe(poly([[0,0],[-70,0]], F, DT)); cfg.touchLegacy = false;
-    if (s.filter(e => e.k === 'LEFT').length !== 1 || boosted(s)) throw 'legacy: a first-swipe brake must be sent once and arm nothing: ' + s.map(e => e.k).join(' ');
     log('a slide along a brake direction sends the reverse once and never arms a boost; a slide along a real turn still does');
 
     // A brake never becomes the reference: pull back to brake, push forward again, and the push
@@ -375,16 +352,13 @@ runTest('SMOKE-TOUCH', `
     log('brake ends boost immediately; same-axis forward push boosts without a guard delay');
 
     // A straight slide re-sends the direction once per 48 px; the duel wire counts on one
-    // same-direction record per SWIPE_SAME, never more. MODERN counts a same-heading slide
-    // immediately, without a touchdown guard. LEGACY keeps its shape: 16, 64, 112.
-    const slide = poly([[0,0],[130,0]], F, DT);
-    cfg.touchLegacy = false; const sm = swipe(slide);
-    cfg.touchLegacy = true;  const sl = swipe(slide);
+    // same-direction record per SWIPE_SAME, never more. A same-heading slide counts
+    // immediately, without a touchdown guard.
+    const sm = swipe(poly([[0,0],[130,0]], F, DT));
     if (dirs(sm) !== 'RIGHT RIGHT RIGHT') throw 'modern slide cadence: ' + dirs(sm);
     const smb = sm.find(e => e.k === 'boost+');
     if (!smb || smb.x < 48 || smb.x > 54 || smb.t >= 100) throw 'modern: a fresh same-heading touch must boost at 48 px before 100 ms, got ' + (smb ? Math.round(smb.x) : 'none');
-    if (dirs(sl) !== 'RIGHT RIGHT RIGHT' || !boosted(sl)) throw 'legacy slide cadence: ' + dirs(sl);
-    log('a straight slide re-sends every 48 px; modern same-heading boost at 48 px without a gate, legacy at its old 64');
+    log('a straight slide re-sends every 48 px; a same-heading boost at 48 px without a gate');
 
     // THE BOOST SLIDE, three cases the user set (heading LEFT throughout):
     //  1. pen down, rest, 16 px along the heading (sent, the sim ignores it), rest 500 ms, then a
@@ -395,7 +369,6 @@ runTest('SMOKE-TOUCH', `
     const H = { heading: { x:-1, y:0 } };
     const at = (trace, ms) => trace.map(p => ({ x:p.x, y:p.y, t:p.t + ms }));
     const cat = (a, b) => a.concat(b.slice(1));
-    cfg.touchLegacy = false;
     let tr = [{ x:0, y:0, t:0 }];
     tr = cat(tr, at(poly([[0,0],[-18,0]], F, DT), 100));
     tr = cat(tr, at(poly([[-18,0],[-110,0]], F, DT), 630));
@@ -461,7 +434,6 @@ runTest('SMOKE-TOUCH', `
 
     // The anti-spiral guard is shared: the third same-way turn in one gesture needs SWIPE_GUARD
     // (64 px); a shorter one is held.
-    cfg.touchLegacy = false;
     s = swipe(poly([[0,0],[30,0],[30,-30],[0,-30],[0,0]], F, DT));
     if (dirs(s) !== 'RIGHT UP LEFT') throw 'modern spiral guard, 30 px legs: ' + dirs(s);
     s = swipe(poly([[0,0],[70,0],[70,-70],[0,-70],[0,0]], F, DT));   // a 70 px leg also passes the 48 px same-direction mark
@@ -483,19 +455,8 @@ runTest('SMOKE-TOUCH', `
     if (s[bi].x > 24) throw 'modern brake fired late, at x=' + s[bi].x;
     log('modern: a reverse slide is the brake, 16 px back from the furthest point');
 
-    // LEGACY keeps its shape, which is what proves the switch selects the old reader.
-    cfg.touchLegacy = true;
-    s = swipe(T_B());
-    if (dirs(s) !== 'RIGHT RIGHT' || !boosted(s)) throw 'legacy, long stroke then up: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
-    s = swipe(T_K());
-    if (dirs(s) !== 'RIGHT DOWN') throw 'legacy, creeping finger: ' + dirs(s);
-    s = swipe(T_A());
-    if (dirs(s) !== 'RIGHT UP') throw 'legacy, textbook corner: ' + dirs(s);
-    log('legacy: the overshoot loses the turn and boosts, the creep turns down, the textbook corner works');
-
-    // Menus read the chord whatever the setting: a vertical swipe scrolls one step at
-    // MENU_SWIPE_1, the next at MENU_SWIPE_SAME.
-    cfg.touchLegacy = false;
+    // Menus read the chord: a vertical swipe scrolls one step at MENU_SWIPE_1, the next at
+    // MENU_SWIPE_SAME.
     const keys = [];
     const oHandle = handleKey;
     handleKey = function(k, pde){ keys.push(k); return oHandle(k, pde); };
@@ -520,7 +481,7 @@ runTest('SMOKE-TOUCH', `
     cfg.debug=0; boosting=false;
     log('debug boost markers: one per displayed start/end, current head cell, level 3 only');
     gameSteer = oSteer; gameBoostStart = oBs; gameBoostEnd = oBe;
-    cfg.touchLegacy = false; phase = 'menu'; inGame = false; players = null;
+    phase = 'menu'; inGame = false; players = null;
     R.ok = true;
   } catch (e) { R.err = e && e.stack ? e.stack : String(e); }
 })();

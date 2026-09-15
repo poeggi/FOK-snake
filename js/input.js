@@ -929,18 +929,18 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // Swipe/gesture control on game canvas.
 // Thresholds (px of finger travel): first move or reverse = SWIPE_1 (16), or SWIPE_N
 // (24) while boosting; 90-deg turn = SWIPE_N (24); continue same direction = SWIPE_SAME
-// (48), which suppresses accidental boosts. One table for both readers (_swipeRead).
-// Dead zone (the chord reader, LEGACY and the menus): 40-50 degrees from horizontal --
-// diagonal motion commits nothing until the finger clearly enters a direction corridor
-// (0-40 deg = horizontal, 50-90 = vertical). In the dead zone the baseline is NOT reset, so
-// displacement keeps accumulating until the angle exits into a real corridor. MODERN in
-// play has no dead zone: the chord's axis is whichever it leans to.
-// Turn window + zig-zag helper (MODERN): see the anti-spiral guard below.
+// (48), which suppresses accidental boosts. One table for play and the menus (_swipeRead).
+// Dead zone (the menus' chord reader): 40-50 degrees from horizontal -- diagonal motion
+// commits nothing until the finger clearly enters a direction corridor (0-40 deg =
+// horizontal, 50-90 = vertical). In the dead zone the baseline is NOT reset, so
+// displacement keeps accumulating until the angle exits into a real corridor. In play
+// there is no dead zone: the chord's axis is whichever it leans to.
+// Turn window + zig-zag helper: see the anti-spiral guard below.
 // Move cooldown: if the finger PAUSES longer than SWIPE_COOLDOWN (50ms) -- staying near
 // still, not merely a coalesced gap under load -- the last direction is cleared, so the
 // next move uses the first-move threshold and re-moves after a pause feel as responsive as
-// the first direction. The MODERN reader also moves the anchor to the pause, and inside a
-// run of turns prices a turn after the pause by its sense (the anti-spiral guard below).
+// the first direction. In play the anchor also moves to the pause, and inside a run of
+// turns a turn after the pause is priced by its sense (the anti-spiral guard below).
 // ---- Focus-grab clicks: a click whose job is giving this WINDOW focus (two
 // side-by-side clients) must not also operate the game. Detection, not a blanket
 // first-click filter: such a gesture starts with the window still BLURRED -- its
@@ -996,12 +996,12 @@ if (typeof window !== 'undefined' && window.PointerEvent) {
     canvas.addEventListener('mouseup', _canvasUp);
 }
 canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
-const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100, TURN_GATE_MS=50;   // MODERN boost guard after each committed axis change
-const _HOP_TAN=Math.tan(DZ_HI*Math.PI/180);   // a checkpoint hop within DZ_HI of the sent axis still agrees with the sent direction (MODERN reader)
+const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100, TURN_GATE_MS=50;   // the boost guard after each committed axis change
+const _HOP_TAN=Math.tan(DZ_HI*Math.PI/180);   // a checkpoint hop within DZ_HI of the sent axis still agrees with the sent direction
 // The checkpoint grain: a finger that has not travelled this far since its last checkpoint within
-// SWIPE_COOLDOWN is resting. With MODERN's 3px a finger slower than 60px/s rests, and a resting
-// finger's travel is never counted; LEGACY keeps 6px, which only forgets the direction.
-const SWIPE_STEP=3, SWIPE_STEP_LEGACY=6;
+// SWIPE_COOLDOWN is resting. With play's 3px a finger slower than 60px/s rests, and a resting
+// finger's travel is never counted; the menus keep 6px, which only forgets the direction.
+const SWIPE_STEP=3, SWIPE_STEP_MENU=6;
 // Menu vertical scrolling wants longer finger travel per entry than in-game steering (which must
 // stay twitchy). Its own two-tier distances, applied ONLY off the play field -- see the thresh below.
 const MENU_SWIPE_1=24, MENU_SWIPE_SAME=48;
@@ -1033,7 +1033,7 @@ function _touchLowF(){ return Math.max(1, _touchSensF()); }
 // reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
 // pause has cleared it, our own snake's heading seeds the first turn -- _myDir(), so the guard
 // arms off the same heading in single player, local 1vs1 and online 1vs1 alike.
-// THE TURN WINDOW (MODERN): a run of turns is "quick" only while each turn lands within
+// THE TURN WINDOW: a run of turns is "quick" only while each turn lands within
 // TURN_MOVES moves of the last one, a move being the snake's step at normal cadence
 // (2 * gPer engine ticks: 200 ms at normal level 1, 100 ms at level 10, boost never shortens
 // it). Past the window the run lapses and the next turn is a first turn again. The window is
@@ -1043,8 +1043,8 @@ function _touchLowF(){ return Math.max(1, _touchSensF()); }
 // is still measured from the dwell point (the anchor moves there), but priced by its sense
 // against the last turn on record (_turnLastDir): the alternating side SWIPE_1, the same
 // sense SWIPE_N, a third same-way turn the guard; a stroke along or against that turn is a
-// first swipe. LEGACY keeps the run until a pause or a turn the other way, as before.
-// THE ZIG-ZAG HELPER (MODERN): two turns of OPPOSITE sense inside the window lock a zig-zag.
+// first swipe.
+// THE ZIG-ZAG HELPER: two turns of OPPOSITE sense inside the window lock a zig-zag.
 // While it holds, the turn that keeps alternating (again the opposite sense of the last one)
 // costs SWIPE_1 (16px) instead of SWIPE_N; the same-sense side keeps SWIPE_N, since that way
 // lies a U-turn. It unlocks when the window lapses, on a same-sense turn, a brake, a
@@ -1058,9 +1058,9 @@ function _moveMs(){ const g=(typeof gPer==='number'&&gPer>0)?gPer:LEVEL_CFG[0].n
 function _turnWindowMs(){ return TURN_MOVES*_moveMs()*_touchLowF(); }
 let _turnSense=0, _turnRun=0, _turnLastAt=-Infinity, _turnLastDir=null, _zigzag=false;
 function _turnReset(){ _turnRun=0; _turnSense=0; _turnLastDir=null; _zigzag=false; }
-function _turnFresh(now){ return !!cfg.touchLegacy||now-_turnLastAt<=_turnWindowMs(); }
-// The run is KEPT across a rest (MODERN) while a turn is on record and the window holds.
-function _turnKept(now){ return !cfg.touchLegacy&&_turnSense!==0&&_turnFresh(now); }
+function _turnFresh(now){ return now-_turnLastAt<=_turnWindowMs(); }
+// The run is KEPT across a rest while a turn is on record and the window holds.
+function _turnKept(now){ return _turnSense!==0&&_turnFresh(now); }
 // The direction a candidate turn is judged against: the last sent one; after a rest the last
 // turn on record while the run is kept; else the live heading. A brake the sim refused
 // therefore seeds the next sense as if it had turned the snake (the run is off by one after a
@@ -1092,13 +1092,13 @@ function _spiralHold(key, dist, latch){
     if(sense===0){ if(!latch) _zigzag=false; return false; }
     if(!_turnFresh(now)) _turnReset();
     if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*_touchLowF())) return true;   // hold the third same-way turn until the swipe clears the guard (LOW: 85px, MED and HIGH: 64px)
-    _zigzag=!cfg.touchLegacy&&_turnSense!==0&&sense===-_turnSense;
+    _zigzag=_turnSense!==0&&sense===-_turnSense;
     _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense; _turnLastAt=now; _turnLastDir=key;
     return false;
 }
 // What a 90-degree turn to `key` costs right now: the zig-zag's cheap side, or a free turn.
 function _turnNeed(key){
-    if(_zigzag&&_inPlay()&&!cfg.touchLegacy&&_turnFresh(performance.now())&&_spiralSense(key)===-_turnSense) return SWIPE_1;
+    if(_zigzag&&_inPlay()&&_turnFresh(performance.now())&&_spiralSense(key)===-_turnSense) return SWIPE_1;
     return SWIPE_N;
 }
 // What a stroke after a rest costs while the run is kept: a 90-degree turn by its sense (the
@@ -1166,7 +1166,7 @@ function _dbgSteerLog(p, d){
 }
 function _isOpp(a,b){return(a==='ArrowLeft'&&b==='ArrowRight')||(a==='ArrowRight'&&b==='ArrowLeft')||(a==='ArrowUp'&&b==='ArrowDown')||(a==='ArrowDown'&&b==='ArrowUp');}
 let _swipeBase=null, _swipeLastDir=null, _swipeLastMoveAt=0, _swipeLastMovePos=null, _swipeTouchStartAt=0, _swipedThisTouch=false, _menuHDir=null;
-let _swipeFollow=null;   // the furthest point the finger has reached along the last sent axis (MODERN reader)
+let _swipeFollow=null;   // the furthest point the finger has reached along the last sent axis
 // THE STEERING FINGER, by identifier. One finger steers; every sample and every lift is matched
 // against it, so a thumb resting on the glass neither pollutes the gesture with its wobble nor
 // ends it by lifting. The newest finger to land on the play surface takes over (a holding thumb
@@ -1179,7 +1179,7 @@ let _swipeId=null;
 let _swipePhase0=null, _swipeInPlay=false;
 // REST is a state the reader holds: entered when the finger has not covered a checkpoint grain
 // within the resting window, left when it covers one faster than that. While it lasts the
-// direction stays forgotten and (MODERN) every sample re-anchors at the last checkpoint, so a
+// direction stays forgotten and, in play, every sample re-anchors at the last checkpoint, so a
 // slow drift is read exactly like a still finger: the next move is a first swipe from where it
 // starts, at the first-swipe distance.
 let _swipeResting=false;
@@ -1217,8 +1217,8 @@ function _dbgTouchSnapshot(){
     const s={ touch: a.n?{x:a.sx/a.n,y:a.sy/a.n}:cp(_dbgTouch), speed,
               rest: !!_swipeBase&&(_swipeResting||nowMs-_swipeLastMoveAt>SWIPE_COOLDOWN*_touchLowF()),
               anchor:cp(_swipeBase), anchorAge:_swipeBase?nowMs-_swipeBaseAt:0,
-              ref:(!cfg.touchLegacy&&_swipeLastDir)?cp(_swipeFollow):null,
-              sent:_dbgSent, sentAge:_dbgSent?nowMs-_dbgSent.at:0, legacy:!!cfg.touchLegacy };
+              ref:_swipeLastDir?cp(_swipeFollow):null,
+              sent:_dbgSent, sentAge:_dbgSent?nowMs-_dbgSent.at:0 };
     _dbgAccReset();
     return s;
 }
@@ -1237,27 +1237,19 @@ function _inControlMask(x,y){
     return false;
 }
 // THE SWIPE READER: one finger sample in, the key it asks for and the distance the threshold
-// table judges out; null while nothing is readable. Both readers open with the CHORD from the
-// anchor, classified by its angle: the first swipe of a touch, the swipe after a pause, and
-// every menu swipe (MODERN takes the axis the chord leans to and judges the portion along it;
-// LEGACY and the menus judge the chord through the dead zone). They part once a direction has
-// been sent in play:
-//   MODERN (default): three distances, each on its own axis. ACROSS the sent axis is the
-//     90-degree turn, measured from where the finger's motion last agreed with the sent
-//     direction: a slanted stroke is a slide, a stroke that has turned is a turn, and the turn
-//     costs SWIPE_N of across travel however long the stroke before it. ALONG the axis from
-//     the commit point, with the finger still running the sent way, is the same direction
-//     (the boost slide). BACK from the furthest point the finger reached is the reverse (the
-//     brake). Both references live in _swipeFollow.
-//   LEGACY (cfg.touchLegacy, DEPRECATED: still selectable for comparison, due for removal
-//     with its dead zone, SWIPE_STEP_LEGACY and its branches): the chord again, from a commit
-//     point that stays put while the
-//     finger keeps sliding, with the dead zone leaning 5 degrees toward the axis just sent. The
-//     overshoot of the previous stroke sits inside every chord, so a turn costs anything from
-//     SWIPE_N to never, and a 48px chord in the old direction reads as a boost slide first.
-// The threshold table, the anti-spiral guard and the boost gate are the same for both.
+// table judges out; null while nothing is readable. It opens with the CHORD from the anchor,
+// classified by its angle: the first swipe of a touch, the swipe after a pause, and every
+// menu swipe (in play the axis the chord leans to, judged by the portion along it; a menu
+// judges the chord through the dead zone). Once a direction has been sent in play there are
+// three distances, each on its own axis. ACROSS the sent axis is the 90-degree turn,
+// measured from where the finger's motion last agreed with the sent direction: a slanted
+// stroke is a slide, a stroke that has turned is a turn, and the turn costs SWIPE_N of
+// across travel however long the stroke before it. ALONG the axis from the commit point,
+// with the finger still running the sent way, is the same direction (the boost slide). BACK
+// from the furthest point the finger reached is the reverse (the brake). Both references
+// live in _swipeFollow.
 function _swipeRead(x,y,sf,hop){
-    if(_inPlay()&&!cfg.touchLegacy&&_swipeLastDir){
+    if(_inPlay()&&_swipeLastDir){
         const d=GDIRS[_swipeLastDir], ax=d.x!==0;
         // _swipeFollow: its ALONG coordinate is the furthest the finger has reached along the
         // sent axis; its ACROSS coordinate moves with the finger only on a checkpoint hop that
@@ -1297,18 +1289,18 @@ function _swipeRead(x,y,sf,hop){
     const dist=Math.hypot(dx,dy);
     if(dist<Math.round(SWIPE_1*sf)) return null;
     const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
-    const modern=_inPlay()&&!cfg.touchLegacy;
-    // MODERN has no dead zone: the chord's axis is whichever it leans to, and a diagonal
-    // commits as soon as SWIPE_1 of it lies along that axis. LEGACY and the menus keep the
+    const modern=_inPlay();
+    // In play there is no dead zone: the chord's axis is whichever it leans to, and a
+    // diagonal commits as soon as SWIPE_1 of it lies along that axis. The menus keep the
     // band, where a diagonal commits nothing until the chord leaves it.
     const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
     const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
     const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
     if(!modern&&ang>=dzLo&&ang<=dzHi) return null;
     const horiz=modern?ang<45:ang<dzLo;
-    // The chord's angle picks the axis (it needs the SWIPE_1 of travel to be reliable). MODERN
-    // then judges the portion of the travel along that axis, so a slanted first swipe needs
-    // SWIPE_1 in the direction being sent; LEGACY and the menus judge the chord itself.
+    // The chord's angle picks the axis (it needs the SWIPE_1 of travel to be reliable). In
+    // play the portion of the travel along that axis is judged, so a slanted first swipe
+    // needs SWIPE_1 in the direction being sent; a menu judges the chord itself.
     const along=modern?(horiz?Math.abs(dx):Math.abs(dy)):dist;
     return {key:horiz?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'), dist:along};
 }
@@ -1369,17 +1361,17 @@ document.addEventListener('touchmove',e=>{
     // from a coalesced slide. Boost is untouched here: the boost gate is anchored to touchdown,
     // so a forgotten heading cannot restart it.
     const win=SWIPE_COOLDOWN*_touchLowF();
-    const step=(_inPlay()&&!cfg.touchLegacy)?SWIPE_STEP:SWIPE_STEP_LEGACY;
+    const step=_inPlay()?SWIPE_STEP:SWIPE_STEP_MENU;
     const grain=!!_swipeLastMovePos&&moved>=step;   // this sample covers a checkpoint grain
     if(grain&&now-_swipeLastMoveAt<=win) _swipeResting=false;   // covered inside the window: the finger is moving again
     else if(now-_swipeLastMoveAt>win&&moved<SWIPE_N) _swipeResting=true;
     _dbgResting=_swipeResting; if(_swipeResting&&(cfg.debug|0)>=3) _dbgAcc.rest++;
     if(_swipeResting){
         _swipeLastDir=null; _swipeRefDir=null;
-        // MODERN reader: the anchor follows a resting finger (to the last checkpoint, at most
+        // In play the anchor follows a resting finger (to the last checkpoint, at most
         // SWIPE_STEP behind it), so a creep never accumulates into a commit and the next swipe is
-        // measured from where it starts. LEGACY and the menus keep the anchor where it is.
-        if(_inPlay()&&!cfg.touchLegacy&&_swipeLastMovePos){ _swipeBase={x:_swipeLastMovePos.x,y:_swipeLastMovePos.y}; _swipeFollow={x:_swipeBase.x,y:_swipeBase.y}; _swipeBaseAt=now; }
+        // measured from where it starts. The menus keep the anchor where it is.
+        if(_inPlay()&&_swipeLastMovePos){ _swipeBase={x:_swipeLastMovePos.x,y:_swipeLastMovePos.y}; _swipeFollow={x:_swipeBase.x,y:_swipeBase.y}; _swipeBaseAt=now; }
     }
     let hop=null;   // the step from the last checkpoint, on the sample that sets a new one
     if(!_swipeLastMovePos||grain){
@@ -1387,7 +1379,7 @@ document.addEventListener('touchmove',e=>{
         _swipeLastMoveAt=now; _swipeLastMovePos={x:t.clientX,y:t.clientY};
     }
     const sf=_touchSensF();
-    // MODERN: the slide that arms the boost counts from the boost gate, never before it. While
+    // The slide that arms the boost counts from the boost gate, never before it. While
     // a touch that changed axis is younger than BOOST_GATE_MS, or the axis changed
     // less than TURN_GATE_MS ago, BASE
     // follows the finger, so nothing pushed inside a guard is credited to a slide. Steering is
@@ -1395,16 +1387,16 @@ document.addEventListener('touchmove',e=>{
     // and after a commit the turn and the brake read REF. Once the guard is over, 48 px along the
     // direction arm the boost.
     const boostGuard=(_swipeTurnAt!==-Infinity&&now-_swipeTouchStartAt<BOOST_GATE_MS*_touchLowF())||now-_swipeTurnAt<TURN_GATE_MS*_touchLowF();
-    if(_inPlay()&&!cfg.touchLegacy&&_swipeLastDir&&boostGuard){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; }
+    if(_inPlay()&&_swipeLastDir&&boostGuard){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; }
     const rd=_swipeRead(t.clientX,t.clientY,sf,hop);
     if(!rd) return;
     const key=rd.key, dist=rd.dist;
-    // MODERN: a first movement ALONG THE HEADING, after touchdown or a rest, is a slide from where
+    // A first movement ALONG THE HEADING, after touchdown or a rest, is a slide from where
     // it started. Its first SWIPE_1 only re-detect a direction the snake already has (the sim
     // ignores the key), so BASE stays put and the boost arms 48 px from the start of the movement,
     // the same 48 a slide after a turn costs. A first movement in any other direction is a turn:
     // it commits at SWIPE_1 and the slide counts from there.
-    const alongHeading=(()=>{ if(!_inPlay()||cfg.touchLegacy||_swipeLastDir) return false; const h=_swipeIntentDir?GDIRS[_swipeIntentDir]:_myDir(), kd=GDIRS[key]; return !!(h&&kd&&h.x===kd.x&&h.y===kd.y); })();
+    const alongHeading=(()=>{ if(!_inPlay()||_swipeLastDir) return false; const h=_swipeIntentDir?GDIRS[_swipeIntentDir]:_myDir(), kd=GDIRS[key]; return !!(h&&kd&&h.x===kd.x&&h.y===kd.y); })();
     // One definition of "in a menu", shared by the vertical step-sizing here and the horizontal
     // one-gesture handling below, so every menu scrolls by the same rule -- no per-screen tuning.
     const inMenu=!_inPlay()&&phase!=='credits';
@@ -1437,7 +1429,7 @@ document.addEventListener('touchmove',e=>{
     if(_inPlay()) _dbgTurnCtx={dist, run:_turnRun, thresh};   // DEBUG L3: hand this gesture's distance/run/guard to the shared steer logger (fires inside handleKey)
     // Only an axis change starts a guard. A brake and the forward push stay on one axis.
     const priorDir=_swipeIntentDir?GDIRS[_swipeIntentDir]:_myDir();
-    if(_inPlay()&&!cfg.touchLegacy&&priorDir&&GDIRS[key]&&(priorDir.x*GDIRS[key].y-priorDir.y*GDIRS[key].x!==0)) _swipeTurnAt=now;
+    if(_inPlay()&&priorDir&&GDIRS[key]&&(priorDir.x*GDIRS[key].y-priorDir.y*GDIRS[key].x!==0)) _swipeTurnAt=now;
     if(_inPlay()) _swipeIntentDir=key;
     handleKey(_dialSwipe(key),null);
     if(_inPlay()){
@@ -1447,9 +1439,8 @@ document.addEventListener('touchmove',e=>{
             // duel snake -- gameBoostEnd routes to the right player in both modes.
             const _mb=_myBoost();
             if(_swipeLastDir&&_isOpp(key,_swipeLastDir)){gameBoostEnd(0);}
-            // MODERN guards only an axis change; a fresh same-heading slide counts
-            // immediately. LEGACY retains its original unconditional touchdown gate.
-            else if(_swipeLastDir&&key===_swipeLastDir){ if(cfg.touchLegacy?now-_swipeTouchStartAt>=BOOST_GATE_MS*_touchLowF():!boostGuard) gameBoostStart(0,d,true); }
+            // Only an axis change is guarded; a fresh same-heading slide counts immediately.
+            else if(_swipeLastDir&&key===_swipeLastDir){ if(!boostGuard) gameBoostStart(0,d,true); }
             else if(!(_mb.on&&_mb.dir&&d.x===_mb.dir.x&&d.y===_mb.dir.y)){gameBoostEnd(0);} // first swipe or 90-deg turn: no boost
         }
     }

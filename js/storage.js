@@ -83,7 +83,7 @@ function _prefersReducedMotion() {
 }
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
-             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, touchLegacy:false, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, smoothMotion:0, reduceMotion:_prefersReducedMotion(),
+             handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, smoothMotion:0, reduceMotion:_prefersReducedMotion(),
              autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, privateDuels:false, cfgVer:3,
              itemReg:{}, mintQ:[], claimQ:[], itemsSeeded:0 };
 }
@@ -102,7 +102,6 @@ function _sanitizeCfg() {
     cfg.turbo       = cfg.turbo !== false;
     cfg.touchSelect = !!cfg.touchSelect;
     cfg.touchSens   = idx(cfg.touchSens, 3, 1);   // 0 LOW / 1 MED (default) / 2 HIGH swipe sensitivity
-    cfg.touchLegacy = !!cfg.touchLegacy;          // false = MODERN swipe reader, true = LEGACY, deprecated (js/input.js _swipeRead)
     cfg.keepAwake   = cfg.keepAwake !== false;    // hold a screen wake lock during active play
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;
