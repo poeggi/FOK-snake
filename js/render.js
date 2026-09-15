@@ -991,7 +991,7 @@ function drawAccessoryWizard(hx, hy) {
 // per-segment hsl() strings aren't reallocated every frame. Zero visual change;
 // falls back to rr() if Path2D is unavailable.
 const _mkSegPath = r => {
-    if (typeof Path2D === 'undefined') return null;
+    if(typeof Path2D === 'undefined') return null;
     const p = new Path2D(), w = CS-2, h = CS-2;
     p.moveTo(r,0); p.lineTo(w-r,0); p.quadraticCurveTo(w,0,w,r);
     p.lineTo(w,h-r); p.quadraticCurveTo(w,h,w-r,h);
@@ -1002,9 +1002,9 @@ const _mkSegPath = r => {
 const _segPathBody = _mkSegPath(3), _segPathHead = _mkSegPath(5);
 let _bodyColCache = { h:-1, len:-1, cols:null };
 function _bodyCols(len, h) {
-    if (_bodyColCache.h !== h || _bodyColCache.len !== len) {
+    if(_bodyColCache.h !== h || _bodyColCache.len !== len) {
         const cols = new Array(len);
-        for (let j=0; j<len; j++) { const l = Math.round(41*(0.5+0.5*(1-j/Math.max(len,1)))); cols[j] = `hsl(${h},65%,${l}%)`; }
+        for(let j=0; j<len; j++) { const l = Math.round(41*(0.5+0.5*(1-j/Math.max(len,1)))); cols[j] = `hsl(${h},65%,${l}%)`; }
         _bodyColCache = { h, len, cols };
     }
     return _bodyColCache.cols;
@@ -1455,7 +1455,7 @@ function _drawTimeCrystal(now) {
 function drawPixelIcon(x, y, icon, cs) {
     icon.d.forEach((row, ry) => {
         let rx = 0;
-        for (const c of row) {
+        for(const c of row) {
             if(c !== '.' && icon.p[c]){
                 ctx.fillStyle = icon.p[c];
                 ctx.fillRect(Math.round(x+rx*cs), Math.round(y+ry*cs), Math.ceil(cs), Math.ceil(cs));
@@ -1498,12 +1498,12 @@ let bonusAt = -9999, bonusLabel = '';
 function showBonus(now, label) { bonusAt = now; bonusLabel = label; }
 
 function spawnFireworks(now) {
-    for (let b = 0; b < 8; b++) {
+    for(let b = 0; b < 8; b++) {
         const delay = b * 310 + Math.random() * 80;
         const x = 55 + Math.random() * (CW - 110);
         const y = 22 + Math.random() * (CH * 0.62);
         const col = FIREWORK_COLS[b % FIREWORK_COLS.length];
-        for (let i = 0; i < 22; i++) {
+        for(let i = 0; i < 22; i++) {
             const angle = (i / 22) * Math.PI * 2;
             const spd = 1.7 + Math.random() * 2.4;
             fireworks.push({

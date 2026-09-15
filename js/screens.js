@@ -97,16 +97,16 @@ function drawSplash(now) {
     let slotFlashF = 0, coinClipped = false;
     let t = 0; // only valid when !_splashExiting; used for INSERT COIN blink
 
-    if (_splashExiting) {
+    if(_splashExiting) {
         const exitMs = now - _splashExitAt;
         // Coin snaps into slot over 80ms then disappears below clip rect
-        if (exitMs < 80) {
+        if(exitMs < 80) {
             showCoin = true;
             coinY = (slotY - 7) + 28 * (exitMs / 80);   // from the 1/4-sunk rest, snap the rest of the way in
             scaleX = 1; spinAngle = 0; coinClipped = true;
         }
         // Sparks: fire at 40ms, fade over 420ms
-        if (exitMs >= 40) slotFlashF = Math.max(0, 1 - (exitMs - 40) / 420);
+        if(exitMs >= 40) slotFlashF = Math.max(0, 1 - (exitMs - 40) / 420);
     } else {
         const elapsed = _splashFast
             ? _splashFastBase + (now - _splashFastStart) / 1000 * 2
@@ -119,7 +119,7 @@ function drawSplash(now) {
         // The idle loop only DROPS the coin; it comes to rest a QUARTER-sunk into the slot
         // (clipped at the mouth). The real insert (snap-in + spark burst) happens exclusively
         // on the button press -- see the _splashExiting branch above.
-        if (t >= T_DROP) {
+        if(t >= T_DROP) {
             showCoin = true;
             coinClipped = true;   // hide the quarter that has entered the slot mouth (clip at slotY)
             coinY = dropT < DROP
@@ -135,7 +135,7 @@ function drawSplash(now) {
 
     // Pixelated sparks burst from slot when coin enters
     // spark speed (spd) >= 90 renders bright white; slower sparks render gold
-    if (slotFlashF > 0) {
+    if(slotFlashF > 0) {
         
         const grav = 55, sp = 1 - slotFlashF;
         ctx.save();
@@ -150,9 +150,9 @@ function drawSplash(now) {
         ctx.restore();
     }
 
-    if (showCoin) {
+    if(showCoin) {
         ctx.save();
-        if (coinClipped) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
+        if(coinClipped) { ctx.beginPath(); ctx.rect(0, 0, CW, slotY); ctx.clip(); }
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.beginPath(); ctx.ellipse(coinX+2, coinY+4, 14*scaleX, 4, 0, 0, Math.PI*2); ctx.fill();
         ctx.translate(coinX, coinY);
@@ -174,8 +174,8 @@ function drawSplash(now) {
     }
 
     // INSERT COIN blink and bottom hint: suppressed during exit sequence
-    if (!_splashExiting) {
-        if (Math.floor(t) % 2 === 1) {
+    if(!_splashExiting) {
+        if(Math.floor(t) % 2 === 1) {
             ctx.shadowColor = '#ffff00'; ctx.shadowBlur = GLOW.TEXT;
             ct('INSERT COIN', CW/2, 344, '#ffff00', FONT.MENU);
             ctx.shadowBlur = 0;
@@ -972,12 +972,12 @@ function drawCredits() {
     drawGrid(); drawOvBg(0.93);
     ctx.save(); ctx.beginPath(); ctx.rect(0,0,CW,CH-24); ctx.clip();
     let y = creditsScroll;
-    for (const [type, val] of CRED) {
-        if (type === 'gap') { y += val; continue; }
+    for(const [type, val] of CRED) {
+        if(type === 'gap') { y += val; continue; }
         const h = CRED_H[type] || 22;
         const yc = y + h/2;
-        if (y > -50 && y < CH + 20) {
-            switch (type) {
+        if(y > -50 && y < CH + 20) {
+            switch(type) {
                 case 'title':
                                         ctg(val, CW/2, yc, '#7fff7f', FONT.DISPLAY, GLOW.HERO); break;
                 case 'sub':
@@ -1006,7 +1006,7 @@ function drawCredits() {
     }
     ctx.restore();
     creditsScroll -= creditsSpeed;
-    if (creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
+    if(creditsScroll < -CRED_TOTAL_H) creditsScroll = CH + 40;  // loop
     ct('UP:slow  DN:fast  ||:pause  A:exit', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 

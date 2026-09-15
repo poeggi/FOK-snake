@@ -47,7 +47,7 @@ let _kbBoostW=null;     // same for WASD / duel P2
 let _splashKeyHeld = false;   // splash key-repeat guard (pure input debounce)
 
 function triggerSplashExit() {
-    if (phase !== 'splash' || _splashExiting) return;
+    if(phase !== 'splash' || _splashExiting) return;
     _splashFast = false; _splashFastStart = 0; _splashFastBase = 0;
     _splashExiting = true;
     _splashExitAt = simNow;
@@ -129,7 +129,7 @@ function _submitName(){
         return;
     }
     if(!nameStr.trim()) return;
-    try{localStorage.setItem('lastSName',nameStr);}catch (e){}
+    try{localStorage.setItem('lastSName',nameStr);}catch(e){}
     netNameChanged();
     if(entryMode==='user'){ _entryLeave(_entryTo); Snd.sfxPlay('select',cfg.music); return; }
     if(_scoreTainted){   // x10 debug run: never touches the local board or the global one
@@ -630,7 +630,7 @@ const UI_INPUT = {
             if(onGear) return;                  // gear holds only owned wearables -- nothing to buy
             const si=cfg.shopItems||(cfg.shopItems={});
             if(_cachedFOKoins>=item.price&&(item.repeatable||!si[item.id])){
-                _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch (e) {}
+                _cachedFOKoins-=item.price; try { localStorage.setItem(FK_KEY,String(_cachedFOKoins)); } catch(e) {}
                 // A wearable purchase goes through the registry (it needs a server instance
                 // id, queued if we are offline); a repeatable is a consumable the server
                 // never tracks and just flips its own flag.
@@ -783,25 +783,25 @@ function gameBoostEnd(p){ const i = _armIndex(p); if(i >= 0) _wsend({ t:'arm', p
 // ================================================================
 function handleKey(key, pde) {
     // Let browser handle F-keys (F5 reload, F11 fullscreen, etc.)
-    if (key.length > 1 && !GAME_KEYS.has(key)) return;
+    if(key.length > 1 && !GAME_KEYS.has(key)) return;
     _uiDirty = true;   // any input redraws the frozen/static screens next frame
-    if (phase === 'splash') {
+    if(phase === 'splash') {
         // Capture only the meaningful keys: arrows fast-forward the coin drop,
         // Space/Enter start the game. Everything else is ignored (no preventDefault)
         // so browser/OS shortcuts keep working on the splash screen.
-        if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
-            if (!_splashFast && !_splashExiting) {
+        if(key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+            if(!_splashFast && !_splashExiting) {
                 _splashFast = true;
                 _splashFastStart = simNow;
                 _splashFastBase = (simNow - phaseAt) / 1000;
             }
             return;
         }
-        if (key === 'Enter' || key === ' ') { triggerSplashExit(); if (pde) pde(); return; }
+        if(key === 'Enter' || key === ' ') { triggerSplashExit(); if(pde) pde(); return; }
         return;
     }
-    if (_splashKeyHeld) return;
-    if (performance.now() - _splashLeftAt < 200) return;   // 200ms post-splash debounce, on the WALL clock (simNow gets reset by a game start)
+    if(_splashKeyHeld) return;
+    if(performance.now() - _splashLeftAt < 200) return;   // 200ms post-splash debounce, on the WALL clock (simNow gets reset by a game start)
 
     // Global: mute (suppressed during name entry so M is typeable)
     if((key==='m'||key==='M')&&phase!=='nameEntry'){ toggleMute(); return; }
@@ -966,23 +966,23 @@ if(typeof window !== 'undefined' && window.addEventListener){
 // triggerSplashExit() calls Snd.audioResume() inside a touchstart, not a pointerdown
 // (iOS Safari only honours AudioContext unlock from touchstart, not pointerdown).
 const _canvasDown = e => {
-    if (e.pointerType === 'touch') return;
+    if(e.pointerType === 'touch') return;
     e.preventDefault();
     // A camera-viewfinder click cycles the camera (on pointerup) -- it must NOT also add a
     // character to the friend ID. This guard was missing, so clicking the camera advanced the ID.
-    if (_scanFor() && _scanInVF(e.clientX, e.clientY)) return;
+    if(_scanFor() && _scanInVF(e.clientX, e.clientY)) return;
     // A pointer click (mouse / TV remote) acts as OK: start on splash, add-a-letter
     // in name entry, confirm/select in every other menu. Not during gameplay.
-    if (phase === 'splash') { splashFastStart(); }
-    else if (phase === 'nameEntry') { handleKey('NameAdd', null); }
-    else if (!_inPlay()) { handleKey('Enter', null); }
+    if(phase === 'splash') { splashFastStart(); }
+    else if(phase === 'nameEntry') { handleKey('NameAdd', null); }
+    else if(!_inPlay()) { handleKey('Enter', null); }
 };
 const _canvasUp = e => {
-    if (e.pointerType === 'touch') return;
-    if (_scanFor() && _scanTapAt(e.clientX, e.clientY)) return;
-    if (phase === 'splash') { triggerSplashExit(); }
+    if(e.pointerType === 'touch') return;
+    if(_scanFor() && _scanTapAt(e.clientX, e.clientY)) return;
+    if(phase === 'splash') { triggerSplashExit(); }
 };
-if (typeof window !== 'undefined' && window.PointerEvent) {
+if(typeof window !== 'undefined' && window.PointerEvent) {
     canvas.addEventListener('pointerdown', _canvasDown);
     canvas.addEventListener('pointerup', _canvasUp);
 } else {
@@ -995,7 +995,7 @@ if (typeof window !== 'undefined' && window.PointerEvent) {
     canvas.addEventListener('mousedown', _canvasDown);
     canvas.addEventListener('mouseup', _canvasUp);
 }
-canvas.addEventListener('touchstart',  e => { if (phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
+canvas.addEventListener('touchstart',  e => { if(phase === 'splash') { splashFastStart(); e.preventDefault(); } }, { passive: false });
 const SWIPE_1=16, SWIPE_N=24, SWIPE_SAME=48, SWIPE_GUARD=64, DZ_LO=40, DZ_HI=50, SWIPE_COOLDOWN=50, BOOST_GATE_MS=100, TURN_GATE_MS=50;   // the boost guard after each committed axis change
 const _HOP_TAN=Math.tan(DZ_HI*Math.PI/180);   // a checkpoint hop within DZ_HI of the sent axis still agrees with the sent direction
 // The checkpoint grain: a finger that has not travelled this far since its last checkpoint within
@@ -1590,26 +1590,26 @@ document.getElementById('btn-esc').addEventListener('click',()=>handleKey('Escap
 // ================================================================
 const nameInp = document.getElementById('name-inp');
 nameInp.addEventListener('input', e => {
-    if (phase !== 'nameEntry') { nameInp.value = ''; return; }   // discard stray text typed while silently focused
-    if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward') {
+    if(phase !== 'nameEntry') { nameInp.value = ''; return; }   // discard stray text typed while silently focused
+    if(e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward') {
         handleKey('Backspace', null);
         nameInp.value = ''; return;
     }
     const val = nameInp.value.toUpperCase();
-    for (const ch of val) {
-        if (_entryChars().includes(ch)) { handleKey(ch, null); }
+    for(const ch of val) {
+        if(_entryChars().includes(ch)) { handleKey(ch, null); }
     }
     nameInp.value = '';
 });
 nameInp.addEventListener('keydown', e => {
-    if (phase !== 'nameEntry') return;
+    if(phase !== 'nameEntry') return;
     // This handler owns keystrokes while the (focused) input drives name entry. Without
     // stopPropagation the same event bubbles to the document keydown listener and is
     // handled AGAIN -- on iPad the on-screen return key then submitted (-> scores) and
     // immediately confirmed out of the scores screen (-> menu) in one press.
     e.stopPropagation();   // the document keydown listener must not ALSO handle this
-    if (e.key === 'Enter') { handleKey('Enter', () => e.preventDefault()); }
-    if (e.key === 'Backspace') { e.preventDefault(); handleKey('Backspace', null); }
+    if(e.key === 'Enter') { handleKey('Enter', () => e.preventDefault()); }
+    if(e.key === 'Backspace') { e.preventDefault(); handleKey('Backspace', null); }
     // Do NOT preventDefault a character key: that cancels its insertion into the field,
     // so the 'input' event never fires and the letter is lost. The 'input' handler is the
     // one that records characters; let the key land. (iPad hardware/soft keyboard both hit
@@ -1997,7 +1997,7 @@ function onBgHide() {
     // freezing our sim while the peer plays on is a guaranteed desync, which is why
     // togglePause() refuses online too.
     const netLive = netGameActive();
-    if (phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicMute('pause'); }
+    if(phase === 'playing' || (phase === 'duel' && !netLive)) { _wsend({t:'pause'}); Snd.musicMute('pause'); }
     // A hidden tab cannot forward packets on time, and everyone downstream of us would
     // spend seconds discovering that. Drop the relay duty the moment we go away; nothing
     // about our OWN watch or duel changes, only what we serve.
@@ -2005,7 +2005,7 @@ function onBgHide() {
     Snd.audioSuspend();
 }
 function onBgShow() {
-    if (cfg.music) Snd.audioResume();
+    if(cfg.music) Snd.audioResume();
     // Re-arm the sim-worker watchdog. While hidden, RAF (so loop()) and the worker's own
     // timers are suspended, so _lastWorkerFrameAt predates the whole background span. The
     // first loop() after we return would otherwise read that stale gap as >3s and flash a
@@ -2014,7 +2014,7 @@ function onBgShow() {
     _lastWorkerFrameAt = performance.now();
     wakeReconcile();   // the OS drops the wake lock while hidden; take it again if we are back in play
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) onBgHide(); else onBgShow(); });
+document.addEventListener('visibilitychange', () => { if(document.hidden) onBgHide(); else onBgShow(); });
 window.addEventListener('pagehide', onBgHide);
 
 // Screen wake lock: keep the display lit during active play (opt-out via GAME > KEEP SCREEN AWAKE).

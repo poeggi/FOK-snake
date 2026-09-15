@@ -80,13 +80,13 @@ try { if(location.hash === '#debug' && (cfg.debug||0) < 1){ cfg.debug = 1; saveC
 let _inviteFid = null;
 try {
     const fm = /^#friend=([0-9a-f]{8})$/.exec(location.hash);
-    if (fm) {
+    if(fm) {
         addFriend(fm[1]);
         const standalone = (navigator.standalone === true) ||
             (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
         const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
             (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-        if (ios && !standalone) _inviteFid = fm[1];
+        if(ios && !standalone) _inviteFid = fm[1];
     }
 } catch(e) {}
 // Arrived via a tournament link (the QR on the JOIN CODE screen). The code is PARKED, not
@@ -95,7 +95,7 @@ try {
 let _tourneyLink = '';
 try {
     const tm = /^#tourney=([A-Za-z0-9]{4,12})$/.exec(location.hash);
-    if (tm) _tourneyLink = tm[1].toUpperCase();
+    if(tm) _tourneyLink = tm[1].toUpperCase();
 } catch(e) {}
 // Arrived via an EVENT link -- the printed poster QR (16-char key) or the live pass QR a
 // member is holding up (6 chars). PARKED like a tournament code and for the same reason:
@@ -105,7 +105,7 @@ try {
 let _eventLink = null;
 try {
     const em = EVENT_HASH_RE.exec(location.hash);
-    if (em) _eventLink = em[1];   // the code exactly as scanned -- the server reads the event out of it
+    if(em) _eventLink = em[1];   // the code exactly as scanned -- the server reads the event out of it
 } catch(e) {}
 let inviteSel = 0, _inviteMsg = '', _inviteMsgAt = 0;
 let _myIdBack = 'multiplayer';   // where the MY ID screen returns to (1vs1 menu or SETTINGS > USER)
@@ -133,13 +133,13 @@ const SPLASH_DARK_S = 1.0;   // the cycle's dark lead: no coin, no blink, nothin
 function splashClock(now){ return Math.max(0, (now - phaseAt) / 1000 - SPLASH_HOLD_S); }
 function splashFastStart(){ _splashFast = true; _splashFastStart = simNow; _splashFastBase = splashClock(simNow); }
 function updateSplashExit() {
-    if (phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
+    if(phase === 'splash' && _splashExiting && simNow - _splashExitAt >= T(30)) {
         _splashExiting = false;
         const dest = _inviteFid ? 'duelInvite' : _tourneyLink ? 'tourneyLobby' : _eventLink ? 'eventPage' : 'menu';
         phase = dest;
         inviteSel = 0; _splashLeftAt = performance.now();   // wall clock: simNow is reset by startGame/startDuel (see input.js debounce)
-        if (phase === 'tourneyLobby') tourneyEnter();
-        if (phase === 'eventPage'){ _eventBack = 'menu'; eventEnter(); }
+        if(phase === 'tourneyLobby') tourneyEnter();
+        if(phase === 'eventPage'){ _eventBack = 'menu'; eventEnter(); }
         // Hold menu music briefly for the clock sync (started during the coin drop), so it
         // opens on the globally-shared bar. Only when online and not yet synced; else no wait.
         if(_netOk() && (netPts() == null))
@@ -154,7 +154,7 @@ function updateSplashExit() {
         // LAST in this function on purpose, and off `dest` rather than `phase`: the sim owns
         // `phase` and the menu hand-over above writes it again on the no-worker fallback, so
         // reading it here would both undo an earlier hand-over and lose the deep link.
-        if (dest === 'menu' && !getPlayerName()) _entryOpen('user', '', 'menu');
+        if(dest === 'menu' && !getPlayerName()) _entryOpen('user', '', 'menu');
     }
 }
 // Set the in-process tick phase to the shared grid (mid-window firing), only on an
@@ -259,9 +259,9 @@ function gameTrack() { return cfg.musicStyle === 0 ? 'game'        : 'classicGam
 // (e.g. a fresh start that pinned the track while still suspended by the autoplay gate).
 // It hands us the track id; menu tracks seek to absolute PTS, the game track to its
 // start-PTS offset. null when unsynced/offline -> the audio layer leaves it be.
-if (typeof Snd !== 'undefined' && Snd.setMusicSeekProvider) Snd.setMusicSeekProvider((trackId) => {
-    if (netPts() == null) return null;
-    if (trackId === 'ambient' || trackId === 'classicMenu')
+if(typeof Snd !== 'undefined' && Snd.setMusicSeekProvider) Snd.setMusicSeekProvider((trackId) => {
+    if(netPts() == null) return null;
+    if(trackId === 'ambient' || trackId === 'classicMenu')
         return netMenuSeekSec();
     return netMusicSeekSec();
 });
@@ -417,7 +417,7 @@ function _debugState(){
 }
 function exportDebugInfo(){
     try { _downloadJSON('snake-debug-info.json', _debugState()); _dataMsg='DEBUG INFO SAVED'; _dataMsgAt=_msgNow(); }
-    catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=_msgNow(); }
+    catch(e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=_msgNow(); }
 }
 // Debug snapshot -> the cloud (POST /debug/submit.php): the full state plus a screenshot.
 // The debug overlays are HTML elements, so canvas.toDataURL() captures the game WITHOUT them.
@@ -632,7 +632,7 @@ function exportFpsLog(){
             worstSustainedFps:(_fpsWorstAvg===Infinity?null:_fpsWorstAvg),
             maxSustainedFps:(_fpsMaxAvg||null), recording:_fpsRec, device:_canvasInfo() });
         _dataMsg='FPS LOG SAVED'; _dataMsgAt=_msgNow();
-    } catch (e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=_msgNow(); }
+    } catch(e) { _dataMsg='EXPORT FAILED'; _dataMsgAt=_msgNow(); }
 }
 
 // ================================================================
@@ -759,7 +759,7 @@ function _openBox(box){
         saveCfg(); _boxOpenAt=_msgNow(); Snd.sfxPlay('unbox',cfg.music); return;
     }
     if(_cachedFOKoins < box.price){ Snd.sfxPlay('fail',cfg.music); return; }
-    _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch (e){}
+    _cachedFOKoins -= box.price; try{ localStorage.setItem(FK_KEY,String(_cachedFOKoins)); }catch(e){}
     const res=rollBox(box);
     if(res.type==='coins'){ addFOKoins(res.amount); _boxReward={kind:'coins',amount:res.amount}; }
     else {
@@ -1434,23 +1434,23 @@ function _demoteWorker(){
 const _mirrorSnake = [];
 function _unpackSnap(snap){
     const sf = snap.snake;
-    if (sf instanceof Int16Array) {
+    if(sf instanceof Int16Array) {
         const n = sf.length / 2;
-        if (_mirrorSnake.length > n) _mirrorSnake.length = n;
-        for (let i = 0; i < n; i++) {
+        if(_mirrorSnake.length > n) _mirrorSnake.length = n;
+        for(let i = 0; i < n; i++) {
             const o = _mirrorSnake[i] || (_mirrorSnake[i] = {x:0,y:0});
             o.x = sf[i*2]; o.y = sf[i*2+1];
         }
         snap.snake = _mirrorSnake;
     }
     const bf = snap.bars;
-    if (bf == null) snap.bars = bars;   // unchanged since last post: keep the mirror's copy
-    else if (bf instanceof Int16Array) {
+    if(bf == null) snap.bars = bars;   // unchanged since last post: keep the mirror's copy
+    else if(bf instanceof Int16Array) {
         const arr = [];
-        for (let i = 0; i < bf.length; i += 6) {
+        for(let i = 0; i < bf.length; i += 6) {
             const o = { x: bf[i], y: bf[i+1], fragile: !!bf[i+2] };
-            if (bf[i+3]) o.paired = true;
-            if (bf[i+4] >= 0) o.pairEnd = { x: bf[i+4], y: bf[i+5] };
+            if(bf[i+3]) o.paired = true;
+            if(bf[i+4] >= 0) o.pairEnd = { x: bf[i+4], y: bf[i+5] };
             arr.push(o);
         }
         snap.bars = arr;   // rare (level begin / crush): a fresh array is fine
@@ -1506,7 +1506,7 @@ function checkWorkerStall(now){
 }
 _initWorker();
 
-if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(() => requestAnimationFrame(loop));
+if(document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(() => requestAnimationFrame(loop));
 else requestAnimationFrame(loop);
 
 // Align SND button and FPS to the actual canvas top/bottom edges in landscape.
@@ -1544,7 +1544,7 @@ const _layoutT0 = performance.now();
 const LAYOUT_TRACE_MAX = 24;
 const _layoutTrace = [];
 function _layoutNote(what, extra){
-    if (_layoutTrace.length >= LAYOUT_TRACE_MAX) return;
+    if(_layoutTrace.length >= LAYOUT_TRACE_MAX) return;
     const vv = window.visualViewport;
     const e = { t: Math.round(performance.now() - _layoutT0), what,
                 de: [document.documentElement.clientWidth, document.documentElement.clientHeight],
@@ -1553,7 +1553,7 @@ function _layoutNote(what, extra){
                 so: (typeof screen !== 'undefined' && screen.orientation && screen.orientation.type) || null,
                 mq: (window.matchMedia ? window.matchMedia('(orientation: landscape)').matches : null),
                 lsq: _lsq.matches, dpr: window.devicePixelRatio };
-    if (extra) Object.assign(e, extra);
+    if(extra) Object.assign(e, extra);
     _layoutTrace.push(e);
 }
 let _safeIns = { t:0, r:0, b:0, l:0 }, _notchSide = '-';
@@ -1562,7 +1562,7 @@ function layout() {
         const wrap = canvas.parentElement;                 // #wrap
         const vpW = document.documentElement.clientWidth, vpH = document.documentElement.clientHeight;
         let wW, wH, m, scale, mode;
-        if (!_lsq.matches) {
+        if(!_lsq.matches) {
             // COLUMN (desktop + portrait touch): #wrap shrink-wraps the JS-sized canvas, so the
             // body groups [HUD + SND/FPS + canvas + gamepad] and centres (desktop) / bottom-
             // aligns (portrait). Measuring #wrap would be circular now, so fit into the viewport
@@ -1581,7 +1581,7 @@ function layout() {
             wW = wrap.clientWidth;
             const wrapTop = wrap.getBoundingClientRect().top;
             wH = Math.min(wrap.clientHeight, Math.max(0, vpH - wrapTop));
-            if (wW <= 0 || wH <= 0) return;
+            if(wW <= 0 || wH <= 0) return;
             m = Math.min(48, Math.max(4, Math.round(Math.min(wW, wH) * 0.02)));
             scale = Math.min((wW - 2*m) / CW, (wH - 2*m) / CH, CANVAS_MAX_H / CH);
         }
@@ -1592,7 +1592,7 @@ function layout() {
         // DEBUG LEVEL 2+ gate on drawing lives in the overlay.)
         _layoutDbg = { mode, vpW, vpH, wW, wH, m, scale, cw, ch: CH*scale };
         _layoutNote('layout', { mode, wW: Math.round(wW), wH: Math.round(wH), scale: +scale.toFixed(3), cw: Math.round(cw), same: Math.abs(cw - _lastCw) < 0.5 });
-        if (Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
+        if(Math.abs(cw - _lastCw) < 0.5) return;          // converged -> stop (breaks RO loops)
         _lastCw = cw;
         canvas.style.width = cw + 'px';
         canvas.style.height = (CH * scale) + 'px';
@@ -1671,31 +1671,31 @@ function _syncSafeArea(){
 // Screen orientation does not determine the available viewport (e.g. iPad split view).
 const _reflow = () => { _syncSafeArea(); layout(); syncLandscapePanels(); };
 window.addEventListener('resize', () => { _layoutNote('resize'); _reflow(); });
-if (typeof screen !== 'undefined' && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', _reflow);
-if (window.ResizeObserver) {
+if(typeof screen !== 'undefined' && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', _reflow);
+if(window.ResizeObserver) {
     const ro = new ResizeObserver(_reflow);
     [document.documentElement, canvas.parentElement, document.getElementById('hud'),
-        document.getElementById('topbar'), document.getElementById('gamepad')].forEach(el => { if (el) ro.observe(el); });
+        document.getElementById('topbar'), document.getElementById('gamepad')].forEach(el => { if(el) ro.observe(el); });
 }
 requestAnimationFrame(_reflow);
-if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_reflow);
+if(document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(_reflow);
 
 // The version of the CODE that is actually running -- stamped into APP_VERSION (assets.js)
 // by the pre-commit hook alongside sw.js, so the display names the bundle this page was
 // served from, whatever worker is active (a hard reload bypasses the worker and runs newer
 // code than the active cache name says). Cache name kept only as a fallback.
 let _swVersion = (typeof APP_VERSION === 'string' && APP_VERSION) ? APP_VERSION : '?';
-if (_swVersion === '?' && 'caches' in window) {
+if(_swVersion === '?' && 'caches' in window) {
     caches.keys().then(keys => {
         const k = keys.find(k => k.startsWith('snake-'));
-        if (k) _swVersion = k.replace('snake-', '');
+        if(k) _swVersion = k.replace('snake-', '');
     }).catch(() => {});
 }
 
 // The registration itself, and the first update check, are js/sw-update.js's -- the first
 // script on the page, so the check leaves before the rest of the bundle is parsed. This is
 // what happens AFTER: the periodic checks, and the reload that puts a new worker on screen.
-if ('serviceWorker' in navigator && _swReg) {
+if('serviceWorker' in navigator && _swReg) {
     const wasControlled = !!navigator.serviceWorker.controller;
     // Update checks: once per minute, plus immediately on regaining focus when
     // the last check is over a minute old -- but ONLY on screens where the
@@ -1704,30 +1704,30 @@ if ('serviceWorker' in navigator && _swReg) {
     const _updSafe = new Set(['splash']);   // update checks (and their auto-reload) happen ONLY on the splash
     let _lastUpd = Date.now();
     const _updCheck = (reg) => {
-        if (Date.now() - _lastUpd < 60000) return;
-        if (!navigator.onLine || inGame || !_updSafe.has(phase)) return;
+        if(Date.now() - _lastUpd < 60000) return;
+        if(!navigator.onLine || inGame || !_updSafe.has(phase)) return;
         _lastUpd = Date.now();
         reg.update().catch(() => {});
     };
     _swReg.then(reg => {
-        if (!reg) return;
-        if (typeof setInterval === 'function') setInterval(() => _updCheck(reg), 60000);
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) _updCheck(reg); });
+        if(!reg) return;
+        if(typeof setInterval === 'function') setInterval(() => _updCheck(reg), 60000);
+        document.addEventListener('visibilitychange', () => { if(!document.hidden) _updCheck(reg); });
     }).catch(() => {});
     let _reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (_reloading || !wasControlled) return;
+        if(_reloading || !wasControlled) return;
         // Only auto-reload from the splash, so a late-activating worker can't yank the player
         // out of a menu or run. Off-splash the update applies on the next cold start, where
         // the new worker already controls the page from its first byte.
-        if (!_updSafe.has(phase) || inGame) return;
+        if(!_updSafe.has(phase) || inGame) return;
         // On iOS navigator.onLine reads true on a captive/dead-uplink wifi, so a worker that
         // re-activates each load could reload the splash forever. sessionStorage (cleared on a
         // real cold start) rate-limits the auto-reload without blocking a genuine update.
         try {
-            if (Date.now() - (+sessionStorage.getItem('swReloadAt') || 0) < 30000) return;
+            if(Date.now() - (+sessionStorage.getItem('swReloadAt') || 0) < 30000) return;
             sessionStorage.setItem('swReloadAt', String(Date.now()));
-        } catch (e) {}
+        } catch(e) {}
         _reloading = true;
         window.location.reload();
     });

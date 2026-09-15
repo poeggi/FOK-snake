@@ -39,16 +39,16 @@ const EV_STEP_MS_MIN = 2000, EV_STEP_MS_MAX = 120000;
 // THE WHOLE OF IT, and all of it is a picture of the last answer rather than a
 // record of anything. _evList is what the `events` flag on hello/poll last said;
 // _ev is the event page's own read. Both are dropped when the screen closes.
-var _ev = null;          // the open event page's `state` answer
-var _evList = [];        // the caller's rows, from hello/poll -- the menu entry reads this
-var _evEid = '';         // which event the page is showing
-var _evUi = { sel:0, msg:'', msgAt:0, bad:false, busy:false };
+let _ev = null;          // the open event page's `state` answer
+let _evList = [];        // the caller's rows, from hello/poll -- the menu entry reads this
+let _evEid = '';         // which event the page is showing
+let _evUi = { sel:0, msg:'', msgAt:0, bad:false, busy:false };
 // _eventLink -- the parked deep link -- is declared in game.js, where the boot
 // hash is read before any of this exists. It is spent by eventEnter().
 // Where the page's BACK goes. MULTIPLAYER for a page opened from the menu, the MENU
 // itself for one a deep link opened at boot -- nobody walked through a submenu to get
 // there, so sending them back to one would be inventing a step they never took.
-var _eventBack = 'multiplayer';
+let _eventBack = 'multiplayer';
 
 // ---- the list, and the only way we know we are in an event ------------------
 // Asked for on the screens that show it and nowhere else -- the same rule the
@@ -354,7 +354,7 @@ function eventChooserOk(r){ return !!(r && r.eid && r.en !== false); }
 // 'eventChooser' the moment a row opens one -- so BACK from the list would return
 // to the list. Captured here, a scan that lands on the list at boot goes back to
 // the MENU rather than to a submenu nobody walked through.
-var _evListBack = 'multiplayer';
+let _evListBack = 'multiplayer';
 function eventsEnter(){
     if(_eventBack && _eventBack !== 'eventChooser') _evListBack = _eventBack;
     _evUi.msg = '';
@@ -537,9 +537,9 @@ async function eventLeave(){
 //
 // NO ONLINE STATE, and none is asked for: presence is friendship-gated in this
 // API and being in the same room does not make two people friends.
-var _evMem = null;       // the last `members` answer, or null before the first
-var _evMemSel = 0;
-var _evMemAsk = null;    // the roster verb awaiting a confirm: {peer, set, label}
+let _evMem = null;       // the last `members` answer, or null before the first
+let _evMemSel = 0;
+let _evMemAsk = null;    // the roster verb awaiting a confirm: {peer, set, label}
 function eventMembers(){ return _evMem || []; }
 function eventMemberSel(){ return _evMemSel; }
 function eventMemberAsk(){ return _evMemAsk; }
@@ -686,10 +686,10 @@ function eventTourneyNew(){
 // LOCALLY on the synced clock. Nothing here polls: the codes for the next minute
 // are already in hand, and the only request is the one that fetches the next
 // minute before this one runs out.
-var _evPass = null;      // { step, valid, slots:[{at, code}] }
-var _evPassT = null;     // the 1 Hz tick that re-asks before the last slot lapses
-var _evPassBusy = false;
-var _evPassDenyAt = 0;   // when a read was last refused: the tick waits EV_PASS_RETRY_MS before asking again
+let _evPass = null;      // { step, valid, slots:[{at, code}] }
+let _evPassT = null;     // the 1 Hz tick that re-asks before the last slot lapses
+let _evPassBusy = false;
+let _evPassDenyAt = 0;   // when a read was last refused: the tick waits EV_PASS_RETRY_MS before asking again
 const EV_PASS_RETRY_MS = 30000;
 function eventPassView(){ return _evPass; }
 // step and valid are ADMIN-CONFIGURABLE and ride the answer, so nothing here
@@ -869,7 +869,7 @@ function eventStatsRow(a){
 // The archive is however long the room has been running, so it is the part that
 // scrolls. The window is what the SCREEN says it can show -- one number, read by
 // the draw and by the scroll alike, so a list cannot be scrolled past what is drawn.
-var _evStatsTop = 0;
+let _evStatsTop = 0;
 function eventStatsTop(){ return _evStatsTop; }
 async function eventStatsEnter(){
     _evStatsTop = 0;
@@ -918,19 +918,19 @@ const EV_MON_WATCH_MS = 4000;    // how often an unanswered or LOST watch ask go
                                  // -- and the timer's own interval, because the ask has to
                                  // be able to happen at that rate to mean anything
 const EV_MON_OVER_MS = 10000;    // how long the wall keeps a finished tournament's podium up
-var _evMon = null;               // the last `monitor` answer -- the whole screen
-var _evMonT = null;
-var _evMonBusy = false;
-var _evMonAt = 0;                // when the lease was last renewed
-var _evMonErr = '';              // 'no monitor' | 'monitor taken' | '' -- said, then stopped
-var _evMonNid = '';              // the match we are watching, so a moved cursor is noticed
-var _evMonRolesAt = 0;           // when that match's sheet landed here: the walkover clock's grace runs from it
-var _evMonAskAt = 0;
-var _evMonTry = 0;               // asks made for _evMonNid: the feeder first, then the other player
-var _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the same stagger as a player
-var _evMonAgain = false;         // a read asked for while one was in flight
-var _evMonOver = null;           // the podium the 'over' signal handed the wall: {tid, podium, names, at}
-var _evMonGone = false;          // displaced while a feed was up: the feed's end lands on the event page
+let _evMon = null;               // the last `monitor` answer -- the whole screen
+let _evMonT = null;
+let _evMonBusy = false;
+let _evMonAt = 0;                // when the lease was last renewed
+let _evMonErr = '';              // 'no monitor' | 'monitor taken' | '' -- said, then stopped
+let _evMonNid = '';              // the match we are watching, so a moved cursor is noticed
+let _evMonRolesAt = 0;           // when that match's sheet landed here: the walkover clock's grace runs from it
+let _evMonAskAt = 0;
+let _evMonTry = 0;               // asks made for _evMonNid: the feeder first, then the other player
+let _evMonAfter = 0;             // the sheet's after_ms: a watcher owes the same stagger as a player
+let _evMonAgain = false;         // a read asked for while one was in flight
+let _evMonOver = null;           // the podium the 'over' signal handed the wall: {tid, podium, names, at}
+let _evMonGone = false;          // displaced while a feed was up: the feed's end lands on the event page
 function eventMonitorView(){ return _evMon; }
 function eventMonitorRolesAt(){ return _evMonRolesAt; }
 // THE PODIUM STAYS ON THE WALL. A player holds the tournament and keeps its podium up
@@ -1174,7 +1174,7 @@ function eventExitPhase(){
 // _evPending is the ONE thing kept between screens, and it is a nudge rather
 // than a record: somebody is waiting at a closed door of an event we run. It is
 // re-derived from the roster the moment that screen is opened.
-var _evPending = {};
+let _evPending = {};
 function _evOnSignal(d){
     if(!d || typeof d !== 'object') return;
     const eid = String(d.eid || ''), what = String(d.event || '');
@@ -1277,7 +1277,7 @@ function eventTlWant(){
 // returns it by itself, which is why it is re-taken on visibilitychange -- that
 // is the half a naive implementation leaves out, and it is the half that matters
 // on a device that is switched between inputs.
-var _evWake = null, _evWakeOn = false, _evWakeBound = false;
+let _evWake = null, _evWakeOn = false, _evWakeBound = false;
 function _evWakeApi(){
     try { return (typeof navigator !== 'undefined' && navigator.wakeLock) || null; }
     catch(e){ return null; }

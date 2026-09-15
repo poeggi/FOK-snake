@@ -29,10 +29,10 @@ function _netApiMinor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*\d+\.(\d+)/); return m ? +m[1] : 0; }
     return 0;
 }
-var _netDbgSrv = null;      // the server's last debug INSTRUCTION (null = never heard one); kept apart from cfg.debug, which is what we DO
-var _netApiNewer = false;   // server MAJOR is newer -> online features disable with a notice
-var _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
-var _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
+let _netDbgSrv = null;      // the server's last debug INSTRUCTION (null = never heard one); kept apart from cfg.debug, which is what we DO
+let _netApiNewer = false;   // server MAJOR is newer -> online features disable with a notice
+let _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
+let _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
 function netStatusNotice(){
     if(netOffline()) return 'OFFLINE MODE (SETTINGS > NETWORK)';
     if(_netApiNewer) return 'GAME UPDATE REQUIRED - PLEASE RELOAD';
@@ -169,10 +169,10 @@ const NET_SEND_CONG = 4 * NET_PKT_MAX;
 // by the redundant log, not the transport.
 const NET_DC_OPTS = { negotiated:true, id:0, ordered:false, maxRetransmits:0 };
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-var _netDbg = { rtt:-1, p2pRtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, iceTx:0, iceBat:0, qMs:0, path:'', inLog:[], sigLog:[],
+let _netDbg = { rtt:-1, p2pRtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, iceTx:0, iceBat:0, qMs:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
-var _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
+let _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
 function _netSigLog(line){ _netDbg.sigLog.unshift(line); if(_netDbg.sigLog.length>6) _netDbg.sigLog.length=6; _uiDirty=true; }
 
 // ---- OUR OWN TRAFFIC, and the server's own queue (API 4.4) ----
@@ -186,18 +186,18 @@ function _netSigLog(line){ _netDbg.sigLog.unshift(line); if(_netDbg.sigLog.lengt
 // The HELD long poll is deliberately NOT counted: it is parked server-side with nothing
 // flowing, so it schedules against nothing -- and counting it would mean never anchoring
 // on a matchmaking screen, where a poll is open by design, all of the time.
-var _netFlight = 0;
+let _netFlight = 0;
 // The high-water mark of that count. A 135ms wait read against a 3 here is this client
 // queueing behind itself; the same wait against a 1 is a genuinely busy host, and they
 // are different problems. Never reset -- it is the worst moment of the session.
-var _netFlightMax = 0;
+let _netFlightMax = 0;
 // q_ms is how long a request waited for a worker BEFORE any work ran. It is the one
 // figure no client can measure for itself: the wait is over before our code starts, and
 // inside our round trip it is indistinguishable from network delay. A non-trivial reading
 // means the host is queueing in this very instant.
 const NET_QMS_BUSY = 5;          // ms; 0 is the ordinary reading, the slice we measured showed 51
 const NET_QMS_FRESH_MS = 4000;   // how long a reading stands for -- load moves, and a stale figure is not evidence
-var _netQ = { ms:0, at:0, flight:0 };
+let _netQ = { ms:0, at:0, flight:0 };
 // ...and it is read together with how many requests of ours were open when it was taken --
 // the reading itself cannot tell a busy host from a client queueing behind ITSELF, and the
 // two are different problems with different fixes. The count is taken before the request
@@ -212,7 +212,7 @@ function netSelfStacked(){ return netHostBusy() && _netQ.flight > 1; }
 // too far apart. Only the server ever sees both, so this is the only evidence that exists
 // that a PAIR is mis-anchored -- and it is a hint, not a refusal: the start it rides on
 // stands, and the next one is given a full re-measure.
-var _netResync = false;
+let _netResync = false;
 // ---- the pace (API 4.4) ----
 // The beat is CONTRACT, not wire. These intervals are stated in the contract and are the
 // same for every client, so they live here as constants. An earlier 4.4 server also sent
@@ -224,7 +224,7 @@ const NET_POLL_S   = 5;       // the longest hold poll.php serves, in whole seco
 // owns a server worker for its whole duration, so a server under pressure withdraws `hold`
 // first, by tier. A 4.3 server sends none of this and this default -- exactly what the
 // client did before -- stands.
-var _netPace = { hold:true };
+let _netPace = { hold:true };
 // How many 1s ticks apart an UNHELD mailbox read sits: where the held poll's answer would
 // have landed, so withdrawing the hold does not cost the server a request per second in
 // place of one held poll.
@@ -280,9 +280,9 @@ const NET_BG_SOLO = 'solo';
 // cannot see for itself. Held until a hello is answered rather than dropped on the first
 // attempt: a stale end names a peer the server no longer has us playing and is ignored there,
 // so carrying it one beat too far is free, while losing it costs a WATCH row its whole window.
-var _netDuelEnd = '';
-var _netSentAt = 0;            // when the last request of ours -- either lane -- went out
-var _netGapQ = null;           // the tail of the background queue
+let _netDuelEnd = '';
+let _netSentAt = 0;            // when the last request of ours -- either lane -- went out
+let _netGapQ = null;           // the tail of the background queue
 // How long a background request must still wait, or 0 for "go now". THE rule, kept apart
 // from the waiting so it can be read at a glance and tested without a clock:
 //   anything of ours in flight -> wait, whatever the time says. This is the whole point.
@@ -312,7 +312,7 @@ function _netGapWait(now, flight, tier){
 function _netGapFlight(tier){ return _netFlight + (_netSyncBusy ? 1 : 0) + ((tier !== NET_BG_SOLO && (_netPollHeld || _netRelayHeld)) ? 1 : 0); }
 // How many callers are waiting at the gate right now. The poll reads it: it must not park a
 // worker again while work of ours is still queued behind the one it just released.
-var _netGapN = 0;
+let _netGapN = 0;
 function _netGate(tier){
     // No timer host, no pacing: the same line the heartbeat and the connect timers draw.
     // A build without one cannot schedule anything anyway, so gating there would only park
@@ -473,7 +473,7 @@ function _netVerOk(theirs){
 // duel (HUD labels), and localStorage.getItem is a synchronous disk-backed read that
 // does not belong in a render path. The name only changes at name entry, so a short
 // TTL keeps the cache honest without any invalidation wiring.
-var _netMyNameC = { v:'', at:0 };
+let _netMyNameC = { v:'', at:0 };
 function _netMyName(){
     const n = Date.now();
     if(n - _netMyNameC.at > 10000){
@@ -488,7 +488,7 @@ function netNameChanged(){ _netMyNameC.at = 0; }
 // from the UA plus touch/pointer/screen. Cached -- the answer is fixed for the tab. It
 // is deliberately coarse and never authoritative: the server whitelists these four and
 // stores anything else as null, so a wrong or unknown guess just shows no badge.
-var _platformC = null;
+let _platformC = null;
 function _detectPlatform(){
     if(_platformC) return _platformC;
     let ua = ''; try { ua = (navigator.userAgent || '').toLowerCase(); } catch(e){}
@@ -545,7 +545,7 @@ function _netClampProfile(p){
 // MILLISECONDS is the one PTS reality; we measure our offset via t.txt
 // (3-5 samples, keep the lowest-RTT one) and adjust ourselves. REQUIRED before
 // an online game starts; refreshed by AGE (NET_ANCHOR_MAX_AGE_MS). ----
-var _netSync = { ofs:null, rtt:-1, at:0 };
+let _netSync = { ofs:null, rtt:-1, at:0 };
 // The lockstep timeline rides the MONOTONIC clock, never Date.now(). Date.now() is the wall
 // clock, which the OS silently slews and steps (its time daemon disciplining toward network
 // time) -- anchoring the shared PTS to it let those adjustments leak straight into the timeline
@@ -569,7 +569,7 @@ function netRawPts(){ return Math.round(_wall()); }
 // OPTIONAL latency report (API: display only -- the admin UI and friends_latency; nothing
 // in gameplay reads it): the same clock samples yield the value -- at least three, an
 // extreme FIRST sample (cold connection: DNS/TCP/TLS) discarded, the rest averaged.
-var _netLat = { value:null, at:0, pending:false };
+let _netLat = { value:null, at:0, pending:false };
 function _netLatFromSamples(rtts){
     if(rtts.length < 3) return null;
     const rest = rtts.slice(1);
@@ -838,7 +838,7 @@ function netDuelPlatforms(){
 // Memoized: three call sites read this EVERY FRAME (HUD + both board draws), yet every
 // input is fixed for the whole match -- the peer profile object only ever changes by
 // reference, and the shop/settings are unreachable mid-duel.
-var _netLookC = null;
+let _netLookC = null;
 function netDuelLook(){
     if(!netGameActive()) return null;
     // Spectating: the feeder already resolved the pair (including its own same-colour nudge),
@@ -1457,8 +1457,8 @@ async function netActionPost(path, action, extra){
 let _netFr = { list:null, at:0, loading:false, sel:0, confirm:null, confirmSel:1, msg:'' };
 // Has a hello ever come back carrying the roster? Latched on the first one that does, and
 // never re-checked: this is a property of the server, not of a response.
-var _netFrHello = false;
-var _netMyIdAt = 0;   // last moment the MY ID screen (our QR) was on display
+let _netFrHello = false;
+let _netMyIdAt = 0;   // last moment the MY ID screen (our QR) was on display
 // Friendships that reached ACCEPTED at least once: an accepted id vanishing from
 // the authoritative server list means the PEER removed it -- mirror that locally.
 let _netFrOk = (function(){ try{ return JSON.parse(localStorage.getItem('fok-snake-friend-ok')||'{}')||{}; }catch(e){ return {}; } })();
@@ -1599,7 +1599,7 @@ function _netFrRefresh(migrate){
 // per second per caller: a bare loop got one through, left the rest unsent, and repeated
 // the identical burst next launch -- never converging, while looking like an abuser.
 const NET_FR_MIG_MS = 1000;
-var _netFrMigQ = [], _netFrMigT = 0;
+let _netFrMigQ = [], _netFrMigT = 0;
 function _netFrMigPush(id){ if(_netFrMigQ.indexOf(id) < 0) _netFrMigQ.push(id); _netFrMigArm(); }
 function _netFrMigArm(){
     if(_netFrMigT || !_netFrMigQ.length || typeof setTimeout !== 'function') return;
@@ -1620,7 +1620,7 @@ function _netFrMigArm(){
 // server exactly as before. Per device is the right scope: a second phone has not seen
 // it either.
 const FR_SEEN_KEY = 'fok-snake-fr-seen';
-var _netFrSeen = null;   // { id: 'in' | 'out' | 'ok' } as last seen; null until the first roster
+let _netFrSeen = null;   // { id: 'in' | 'out' | 'ok' } as last seen; null until the first roster
 function _netFrSeenLoad(){
     if(_netFrSeen) return;
     try{ _netFrSeen = JSON.parse(localStorage.getItem(FR_SEEN_KEY) || 'null'); }catch(e){ _netFrSeen = null; }

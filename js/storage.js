@@ -22,25 +22,25 @@ let _lsFlushScheduled = false;
 // call. The idle callback carries a deadline so a device that is never idle still writes.
 function _lsFlush() {
     _lsFlushScheduled = false;
-    for (const [k, v] of _lsPending) { try { localStorage.setItem(k, typeof v === 'function' ? v() : v); } catch (e) {} }
+    for(const [k, v] of _lsPending) { try { localStorage.setItem(k, typeof v === 'function' ? v() : v); } catch(e) {} }
     _lsPending.clear();
 }
 function saveLater(key, value) {
     _lsPending.set(key, value);
-    if (_lsFlushScheduled) return;
+    if(_lsFlushScheduled) return;
     _lsFlushScheduled = true;
-    if (typeof requestIdleCallback === 'function') requestIdleCallback(_lsFlush, { timeout: 2000 });
+    if(typeof requestIdleCallback === 'function') requestIdleCallback(_lsFlush, { timeout: 2000 });
     else setTimeout(_lsFlush, 0);
 }
-try { addEventListener('pagehide', _lsFlush); } catch (e) {}
-try { document.addEventListener('visibilitychange', () => { if (document.hidden) _lsFlush(); }); } catch (e) {}
+try { addEventListener('pagehide', _lsFlush); } catch(e) {}
+try { document.addEventListener('visibilitychange', () => { if(document.hidden) _lsFlush(); }); } catch(e) {}
 function getScores() {
     try {
         const raw = localStorage.getItem(HS_KEY);
         if(raw === null) return [{name:'SNAKE PLISSKEN',score:42,level:1,diff:1,color:0,shopItems:{},date:'26.11.97'}];
         const a = JSON.parse(raw);
         return Array.isArray(a) ? a : [];
-    } catch (e) { return []; }
+    } catch(e) { return []; }
 }
 // Best local score -- passed into startGame() so the sim never touches localStorage itself.
 function bestScore(){ let b=0; try{ for(const s of getScores()) if((s.score||0)>b) b=s.score; }catch(e){} return b; }
@@ -63,7 +63,7 @@ function addScore(name, sc, lvl, won) {
                   diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date };
     s.push(row);
     s.sort((a, b) => b.score - a.score);
-    try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch (e) {}
+    try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch(e) {}
     addFOKoins(sc);
     const i = s.indexOf(row);
     return i < 10 ? i : -1;   // the row the run landed on among the ten kept; -1 = it fell off
@@ -79,7 +79,7 @@ function saveCfg() { saveLater(CFG_KEY, () => JSON.stringify(cfg)); _wsend({ t:'
 // environments without matchMedia (old engines, the sim worker). Still user-overridable after.
 function _prefersReducedMotion() {
     try { return typeof matchMedia==='function' && matchMedia('(prefers-reduced-motion: reduce)').matches; }
-    catch (e) { return false; }
+    catch(e) { return false; }
 }
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
@@ -135,7 +135,7 @@ function _sanitizeCfg() {
 // backup clears settings that backup never carried.
 function loadCfg() {
     let s = {};
-    try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch (e) {}
+    try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch(e) {}
     if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
     if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
     // v3: relay-only was a stop-gap default while the handshake was unreliable.
@@ -154,10 +154,10 @@ function loadCfg() {
 const ACH_KEY = 'fok-snake-ach';
 let achUnlocked = {};
 let achPopups = [];   // {id, at}
-function loadAch() { try { achUnlocked = JSON.parse(localStorage.getItem(ACH_KEY) || '{}'); } catch (e) {} }
+function loadAch() { try { achUnlocked = JSON.parse(localStorage.getItem(ACH_KEY) || '{}'); } catch(e) {} }
 function saveAch() { saveLater(ACH_KEY, JSON.stringify(achUnlocked)); }
-function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch (e){ return true; } }
-function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch (e){} }
+function announceSeen(){ try{ return !ANNOUNCEMENT||localStorage.getItem('seenAnnounce')===ANNOUNCEMENT.id; }catch(e){ return true; } }
+function markAnnounceSeen(){ try{ if(ANNOUNCEMENT)localStorage.setItem('seenAnnounce',ANNOUNCEMENT.id); }catch(e){} }
 const EASY_ACHS = new Set(['first_gem','level1','level5','fokoins_1k','fokoins_10k','fokoins_1m']);
 const EGG_ACHS = new Set(EGG_ACHIEVEMENTS.map(a=>a.id));   // found outside a run: difficulty never gates them
 // EVENT achievements (`ev_<eid>`) are the one kind the shipped table cannot hold: an
@@ -172,7 +172,7 @@ const EGG_ACHS = new Set(EGG_ACHIEVEMENTS.map(a=>a.id));   // found outside a ru
 const ACH_EV_KEY = 'fok-snake-ach-ev';
 let achEvents = {};
 function _achIsEvent(id) { return /^ev_[A-Z0-9]{4}$/.test(String(id || '')); }
-function loadAchEvents() { try { achEvents = JSON.parse(localStorage.getItem(ACH_EV_KEY) || '{}'); } catch (e) {} }
+function loadAchEvents() { try { achEvents = JSON.parse(localStorage.getItem(ACH_EV_KEY) || '{}'); } catch(e) {} }
 function achEventDefs() { return achEvents; }
 function achEventPut(id, a) {
     if(!a || typeof a !== 'object') return;
@@ -197,7 +197,7 @@ loadAch(); loadAchEvents();
 
 function resetStats() {
     const keys = [HS_KEY, FK_KEY, ACH_KEY, ACH_EV_KEY, 'lastSName'];
-    keys.forEach(k=>{ _lsPending.delete(k); try { localStorage.removeItem(k); } catch (e) {} });
+    keys.forEach(k=>{ _lsPending.delete(k); try { localStorage.removeItem(k); } catch(e) {} });
     _cachedFOKoins = 0;
     achUnlocked = {}; achPopups = []; achEvents = {}; _scoreboardCache = null;
     // Owned items are no longer local truth: the server holds the instances, so a
@@ -251,16 +251,16 @@ function _pidCookieSet(id){
 // has it -- then keep both in sync (and refresh the cookie's rolling expiry).
 function getPlayerId() {
     let id = _pidCookieGet();                                   // MASTER: the long-lived cookie
-    if (!/^[0-9a-f]{8}$/.test(id || '')) {                      // cookie gone: fall back to the localStorage backup
+    if(!/^[0-9a-f]{8}$/.test(id || '')) {                      // cookie gone: fall back to the localStorage backup
         try { id = localStorage.getItem(PID_KEY); } catch(e) {}
     }
-    if (!/^[0-9a-f]{8}$/.test(id || '')) {                      // neither store has it: mint a fresh identity
+    if(!/^[0-9a-f]{8}$/.test(id || '')) {                      // neither store has it: mint a fresh identity
         let b;
         try { b = crypto.getRandomValues(new Uint8Array(4)); }
         catch(e) { b = Array.from({length:4}, () => Math.floor(Math.random()*256)); }
-        id = ''; for (let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+        id = ''; for(let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
     }
-    try { if (localStorage.getItem(PID_KEY) !== id) localStorage.setItem(PID_KEY, id); } catch(e) {}   // keep the backup current
+    try { if(localStorage.getItem(PID_KEY) !== id) localStorage.setItem(PID_KEY, id); } catch(e) {}   // keep the backup current
     _pidCookieSet(id);                                          // (re)assert the master + refresh its rolling expiry
     return id;
 }
@@ -270,7 +270,7 @@ function resetPlayerId() {
     let b;
     try { b = crypto.getRandomValues(new Uint8Array(4)); }
     catch(e) { b = Array.from({length:4}, () => Math.floor(Math.random()*256)); }
-    let id = ''; for (let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+    let id = ''; for(let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
     try { localStorage.setItem(PID_KEY, id); } catch(e) {}
     _pidCookieSet(id);
     return id;
@@ -333,9 +333,9 @@ function getFriends() {
     } catch(e) { return []; }
 }
 function addFriend(id) {
-    if (!/^[0-9a-f]{8}$/.test(id || '') || id === getPlayerId()) return false;
+    if(!/^[0-9a-f]{8}$/.test(id || '') || id === getPlayerId()) return false;
     const a = getFriends();
-    if (a.indexOf(id) < 0) {   // indexOf: Array.includes is ES2016, absent on old smart-TV engines
+    if(a.indexOf(id) < 0) {   // indexOf: Array.includes is ES2016, absent on old smart-TV engines
         a.push(id);
         try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(a.slice(-64))); } catch(e) {}
     }
@@ -403,7 +403,7 @@ function backupStats() {
         snap.tok=getCloudToken()||undefined;   // FILE-only client extension: carries the cloud token so a file restore re-establishes cloud access
         _downloadJSON('snake-fok-backup.json', snap);
         _dataMsg='CONFIG SAVED TO FILE'; _dataMsgAt=_msgNow();
-    } catch (e) { _dataMsg='FILE BACKUP FAILED'; _dataMsgAt=_msgNow(); }
+    } catch(e) { _dataMsg='FILE BACKUP FAILED'; _dataMsgAt=_msgNow(); }
 }
 // Cloud backup: POST the whole config to the vault. First time mints a token (store it in
 // both stores + cookie); later backups present it. Payload is opaque to the server.
@@ -472,11 +472,11 @@ _restoreInp.addEventListener('change',()=>{
         try {
             const d=JSON.parse(rd.result);
             _dataMsg=_applyRestoredConfig(d)?'CONFIG RESTORED':'INVALID FILE'; _dataMsgAt=_msgNow();
-        } catch (e) { _dataMsg='INVALID FILE'; _dataMsgAt=_msgNow(); }
+        } catch(e) { _dataMsg='INVALID FILE'; _dataMsgAt=_msgNow(); }
     };
     rd.onerror=()=>{ _dataMsg='READ FAILED'; _dataMsgAt=_msgNow(); };
     rd.readAsText(f);
 });
-function restoreStats(){ try{ _restoreInp.click(); }catch (e){} }
+function restoreStats(){ try{ _restoreInp.click(); }catch(e){} }
 
 const fpsEl = document.getElementById('fps-el');

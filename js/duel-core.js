@@ -73,14 +73,14 @@ const RB_SPEC_FUTURE = 192;  // ...but a SPECTATOR deliberately runs behind the 
                              // keeps a spectator rollback-free. Deliberately far wider than the offset
                              // itself needs: a relayed CHECKPOINT can land a whole wire ahead of a
                              // booting node, and past this the feed, not the input, is the problem.
-var _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
-var _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
-var _rbSeq = 0;              // our outgoing input sequence
-var _rbPeerSeq = [-1, -1];   // highest sequence applied, PER AUTHOR index. A duel peer only ever
+let _rbRing = [];            // [{tk, snap}] -- snap is the state BEFORE tick tk ran
+let _rbLog = new Map();      // tick -> [cmd] : every input, BOTH players, by authored tick
+let _rbSeq = 0;              // our outgoing input sequence
+let _rbPeerSeq = [-1, -1];   // highest sequence applied, PER AUTHOR index. A duel peer only ever
                              // fills its own slot; a spectator receives BOTH players' streams on one
                              // channel, and their sequence lines are independent -- one shared counter
                              // let whichever player was ahead suppress the other's inputs entirely.
-var _lastLocalDir = null;    // last dir we AUTHORED for our snake -- the intent-change gate (netLocalInput)
+let _lastLocalDir = null;    // last dir we AUTHORED for our snake -- the intent-change gate (netLocalInput)
 // Every packet repeats the recent inputs, so a lost one is repaired by the next without a
 // retransmit (the DataChannel is deliberately unreliable). 8 covers far more than any hand
 // generates inside a round trip, and keeps the worst-case packet (~500 bytes) well inside both
@@ -98,18 +98,18 @@ const RB_RX_MAX = RB_REDUNDANCY;
 // ~4 ticks (~67ms) keeps each client's OWN radio out of that doze. THE tunable to A/B on
 // a real PC+iOS pair: raise it if the trickle is enough, lower it (~33ms at 2) if it dozes.
 const NET_WARM_EVERY = 4;
-var _rbSent = [];            // recent local inputs, resent for redundancy
+let _rbSent = [];            // recent local inputs, resent for redundancy
 // Deferred-input marker: authoring past the leading-edge cap sets this; netTickPre flushes
 // it once (latest-valid, since _rbSent already holds the most recent records). A burst of
 // touches or key-repeats beyond the cap collapses to a single send, not one packet each.
-var _netInDirty = false;
+let _netInDirty = false;
 // One-shot repair resend, as a countdown: an input-carrying flush arms it to 2, each
 // input-free netTickPre counts it down, and the resend fires at 0 -- two tick boundaries
 // (~27-33ms) behind the flush. Real loss is bursty (a radio stall, a full queue), so the
 // gap decorrelates the repair from the burst that ate the original. A fresh input flush
 // re-arms it (that packet carries the whole redundancy log, so it IS the repair); fires
 // at most once per armed flush, well inside the 16-tick heartbeat's ~267ms.
-var _netInRepeat = 0;
+let _netInRepeat = 0;
 // Cap for the leading-edge flush: counts the input-authored flushes of the current tick
 // cycle (bumped by the immediate, netTickPre and netTickPost flushes, zeroed when
 // netTickPre opens the next cycle). The first TWO turns of a cycle ship the moment they
@@ -117,15 +117,15 @@ var _netInRepeat = 0;
 // second record deferred to the boundary leaves with zero wire budget. Anything past two
 // only marks _netInDirty and coalesces into the next tick's flush, so a touchmove storm
 // costs bounded packets per tick, not one per event.
-var _netInFlush = 0;
+let _netInFlush = 0;
 // A received input that lands AFTER its own tick needs a rollback re-sim (the clone-heavy
 // path). Many packets draining together after a busy frame would each trigger their own --
 // a rollback flood on the single main thread. Instead every _netPeerInput only RECORDS the
 // earliest tick that needs rewinding here; netTickPre does ONE rollback per tick covering
 // them all, so the expensive op is capped at the tick rate no matter the packet rate.
-var _rbRewindTo = Infinity;
+let _rbRewindTo = Infinity;
 function _rbDbgFresh(){ return { rb:0, resim:0, drop:0, maxRew:0, desync:0, hashOk:0, hashLost:0, lost:0, live:0, fix:0, desyncAt:'' }; }
-var _rbDbg = _rbDbgFresh();
+let _rbDbg = _rbDbgFresh();
 // simTick is a FREE-RUNNING counter from page load -- startDuel does not reset it,
 // and it ticks through the menus. So two clients enter a duel with wildly different
 // values (one at 45000, the other at 3000) and their raw ticks mean nothing to each
@@ -133,13 +133,13 @@ var _rbDbg = _rbDbgFresh();
 // starts: both clients start at the same server-issued start_pts, so relative tick 0
 // is the same instant on both. Without it every input lands outside the accept
 // window and is dropped -- which looks exactly like "nothing ever gets through".
-var _rbBase = 0;
+let _rbBase = 0;
 // The session epoch _rbBase belongs to, captured at the same reset that captures the base.
 // Tick-stream packets ('in'/'h'/'st'/'rs') are stamped and gated with THIS (see _netSend and
 // the epoch gate in _netHandleMsg), because s.epoch advances at the HALT while the sims keep
 // ticking the old timeline until the scheduled start -- the two disagree for that whole window.
-var _rbEpoch = 0;
-var _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = healthy): repeated
+let _rbEpoch = 0;
+let _rbBadSince = 0;      // wall clock of the FIRST unhealed mismatch (0 = healthy): repeated
                           // failed repairs escalate to a session end on the persistence deadline
 // A refused packet is normal jitter under independent clocks: the redundant resend
 // re-delivers that input at a usable tick and the two worlds never actually diverge (the
@@ -259,7 +259,7 @@ const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORIT
                              // the past (simTick >= tk) -- no wait. Applying immediately keeps the
                              // correction in the seamless in-ring path; a future-stamped state (tk >
                              // simTick) still parks here until we reach its tick.
-var _rbHashQ = [];           // [{tk, h}] peer hashes waiting for their tick to settle
+let _rbHashQ = [];           // [{tk, h}] peer hashes waiting for their tick to settle
 function _rbCheckHash(m){
     // The per-field hashes are positional (RB_HASH_DUEL order): clamp to the known
     // length so a hostile peer cannot ship tens of thousands of entries for the
@@ -292,7 +292,7 @@ function _rbRingFind(tk){
 // keep it: RB_MYHASH_KEEP entries one hash-tick apart tolerate several seconds of arrival lag,
 // whatever the ring depth is tuned to.
 const RB_MYHASH_KEEP = 8;
-var _rbMyHash = [];          // [{tk,h,f}] oldest first, one per hash tick
+let _rbMyHash = [];          // [{tk,h,f}] oldest first, one per hash tick
 function _rbMyHashAdd(tk, hb){
     if(_rbMyHash.length && _rbMyHash[_rbMyHash.length - 1].tk === tk) return;
     _rbMyHash.push({ tk, h:hb.h, f:hb.f });
@@ -321,10 +321,10 @@ function _rbMyHashFind(tk){
 // An item with no uid (bought while offline, never registered) simply has nothing to name on
 // the server: it stays out of the digest and generates no claim. It is still worn, drawn and
 // stealable -- offline play is never blocked, it is only unattestable.
-var _wsMid = '', _wsSec = '', _wsIds = ['', ''], _wsSeqs = null;
-var _wsOwnPrev = null;       // the uid -> player-index map at the previously attested tick
-var _wsPend = [];            // gains held back for the peer's tag
-var _wsPeerTag = [];         // [{tk,g}] peer tags for ticks whose _ws provably agreed
+let _wsMid = '', _wsSec = '', _wsIds = ['', ''], _wsSeqs = null;
+let _wsOwnPrev = null;       // the uid -> player-index map at the previously attested tick
+let _wsPend = [];            // gains held back for the peer's tag
+let _wsPeerTag = [];         // [{tk,g}] peer tags for ticks whose _ws provably agreed
 const WS_TAG_RE = /^[0-9a-f]{16}$/;
 const WS_CLAIM_WAIT = 128;   // drain ticks (~2.1s) a gain waits for the peer's tag before shipping unproven
 const WS_PEERTAG_KEEP = 8;   // one per hash tick, the same arrival margin RB_MYHASH_KEEP allows
@@ -503,7 +503,7 @@ function _rbHashSettle(){
 // own). Gems/items follow the shared PRNG, so the MORE ADVANCED world (higher gemsDone) wins
 // and its gem/RNG/power state is adopted. Corrections are applied at the SETTLED tick and
 // re-converge through the normal rollback resim -- so both worlds heal without a host.
-var _rbStateQ = [];          // [{tk,i,s,gd,...}] peer states parked until their tick settles
+let _rbStateQ = [];          // [{tk,i,s,gd,...}] peer states parked until their tick settles
 // The last peer state we adopted, re-asserted at its own tick by every re-simulation.
 // A repair patches ONE ring entry; every older entry still holds the prediction it corrected,
 // so a rollback that lands behind it restores that prediction and silently un-repairs the
@@ -512,7 +512,7 @@ var _rbStateQ = [];          // [{tk,i,s,gd,...}] peer states parked until their
 // our log, and only the repair we just discarded knew it. Re-asserting is not a guess -- it is
 // the same authoritative pack at the same tick. Cleared with the ring it points into: a reset
 // re-uses tick numbers, and a stale pack would then inject a dead snake into a fresh match.
-var _rbFix = null;           // {tk, i, pk} -- the peer index and its packed snake at that tick
+let _rbFix = null;           // {tk, i, pk} -- the peer index and its packed snake at that tick
 function _rbSendState(t, sn){
     if(!sn || !sn.players) return;
     const mi = netMyIndex(), me = sn.players[mi];
@@ -555,14 +555,14 @@ function _rbCheckState(m){
 // mismatch. This is the only thing that heals a STRUCTURAL desync (the 'st' packet carries no
 // level/bars/phase). Sent in a small burst because the channel is unreliable and this can fragment.
 const RB_RESYNC_BURST = 4;
-var _rbResyncSend = 0;       // full-resync sends still owed (whoever is ahead of a frozen peer)
+let _rbResyncSend = 0;       // full-resync sends still owed (whoever is ahead of a frozen peer)
 // TRUE while the owed sends are a FULL outage burst (a reconnect, or a peer detected a whole
 // ring behind) rather than the routine single-rs desync repair. Only a full burst finishing
 // fires the recovery hook (_rbRecovered below): the outage healed the peer's STATE, but the
 // pair still ticks on the pre-outage clock anchor, so the net layer answers with a RESUME
 // boundary (fresh burst + anchor + epoch, no rebuild). A one-packet repair must NOT open a
 // boundary every time a hash disagrees -- that would be a re-anchor storm under jitter.
-var _rbResyncFull = false;
+let _rbResyncFull = false;
 // An ORDINARY 'rs' stamped a little AHEAD of our sim, parked until the sim reaches its tick.
 // The sender's frontier legitimately sits a tick or two past a peer whose loop fires later,
 // so the ring entry for T does not exist here YET -- that is an EARLY packet, not an aged-out
@@ -570,7 +570,7 @@ var _rbResyncFull = false;
 // pinned 64-grid hash snapshots: the next 1Hz emit then silently skipped a full verdict
 // cycle, which under a running escalation clock is the difference between healing and the
 // OUT OF SYNC deadline. Newest wins if another arrives before the drain.
-var _rbResyncQ = null;
+let _rbResyncQ = null;
 function _rbArmFullResync(){ _rbResyncSend = RB_RESYNC_BURST; _rbResyncFull = true; }
 // A peer packet stamped a full RB_DEPTH behind our sim can only mean the peer FROZE (backgrounded)
 // while we ran on: arm an authoritative resync burst so it can catch its tick base forward. Gated
@@ -920,7 +920,7 @@ function _rbAdd(tk, cmd){
 // Head positions per tick (BEFORE the tick ran), kept BESIDE the thinned ring: the
 // live-apply test (_rbPeerSteppedSince) needs the exact-tick head, which the ring no
 // longer holds for every tick. Four ints per tick instead of a full clone.
-var _rbHeads = new Map();
+let _rbHeads = new Map();
 function _rbNoteHeads(t, force){
     if(!players || (!force && _rbHeads.has(t))) return;
     const a = players[0] && players[0].snake[0], b = players[1] && players[1].snake[0];

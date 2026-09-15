@@ -6,7 +6,7 @@
 // ================================================================
 
 function startLen(lvl) {
-    if (lvl <= 2) return 3; if (lvl <= 5) return 5; if (lvl <= 8) return 7; return 10;
+    if(lvl <= 2) return 3; if(lvl <= 5) return 5; if(lvl <= 8) return 7; return 10;
 }
 
 function _lvlGper(l){ return LEVEL_CFG[l-1][['easy','normal','hard'][cfg.diff]]; }
@@ -204,7 +204,7 @@ function _duelStealRoll(){
 function _wsTake(i) {
     const g = _ws.it; _ws.it = null;
     const w = _ws.w[i], um = _ws.u[i], cat = WS[g.id].cat;
-    if (cat) for (let k = w.length - 1; k >= 0; k--) if (WS[w[k]].cat === cat) { delete um[w[k]]; w.splice(k, 1); }
+    if(cat) for(let k = w.length - 1; k >= 0; k--) if(WS[w[k]].cat === cat) { delete um[w[k]]; w.splice(k, 1); }
     w.push(g.id); um[g.id] = g.uid;
     emit({t:'wsget', id:g.id, uid:g.uid, from:g.own, to:i});
 }
@@ -258,7 +258,7 @@ function _mkDuelPlayer(x0, y0, dx) {
 // caller passes the same body the lethal check uses, tail tip excluded unless eating, so a
 // bite always costs at least one segment (the tip vacates as the head arrives).
 function _powerBiteIdx(body, hk) {
-    for (let j = 1; j < body.length; j++) if (ck(body[j]) === hk) return j;
+    for(let j = 1; j < body.length; j++) if(ck(body[j]) === hk) return j;
     return 0;
 }
 // ...and _powerBite applies it AFTER the move, where the unshifted head has pushed the
@@ -307,7 +307,7 @@ function _duelBeginLevel(reseed) {
     // about to be rebuilt, and losing gear to a rebuild is not something either player did.
     if(_ws && _ws.it){ _wsWearBack(_ws.it); _ws.it = null; }
     _nmWasAdjacent = false;   // fresh spawns are far apart; never carry a pass across a rebuild
-    for (let i = 0; i < 2; i++) {
+    for(let i = 0; i < 2; i++) {
         const keep = players[i];
         const fresh = i === 0 ? _mkDuelPlayer(6, Math.floor(ROWS/2)-4, 1)
                               : _mkDuelPlayer(COLS-7, Math.floor(ROWS/2)+4, -1);
@@ -316,7 +316,7 @@ function _duelBeginLevel(reseed) {
     }
     gemsDone = 0;
     const blocked = new Set(players[0].snake.concat(players[1].snake).map(ck));
-    for (let i = 0; i < 3; i++) {   // clear runway ahead of both spawns
+    for(let i = 0; i < 3; i++) {   // clear runway ahead of both spawns
         blocked.add(ck({x:(6+1+i)%COLS, y:Math.floor(ROWS/2)-4}));
         blocked.add(ck({x:(COLS-7-1-i+COLS)%COLS, y:Math.floor(ROWS/2)+4}));
     }
@@ -504,11 +504,11 @@ function _gourangaSwept(){
 }
 function _duelHeartCell(blocked) {
     const cx = Math.floor(COLS/2), cy = Math.floor(ROWS/2);
-    for (let r = 0; r < Math.max(COLS, ROWS); r++) {
-        for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // walk each square ring once
+    for(let r = 0; r < Math.max(COLS, ROWS); r++) {
+        for(let dy = -r; dy <= r; dy++) for(let dx = -r; dx <= r; dx++) {
+            if(Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // walk each square ring once
             const c = { x:(cx+dx+COLS)%COLS, y:(cy+dy+ROWS)%ROWS };
-            if (!blocked.has(ck(c))) return c;
+            if(!blocked.has(ck(c))) return c;
         }
     }
     return null;
@@ -517,9 +517,9 @@ function _duelSpawnGem() {
     const occupied = () => new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
     // The line replaces the gem here exactly as it does in single player -- same trigger,
     // same suppression, same draw off the shared stream, so both clients build the same board.
-    if (_gourangaMaybe(occupied())) return;
+    if(_gourangaMaybe(occupied())) return;
     const gB = occupied();
-    if (heart) gB.add(ck(heart));   // a heart may still be on the board from an earlier gem this level
+    if(heart) gB.add(ck(heart));   // a heart may still be on the board from an earlier gem this level
     gem = freeCell(gB);
     gem.tier = 0; gemAt = gem.spawnAt = simNow;
     // The pellet and the crystal, on the one shared roll (see _spawnExtras).
@@ -528,54 +528,54 @@ function _duelSpawnGem() {
     // can matter (someone below the cap) and never stacked on another heart. The lives/heart
     // gates are all synced state so both clients take the same branch and consume the rng in
     // lockstep; the cell is chosen without rng (see _duelHeartCell).
-    if (!heart && level >= 2 && players.some(p => p.lives < _duelHeartsMax) && rng() < 0.05 * _X10()) {
+    if(!heart && level >= 2 && players.some(p => p.lives < _duelHeartsMax) && rng() < 0.05 * _X10()) {
         const hB = new Set(players[0].snake.concat(players[1].snake, bars).map(ck));
-        hB.add(ck(gem)); if (powerPellet) hB.add(ck(powerPellet));
+        hB.add(ck(gem)); if(powerPellet) hB.add(ck(powerPellet));
         const hc = _duelHeartCell(hB);
-        if (hc) { heart = hc; heartAt = simNow; }
+        if(hc) { heart = hc; heartAt = simNow; }
     }
 }
 // One duel game tick: both due snakes move SIMULTANEOUSLY (heads computed first, then
 // deaths resolved together) so neither player has a resolution-order advantage.
 function duelStep(now) {
     const moves = [null, null];
-    for (let i = 0; i < 2; i++) {
+    for(let i = 0; i < 2; i++) {
         const P = players[i];
-        if (!P.alive || P.stepAccum < 2) continue;
+        if(!P.alive || P.stepAccum < 2) continue;
         P.stepAccum -= 2;
-        while (P.dirQueue.length > 0) { const nd = P.dirQueue.shift(); if (nd.x !== -P.dir.x || nd.y !== -P.dir.y) { P.dir = nd; break; } }
+        while(P.dirQueue.length > 0) { const nd = P.dirQueue.shift(); if(nd.x !== -P.dir.x || nd.y !== -P.dir.y) { P.dir = nd; break; } }
         moves[i] = {x:(P.snake[0].x+P.dir.x+COLS)%COLS, y:(P.snake[0].y+P.dir.y+ROWS)%ROWS};
     }
-    if (_powerMode && now - _powerModeAt >= _POWER_DUR) { _powerMode = false; emit({t:'bars'}); }
-    if (!moves[0] && !moves[1]) return;
+    if(_powerMode && now - _powerModeAt >= _POWER_DUR) { _powerMode = false; emit({t:'bars'}); }
+    if(!moves[0] && !moves[1]) return;
     const protect = now - spawnAt < SPAWN_PROTECT;
     const dead = [false, false];
     const crushK = [null, null], biteK = [null, null], selfK = [0, 0];
     const into = [null, null], hitAt = [null, null];   // renderer-only: what the death ran into, and where
     const barKeys = new Set(bars.map(ck));
-    for (let i = 0; i < 2; i++) {
-        if (!moves[i]) continue;
+    for(let i = 0; i < 2; i++) {
+        if(!moves[i]) continue;
         const hk = ck(moves[i]), other = players[1-i];
         const eats = gem && ck(gem) === hk;
         // Where this move runs into the mover's OWN body (0 = nowhere).
         const selfAt = protect ? 0 : _powerBiteIdx(eats ? players[i].snake : players[i].snake.slice(0,-1), hk);
-        if (!protect) {
-            if (barKeys.has(hk)) {
+        if(!protect) {
+            if(barKeys.has(hk)) {
                 const hb = bars.find(b => ck(b) === hk);
-                if (hb && (hb.fragile || _powerMode)) crushK[i] = hk;   // fragile OR powered: smash through, same rule as single player
+                if(hb && (hb.fragile || _powerMode)) crushK[i] = hk;   // fragile OR powered: smash through, same rule as single player
                 else { dead[i] = true; into[i] = 'bar'; hitAt[i] = moves[i]; }   // solid bar: lethal
             }
             // own body: the tail vacates unless eating (same rule as classic). POWERED this is
             // no longer lethal -- the head goes through and the tail falls off (see _powerBite).
-            else if (selfAt > 0) {
-                if (_powerMode) selfK[i] = selfAt;
+            else if(selfAt > 0) {
+                if(_powerMode) selfK[i] = selfAt;
                 else { dead[i] = true; into[i] = 'self'; hitAt[i] = moves[i]; }
             }
             // opponent's snake: lethal normally; POWERED it becomes food -- biting the
             // head kills THEM, biting the body eats their tail off and slows the biter.
-            else if (other.alive && other.snake.some(s => ck(s) === hk)) {
-                if (!_powerMode) { dead[i] = true; into[i] = 'snake'; hitAt[i] = moves[i]; }
-                else if (ck(other.snake[0]) === hk) { dead[1-i] = true; into[1-i] = 'snake'; hitAt[1-i] = moves[i]; }
+            else if(other.alive && other.snake.some(s => ck(s) === hk)) {
+                if(!_powerMode) { dead[i] = true; into[i] = 'snake'; hitAt[i] = moves[i]; }
+                else if(ck(other.snake[0]) === hk) { dead[1-i] = true; into[1-i] = 'snake'; hitAt[1-i] = moves[i]; }
                 else biteK[i] = hk;
             }
         }
@@ -592,28 +592,28 @@ function duelStep(now) {
     // T-bone or a rear-end, and those stay the mover's own fault, exactly as before.
     const closing = (a, b) => a.dir.x === -b.dir.x && a.dir.y === -b.dir.y;
     let headOn = !protect && !!moves[0] && !!moves[1] && ck(moves[0]) === ck(moves[1]);
-    if (!headOn && !protect && players[0].alive && players[1].alive)
-        for (let i = 0; i < 2; i++)
-            if (moves[i] && ck(moves[i]) === ck(players[1-i].snake[0]) && closing(players[i], players[1-i]))
+    if(!headOn && !protect && players[0].alive && players[1].alive)
+        for(let i = 0; i < 2; i++)
+            if(moves[i] && ck(moves[i]) === ck(players[1-i].snake[0]) && closing(players[i], players[1-i]))
                 headOn = true;
-    if (headOn) {
+    if(headOn) {
         dead[0] = dead[1] = true;
         // The one whose turn it was not has no move to point at, so its impact is the other
         // head: that is the cell it is being crushed against, and the renderer reads this to
         // decide which way the wreck leans.
-        for (let i = 0; i < 2; i++) { into[i] = 'headon'; hitAt[i] = moves[i] || players[1-i].snake[0]; }
+        for(let i = 0; i < 2; i++) { into[i] = 'headon'; hitAt[i] = moves[i] || players[1-i].snake[0]; }
     }
-    if (dead[0] || dead[1]) {
+    if(dead[0] || dead[1]) {
         // A crash NEVER costs gear. The pass that leads into a collision has already rolled
         // its steal a tick or two earlier, so a head-on or a swerve into somebody read as
         // "I hit them and my hat came off" -- and a match-ending death has no rebuild coming
         // to hand it back. Whoever it came off gets it back here, in flight or already lying
         // on the board, the same rule _duelBeginLevel applies to a board rebuild. Nothing is
         // drawn from the rng, so both clients cancel the same drop on the same tick.
-        if (_ws && _ws.it) { _wsWearBack(_ws.it); _ws.it = null; }
-        if (dead[0]) players[0].lives--;
-        if (dead[1]) players[1].lives--;
-        for (let i = 0; i < 2; i++) if (dead[i]) {
+        if(_ws && _ws.it) { _wsWearBack(_ws.it); _ws.it = null; }
+        if(dead[0]) players[0].lives--;
+        if(dead[1]) players[1].lives--;
+        for(let i = 0; i < 2; i++) if(dead[i]) {
             const at = hitAt[i] || players[i].snake[0];
             emit({t:'crash',p:i,hx:players[i].snake[0].x,hy:players[i].snake[0].y,
                   x:at.x,y:at.y,into:into[i]||'snake',boost:!!players[i].boosting,gp:gPer});
@@ -626,13 +626,13 @@ function duelStep(now) {
         // mispredicted final kill is still rolled back before it is ever called.
         deathMsg = (dead[0]&&dead[1]) ? 'BOTH LOSE A LIFE' : (dead[0] ? 'P1 LIFE LOST' : 'P2 LIFE LOST');
         phase = 'dying'; phaseAt = now;
-        if (players[0].lives <= 0 || players[1].lives <= 0) emit({t:'mpause'});
+        if(players[0].lives <= 0 || players[1].lives <= 0) emit({t:'mpause'});
         return;
     }
     // Bar crush (fragile or powered): the SAME destruction path as single player, so a
     // paired unit breaks as one. No coin/score reward in a duel (its economy is gems + hearts).
-    for (let i = 0; i < 2; i++) {
-        if (!crushK[i]) continue;
+    for(let i = 0; i < 2; i++) {
+        if(!crushK[i]) continue;
         _crushBarAt(crushK[i]);
     }
     // Apply both moves first; gem consequences afterwards (a level-up rebuilds the
@@ -641,9 +641,9 @@ function duelStep(now) {
     const gAte = [-1, -1];
     // Count every move once the sweep has begun, exactly as single player does -- a duel's
     // two snakes make the moves, which is the same measure asked of a line they share.
-    if (_gourangaActive && _gourangaEaten) _gourangaSteps++;
-    for (let i = 0; i < 2; i++) {
-        if (!moves[i]) continue;
+    if(_gourangaActive && _gourangaEaten) _gourangaSteps++;
+    for(let i = 0; i < 2; i++) {
+        if(!moves[i]) continue;
         const P = players[i];
         P.snake.unshift(moves[i]);
         // The pellet and the crystal, on the one shared rule (see _takePickups) -- the score
@@ -655,21 +655,21 @@ function duelStep(now) {
         gAte[i] = _gourangaTake(ck(moves[i]));
         // A landed windswept item goes to whoever reaches it first -- including the snake it
         // came off, who can simply take it back. Nothing is collectible in flight (at).
-        if (_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) _wsTake(i);
-        if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
+        if(_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) _wsTake(i);
+        if(heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
             heart = null;
-            if (P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); emit({t:'sfx',name:'1up'}); }
+            if(P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); emit({t:'sfx',name:'1up'}); }
         }
-        if ((eater < 0 && gem && ck(gem) === ck(moves[i])) || gAte[i] >= 0) {
-            if (gAte[i] < 0) eater = i;
+        if((eater < 0 && gem && ck(gem) === ck(moves[i])) || gAte[i] >= 0) {
+            if(gAte[i] < 0) eater = i;
             P.snake.push(Object.assign({}, P.snake[P.snake.length - 1]));   // +2 growth (classic normal)
         } else P.snake.pop();
     }
     // A POWERED self-bite resolves with the move applied, so the index has shifted one along
     // with the head. Ahead of the chomps below: a segment this snake has already lost cannot
     // also be chomped off it, and the chomp's findIndex simply comes up empty.
-    for (let i = 0; i < 2; i++) {
-        if (!selfK[i]) continue;
+    for(let i = 0; i < 2; i++) {
+        if(!selfK[i]) continue;
         const n = players[i].snake.length;
         _powerBite(players[i].snake, selfK[i]);
         emit({t:'bite', p:i, x:moves[i].x, y:moves[i].y, n:n - players[i].snake.length});
@@ -677,14 +677,14 @@ function duelStep(now) {
     // Bites resolve after the moves: the victim's tail is eaten off from the bitten
     // segment back (if it moved away this very tick, it escaped), the biter chews
     // at half speed for 2 seconds. Nobody dies from a body bite.
-    for (let i = 0; i < 2; i++) {
-        if (!biteK[i]) continue;
+    for(let i = 0; i < 2; i++) {
+        if(!biteK[i]) continue;
         const other = players[1-i];
         const idx = other.snake.findIndex(s => ck(s) === biteK[i]);
         // A bite at the NECK (idx 1) must not leave a head with no body at all, which
         // reads as a broken render rather than a hit taken. The chomp bites as deep
         // as it can; it just cannot take the last body segment with it.
-        if (idx > 0) other.snake.length = Math.max(idx, SNAKE_MIN_LEN);
+        if(idx > 0) other.snake.length = Math.max(idx, SNAKE_MIN_LEN);
         players[i].slowUntil = now + T(120);
         emit({t:'sfx',name:'crash'}); emit({t:'bonus',label:'CHOMP!'});
     }
@@ -695,32 +695,32 @@ function duelStep(now) {
     // inside the snake for as long as the tail takes to clear it. Whoever it came down
     // inside HAS reached it. After the bites, so a segment already chewed off cannot
     // collect; player 0 first if both cover it, which no rng draw depends on.
-    if (_ws && _ws.it && simTick >= _ws.it.at) {
+    if(_ws && _ws.it && simTick >= _ws.it.at) {
         const k = ck(_ws.it);
-        for (let i = 0; i < 2; i++) if (players[i].snake.some(s => ck(s) === k)) { _wsTake(i); break; }
+        for(let i = 0; i < 2; i++) if(players[i].snake.some(s => ck(s) === k)) { _wsTake(i); break; }
     }
     // Beads first, in player order, then the gem: ONE settlement, so a level that completes
     // does it exactly once however many things were eaten on this tick. A bead counts toward
     // the shared goal and scores like a gem -- the classic bonus ladder has no meaning with
     // two scorers, so a duel banks the flat level*100 the way it does for every other gem.
     let last = -1;
-    for (let i = 0; i < 2; i++) if (gAte[i] >= 0) { players[i].score += level * 100; gemsDone++; last = i; }
-    if (eater >= 0) { players[eater].score += level * 100; gemsDone++; last = eater; }
-    if (last >= 0) {
+    for(let i = 0; i < 2; i++) if(gAte[i] >= 0) { players[i].score += level * 100; gemsDone++; last = i; }
+    if(eater >= 0) { players[eater].score += level * 100; gemsDone++; last = eater; }
+    if(last >= 0) {
         const swept = _gourangaSwept();
-        if (swept === true) { emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'}); }
-        if (gemsDone >= GEMS_PER_LEVEL) {
+        if(swept === true) { emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'}); }
+        if(gemsDone >= GEMS_PER_LEVEL) {
             // Twist: the level-finisher earns a heart back, capped at the match's cap.
-            if (players[last].lives < _duelHeartsMax) players[last].lives++;
+            if(players[last].lives < _duelHeartsMax) players[last].lives++;
             emit({t:'sfx',name:'levelUp'});
             // Same "press to continue" gate as single player: wait in 'levelDone' for 'advance'.
             levelWasPerfect = false;   // no perfect-level bonus in a duel
             phase = 'levelDone'; phaseAt = now;
             return;
         }
-        if (swept !== true) emit({t:'sfx',name:'eat'});
+        if(swept !== true) emit({t:'sfx',name:'eat'});
         // A finished line hands the level back to ordinary gems; a bead mid-line does not.
-        if (!_gourangaActive) _duelSpawnGem();
+        if(!_gourangaActive) _duelSpawnGem();
     }
 }
 
@@ -839,19 +839,19 @@ function _tryGouranga(blocked) {
 // since the snake can smash through them. Returns Infinity if the goal is walled off.
 function _pathDist(start, goal) {
     const gk = ck(goal);
-    if (ck(start) === gk) return 0;
+    if(ck(start) === gk) return 0;
     const blocked = new Set(snake.slice(1, -1).concat(bars.filter(b => !b.fragile)).map(ck));
     const STEP = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
     let frontier = [start], seen = new Set([ck(start)]), dist = 0;
-    while (frontier.length) {
+    while(frontier.length) {
         dist++;
         const next = [];
-        for (const c of frontier) {
-            for (const d of STEP) {
+        for(const c of frontier) {
+            for(const d of STEP) {
                 const nx = (c.x + d.x + COLS) % COLS, ny = (c.y + d.y + ROWS) % ROWS;
                 const nk = nx + ',' + ny;
-                if (nk === gk) return dist;
-                if (seen.has(nk) || blocked.has(nk)) continue;
+                if(nk === gk) return dist;
+                if(seen.has(nk) || blocked.has(nk)) continue;
                 seen.add(nk); next.push({x:nx, y:ny});
             }
         }

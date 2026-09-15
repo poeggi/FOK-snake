@@ -65,19 +65,19 @@ self._wall = () => (typeof performance !== 'undefined' && performance.now && per
     ? performance.timeOrigin + performance.now()
     : Date.now();
 self.netPts = () => _dcOfs == null ? null : Math.round(_wall() + _dcOfs);
-self._netSend = (o) => { if(_dcOn && !_dcSpec) postMessage({ t:'wire', o }); };
-self._netSigLog = (line) => { if(_dcOn) postMessage({ t:'dsig', line }); };
+self._netSend = (o) => { if (_dcOn && !_dcSpec) postMessage({ t:'wire', o }); };
+self._netSigLog = (line) => { if (_dcOn) postMessage({ t:'dsig', line }); };
 self._netDbg = { inRx:0, inTx:0, inLog:[], peerTkOfs:0, lag:0, hbRx:0, hbTx:0 };
 // Tick-tag events instead of game.js's direct dispatch: main replays them from its own
 // queues (2-tick cosmetic delay); during a rollback re-sim only the deferred cosmetic
 // kinds re-queue -- the same rule as game.js drainSimEvents under _replaying.
 self.drainSimEvents = () => {
-    for(const e of simEvents){
+    for (const e of simEvents){
         // Replay re-queues cosmetics only -- EXCEPT duelHalt: a death introduced BY a rollback
         // crosses DEATH_DUR inside the replay, and swallowing it would delay the respawn
         // boundary by a full re-announce period (_HALT_RE). A duplicate halt is folded by
         // the host's one-boundary guard, so passing it through is always safe.
-        if(_replaying && !FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
+        if (_replaying && !FX_DEFER.has(e.t) && e.t!=='duelHalt') continue;
         _dcEvents.push({ tk: simTick, e });
     }
     simEvents.length = 0;
@@ -93,12 +93,12 @@ self._rbRecovered = () => { _dcEvents.push({ tk: simTick, e: { t: 'duelRecovered
 // message rather than a tick-tagged sim event: it is not a sim effect and must not be
 // replayed, coalesced or cancelled by a rollback. The in-process home calls itemClaim
 // directly instead (game.js _wsClaimOut).
-self._wsClaimOut = (c) => { if(_dcOn) postMessage({ t: 'iclaim', c }); };
+self._wsClaimOut = (c) => { if (_dcOn) postMessage({ t: 'iclaim', c }); };
 // Note the deepest rewind per post so main can cancel already-queued cosmetics past it.
 const _dcRbOrig = _rbRollback;
 self._rbRollback = function(toTick){
     const r = _dcRbOrig(toTick);
-    if(r && (!_dcRewTo || toTick < _dcRewTo)) _dcRewTo = toTick;
+    if (r && (!_dcRewTo || toTick < _dcRewTo)) _dcRewTo = toTick;
     return r;
 };
 // Phase is SET, only when the shared grid moves (duel start, and a re-anchor via
@@ -106,7 +106,7 @@ self._rbRollback = function(toTick){
 // e = ft - simTick - 0.5 sweeps a full unit every tick period, so a continuous detector
 // fires every tick as normal operation -- the grid only actually moves on an anchor change.
 function _dcSeedPhase(){
-    if(_dcOfs == null || !_dcStartPts) return;
+    if (_dcOfs == null || !_dcStartPts) return;
     const ft0 = (_wall() + _dcOfs - _dcStartPts) / TICK_MS;
     _acc = Math.max(-TICK_MS, Math.min(TICK_MS, (ft0 - simTick - 0.5) * TICK_MS));
     _dcSnapN++; _dcSnapAt = performance.now();
@@ -114,7 +114,7 @@ function _dcSeedPhase(){
 // The shared-clock tick target (net-session.js netTickTarget's worker twin, same 600-tick
 // origin sanity window). null = steer nowhere, free-run at 60Hz.
 function _dcTarget(){
-    if(!_dcOn || !_dcStartPts || _dcOfs == null) return null;
+    if (!_dcOn || !_dcStartPts || _dcOfs == null) return null;
     const t = Math.floor((_wall() + _dcOfs - _dcStartPts) / TICK_MS);
     return Math.abs(t - simTick) > 600 ? null : t;
 }
@@ -281,7 +281,7 @@ onmessage = (e) => {
         case 'duelLevelNet':   // online level-up (mirrors duelStartNet, but keeps players/score/lives)
             if (!_dcOn) break;
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? _dcOfs : m.ofs); _dcStartPts = m.startPts || _dcStartPts;
-            if(m.spec !== undefined) _dcSpec = !!m.spec;
+            if (m.spec !== undefined) _dcSpec = !!m.spec;
             simCommand({ t:'startDuelLevel', level: m.lvl|0 });   // host-authored target level, carried on the go
             _rbReset();   // startDuelLevel rewound simTick; the rollback base reads it
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;
@@ -294,7 +294,7 @@ onmessage = (e) => {
         case 'duelRespawnNet': // post-death restart (mirrors duelLevelNet; seed + level stay, board rebuilt)
             if (!_dcOn) break;
             _dcMy = m.my|0; _dcOfs = (m.ofs == null ? _dcOfs : m.ofs); _dcStartPts = m.startPts || _dcStartPts;
-            if(m.spec !== undefined) _dcSpec = !!m.spec;
+            if (m.spec !== undefined) _dcSpec = !!m.spec;
             simCommand({ t:'startDuelRespawn' });
             _rbReset();   // startDuelRespawn rewound simTick; the rollback base reads it
             _netDbg.inRx = 0; _netDbg.inTx = 0; _netDbg.inLog.length = 0;

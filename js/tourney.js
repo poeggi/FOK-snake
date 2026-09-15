@@ -41,11 +41,11 @@ const TT_READ_MS    = 2000;
 // The whole client-side picture, or null when we hold no tournament. Every field in it
 // came from the server; nothing here is derived except the match-count arithmetic the
 // lobby shows, which is the server's own formula quoted back at the player.
-var _tt = null;
+let _tt = null;
 // `contAt` is on OUR clock, the same one every other deadline in this file is on: the round
 // board's own `at` is a stamp from the server's clock, which this screen has no offset to
 // read, while `wait` is a duration and needs none.
-var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, eid:'', home:'', busy:false, contAt:0, from:'', to:'', ask:null };
+let _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, eid:'', home:'', busy:false, contAt:0, from:'', to:'', ask:null };
 // stakes and lvl are what the CREATE screen collects before there is a tournament to put
 // them on. They live here rather than in cfg because they describe one tournament, not
 // this device: the next one is configured from its own screen.
@@ -54,24 +54,24 @@ var _ttUi = { sel:-1, msg:'', msgAt:0, stakes:false, lvl:1, speed:false, eid:'',
 // It carries the WHOLE setup the refused call was made with, because YES re-sends that call.
 // The read-back of a tournament this device is still in but is not currently looking at --
 // what the REJOIN row is made of. Null until _ttProbe finds one.
-var _ttBack = null;
-var _ttNid  = '';      // the node the current sheet names
-var _ttRolesAt = 0;    // when that sheet arrived
-var _ttEngAt = 0;      // when it was last turned into a connection; 0 = not yet
+let _ttBack = null;
+let _ttNid  = '';      // the node the current sheet names
+let _ttRolesAt = 0;    // when that sheet arrived
+let _ttEngAt = 0;      // when it was last turned into a connection; 0 = not yet
 // The node that is FINISHED on our side -- reported, settled by the server, or watched
 // to its end. The one thing that stops a sheet from being engaged again (_ttDrive).
-var _ttDone = '';
-var _ttRep  = null;    // the pending result report {body, at, tries}
-var _ttRepBusy = false;
-var _ttWant = null;    // the match parameters an inbound answer must be dressed with
+let _ttDone = '';
+let _ttRep  = null;    // the pending result report {body, at, tries}
+let _ttRepBusy = false;
+let _ttWant = null;    // the match parameters an inbound answer must be dressed with
 // The node whose match is ON THE BOARD, which is NOT _ttNid: the server deals the next node
 // the moment a result settles, so from then until the finished match leaves the screen the
 // two name different matches. Everything about the match being played -- what a result is
 // reported against, whether walking out still owes one -- hangs off this one.
-var _ttPlayNid = '', _ttWatchNid = '';
-var _ttOverAt = 0;
-var _ttT = null;
-var _ttAfter = 0, _ttAfterT = null;   // when the server's stagger lets us ask again, and the one-shot that does
+let _ttPlayNid = '', _ttWatchNid = '';
+let _ttOverAt = 0;
+let _ttT = null;
+let _ttAfter = 0, _ttAfterT = null;   // when the server's stagger lets us ask again, and the one-shot that does
 
 // tourneyQuit is one of them: the leave dialog is a tournament screen like any other, so
 // a tournament that ends underneath it takes it down with the rest rather than leaving a

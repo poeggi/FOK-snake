@@ -7,10 +7,10 @@
 // remains here are the hooks that hand it the session (docs/DEPRECATED-relay.md).
 // ============================================================================
 // ---- WebRTC session: P2P DataChannel; the server only relays SDP/ICE ----
-var _netSess = null;   // {peer, role:'host'|'peer', pc, dc, ...} -- var: hoisted callers must see undefined, never TDZ
+let _netSess = null;   // {peer, role:'host'|'peer', pc, dc, ...} -- var: hoisted callers must see undefined, never TDZ
 // Server 'peer-net' hints, keyed by peer id: { ip, fam, selfFam }. The server's view of
 // each peer's public IP + address family, used to de-obfuscate mDNS ICE candidates (below).
-var _netPeerNet = {};
+let _netPeerNet = {};
 // Rewrite a peer's mDNS host candidate (`<uuid>.local`) to use its real IPv6, learned from
 // the server's peer-net hint. IPv6 ONLY: with no NAT the candidate's (revealed) port is the
 // reachable one, so real-IP + that port is a directly connectable candidate. On IPv4 the
@@ -251,7 +251,7 @@ async function _netSignalIce(to, payload){
 const NET_ICES_MAX = 24;          // contract cap: entries in one `ices` payload
 const NET_ICES_BYTES = 15000;     // ...under the 16KB payload limit, with room for the envelope
 const NET_ICES_WINDOW_MS = 100;   // how long the tail collects before it goes
-var _netIceTx = {};               // peer id -> { buf, bytes, t, open }
+let _netIceTx = {};               // peer id -> { buf, bytes, t, open }
 // A fresh RTCPeerConnection gathers afresh: its first candidate is a first candidate
 // again, and anything still buffered belongs to a connection that no longer exists.
 function _netIceTxReset(to){

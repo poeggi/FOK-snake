@@ -162,14 +162,14 @@ const Snd = (() => {
             // so it minimises/steadies latency rather than guaranteeing 16.7ms. Older engines
             // reject a constructor arg, so fall back to the no-arg form.
             const _AC = window.AudioContext || window.webkitAudioContext;
-            try { _ctx = new _AC({ latencyHint: 1/60 }); } catch(_e) { _ctx = new _AC(); }
+            try { _ctx = new _AC({ latencyHint: 1/60 }); } catch (_e) { _ctx = new _AC(); }
             _musicGain = _ctx.createGain(); _musicGain.gain.value = 0; _musicGain.connect(_ctx.destination);
             _sfxGain = _ctx.createGain(); _sfxGain.gain.value = 0.5 *_sfxVol; _sfxGain.connect(_ctx.destination);
             _ctx.onstatechange = () => {
                 if (_ctx.state === 'running') _applyMusic();
                 else if (_ctx.state === 'interrupted') _bgParked = true;   // iOS OS interruption, maybe w/o a page event
             };
-        } catch(e) { _ctx = null; }
+        } catch (e) { _ctx = null; }
     }
 
     function audioResume() {
@@ -198,10 +198,10 @@ const Snd = (() => {
             _musicGain.gain.cancelScheduledValues(now);
             _musicGain.gain.setValueAtTime(_musicGain.gain.value, now);
             _musicGain.gain.linearRampToValueAtTime(0, now + fade);
-        } catch(e) {}
+        } catch (e) {}
         // Suspend only after the ramp renders, and only if still parked -- a fast return
         // clears _bgParked on resume, cancelling this pending suspend.
-        setTimeout(() => { if (_bgParked && _ctx) { try { _ctx.suspend(); } catch(e) {} } }, Math.ceil(fade * 1000) + 4);
+        setTimeout(() => { if (_bgParked && _ctx) { try { _ctx.suspend(); } catch (e) {} } }, Math.ceil(fade * 1000) + 4);
     }
 
     // -- Music -----------------------------------------------------
@@ -342,11 +342,11 @@ const Snd = (() => {
     // seekAbs + (contextTime - t0); reality is it is heard NOW (shared = provider). The gap
     // is the drift. null when unsynced, no track, or the API is unavailable (iOS/suspended).
     function musicDriftMs(){
-        if(!_ctx || !_currentTrack || !_musicAnchor || !_seekProvider) return null;
+        if (!_ctx || !_currentTrack || !_musicAnchor || !_seekProvider) return null;
         const ts = _ctx.getOutputTimestamp ? _ctx.getOutputTimestamp() : null;
-        if(!ts || !(ts.contextTime > 0)) return null;
+        if (!ts || !(ts.contextTime > 0)) return null;
         const sNow = _seekProvider(_currentTrack);
-        if(sNow == null || !(sNow > 0)) return null;
+        if (sNow == null || !(sNow > 0)) return null;
         return (_musicAnchor.seekAbs + (ts.contextTime - _musicAnchor.t0) - sNow) * 1000;
     }
     // Fixed-seed white noise (mulberry32, like the sim) baked ONCE into a 44100Hz buffer:

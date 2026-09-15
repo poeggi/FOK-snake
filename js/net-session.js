@@ -20,7 +20,7 @@
 // stepping into/out of a menu). Only an explicit abort (BACK/quit) or a timeout
 // clears it. Putting these in _netLb is what silently killed handshakes before:
 // every screen change reset the object and the peer's reply was then discarded.
-var _netHs = { sent:null, sentAt:0, sentRelay:false,     // we invited; awaiting accept (sentRelay: DEPRECATED(relay))
+let _netHs = { sent:null, sentAt:0, sentRelay:false,     // we invited; awaiting accept (sentRelay: DEPRECATED(relay))
                accepting:null, acceptingAt:0,            // we accepted; awaiting their offer
                offerTo:null, offerPayload:null, offeredAt:0, offerTries:0 };   // we offered; awaiting answer
 function _netHsClear(){ _netHs = { sent:null, sentAt:0, sentRelay:false, accepting:null, acceptingAt:0,

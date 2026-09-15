@@ -92,36 +92,36 @@ const SPEC_BOOT_TRIES = 20;
 const SPEC_FWD = { go:1, in:1, st:1, rs:1, bye:1, h:1 };
 
 // ---- state --------------------------------------------------------------
-var _spOut = [];        // links I SERVE (downstream)
-var _spIn  = [];        // links FEEDING me (upstream; two while dual-connected)
-var _spOn = false;      // I am spectating (my sim is being driven by a feed)
-var _spHops = 1;        // how many forwarding hops from the feeder I sit
-var _spGen = 0;         // FEED generation: bumped when a backup feeder takes over
-var _spSeq = 0;         // my outbound envelope sequence, as a feeder
-var _spSeen = -1;       // highest envelope seq applied (dedup across a dual-connect)
-var _spLine = '';       // id of the node whose sequence line _spSeen counts (see _spOnFeedMsg)
-var _spCtx = null;      // the bootstrap context I hold (mine as feeder, or the one I was sent)
-var _spRs = null;       // newest checkpoint 'rs' envelope
-var _spBuf = [];        // envelopes since _spRs, for a late joiner
-var _spQ = [];          // pre-boot buffer (see the boot-delay note in the header)
-var _spBootT = null;    // the pending boot timer
-var _spRole = '';       // '' | 'feeder' | 'primary' | 'secondary'
-var _spTid = '', _spNid = '';
-var _spGrant = {};      // peer id -> ms when we authorised it to open a spectator link
-var _spWant = [];       // MY outstanding watch requests: [{to, at, last, heard, sparse}] -- a secondary asks BOTH primaries
-var _spSilent = {};     // peer id -> ladders that ran out without ONE word back from it (see _spWantPump)
-var _spAsk = [];        // asks PARKED on me, waiting for a match to serve: [{from, at}]
-var _spMonitor = '';    // the event MONITOR the roles sheet names: served on a slot of its own, listed nowhere
-var _spOkAt = 0;        // when we last answered 'ok' -- an offer is owed to us until it lands
-var _spBootTry = 0;     // boots deferred waiting for the shared clock
-var _spT = null;        // the 250ms housekeeping timer
-var _spSrc = '';        // peer id of the link currently feeding me
-var _spLostAt = 0;
-var _spOrphanG = -1;    // generation the server was last told we had run out of sources in      // when the feed first fell silent (the terminal deadline runs off this)
-var _spCkptAt = 0;
-var _spCkptReq = null;  // the checkpoint the worker is minting: {n, at} -- the stream is HELD behind it (_spCkpt)
-var _spFeedAt = 0;      // wall time of the last envelope that reached me
-var _spDbg = { rx:0, tx:0, dup:0, over:0, fail:0, gen:0, boot:0 };
+let _spOut = [];        // links I SERVE (downstream)
+let _spIn  = [];        // links FEEDING me (upstream; two while dual-connected)
+let _spOn = false;      // I am spectating (my sim is being driven by a feed)
+let _spHops = 1;        // how many forwarding hops from the feeder I sit
+let _spGen = 0;         // FEED generation: bumped when a backup feeder takes over
+let _spSeq = 0;         // my outbound envelope sequence, as a feeder
+let _spSeen = -1;       // highest envelope seq applied (dedup across a dual-connect)
+let _spLine = '';       // id of the node whose sequence line _spSeen counts (see _spOnFeedMsg)
+let _spCtx = null;      // the bootstrap context I hold (mine as feeder, or the one I was sent)
+let _spRs = null;       // newest checkpoint 'rs' envelope
+let _spBuf = [];        // envelopes since _spRs, for a late joiner
+let _spQ = [];          // pre-boot buffer (see the boot-delay note in the header)
+let _spBootT = null;    // the pending boot timer
+let _spRole = '';       // '' | 'feeder' | 'primary' | 'secondary'
+let _spTid = '', _spNid = '';
+let _spGrant = {};      // peer id -> ms when we authorised it to open a spectator link
+let _spWant = [];       // MY outstanding watch requests: [{to, at, last, heard, sparse}] -- a secondary asks BOTH primaries
+let _spSilent = {};     // peer id -> ladders that ran out without ONE word back from it (see _spWantPump)
+let _spAsk = [];        // asks PARKED on me, waiting for a match to serve: [{from, at}]
+let _spMonitor = '';    // the event MONITOR the roles sheet names: served on a slot of its own, listed nowhere
+let _spOkAt = 0;        // when we last answered 'ok' -- an offer is owed to us until it lands
+let _spBootTry = 0;     // boots deferred waiting for the shared clock
+let _spT = null;        // the 250ms housekeeping timer
+let _spSrc = '';        // peer id of the link currently feeding me
+let _spLostAt = 0;
+let _spOrphanG = -1;    // generation the server was last told we had run out of sources in      // when the feed first fell silent (the terminal deadline runs off this)
+let _spCkptAt = 0;
+let _spCkptReq = null;  // the checkpoint the worker is minting: {n, at} -- the stream is HELD behind it (_spCkpt)
+let _spFeedAt = 0;      // wall time of the last envelope that reached me
+let _spDbg = { rx:0, tx:0, dup:0, over:0, fail:0, gen:0, boot:0 };
 
 // ---- predicates the rest of the app asks ---------------------------------
 // TRUE while this client is watching a match rather than playing one. The duel
