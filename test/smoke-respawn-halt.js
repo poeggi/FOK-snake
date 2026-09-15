@@ -48,8 +48,12 @@ try {
     // zeroed its counter here would sit 60 ticks behind, and nothing closes a gap that way. The
     // number is DERIVED, never a literal, so moving the fixture clock cannot leave this passing
     // against a stale expectation.
+    // The harness has no performance.timeOrigin, so _wall() is Date.now(): hold it still across
+    // the expectation and the begin, or a loaded box straddles a tick boundary between the two.
+    const _dn = Date.now, _held = _dn(); Date.now = () => _held;
     const RSP_PTS = 99000, rspExp = Math.floor((netPts() - RSP_PTS) / TICK_MS);
     _netHandleMsg(JSON.stringify({ t:'go', why:'respawn', seed:0xABCD, startPts:RSP_PTS, epoch:1, lvl:1, bth:0 }));
+    Date.now = _dn;
     if(!sent.some(m=>m.t==='go' && m.a===1)) fail('respawn go was not echoed');
     if(simTick !== rspExp) fail('respawn begin left simTick ' + simTick + ' != ' + rspExp + ' (the tick startPts implies)');
     if(phase !== 'duelReady') fail('respawn begin left phase ' + phase + " != 'duelReady'");
