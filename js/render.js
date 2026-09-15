@@ -1026,11 +1026,10 @@ function drawPacHead(x, y, facing) {
     ctx.beginPath(); ctx.arc(cx+px*r*0.42+facing.x*r*0.12, cy+py*r*0.42+facing.y*r*0.12, 1.6, 0, Math.PI*2); ctx.fill();
     ctx.restore();
 }
-// Core snake renderer, parametrized (segments, direction, queue, colour, wardrobe) so the
 // Draws ONE snake, whole: colour, head, and the ENTIRE wardrobe. Single player and
-// each duel snake go through here, so a snake looks the same wherever it is drawn --
-// the belt/shoes/gown used to live in drawSnake() alone, which meant an online
-// opponent silently lost half their cosmetics. shimmer = draw the gown's travelling
+// each duel snake go through here, so a snake looks the same wherever it is drawn
+// (a wardrobe piece drawn on one path only silently undresses an online opponent).
+// shimmer = draw the gown's travelling
 // sparkle (single player: beating the record; duel: leading -- both clients agree).
 // ---- SMOOTH MOTION (cfg.smoothMotion): a render-side ramp between cells ----
 // The sim steps a whole cell at a time; this draws each segment part-way from the cell it

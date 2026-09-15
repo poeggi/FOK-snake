@@ -16,11 +16,11 @@ const NET_BASE = 'https://fok-server.poggensee.it';
 // BOTH A and AAAA: the p2p connect wants candidates on whichever family works, and the
 // public-address discovery in net-rtc.js can only name a family it gathered over.
 const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
-const NET_API_BUILT = 4;    // the contract MAJOR this client implements (API.md: Versioning; v4 = the ITEM REGISTRY -- the server owns item-instance ownership, so a transfer moves one row instead of copying a flag)
+const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-server docs/API.md, Versioning)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 16;   // built against 4.16 = named event ids may contain 0 and 1; pass and printed-key alphabets and all identifier lengths stay unchanged. 4.15 = THE WALKOVER CLOCK RIDES THE SHEET: `walkover_at` on every `roles` sheet (and on the `roles` object of a state read and of the event `monitor` answer) is the server ms from which a gone seat MAY be walked over -- dealt + tournament_walkover_ms, re-stamped by a re-deal -- so the player called up, every watcher and the event's screen count the same seconds down off one value; it is the first instant the server may act, never a promise that it will, a seat that keeps asking is never walked over, and a client without the field shows no clock. 4.14 = THE EVENT MONITOR IS DEALT THE SHEET: an event's monitor holder receives every `tourney` signal of the event's tournament -- the roles sheet in the same drain as the players, so the TV asks for the feed the instant a match is dealt instead of at its next 30 s lease read -- and `roles` / `roles-patch` name it in a field of its own, `monitor`, outside `players`, `primaries`, `secondaries` and `names`: every client grants the feed off that field (which is what lets a MAKE DUELS PRIVATE player feed it), no client lists, draws or counts it, and the feeder serves it on a slot of its own beside the two primaries so it never costs a person a direct slot. The monitor's `you` stays `idle`; feeding stays the ordinary `watch` signal and the P2P feed; reading the monitor still settles no deadline. 4.13 = A PRINTED KEY ADMITS BEFORE THE EVENT STARTS: a poster goes on a wall days early, so scanning its 11-character key while the event is `upcoming` now joins instead of answering 409, and the event rides the caller's `events` list from that moment -- which is the whole point, because being unable to see that you registered is what made scanning a poster feel like it had failed. A live PASS does not admit early and the `pass` action stays refused: a pass is minted from the clock by a member of a running event, and there is no clock to mint one from before it starts. The ACHIEVEMENT is not granted early either -- `ach` is simply absent from a member answer while the event is upcoming and appears on the first one after it has started, which needs nothing here because every member answer already carries it and an absent one is already a no-op. NOTHING ELSE MOVED: no new field, no capability flag, and no way to detect this but to try the join, so nothing here is gated on the minor. 4.12 = THE PRINTED KEY FITS THE GAME'S OWN SCANNER: an event's poster is rendered by the server at exactly version 3 / level L / mask 0, which is the one shape this client's decoder reads, and its key is 11 characters NAMING ITS OWN EVENT rather than 16 beside an eid. Eleven is the whole budget: 42 bytes of URL prefix against a 53-byte version-3 symbol. So both codes an event shows are 53 bytes and THE DOT is what tells them apart -- a pass carries its eid in front of its own dot, a key has none. `join` therefore takes {id, code} with NO eid and the server reads the event out of the code, which is the only thing that can work for a key; the eid comes back on the answer. 4.11 = EVENTS: a room an operator opens on the server, joined by scanning its QR -- straight in when it is OPEN, after the organizer approves when it is CLOSED. THE SERVER IS THE ROSTER: membership is rows there and nothing else, so a client reads `events` on hello/poll fresh whenever a screen needs it, keeps no copy, reconciles nothing at startup and puts nothing in the vault -- deliberately NOT the friends-list pattern, whose local copy plus startup reconciliation is what makes a restored config fire a burst of requests. A member learns it was removed by the event simply being gone from that list. The live pass QR is why the identifiers are the length they are: this client's fixed version-3 encoder takes 53 text bytes, the URL prefix is 42, and 4 + 1 + 6 is what is left -- which is also why a pass names no issuer, so the server cannot learn who passed an event on. An event TOURNAMENT is an ordinary tournament with `eid` as a tag and a membership check on the way in, and the event MONITOR is an ordinary SPECTATOR: the same 'watch' signal, the same P2P feed, the same renderer, no second transport anywhere. `monitor_allowed` rides `state` and every `events` row so a client can ask whether a screen is offered WITHOUT claiming the slot, and `you` always describes the caller's own ROW rather than the role it is playing, so a member holding a free monitor lease still reads member; 4.10 = ONE AT A TIME: nothing of ours leaves beside a PARKED POLL unless a player is waiting on it right now -- the duel handshake (signal, start), a tournament action, a friend request, a seek -- and never two of them, because two beside the hold race each other and BOTH pay the full queue wait; everything nobody is waiting for (the beat, the roster, a score) waits for the poll to answer, one hold at most. t.txt is not a request for the rule: it is static, starts no work on the server, and the clock sweep must never queue behind a hold. A pts is refused only past pts_ahead_max_ms (200 ms), warned at half of it, so what we send is the reading we hold -- unbackdated, which is what makes the server's log evidence about our anchor; 4.9 = the poll is a COMPLETE beat: it carries `api` and the server's `debug` instruction on every body it sends (the two things a client cannot know are due, so it can never be its job to ask), and takes `aa` / `fl` / `tl` / `de` / `db` -- the hello answers a screen holding a poll used to send a second request for. A client on such a screen sends nothing beside its poll at all, not even the 60 s beat, because the poll is one; what stays hello's is what the CLIENT knows is due and the server cannot (a rename, a latency reading, its nets, and duel_with during a game, where nothing holds a poll anyway). Why it is worth a minor: a request sent beside a parked poll can be the one that takes the host to a concurrency its worker pool has not served before, and pays ~130 ms for the fork; 4.8 = a host may REPLACE the tournament it holds: a create answered 409 (already hosting) is re-sent with replace:true after the player confirms, ending the old one exactly as their own leave would and opening the new one in the same call, so a client never ends up holding neither (the old lobby is told 'host opened a new one'); 4.7 = a duel is ANNOUNCED as it begins: start.php records it (both peers call it at the match-identity moments), the heartbeat's duel_with refreshes it and hello's duel_end clears it at teardown, with duel_private marking a duel that counts everywhere but is never attributed to a person; 4.6 = friend presence as DELTAS against a cursor (friends_since on hello, fs on the poll -> friends_delta / friends_at / friends_more), the counters and the hold decision on the poll's 200, no friend ids on the wire and no screen tick; 4.5 = the 60 s heartbeat against a 120 s online window (every window a beat keeps alive -- presence, duel, auto-accept, the signal TTL -- doubled with it); 4.4, including its RE-RELEASE (the roster on hello's `friends_list`: feature-detected, never version-gated, because a server may answer to 4.4 without it) (ICE trickled in batches as one `ices` signal; the clock anchored on a quiet wire, with the server's own queue wait `q_ms` and start.php's `resync` hint to say when a sample is worth trusting; the hold decision in hello's `pace`); 4.3 = the tournament round ladder: a match starts at the level the bracket says, and a finished round stops on a scoreboard the host clears; 4.2 = hello `nets`: we report our own public address in BOTH families; 4.1 = tournament.php + the 'watch'/'tourney' signal pair + friends_playing; every 3.x minor is folded into the 4.0 baseline
+const NET_API_BUILT_MINOR = 16;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -226,8 +226,8 @@ const NET_POLL_S   = 5;       // the longest hold poll.php serves, in whole seco
 // client did before -- stands.
 var _netPace = { hold:true };
 // How many 1s ticks apart an UNHELD mailbox read sits: where the held poll's answer would
-// have landed, so withdrawing the hold does not cost the server a request per second
-// where one held poll used to sit.
+// have landed, so withdrawing the hold does not cost the server a request per second in
+// place of one held poll.
 const NET_UNHELD_EVERY = NET_POLL_S;
 // A tab hidden longer than this, with nothing of ours in flight and no seek running, reads
 // the mailbox UNHELD on the cadence above instead of holding: a hold owns a worker for its
@@ -247,14 +247,14 @@ function _netHiddenLong(){ return _netHiddenAt > 0 && Date.now() - _netHiddenAt 
 // goes out ONE AT A TIME through here, spaced by the gap the contract states and never
 // beside anything else of ours. None of it is anything a player is waiting for.
 //
-// The duel path used to be exempt outright, on the grounds that it is the latency a player
-// feels. The server then measured what that exemption costs: at the moment a match was
+// The duel's SERVER ROUND TRIPS come through here too, although they are the latency a
+// player feels: the server measured the cost of exempting them. At the moment a match was
 // dealt, one client had start.php and tournament.php leave in the same millisecond and BOTH
 // waited 128ms for a worker while the pool mean was 2.5ms. Being past the gate is not the
 // same as going out together -- two exempt calls in one tick race each other and both pay
-// the queue, where one behind the other pays it once. So the duel's SERVER ROUND TRIPS come
-// through here as well now. What stays outside is the long poll itself: it IS the parked
-// slot the rule allows beside one other request, and gating it would only park the mailbox.
+// the queue, where one behind the other pays it once. What stays outside is the long poll
+// itself: it IS the parked slot the rule allows beside one other request, and gating it
+// would only park the mailbox.
 // SPACING, not a wait: it is sized just above what one request costs, so a stacked burst
 // drains in milliseconds and no single call is ever held long enough for a player to feel it.
 const NET_GAP_MS = 100;        // the contract's spacing between any two requests of ours
@@ -456,8 +456,8 @@ function _netJsonArr(s){ try{ const v = JSON.parse(s); return Array.isArray(v) ?
 
 // ---- player profile (sent with invites/offers; received ones are UNTRUSTED) ----
 // Do these two builds share a SIMULATION? Compare MAJOR.MINOR only, so 2.0.0 and
-// 2.0.1 play together. The patch auto-bumps on every commit, so an exact match meant
-// two devices practically never agreed and refused to duel over a changed pixel.
+// 2.0.1 play together: the patch auto-bumps on every commit, so an exact match would
+// let two devices refuse to duel over a changed pixel.
 //
 // What actually has to match is determinism, not the build: two clients whose sims
 // differ desync, two whose message strings differ do not. So major.minor is a PROMISE
@@ -739,7 +739,7 @@ function netDebugQuad(){
         Nm.push('drop ' + _rbDbg.drop + ' lost ' + _rbDbg.lost + (d.congDrop ? '  CONG ' + d.congDrop : '')
             + (d.retx ? '  RETX ' + d.retx : ''));
         // pts live = the peer's one-way pts-delta (how late their inputs land) -- the number
-        // that predicts rollbacks, so it takes the Level-2 slot the wall clock used to hold.
+        // that predicts rollbacks, so it gets the Level-2 slot.
         Tm.push('pts live ' + Math.round(d.lag) + (d.lagN ? '  avg ' + Math.round(d.lagAvg) + ' ' + Math.round(d.lagMin) + '/' + Math.round(d.lagMax) : ''));
         // tgt = the tick the wall PTS says we should be at; d = tgt-simTick, i.e. how far
         // our engine sim sits from the wall clock (the drift the accumulator steers out).
@@ -808,8 +808,8 @@ function netPlayerNames(){
 }
 // ONE side of a duel, named. P1/P2 is a slot number, and a slot number is what you write
 // when you do not know who is in the slot -- but by the time a duel is running, both names
-// are known on both sides. Every place that used to print a slot number asks here instead,
-// so the HUD, the winner banner and the heart-lost line all say the same word for the same
+// are known on both sides. Every place that names a side asks here, so the HUD, the winner
+// banner and the heart-lost line all say the same word for the same
 // person. PLAYER 1 / PLAYER 2 survives only as the fallback it always should have been: a
 // local duel on one keyboard, where the second player has no account and so has no name.
 function duelSideName(i){
@@ -1127,7 +1127,7 @@ async function _netHello(){
 // still surface there, silent everywhere else (incl. during games: the
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
 let _netPollTick = 0;
-// 4.9: what a screen HOLDING a poll used to send a second request for now rides the poll.
+// 4.9: everything a screen HOLDING a poll needs rides the poll, no second request.
 // Two of the answers are FEATURE-DETECTED, never version-gated (a minor is re-released, so a
 // server may answer "4.9" without them): the old route stands until the poll has served the
 // answer once, exactly as _netFrHello does for the roster on hello.
@@ -1135,7 +1135,7 @@ let _netFrPoll = false;    // the poll serves `friends`: netFriendsEnter sends n
 let _netTtPoll = false;    // the poll serves `tourneys`: the tournament lobby's 5 s hello stands down
 let _netFlWant = false;    // ask for the roster on the next poll (one-shot, armed by netFriendsEnter)
 let _netTlAt = 0;          // when the announce last came back: tl makes the server answer AT ONCE, so it rides a tick of its own
-const NET_TOURNEYS_MS = 5000;   // the announce tick the tournament lobby used to spend a hello on
+const NET_TOURNEYS_MS = 5000;   // the tournament lobby's announce tick
 let _netEvAt = 0;          // when the caller's event rows last came back
 // ev ANSWERS AT ONCE, exactly like fl and tl: poll.php never 204s a request that asked for
 // rows, so riding every poll would cut every hold short and spin an event screen into a hot
@@ -1277,7 +1277,7 @@ async function _netPollOnce(){
     // fs: on a presence screen the poll's return carries the friend delta, the counters and
     // the hold decision (4.6), so those screens send no hello of their own.
     const fs = _netFrScreen() ? '&fs=' + _netFrSince : '';
-    // ...and with it (4.9) the rest of what a holding screen used to send a hello for.
+    // ...and with it (4.9) the rest of what a holding screen needs.
     // fl and tl make the server ANSWER AT ONCE -- a screen that just opened is not waiting
     // for a signal that is not coming -- so tl rides a 5 s tick of its own rather than every
     // poll, or the tournament lobby's hold would never stand. aa only ARMS; clearing
@@ -1376,11 +1376,10 @@ if(typeof document !== 'undefined' && document.addEventListener){
         const awayMs = _netHiddenAt ? Date.now() - _netHiddenAt : 0; _netHiddenAt = 0;
         _netPollResume();   // drop the latch, and no held poll before the aborted one's worker is free
         _netHelloBusy = false;
-        // SEQUENCED, not fanned out. This used to fire a clock sync, a heartbeat and a
-        // roster read into the same instant -- and the clock sample was then taken against
-        // the two requests standing beside it, which is the one thing a sample must never
-        // be. A resume is exactly when a client re-anchors, so a sample polluted here lands
-        // in the offset the whole lockstep timeline hangs from. Heartbeat first (it is what
+        // SEQUENCED, not fanned out: a clock sample taken beside two requests of our own is
+        // the one thing a sample must never be, and a resume is exactly when a client
+        // re-anchors, so a sample polluted here lands in the offset the whole lockstep
+        // timeline hangs from. Heartbeat first (it is what
         // tells the server we are back), the anchor second, once the wire is our own again;
         // the roster comes with the heartbeat or on its own tick above.
         _netFrSince = 0;   // whatever presence we held is as old as the sleep: read it whole
@@ -1778,9 +1777,9 @@ function netFetchScores(){
 // a short delay so boot itself never touches the network path. All soft-fail. ----
 // The beat's PHASE is load time and nothing else: each one re-arms off the previous, never
 // off Date.now() and never off the shared server clock, so two clients sit on the same
-// millisecond only if they loaded on it. A served jitter budget used to add an offset on top
-// of that; it bought nothing, because what separates a roomful of clients is the gate they
-// all queue at (NET_GAP_MS), which spaces the calls rather than the sessions making them.
+// millisecond only if they loaded on it. No served jitter budget on top: what separates a
+// roomful of clients is the gate they all queue at (NET_GAP_MS), which spaces the calls
+// rather than the sessions making them.
 if(_netTimers){
     // 4.9: a poll is a COMPLETE beat -- presence, `api`, the debug instruction and (with
     // `aa`) auto-accept all ride it -- so a client holding one owes no hello at all, and the

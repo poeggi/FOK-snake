@@ -6,6 +6,17 @@ const { runTest } = require('./harness');
 const driver = `
 ;(function(){
   const R = globalThis.__R = { steps: [], err: null, ok: false };
+  // Expected loot value for a fresh player (no dupes): the coins filler averages half the
+  // price, each rarity tier the mean value of its pool. The product never needs the figure.
+  const boxEV = (box) => {
+    let ev = box.odds.coins * box.price * 0.5;
+    for(const r of ['common','rare','epic','legendary']){
+      const pool=_boxLootPool(r,false);
+      if(!pool.length || !box.odds[r]) continue;
+      ev += box.odds[r] * (pool.reduce((s,id)=>s+_boxItemValue(id),0)/pool.length);
+    }
+    return ev;
+  };
   try {
     // 1. odds are a valid distribution
     for(const b of BOXES){

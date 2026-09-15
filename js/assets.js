@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.4.83';
+const APP_VERSION = 'v4.4.84';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -166,13 +166,13 @@ const CODE_LEN = 6;
 // which is a fixed version 3 at level L -- 53 text bytes, no more. The URL prefix
 // is 42, so 11 is what is left, and both URLs come to exactly 53. A poster nobody
 // can scan in the app is the wrong poster, which is what a 16-character key made.
-const EVENT_EID_LEN = 4, EVENT_PASS_LEN = 6, EVENT_KEY_LEN = 11, EVENT_CODE_LEN = 11;
+const EVENT_EID_LEN = 4, EVENT_PASS_LEN = 6, EVENT_KEY_LEN = 11;
 // The third hash the game answers to, beside #friend= and #tourney=. ONE capture:
 // the code exactly as it was scanned, dot and all, because that is what `join`
 // posts -- the server reads the event out of it and the client never has to know
 // which of the two it is holding. Anchored at the end: a link with anything
 // trailing is not one of ours. API 4.16 allows 0 and 1 in the eid only.
-const EVENT_HASH_RE = /#event=((?:[A-Z0-9]{4}\.[A-Z2-9]{6})|(?:[A-Z2-9]{11}))$/;
+const EVENT_HASH_RE = new RegExp('#event=((?:[A-Z0-9]{' + EVENT_EID_LEN + '}[.][A-Z2-9]{' + EVENT_PASS_LEN + '})|(?:[A-Z2-9]{' + EVENT_KEY_LEN + '}))$');
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed
 // boost period G (>=2, so <=30 Hz). Normal movement advances one cell every 2

@@ -52,8 +52,7 @@ const DRIVER = `
     if(hit(U + '#friend=00ff00ee')) throw 'a friend link must not read as an event';
     if(hit(U + '#tourney=K7QMX2')) throw 'a tournament link must not read as an event';
     if(EVENT_EID_LEN!==4 || EVENT_PASS_LEN!==6 || EVENT_KEY_LEN!==11) throw 'identifier lengths moved';
-    if(EVENT_EID_LEN + 1 + EVENT_PASS_LEN !== EVENT_CODE_LEN) throw 'a dotted pass must spend the whole budget';
-    if(EVENT_KEY_LEN !== EVENT_CODE_LEN) throw 'a key must spend the same budget';
+    if(EVENT_EID_LEN + 1 + EVENT_PASS_LEN !== EVENT_KEY_LEN) throw 'a dotted pass and a key must spend the same budget';
     log('hash parser ok: one 11-char budget, the dot tells a pass from a key, never the other two links');
 
     // ---- THE 53-BYTE BUDGET ------------------------------------------------
@@ -516,7 +515,7 @@ const DRIVER = `
     if(reads !== 2) throw 'a signal for another event must not refresh this page';
     _evPending = {};
     _evOnSignal({ event:'request', eid:'K7QM', from:'c0ffee42' });
-    if(!eventPendingAt('K7QM')) throw 'a request must badge the event it names';
+    if(!_evPending['K7QM']) throw 'a request must badge the event it names';
     if(reads !== 2) throw 'a request is a nudge, not a re-read';
     _evOnSignal({ event:'accepted', eid:'K7QM' });
     if(reads !== 3) throw 'an approval must read state -- that is where the achievement is';
@@ -1376,7 +1375,7 @@ const DRIVER = `
           // Entering the screen takes one.
           eventWakeSet(true); await tick();
           if(asked !== 1) throw 'exactly one lock is asked for, got '+asked;
-          if(!eventWakeHeld()) throw 'and it has to be HELD, not merely asked for';
+          if(!!!_evWake) throw 'and it has to be HELD, not merely asked for';
           if(!listeners.visibilitychange) throw 'a lock that is not re-taken on visibilitychange is gone the first time the TV switches input';
           // A second arm while one stands asks for nothing: a screen redraw is not a reason.
           eventWakeSet(true); await tick();
@@ -1384,28 +1383,28 @@ const DRIVER = `
           // Leaving gives it back. A lock outliving its screen is a promise nobody asked for.
           eventWakeSet(false);
           if(released !== 1) throw 'leaving the screen must release the lock, got '+released;
-          if(eventWakeHeld()) throw 'and nothing may still read as held';
+          if(!!_evWake) throw 'and nothing may still read as held';
           // THE BROWSER DROPS IT BY ITSELF when the page hides, and never returns it.
           // That re-take is the half a naive implementation leaves out, and the half
           // that matters on a device switched between inputs.
           eventWakeSet(true); await tick();
           lock.on_release();                                  // the browser let go
-          if(eventWakeHeld()) throw 'a released lock must not still read as held';
+          if(!!_evWake) throw 'a released lock must not still read as held';
           globalThis.document.hidden = true; listeners.visibilitychange(); await tick();
           if(asked !== 2) throw 'a hidden page cannot take one, got '+asked+' asks';
           globalThis.document.hidden = false; listeners.visibilitychange(); await tick();
-          if(asked !== 3 || !eventWakeHeld()) throw 'coming back has to take it again, got '+asked+' asks';
+          if(asked !== 3 || !!!_evWake) throw 'coming back has to take it again, got '+asked+' asks';
           eventWakeSet(false);
           // A TV WITHOUT THE API is the ordinary case, not an error: nothing throws,
           // nothing is held, and the screen works exactly as it does today.
           globalThis.navigator = {};
           eventWakeSet(true); await tick();
-          if(eventWakeHeld()) throw 'an absent API must leave nothing held';
+          if(!!_evWake) throw 'an absent API must leave nothing held';
           eventWakeSet(false);
           // ...and one that REFUSES is the same thing: refused is not crashed.
           globalThis.navigator = { wakeLock: { request: async () => { throw new Error('denied'); } } };
           eventWakeSet(true); await tick();
-          if(eventWakeHeld()) throw 'a refusal must leave nothing held';
+          if(!!_evWake) throw 'a refusal must leave nothing held';
           eventWakeSet(false);
           globalThis.navigator = _oNav; globalThis.document = _oDoc;
       }

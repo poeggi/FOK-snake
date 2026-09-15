@@ -344,7 +344,7 @@ function drainSimEvents(){
                 if(typeof netDuelHalt === 'function') netDuelHalt(); break;
             case 'duelRecovered':   // worker home: a full resync burst settled -- the net layer opens the resume boundary
                 if(typeof _netResyncSettled === 'function') _netResyncSettled(); break;
-            case 'lvlreset': fireworks=[]; _crushEffects=[]; _crashFx=[]; break;   // clear leftover particles at level begin (sim used to do this directly)
+            case 'lvlreset': fireworks=[]; _crushEffects=[]; _crashFx=[]; break;   // clear leftover particles at level begin
             case 'showhud':  if(e.v && !inGame) break;   // a stale worker "show" (e.g. a late level-reset frame) must never raise the HUD on a menu; hides always honoured
                              showHUD(e.v); break;
             case 'gameover':
@@ -464,10 +464,6 @@ function _flashDbgSnapBtn(){
     if(_dbgSnapBtnT) clearTimeout(_dbgSnapBtnT);
     _dbgSnapBtnT = setTimeout(()=>{ if(_dbgSnapBtn){ _dbgSnapBtn.classList.remove('snapped'); _dbgSnapBtn.textContent = 'SNAP'; } }, 900);
 }
-// TODO(compat): ES2017 async/await in a CORE file (game.js) -- a pre-2017 engine throws a
-// SyntaxError parsing the WHOLE file, so the game does not boot at all on a ~10-year-old phone.
-// The only ES2017 syntax in game.js. FIX (decide later, see storage.js cloudBackup): move this
-// debug-upload into the isolated online-tier file so game.js stays ES2015 and parses everywhere.
 async function sendDebugSnapshot(){
     if(!_dbgSnap){ _dataMsg='CAPTURE FIRST (DEBUG LVL 3)'; _dataMsgAt=_msgNow(); return; }
     if(typeof _netOk!=='function' || !_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
@@ -502,8 +498,7 @@ function _updateDbgSnapBtn(){
 // Debug overlay (DEBUG LEVEL 2+): four corner docks -- network, timing, graphics,
 // sim/game status. Refreshed 4/s, and only when the text actually changed. This is
 // a READOUT, not an animation:
-// nobody reads 60 updates a second, and it used to do exactly that -- rebuilding the
-// whole string and writing textContent every frame, each write forcing a reflow, in a
+// nobody reads 60 updates a second, and every textContent write forces a reflow in a
 // tool whose entire job is to not perturb what it measures. The numbers it shows
 // (rtt, anchor, rollbacks) move far slower than a frame anyway.
 const NET_DBG_MS = 250;
@@ -790,17 +785,6 @@ function _boxLootPool(rarity, admin){
     for(const it of SHOP_ITEMS) if(!it.repeatable && ITEM_RARITY[it.id]===rarity) pool.push(it.id);
     for(const it of BOX_ITEMS) if(it.rarity===rarity && (admin || !it.admin)) pool.push(it.id);
     return pool;
-}
-function _boxCoinsAvg(box){ return box.price*0.5; }   // mean of the coins-filler reward (25%-75%)
-// Expected loot value for a fresh player (no dupes). test/box-odds.js asserts price > EV.
-function boxEV(box){
-    let ev = box.odds.coins * _boxCoinsAvg(box);
-    for(const r of ['common','rare','epic','legendary']){
-        const pool=_boxLootPool(r,false);
-        if(!pool.length || !box.odds[r]) continue;
-        ev += box.odds[r] * (pool.reduce((s,id)=>s+_boxItemValue(id),0)/pool.length);
-    }
-    return ev;
 }
 // Roll one outcome. Pity: after BOX_PITY consecutive junk pulls (coins/common) the next
 // pull is forced to epic/legendary. Returns {type:'coins',amount} or {type:'item',id,rarity}.

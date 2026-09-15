@@ -129,7 +129,6 @@ var _spDbg = { rx:0, tx:0, dup:0, over:0, fail:0, gen:0, boot:0 };
 // widen the future window; _netSend reads it to guarantee we transmit NOTHING
 // toward the two players. A spectator is invisible to the match it watches.
 function netSpectating(){ return _spOn; }
-function netSpecRole(){ return _spRole; }
 function netSpecDbg(){ return _spDbg; }
 // How long since anything reached us off the feed, in ms (0 before the first envelope).
 // The spectator's equivalent of the duel's silence detector -- and the only thing its
@@ -825,10 +824,10 @@ function _spBoot(){
     // No shared clock YET rather than no shared clock: the sync specWatch asked for has not
     // landed. The context stays good while we wait -- every field in it is a match constant
     // except a tick base quoted on that very clock -- so waiting costs a few hundred ms and
-    // discarding it costs the whole feed. It used to discard: the link stayed open and
-    // subscribed, the feeder went on serving it, and every envelope was thrown away one layer
-    // up by the !_spOn gate in _spOnFeedMsg. No silence, no error, nothing for either end's
-    // ladder to find -- just a watcher on CONNECTING until the tournament dealt the next node.
+    // discarding it costs the whole feed: the link would stay open and subscribed, the feeder
+    // would go on serving it, and every envelope would be thrown away one layer up by the
+    // !_spOn gate in _spOnFeedMsg. No silence, no error, nothing for either end's ladder to
+    // find -- a watcher on CONNECTING until the tournament dealt the next node.
     if(netPts() == null){
         if(typeof _netAnchorRefresh === 'function') _netAnchorRefresh({ n:3, nudge:true });
         if(typeof setTimeout === 'function' && ++_spBootTry <= SPEC_BOOT_TRIES){

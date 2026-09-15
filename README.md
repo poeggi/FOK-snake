@@ -36,7 +36,10 @@ in. It engages only after a short aligned hold, so the tap that turns you is nev
 read as a boost, and turning drops it again. Settings -> TURBO BOOST switches it
 off entirely.
 
-Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to boost. Swipe the canvas to steer, and swipe again the way you are already going to boost. Tap the canvas during name entry to open the keyboard.
+Mobile: X-shaped d-pad + OK/pause/ESC side buttons. Hold a d-pad direction to
+boost. Swipe the canvas to steer, swipe on the way you are already going to
+boost, and swipe back against it to brake (end the boost). Tap the canvas during
+name entry to open the keyboard.
 
 ## Difficulty modes
 
@@ -198,6 +201,10 @@ previous cache. Do not edit the version/CACHE/ASSETS lines in sw.js by hand.
 A client runs from its cached bundle and never waits for the network. The
 service worker update check (a 4 KB file) finds a new version, the new bundle is
 fetched whole before it goes live, and the game reloads once on the splash.
+
+Tests are plain Node, no dependencies. `bash test/checks.sh` runs the fast tier
+(the pre-commit hook runs the same), `bash test/checks.sh --full` adds the duel
+sweeps CI runs. See test/README.md for the on-demand modes.
 
 ## License
 

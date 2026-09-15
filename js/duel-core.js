@@ -236,18 +236,6 @@ function _rbDuelSnap(){
              timeCrystal, timeCrystalAt, _slowMode, _slowModeAt,
              _gourangaLine, _gourangaActive, _gourangaEaten, _gourangaSteps };
 }
-// Per-FIELD hashes alongside the whole-state one. A bare "DESYNC" cannot say what
-// diverged -- we hold the peer's hash, not its state, so there is nothing to diff.
-// They turn an unactionable alarm into a field name, which is the only way to find a
-// divergence that only happens on real devices. On the wire they ride inside 'h' as a
-// positional 16-bit array (see _rbHashBoth); this named 32-bit map is the tests'
-// diagnostic view (the product diff in _rbHashSettle reads _rbHashBoth's 16-bit array).
-function _rbHashFields(snap){
-    const o = {};
-    // JSON.stringify(undefined) is undefined, not a string: a field may legitimately be absent.
-    for(const k of RB_HASH_DUEL) o[k] = _rbStrHash(JSON.stringify(snap[k]) || 'u');
-    return o;
-}
 function _rbStrHash(s){
     let h = 0x811c9dc5;
     for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }

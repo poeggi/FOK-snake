@@ -125,8 +125,8 @@ async function _netRelayPost(s, o){
         if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return 'ok'; }   // capped: honest busy, end the attempt
         if(r.status === 400 || r.status === 429){
             // 429 = the per-second rate block, a full peer backlog, or a momentarily-full hub
-            // store; 400 is almost always our clock. All used to look like a healthy send and
-            // surfaced 4s later as CONNECTION LOST, blaming the network.
+            // store; 400 is almost always our clock. Named here, or each looks like a healthy
+            // send and surfaces 4s later as CONNECTION LOST, blaming the network.
             let j = null; try{ j = await r.json(); }catch(e){}
             const err = (j && j.error) ? String(j.error) : '';
             _netDbg.relayDrop = (_netDbg.relayDrop|0) + 1;

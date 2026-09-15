@@ -373,11 +373,11 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     _netSess.seed = (d.seed>>>0) || 1;
     _netHs.accepting = null;
     _netWire(pc.createDataChannel('fok', NET_DC_OPTS));   // pre-negotiated: open our own end at the same id as the offerer
-    // NO clock sync here. It used to run in parallel with the ICE handshake, which is the
-    // single busiest instant this client ever has: its own candidates, the answer, and the
-    // peer's candidates all crossing at once. Half of whatever queueing a sample met there
-    // landed straight in the offset, and the offset is what the whole duel timeline rests
-    // on. The anchor is taken in _netRequestStart instead -- channel open, wire quiet.
+    // NO clock sync here: the ICE handshake is the single busiest instant this client ever
+    // has (its own candidates, the answer and the peer's candidates all crossing at once),
+    // and half of whatever queueing a sample meets lands straight in the offset the whole
+    // duel timeline rests on. The anchor is taken in _netRequestStart -- channel open,
+    // wire quiet.
     try {
         await pc.setRemoteDescription(d.sdp);
         if(_netSess && _netSess.pc === pc){ _netSess.rdOk = true; _netIceFlush(_netSess); }
@@ -737,15 +737,13 @@ function _netLiveCheck(){
     if(_netTxTick(s)) return;         // pending-transition retry (~1/s) + the unanswered-go deadline
     // The idle keepalive carries the recent input log, so it doubles as repair:
     // a lost LAST input would otherwise sit unfixed until the player pressed
-    // something else. An empty log is just an alive check, as before.
+    // something else. An empty log is just an alive check.
     //
-    // The keepalive PERIOD used to equal the warning THRESHOLD: this ran on a
-    // 1000ms interval (setInterval never fires early, often late) while the warning
-    // fires after 1000ms of silence. So the gap crossed the line just before every
-    // single arrival -- CONNECTION LOST flashed once a second on a perfect link.
-    // Deterministic, not a jitter edge case. A keepalive must be comfortably faster
-    // than whatever watches for its absence: three per window, so three must
-    // genuinely go missing before we say a word.
+    // The keepalive PERIOD must be comfortably shorter than the warning THRESHOLD:
+    // a period equal to it crosses the line just before every arrival (setInterval
+    // never fires early, often late) and CONNECTION LOST flashes once a second on a
+    // perfect link. Three per window, so three must genuinely go missing before we
+    // say a word.
     if(nowMs - s.lastSent > NET_KEEPALIVE_MS)
         _netSend(inGame && !_netWD() ? { t:'in', tk:_rbToWire(simTick), l:_rbSent } : { t:'pi' });   // worker duel: _rbSent lives in the worker; its 16-tick heartbeat covers repair
     // The re-offer retry is gated off in-game, so drive it from here while reconnecting.

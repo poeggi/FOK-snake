@@ -292,10 +292,9 @@ function _duelBeginLevel(reseed) {
     const li = Math.min(level, LEVEL_CFG.length) - 1;
     if(reseed) seedRng(_duelLevelSeed(gameSeed, level));
     // Roll the speed round HERE and nowhere else, on EVERY spawn: a new level and every
-    // respawn after a death each take their own 1-in-10 chance. It used to be rolled only
-    // when a level opened, so a level that came up hot STAYED hot through every death on it
-    // -- which is exactly what made a speed round so punishing to finish. A death now
-    // re-rolls it in either direction. The draw rides the shared PRNG (re-anchored to
+    // respawn after a death each take their own 1-in-10 chance, so a death re-rolls it in
+    // either direction and a level that came up hot does not stay hot through every death
+    // on it (which is what makes a speed round punishing to finish). The draw rides the shared PRNG (re-anchored to
     // (gameSeed, level) on a new level, flowing on a respawn; _rngState is hashed and
     // rollback-restored either way), so both clients reach the same verdict.
     // The roll is taken FIRST and unconditionally past its own gate, so a speed tournament
@@ -682,9 +681,9 @@ function duelStep(now) {
         if (!biteK[i]) continue;
         const other = players[1-i];
         const idx = other.snake.findIndex(s => ck(s) === biteK[i]);
-        // A bite at the NECK (idx 1) used to leave a head with no body at all, which
-        // reads as a broken render rather than a hit taken. The chomp still bites as
-        // deep as it can; it just cannot take the last body segment with it.
+        // A bite at the NECK (idx 1) must not leave a head with no body at all, which
+        // reads as a broken render rather than a hit taken. The chomp bites as deep
+        // as it can; it just cannot take the last body segment with it.
         if (idx > 0) other.snake.length = Math.max(idx, SNAKE_MIN_LEN);
         players[i].slowUntil = now + T(120);
         emit({t:'sfx',name:'crash'}); emit({t:'bonus',label:'CHOMP!'});
@@ -733,9 +732,8 @@ function _barFragile(x,y) {
 }
 // THE barricade placement, shared by single player AND duel -- one code path, never
 // mirrored. Both modes get the same fragility rule (the edge ring is always crushable,
-// via _barFragile) and the same ~10% 2-cell paired extensions. Duel used to hard-code
-// every bar fragile:false, so a bar on the outer ring was solid in a duel but crushable
-// in single player: the "solid barricade on the corner" that could never happen solo.
+// via _barFragile) and the same ~10% 2-cell paired extensions, so a bar on the outer
+// ring is crushable in a duel exactly as it is solo.
 // The caller supplies its own blocked-set (snake(s) + launch runway) and bar count.
 function _placeBars(blocked, numBars) {
     const bars = [];

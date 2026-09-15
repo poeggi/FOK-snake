@@ -3,9 +3,9 @@
 // one server row with a unique id (uid), and this is the only file that talks to
 // it (/api/items.php).
 //
-// WHY a registry at all. Ownership used to be a boolean in cfg.shopItems, and the
-// cloud backup could restore it: lose a crown in a duel, reload yesterday's save,
-// have the crown back -- while the thief kept theirs too. A uid cannot be
+// WHY a registry at all. Ownership as a boolean in cfg.shopItems is something the
+// cloud backup can restore: lose a crown in a duel, reload yesterday's save, have
+// the crown back -- while the thief keeps theirs too. A uid cannot be
 // restored into existence. The server's items row IS ownership; a transfer MOVES
 // that row (compare-and-swap on its seq), so the population is conserved and a
 // restore can only ever hand back items the server still says are yours.

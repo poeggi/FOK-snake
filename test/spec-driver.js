@@ -106,7 +106,7 @@ const SPEC_HOOKS = `
   globalThis.__grant    = (ids)=> specGrant(ids);
   globalThis.__node     = (tid, nid)=> specNode(tid, nid);
   globalThis.__specOn   = ()=> netSpectating();
-  globalThis.__specRole = ()=> netSpecRole();
+  globalThis.__specRole = ()=> _spRole;
   globalThis.__specDbg  = ()=> Object.assign({}, netSpecDbg());
   globalThis.__specBias = ()=> netSpecBias();
   globalThis.__specHops = ()=> _spHops;

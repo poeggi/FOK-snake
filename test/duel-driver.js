@@ -264,7 +264,11 @@ const HOOKS = (id) => `
       const sn=_rbRing[i].snap; let h=__hashMemo.get(sn);
       if(h===undefined){ h=_rbHash(sn); __hashMemo.set(sn,h); }
       return h; } return null; };
-  globalThis.__ringFieldsAt= (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return _rbHashFields(_rbRing[i].snap); return null; };
+  // Per-FIELD hashes of a snapshot, the diagnostic view of what the 'h' packet carries as a
+  // positional 16-bit array (_rbHashBoth): a DESYNC verdict named by field. undefined
+  // stringifies to undefined, not a string: a field may legitimately be absent.
+  const __fields = (sn)=>{ const o={}; for(const k of RB_HASH_DUEL) o[k]=_rbStrHash(JSON.stringify(sn[k])||'u'); return o; };
+  globalThis.__ringFieldsAt= (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return __fields(_rbRing[i].snap); return null; };
   globalThis.__ringSnapAt  = (tk)=>{ for(let i=_rbRing.length-1;i>=0;i--) if(_rbRing[i].tk===tk) return JSON.parse(JSON.stringify(_rbRing[i].snap)); return null; };
   // The input log for a tick range: what commands each client will replay for those ticks.
   // Both clients MUST hold an identical log (lockstep), so a diff here localises a lost/misfiled input.

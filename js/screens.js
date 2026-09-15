@@ -80,8 +80,6 @@ function drawSplash(now) {
     const DARK_LEAD = SPLASH_DARK_S, DROP = 1.5, ENTER = 0.4, DARK_TAIL = 0.1;
     const CYCLE = DARK_LEAD + DROP + ENTER + 1.0 + DARK_TAIL;
     const T_DROP  = DARK_LEAD;
-    const T_ENTER = DARK_LEAD + DROP;
-    const T_DONE  = DARK_LEAD + DROP + ENTER;
     const coinX = CW/2, slotY = 292, startY = 162;
 
     // Background matches menu: grid + scan line overlay
@@ -708,7 +706,7 @@ function drawScores() {
 }
 
 // Achievement-page geometry, read from css/style.css (:root --ach-*) so BASE, EXPERT and
-// EGGS share ONE layout -- the pages used to carry their own top offsets and drifted apart.
+// EGGS share ONE layout instead of three sets of top offsets that drift apart.
 // Same CSS-token pattern as FONT/GLOW (js/text.js): defaults keep the headless harness,
 // which has no getComputedStyle, drawing the identical layout.
 const ACH = (() => {
@@ -1184,7 +1182,7 @@ function _drawScanPanel(){
 
 // The shared world layer for EVERY mode: single player, 1vs1 local, 1vs1 online. Background,
 // collectibles, world FX and the snake(s) all draw here, so a duel and a solo game go through
-// the exact same code -- the split that used to let cosmetics/power/state diverge is gone.
+// the exact same code and cosmetics, power and state cannot diverge between them.
 // A duel maintains only gem + powerPellet, so the other collectibles guard on globals it never
 // sets and simply no-op; players and snake are mutually exclusive (startDuel sets players,
 // startGame nulls it), so only one snake branch ever fires.
@@ -2014,7 +2012,7 @@ function drawTourneyLobby(){
         const you = !!p && p.id === getPlayerId();
         if(you) _ttYou(y);
         // The ID is what every row is guaranteed to have, so it is what every row shows: a
-        // player who never set a name used to be an entirely blank line in the roster.
+        // player who never set a name is otherwise an entirely blank line in the roster.
         _ttCol(_ttClip(nm || 'NO NAME', 10), TT_X_COL, y, nm ? (you ? '#7fff7f' : '#888') : '#555', FONT.MENU);
         _ttCol(fmtFriendId(String((p && p.id) || '')), CW/2 + 126, y, '#cccccc', FONT.MENU, 'right');
         // The row's own size: HOST says which of these people this one is, the same way
@@ -2109,8 +2107,8 @@ function _ttBracketBoard(t, walk){
         (t.bracket || []).slice(0, 9).forEach((nd, i) => {
             const y = 84 + i * 22, live = String(nd.nid) === cur, st = String(nd.state || 'pending');
             // Six node states, three readings: one is being played, one produced a result,
-            // and one closed without producing anything. A void or frozen node used to draw
-            // exactly like a match still waiting its turn, which is the one thing it is not.
+            // and one closed without producing anything. A void or frozen node must not draw
+            // like a match still waiting its turn, which is the one thing it is not.
             const col = live ? '#ffd700' : (st === 'settled' || st === 'confirmed') ? '#7fff7f'
                       : st === 'frozen' ? '#ff5555' : st === 'void' ? '#666' : '#888';
             _ttCol(_ttClip(String(nd.nid || '').toUpperCase(), 5), TT_X_COL, y, col, FONT.MENU);
@@ -2354,8 +2352,8 @@ function drawTourneyCeremony(){
     const walk = _ttWalkText(tourneyWalkoverLeft(r, tourneyRolesAt()), you === 'play');
     if(walk) ct(walk, CW/2, 290, '#ffaa44', FONT.HINT);
     // A watch that has not started is one of five different situations with five different
-    // causes, and CONNECTING is what every one of them used to look like from here. Say
-    // which: a watcher staring at one word cannot tell anyone what they are looking at.
+    // causes. Say which: a watcher staring at one word cannot tell anyone what they are
+    // looking at.
     const st = (you === 'spectate' && typeof specStatus === 'function' && specStatus()) || 'CONNECTING';
     drawStatus(tourneyUi().msg || (st + _ttDots()));
     // The player being called up has no key here and is offered none: a hint naming a way

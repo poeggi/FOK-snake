@@ -77,7 +77,6 @@ function _netEvApply(v){
 }
 function _evRow(eid){ for(const e of _evList) if(String(e.eid) === String(eid)) return e; return null; }
 
-function eventList(){ return _evList; }
 function eventView(){ return _ev; }
 function eventUi(){ return _evUi; }
 // Are we in any event at all? The list is the only answer to that question.
@@ -465,10 +464,8 @@ function eventRows(){
     // The roster, read fresh every time it is opened. A member sees who is in the
     // room; the organizer sees the door as well.
     rows.push({ t:'MEMBERS', go:'members' });
-    // WHAT THE ROOM HAS DONE, on a screen of its own. It used to be three archive
-    // lines squeezed under the rows on the page, which is where they were least
-    // readable and most in the way -- a date, two counts and a run of clipped names
-    // with no room to say what any of it meant.
+    // WHAT THE ROOM HAS DONE, on a screen of its own: squeezed under the rows here
+    // it is least readable and most in the way.
     rows.push({ t:'EVENT STATISTICS', go:'stats' });
     if(org && !scheduled && st !== 'ended'){
         // RUN and PAUSE are the same row wearing the state it would move to. END
@@ -861,9 +858,8 @@ function eventStatsView(e){
              live:!!(e && e.tourney && e.tourney.tid), top:top, archive:arch };
 }
 // One archived tournament as a row: when, how much of the field turned up, and who
-// won it. The three podium names the page used to print ran off both sides of the
-// screen at this font; the standings above the list are where the rest of the
-// podium is answered now.
+// won it. Only the winner: three podium names run off both sides of the screen at
+// this font, and the standings above the list answer the rest of the podium.
 function eventStatsRow(a){
     if(!a) return { day:'', field:'', won:'' };
     const pod = Array.isArray(a.podium) ? a.podium : [];
@@ -1181,7 +1177,6 @@ function eventExitPhase(){
 // than a record: somebody is waiting at a closed door of an event we run. It is
 // re-derived from the roster the moment that screen is opened.
 var _evPending = {};
-function eventPendingAt(eid){ return !!_evPending[String(eid || '')]; }
 function _evOnSignal(d){
     if(!d || typeof d !== 'object') return;
     const eid = String(d.eid || ''), what = String(d.event || '');
@@ -1321,10 +1316,6 @@ function eventWakeSet(on){
     _evWakeTake();
     return true;
 }
-// Whether a lock is actually STANDING, not whether one was asked for: on a TV that
-// has no such API the answer is false for ever, and that is a fact worth being able
-// to read rather than assume.
-function eventWakeHeld(){ return !!_evWake; }
 
 // ---- the achievement -------------------------------------------------------
 // Server-carried: the id, name, description and (optionally) the 8x8 icon all

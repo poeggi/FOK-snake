@@ -130,7 +130,7 @@ const HOOKS = (myId) => `
   globalThis.__history = ()=>{ score=8123; lives=2; snake=[{x:3,y:4}]; dir={x:1,y:0}; heart={x:9,y:9};
                               _earlyHeartTrigger=17; perfectCount=5; _shimmerThreshold=91234; };
   globalThis.__desync = ()=>{ players[1].snake[0].x = (players[1].snake[0].x + 3) % COLS; };
-  globalThis.__hashFields = ()=> _rbHashFields(simSnapshot());
+  globalThis.__hashFields = ()=>{ const sn=simSnapshot(), o={}; for(const k of RB_HASH_DUEL) o[k]=_rbStrHash(JSON.stringify(sn[k])||'u'); return o; };
   globalThis.__field = (k)=> JSON.stringify(simSnapshot()[k]);
   // Corrupt STRUCTURAL state (not our own snake): wrong level, a wrong view of the peer's snake,
   // wrong gem count -- the kind of divergence the 'st' recovery can NEVER heal.
