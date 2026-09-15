@@ -161,6 +161,36 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'LEFT UP RIGHT') throw 'legacy, the spiral run must not lapse, sent: ' + dirs(s);
     log('modern: a zig-zag locks within 3 moves and its alternating turn costs 16 px, the same-sense side 24; the spiral run lapses past 3 moves; legacy unchanged');
 
+    // A PACED STAIRCASE: one stroke per snake move, the thumb still at every corner. The dwell
+    // is a rest (the anchor moves to the corner) but not a change of mind: the run, the lock and
+    // the last turn on record survive it, the stroke after it is priced by its sense, and the
+    // window is the only clock (a dwell never refreshes it). legs = [dx,dy] strokes at F with
+    // 'dwell' ms of stillness (no samples) between them.
+    const paced = (legs, dwell) => { const out = [{ x:0, y:0, t:0 }]; let x = 0, y = 0, t = 0;
+      legs.forEach((l, i) => { if (i) t += dwell; const seg = poly([[x, y], [x + l[0], y + l[1]]], F, DT);
+        for (let k = 1; k < seg.length; k++) out.push({ x: seg[k].x, y: seg[k].y, t: t + seg[k].t });
+        t += seg[seg.length - 1].t; x += l[0]; y += l[1]; });
+      return out; };
+    gPer = 6;   // level 1: the window is 600 ms
+    s = swipe(paced([[0,-20],[20,0],[0,-20],[20,0],[0,-20],[20,0]], 150));
+    if (turns(s) !== 'UP RIGHT UP RIGHT UP RIGHT') throw 'modern, a paced 20 px staircase with 150 ms dwells sent: ' + dirs(s);
+    if (!_zigzag) throw 'modern, a paced staircase must hold the zig-zag lock across its dwells';
+    s = swipe(paced([[0,-30],[-20,0]], 150));   // UP then LEFT: the same sense twice (that way lies a U-turn)
+    if (turns(s) !== 'UP') throw 'modern, a rested same-sense turn at 20 px must wait for 24, sent: ' + dirs(s);
+    s = swipe(paced([[0,-30],[-24,0]], 150));
+    if (turns(s) !== 'UP LEFT') throw 'modern, a rested same-sense turn at 24 px must turn, sent: ' + dirs(s);
+    s = swipe(paced([[0,-30],[-30,0],[0,40]], 150));   // UP LEFT DOWN: a rested third same-way turn is held under 64
+    if (turns(s) !== 'UP LEFT') throw 'modern, a rested third same-way turn at 40 px must be held, sent: ' + dirs(s);
+    s = swipe(paced([[0,-30],[-30,0],[0,70]], 150));
+    if (turns(s) !== 'UP LEFT DOWN') throw 'modern, a rested third same-way turn at 70 px must turn, sent: ' + dirs(s);
+    s = swipe(paced([[0,-30],[-20,0]], 700));   // 700 ms of stillness after the turn: past the window, the run is over
+    if (turns(s) !== 'UP LEFT') throw 'modern, a same-sense turn after a 700 ms dwell must be a free first swipe, sent: ' + dirs(s);
+    s = swipe(paced([[0,-30],[-20,0]], 400));
+    if (turns(s) !== 'UP') throw 'modern, a same-sense turn after a 400 ms dwell is still in the run, sent: ' + dirs(s);
+    cfg.touchLegacy = true; s = swipe(paced([[0,-30],[-20,0]], 150)); cfg.touchLegacy = false;
+    if (turns(s) !== 'UP LEFT') throw 'legacy, a pause clears the run (a 20 px same-sense turn is a first swipe), sent: ' + dirs(s);
+    log('modern: a corner dwell keeps the run, the lock and the guard, and never refreshes the window; legacy: a pause clears the run');
+
     // A thumb that drifts one way while waiting (too fast to count as resting, too slanted to
     // count as the sent direction) never has to undo the drift: the across reference re-anchors
     // where the across motion reverses, so the next move the other way is a turn at SWIPE_N.
