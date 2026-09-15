@@ -119,6 +119,16 @@ runTest('SMOKE-TOUCH', `
     if (!u || -u.y >= 16) throw 'legacy, slanted first swipe must fire on the chord, got UP after ' + (u ? -u.y : 'never') + ' px of up travel';
     log('modern: the first swipe fires on 16 px along its axis, legacy on 16 px of chord');
 
+    // MODERN has no dead zone: a first swipe inside the 40-50 degree band still commits, on
+    // whichever axis the chord leans to. LEGACY keeps the band and stays silent there.
+    s = swipe(poly([[0,0],[72,-69]], F, DT));                       // 100 px at 44 deg
+    if (turns(s) !== 'RIGHT') throw 'modern, a 44 deg first swipe sent: ' + (dirs(s) || 'nothing');
+    s = swipe(poly([[0,0],[69,-72]], F, DT));                       // 100 px at 46 deg
+    if (turns(s) !== 'UP') throw 'modern, a 46 deg first swipe sent: ' + (dirs(s) || 'nothing');
+    cfg.touchLegacy = true; s = swipe(poly([[0,0],[72,-69]], F, DT)); cfg.touchLegacy = false;
+    if (dirs(s) !== '') throw 'legacy, a 44 deg first swipe must sit in the dead zone, sent: ' + dirs(s);
+    log('modern: no dead zone on the first swipe (44 deg is RIGHT, 46 deg is UP); legacy keeps the band');
+
     // A thumb that drifts one way while waiting (too fast to count as resting, too slanted to
     // count as the sent direction) never has to undo the drift: the across reference re-anchors
     // where the across motion reverses, so the next move the other way is a turn at SWIPE_N.

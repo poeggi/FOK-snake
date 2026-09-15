@@ -930,10 +930,11 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // Thresholds (px of finger travel): first move or reverse = SWIPE_1 (16), or SWIPE_N
 // (24) while boosting; 90-deg turn = SWIPE_N (24); continue same direction = SWIPE_SAME
 // (48), which suppresses accidental boosts. One table for both readers (_swipeRead).
-// Dead zone (the chord reader): 40-50 degrees from horizontal -- diagonal motion commits
-// nothing until the finger clearly enters a direction corridor (0-40 deg = horizontal,
-// 50-90 = vertical). In the dead zone the baseline is NOT reset, so displacement keeps
-// accumulating until the angle exits into a real corridor.
+// Dead zone (the chord reader, LEGACY and the menus): 40-50 degrees from horizontal --
+// diagonal motion commits nothing until the finger clearly enters a direction corridor
+// (0-40 deg = horizontal, 50-90 = vertical). In the dead zone the baseline is NOT reset, so
+// displacement keeps accumulating until the angle exits into a real corridor. MODERN in
+// play has no dead zone: the chord's axis is whichever it leans to.
 // Move cooldown: if the finger PAUSES longer than SWIPE_COOLDOWN (50ms) -- staying near
 // still, not merely a coalesced gap under load -- the last direction is cleared, so the
 // next move uses the first-move threshold and re-moves after a pause feel as responsive as
@@ -1184,9 +1185,10 @@ function _inControlMask(x,y){
 }
 // THE SWIPE READER: one finger sample in, the key it asks for and the distance the threshold
 // table judges out; null while nothing is readable. Both readers open with the CHORD from the
-// anchor, classified by its angle through the dead zone: the first swipe of a touch, the swipe
-// after a pause, and every menu swipe (MODERN judges that first swipe by its portion along the
-// chosen axis, LEGACY by the chord). They part once a direction has been sent in play:
+// anchor, classified by its angle: the first swipe of a touch, the swipe after a pause, and
+// every menu swipe (MODERN takes the axis the chord leans to and judges the portion along it;
+// LEGACY and the menus judge the chord through the dead zone). They part once a direction has
+// been sent in play:
 //   MODERN (default): three distances, each on its own axis. ACROSS the sent axis is the
 //     90-degree turn, measured from where the finger's motion last agreed with the sent
 //     direction: a slanted stroke is a slide, a stroke that has turned is a turn, and the turn
@@ -1239,15 +1241,19 @@ function _swipeRead(x,y,sf,hop){
     const dist=Math.hypot(dx,dy);
     if(dist<Math.round(SWIPE_1*sf)) return null;
     const ang=Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI;
+    const modern=_inPlay()&&!cfg.touchLegacy;
+    // MODERN has no dead zone: the chord's axis is whichever it leans to, and a diagonal
+    // commits as soon as SWIPE_1 of it lies along that axis. LEGACY and the menus keep the
+    // band, where a diagonal commits nothing until the chord leaves it.
     const isH=_swipeLastDir==='ArrowLeft'||_swipeLastDir==='ArrowRight';
     const isV=_swipeLastDir==='ArrowUp'||_swipeLastDir==='ArrowDown';
     const dzLo=isH?DZ_LO+5:DZ_LO, dzHi=isV?DZ_HI-5:DZ_HI;
-    if(ang>=dzLo&&ang<=dzHi) return null;
-    const horiz=ang<dzLo;
+    if(!modern&&ang>=dzLo&&ang<=dzHi) return null;
+    const horiz=modern?ang<45:ang<dzLo;
     // The chord's angle picks the axis (it needs the SWIPE_1 of travel to be reliable). MODERN
     // then judges the portion of the travel along that axis, so a slanted first swipe needs
     // SWIPE_1 in the direction being sent; LEGACY and the menus judge the chord itself.
-    const along=(_inPlay()&&!cfg.touchLegacy)?(horiz?Math.abs(dx):Math.abs(dy)):dist;
+    const along=modern?(horiz?Math.abs(dx):Math.abs(dy)):dist;
     return {key:horiz?(dx>0?'ArrowRight':'ArrowLeft'):(dy>0?'ArrowDown':'ArrowUp'), dist:along};
 }
 document.addEventListener('touchstart',e=>{
