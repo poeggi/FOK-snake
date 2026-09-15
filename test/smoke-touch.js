@@ -1,7 +1,8 @@
 // Swipe readers (js/input.js _swipeRead): the MODERN reader sends the turn the finger made
 // however long the stroke before it, sends nothing for a resting finger's creep, and keeps
-// the same-direction (boost) cadence of a straight slide; LEGACY is selectable and keeps its
-// shape (its overshoot and creep readings are what prove the switch picks the old reader).
+// the same-direction (boost) cadence of a straight slide; LEGACY is deprecated but selectable
+// and keeps its shape (its overshoot and creep readings are what prove the switch picks the
+// old reader).
 // Traces are finger paths in CSS px, sampled every 8 ms at 0.6 px/ms (a brisk thumb, ~120 Hz),
 // driven through the REAL document touch handlers in a live classic game.
 // Run: node test/smoke-touch.js
@@ -72,9 +73,9 @@ runTest('SMOKE-TOUCH', `
     const row = SETTINGS_CATS.find(c => c.label === 'CONTROLS').items.find(it => it.lbl().indexOf('TOUCH DETECT') === 0);
     if (!row) throw 'CONTROLS has no TOUCH DETECT row';
     if (row.lbl() !== 'TOUCH DETECT: MODERN') throw 'default label: ' + row.lbl();
-    row.act(); if (!cfg.touchLegacy || row.lbl() !== 'TOUCH DETECT: LEGACY') throw 'act() did not switch to LEGACY: ' + row.lbl();
+    row.act(); if (!cfg.touchLegacy || row.lbl() !== 'TOUCH DETECT: LEGACY (DEPRECATED)') throw 'act() did not switch to LEGACY: ' + row.lbl();
     row.act(); if (cfg.touchLegacy) throw 'act() did not switch back to MODERN';
-    log('TOUCH DETECT row: MODERN by default, act() toggles LEGACY');
+    log('TOUCH DETECT row: MODERN by default, act() toggles LEGACY, marked deprecated');
 
     // MODERN: the turn costs SWIPE_N of across travel, whatever the stroke before it.
     cfg.touchLegacy = false;

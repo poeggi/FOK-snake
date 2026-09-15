@@ -103,7 +103,7 @@ function _sanitizeCfg() {
     cfg.turbo       = cfg.turbo !== false;
     cfg.touchSelect = !!cfg.touchSelect;
     cfg.touchSens   = idx(cfg.touchSens, 3, 1);   // 0 LOW / 1 MED (default) / 2 HIGH swipe sensitivity
-    cfg.touchLegacy = !!cfg.touchLegacy;          // false = MODERN swipe reader, true = LEGACY (js/input.js _swipeRead)
+    cfg.touchLegacy = !!cfg.touchLegacy;          // false = MODERN swipe reader, true = LEGACY, deprecated (js/input.js _swipeRead)
     cfg.keepAwake   = cfg.keepAwake !== false;    // hold a screen wake lock during active play
     cfg.offline     = !!cfg.offline;
     cfg.fps30       = !!cfg.fps30;

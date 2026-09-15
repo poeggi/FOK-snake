@@ -1249,7 +1249,9 @@ function _inControlMask(x,y){
 //     the commit point, with the finger still running the sent way, is the same direction
 //     (the boost slide). BACK from the furthest point the finger reached is the reverse (the
 //     brake). Both references live in _swipeFollow.
-//   LEGACY (cfg.touchLegacy): the chord again, from a commit point that stays put while the
+//   LEGACY (cfg.touchLegacy, DEPRECATED: still selectable for comparison, due for removal
+//     with its dead zone, SWIPE_STEP_LEGACY and its branches): the chord again, from a commit
+//     point that stays put while the
 //     finger keeps sliding, with the dead zone leaning 5 degrees toward the axis just sent. The
 //     overshoot of the previous stroke sits inside every chord, so a turn costs anything from
 //     SWIPE_N to never, and a 48px chord in the old direction reads as a boost slide first.
