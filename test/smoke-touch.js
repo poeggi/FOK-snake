@@ -165,9 +165,9 @@ runTest('SMOKE-TOUCH', `
     // is a rest (the anchor moves to the corner) but not a change of mind: the run, the lock and
     // the last turn on record survive it, the stroke after it is priced by its sense, and the
     // window is the only clock (a dwell never refreshes it). legs = [dx,dy] strokes at F with
-    // 'dwell' ms of stillness (no samples) between them.
+    // 'dwell' ms of stillness (no samples) between them (a third value on a leg overrides it).
     const paced = (legs, dwell) => { const out = [{ x:0, y:0, t:0 }]; let x = 0, y = 0, t = 0;
-      legs.forEach((l, i) => { if (i) t += dwell; const seg = poly([[x, y], [x + l[0], y + l[1]]], F, DT);
+      legs.forEach((l, i) => { if (i) t += (l.length > 2 ? l[2] : dwell); const seg = poly([[x, y], [x + l[0], y + l[1]]], F, DT);
         for (let k = 1; k < seg.length; k++) out.push({ x: seg[k].x, y: seg[k].y, t: t + seg[k].t });
         t += seg[seg.length - 1].t; x += l[0]; y += l[1]; });
       return out; };
@@ -189,7 +189,14 @@ runTest('SMOKE-TOUCH', `
     if (turns(s) !== 'UP') throw 'modern, a same-sense turn after a 400 ms dwell is still in the run, sent: ' + dirs(s);
     cfg.touchLegacy = true; s = swipe(paced([[0,-30],[-20,0]], 150)); cfg.touchLegacy = false;
     if (turns(s) !== 'UP LEFT') throw 'legacy, a pause clears the run (a 20 px same-sense turn is a first swipe), sent: ' + dirs(s);
-    log('modern: a corner dwell keeps the run, the lock and the guard, and never refreshes the window; legacy: a pause clears the run');
+    // The latch after a dwell (16 px along the direction the snake has, a no-op for the sim)
+    // keeps the lock: the fluid 20 px turn straight out of it is still cheap. A push long
+    // enough to boost breaks it: the same turn then needs 24.
+    s = swipe(paced([[0,-30],[30,0],[0,-30],[0,-16],[20,0,0]], 150));
+    if (turns(s) !== 'UP RIGHT UP RIGHT' || boosted(s)) throw 'modern, a 16 px latch after a dwell must keep the lock, sent: ' + dirs(s);
+    s = swipe(paced([[0,-30],[30,0],[0,-30],[0,-48],[20,0,0]], 150));
+    if (turns(s) !== 'UP RIGHT UP' || !boosted(s)) throw 'modern, a boost slide after a dwell must break the lock (the 20 px turn waits for 24), sent: ' + dirs(s) + (boosted(s) ? ' +boost' : '');
+    log('modern: a corner dwell keeps the run, the lock and the guard, and never refreshes the window; the latch after it keeps the lock, a boost breaks it; legacy: a pause clears the run');
 
     // A thumb that drifts one way while waiting (too fast to count as resting, too slanted to
     // count as the sent direction) never has to undo the drift: the across reference re-anchors

@@ -1048,8 +1048,11 @@ function _touchLowF(){ return Math.max(1, _touchSensF()); }
 // While it holds, the turn that keeps alternating (again the opposite sense of the last one)
 // costs SWIPE_1 (16px) instead of SWIPE_N; the same-sense side keeps SWIPE_N, since that way
 // lies a U-turn. It unlocks when the window lapses, on a same-sense turn, a brake, a
-// same-direction slide (a leg long enough to boost) or a new touch; a rest does not unlock it.
-// LOW sensitivity widens the window by its 1.33 like every other time gate; HIGH leaves it.
+// same-direction slide (a leg long enough to boost) or a new touch. A rest does not unlock
+// it, and neither does the latch after one (the 16 px re-send of the direction the snake
+// has, which only tells the reader which way the thumb runs): a boost breaks the lock, a
+// no-op does not. LOW sensitivity widens the window by its 1.33 like every other time gate;
+// HIGH leaves it.
 const TURN_MOVES=3;
 function _moveMs(){ const g=(typeof gPer==='number'&&gPer>0)?gPer:LEVEL_CFG[0].normal; return 2*g*TICK_MS; }
 function _turnWindowMs(){ return TURN_MOVES*_moveMs()*_touchLowF(); }
@@ -1078,12 +1081,15 @@ function _spiralHeld(key, dist){
     const sense=_spiralSense(key);
     return sense!==0&&sense===_turnSense&&_turnRun>=2&&_turnFresh(performance.now())&&dist<Math.round(SWIPE_GUARD*_touchLowF());
 }
-function _spiralHold(key, dist){
+// `latch`: this send is the first movement along the heading after a rest or touchdown, a
+// no-op for the sim; it keeps the lock. Every other straight or reverse send (the boost slide,
+// a brake) drops it.
+function _spiralHold(key, dist, latch){
     if(!_inPlay()) return false;
     const now=performance.now();
     if(!_swipeLastDir&&!_turnKept(now)) _turnReset();
     const sense=_spiralSense(key);
-    if(sense===0){ _zigzag=false; return false; }
+    if(sense===0){ if(!latch) _zigzag=false; return false; }
     if(!_turnFresh(now)) _turnReset();
     if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*_touchLowF())) return true;   // hold the third same-way turn until the swipe clears the guard (LOW: 85px, MED and HIGH: 64px)
     _zigzag=!cfg.touchLegacy&&_turnSense!==0&&sense===-_turnSense;
@@ -1420,7 +1426,7 @@ document.addEventListener('touchmove',e=>{
     // finger on the same cadence as any slide, so a turn out of it is judged from where the
     // finger is in both readers.
     if(_inPlay()&&key===_swipeLastDir&&_swipeIsBrake(key)){ _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=now; return; }
-    if(_spiralHold(key,dist)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,Math.round(SWIPE_GUARD*_touchLowF())); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
+    if(_spiralHold(key,dist,alongHeading)){ _dbgTurnLog(_myHeadCell(),key,dist,_turnRun+1,true,Math.round(SWIPE_GUARD*_touchLowF())); return; }   // a third same-way turn in a row (a spiral) must clear the longer guard distance
     // Menu: a LEFT/RIGHT swipe is one full gesture -- remember it and fire a single key on touchend
     // (no repeat while dragging). UP/DOWN falls through and fires live, immediately, as before.
     // _swipeBase is left un-reset so the gesture holds.
