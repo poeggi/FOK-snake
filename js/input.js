@@ -935,6 +935,7 @@ canvas.addEventListener('mousemove', ()=>{ document.body.classList.remove('curso
 // (0-40 deg = horizontal, 50-90 = vertical). In the dead zone the baseline is NOT reset, so
 // displacement keeps accumulating until the angle exits into a real corridor. MODERN in
 // play has no dead zone: the chord's axis is whichever it leans to.
+// Turn window + zig-zag helper (MODERN): see the anti-spiral guard below.
 // Move cooldown: if the finger PAUSES longer than SWIPE_COOLDOWN (50ms) -- staying near
 // still, not merely a coalesced gap under load -- the last direction is cleared, so the
 // next move uses the first-move threshold and re-moves after a pause feel as responsive as
@@ -1031,7 +1032,21 @@ function _touchLowF(){ return Math.max(1, _touchSensF()); }
 // reads the turn directions, never the board. _swipeLastDir is the live gesture heading; once a
 // pause has cleared it, our own snake's heading seeds the first turn -- _myDir(), so the guard
 // arms off the same heading in single player, local 1vs1 and online 1vs1 alike.
-let _turnSense=0, _turnRun=0;
+// THE TURN WINDOW (MODERN): a run of turns is "quick" only while each turn lands within
+// TURN_MOVES moves of the last one, a move being the snake's step at normal cadence
+// (2 * gPer engine ticks: 200 ms at normal level 1, 100 ms at level 10, boost never shortens
+// it). Past the window the run lapses and the next turn is a first turn again. LEGACY keeps
+// the run until a pause or a turn the other way, as before.
+// THE ZIG-ZAG HELPER (MODERN): two turns of OPPOSITE sense inside the window lock a zig-zag.
+// While it holds, the turn that keeps alternating (again the opposite sense of the last one)
+// costs SWIPE_1 (16px) instead of SWIPE_N; the same-sense side keeps SWIPE_N, since that way
+// lies a U-turn. It unlocks when the window lapses, on a pause, a same-sense turn, a brake or
+// a same-direction slide (a leg long enough to boost). LOW sensitivity widens the window by
+// its 1.33 like every other time gate; HIGH leaves it.
+const TURN_MOVES=3;
+function _moveMs(){ const g=(typeof gPer==='number'&&gPer>0)?gPer:LEVEL_CFG[0].normal; return 2*g*TICK_MS; }
+function _turnWindowMs(){ return TURN_MOVES*_moveMs()*_touchLowF(); }
+let _turnSense=0, _turnRun=0, _turnLastAt=-Infinity, _zigzag=false;
 // The direction a candidate turn is judged against: the last sent one, or the live heading when
 // nothing has been sent in this gesture. A brake the sim refused therefore seeds the next sense
 // as if it had turned the snake (the run is off by one after a brake); judging against the live
@@ -1041,20 +1056,29 @@ function _spiralSense(key){
     const prev=_spiralPrev(), kd=GDIRS[key];
     return (prev&&kd)?Math.sign(prev.x*kd.y-prev.y*kd.x):0;   // +1/-1 for a 90-degree turn, 0 for straight/reverse
 }
+function _turnFresh(now){ return !!cfg.touchLegacy||now-_turnLastAt<=_turnWindowMs(); }
 // Pure: would the guard hold this turn right now? (_swipeRead asks before the run is updated.)
 function _spiralHeld(key, dist){
     if(!_inPlay()||!_swipeLastDir) return false;
     const sense=_spiralSense(key);
-    return sense!==0&&sense===_turnSense&&_turnRun>=2&&dist<Math.round(SWIPE_GUARD*_touchLowF());
+    return sense!==0&&sense===_turnSense&&_turnRun>=2&&_turnFresh(performance.now())&&dist<Math.round(SWIPE_GUARD*_touchLowF());
 }
 function _spiralHold(key, dist, sf){
     if(!_inPlay()) return false;
-    if(!_swipeLastDir){ _turnRun=0; _turnSense=0; }
+    if(!_swipeLastDir){ _turnRun=0; _turnSense=0; _zigzag=false; }
     const sense=_spiralSense(key);
-    if(sense===0) return false;
+    if(sense===0){ _zigzag=false; return false; }
+    const now=performance.now();
+    if(!_turnFresh(now)){ _turnRun=0; _turnSense=0; _zigzag=false; }
     if(sense===_turnSense && _turnRun>=2 && dist<Math.round(SWIPE_GUARD*_touchLowF())) return true;   // hold the third same-way turn until the swipe clears the guard (LOW: 85px, MED and HIGH: 64px)
-    _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense;
+    _zigzag=!cfg.touchLegacy&&_turnSense!==0&&sense===-_turnSense;
+    _turnRun=(sense===_turnSense)?_turnRun+1:1; _turnSense=sense; _turnLastAt=now;
     return false;
+}
+// What a 90-degree turn to `key` costs right now: the zig-zag's cheap side, or a free turn.
+function _turnNeed(key){
+    if(_zigzag&&_inPlay()&&!cfg.touchLegacy&&_swipeLastDir&&_turnFresh(performance.now())&&_spiralSense(key)===-_turnSense) return SWIPE_1;
+    return SWIPE_N;
 }
 // DEBUG LEVEL 3 turn trace: our snake's head cell, and a small ring of fading markers dropped
 // where each touch turn commits -- and where the anti-spiral guard holds one -- so a spiral can
@@ -1230,7 +1254,8 @@ function _swipeRead(x,y,sf,hop){
         // The same direction (the boost slide) is a finger still running the sent way, SWIPE_SAME
         // along from the commit point; a stroke curving away is a turn in the making, never a slide.
         if(agrees&&along>=Math.round(SWIPE_SAME*sf)) return {key:_swipeLastDir, dist:along};
-        const turn=Math.abs(across)>=Math.round(SWIPE_N*sf)?{key:ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft'), dist:Math.abs(across)}:null;
+        const tkey=ax?(across>0?'ArrowDown':'ArrowUp'):(across>0?'ArrowRight':'ArrowLeft');
+        const turn=Math.abs(across)>=Math.round(_turnNeed(tkey)*sf)?{key:tkey, dist:Math.abs(across)}:null;
         const brake=(back>=Math.round(SWIPE_1*sf)&&back>Math.abs(across))?{key:ax?(d.x>0?'ArrowLeft':'ArrowRight'):(d.y>0?'ArrowUp':'ArrowDown'), dist:back}:null;
         // A turn outranks the brake (a thumb curling back-and-up is turning), except a turn the
         // anti-spiral guard is holding: that one must not shadow a finger pulling back to brake.
@@ -1279,7 +1304,7 @@ document.addEventListener('touchstart',e=>{
     // identifier back after an end the browser never delivered; either way the arm held so far
     // is released here, since the old finger's lift is no longer ours to hear.
     if(_swipeBase) gameBoostEnd(0);
-    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false; _swipeTurnAt=-Infinity; _swipeIntentDir=null;
+    _swipeId=t.identifier; _swipePhase0=phase; _swipeInPlay=_inPlay(); _swipeResting=false; _swipeTurnAt=-Infinity; _swipeIntentDir=null; _zigzag=false;
     _swipeBase={x:t.clientX,y:t.clientY}; _swipeFollow={x:t.clientX,y:t.clientY}; _swipeBaseAt=performance.now(); _swipeLastDir=null; _swipeRefDir=null; _swipeLastMoveAt=performance.now(); _swipeLastMovePos={x:t.clientX,y:t.clientY}; _swipeTouchStartAt=performance.now(); _swipedThisTouch=false; _menuHDir=null;
     _dbgTouch=((cfg.debug|0)>=3)?{x:t.clientX,y:t.clientY}:null; _dbgResting=false; _dbgAccReset();
 },{passive:false});
@@ -1356,14 +1381,15 @@ document.addEventListener('touchmove',e=>{
     // the snake (a 180 is illegal), so keep it cheap at SWIPE_1 -- braking should be easier than a
     // turn. While boosting the heading IS _myBoost().dir, so this still fires after a pause has
     // forgotten _swipeLastDir (finger held still, then flicked back). Otherwise: first swipe SWIPE_1
-    // (SWIPE_N while boosting); 90-deg turn: SWIPE_N; same dir: SWIPE_SAME (boost prevention).
+    // (SWIPE_N while boosting); 90-deg turn: SWIPE_N, or SWIPE_1 on a locked zig-zag's cheap
+    // side (_turnNeed); same dir: SWIPE_SAME (boost prevention).
     // Menu UP/DOWN overrides that with its own longer two-tier distances; the in-play path is untouched.
     const isMenuV=inMenu&&(key==='ArrowUp'||key==='ArrowDown');
     const _mbT=_myBoost(), _kd=GDIRS[key];
     const isBrake=_inPlay()&&_mbT.on&&_mbT.dir&&_kd&&_kd.x===-_mbT.dir.x&&_kd.y===-_mbT.dir.y;
     const thresh=Math.round((isMenuV?(key===_swipeLastDir?MENU_SWIPE_SAME:MENU_SWIPE_1)
         :isBrake?SWIPE_1
-        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_mbT.on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:SWIPE_N))*sf);
+        :((!_swipeLastDir||_isOpp(key,_swipeLastDir))?(_mbT.on?SWIPE_N:SWIPE_1):key===_swipeLastDir?SWIPE_SAME:_turnNeed(key)))*sf);
     if(dist<thresh) return;
     // A finger sliding on along a brake direction is dead movement: the sim refused that
     // direction, so nothing is re-sent and no boost is armed. The anchors still move up to the

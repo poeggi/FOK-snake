@@ -129,6 +129,38 @@ runTest('SMOKE-TOUCH', `
     if (dirs(s) !== '') throw 'legacy, a 44 deg first swipe must sit in the dead zone, sent: ' + dirs(s);
     log('modern: no dead zone on the first swipe (44 deg is RIGHT, 46 deg is UP); legacy keeps the band');
 
+    // THE ZIG-ZAG HELPER. Two turns of opposite sense within the turn window lock a zig-zag;
+    // from then on the turn that keeps alternating costs 16 px, the same-sense side still 24.
+    // Legs 30,30,30 lock it (first swipe, turn, turn), the 18 px legs after ride the cheap side.
+    gPer = 6;   // normal level 1: a move every 200 ms, the window 3 moves = 600 ms
+    s = swipe(poly([[0,0],[-30,0],[-30,-30],[-60,-30],[-60,-48],[-78,-48],[-78,-66],[-96,-66]], F, DT));
+    if (turns(s) !== 'LEFT UP LEFT UP LEFT UP LEFT') throw 'modern, a locked zig-zag with 18 px legs sent: ' + dirs(s);
+    s = swipe(poly([[0,0],[-30,0],[-30,-30],[-60,-30],[-60,-12]], F, DT));      // ...then 18 px the SAME sense (DOWN after LEFT)
+    if (turns(s) !== 'LEFT UP LEFT') throw 'modern, the same-sense side of a zig-zag must still cost 24 px, sent: ' + dirs(s);
+    s = swipe(poly([[0,0],[-30,0],[-30,-30],[-60,-30],[-60,-6]], F, DT));
+    if (turns(s) !== 'LEFT UP LEFT DOWN') throw 'modern, 24 px the same sense must still turn, sent: ' + dirs(s);
+    // The lock needs the second turn within the window: a 400 ms crawl between the turns locks
+    // (at level 1), a 700 ms one lets the run lapse and the 18 px leg sends nothing.
+    const zz = (crawl) => poly([[0,0],[-30,0],[-30,-30],[-30,-30-crawl,0.1],[-60,-30-crawl],[-60,-48-crawl]], F, DT);   // the crawl runs 0.1 px/ms: 10 px per 100 ms
+    s = swipe(zz(40));
+    if (turns(s) !== 'LEFT UP LEFT UP') throw 'modern, a second turn 400 ms after the first must lock the zig-zag, sent: ' + dirs(s);
+    s = swipe(zz(70));
+    if (turns(s) !== 'LEFT UP LEFT') throw 'modern, a second turn 700 ms after the first must not lock (window 600 ms), sent: ' + dirs(s);
+    gPer = 3;   // level 10: a move every 100 ms, the window 300 ms -- the 400 ms crawl no longer locks
+    s = swipe(zz(40));
+    if (turns(s) !== 'LEFT UP LEFT') throw 'modern, the window must follow the pace (300 ms at level 10), sent: ' + dirs(s);
+    gPer = 6;
+    // THE SPIRAL GUARD LAPSES with the window too: a third same-way turn 700 ms after the second
+    // is a free 24 px turn again; 400 ms after it is still held (64 px). LEGACY never lapses.
+    const spiral = (crawl, sp) => poly([[0,0],[-30,0],[-30,-30],[0,-30],[crawl,-30,sp||0.1],[crawl,-6]], F, DT);
+    s = swipe(spiral(40));
+    if (turns(s) !== 'LEFT UP RIGHT') throw 'modern, a third same-way turn 400 ms on must be held, sent: ' + dirs(s);
+    s = swipe(spiral(70));
+    if (turns(s) !== 'LEFT UP RIGHT DOWN') throw 'modern, a third same-way turn 700 ms on must be free (window 600 ms), sent: ' + dirs(s);
+    cfg.touchLegacy = true; s = swipe(spiral(105, 0.15)); cfg.touchLegacy = false;   // 700 ms above LEGACY's 120 px/s rest floor
+    if (turns(s) !== 'LEFT UP RIGHT') throw 'legacy, the spiral run must not lapse, sent: ' + dirs(s);
+    log('modern: a zig-zag locks within 3 moves and its alternating turn costs 16 px, the same-sense side 24; the spiral run lapses past 3 moves; legacy unchanged');
+
     // A thumb that drifts one way while waiting (too fast to count as resting, too slanted to
     // count as the sent direction) never has to undo the drift: the across reference re-anchors
     // where the across motion reverses, so the next move the other way is a turn at SWIPE_N.
