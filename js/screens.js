@@ -303,14 +303,37 @@ function _mRand(){ _mSnakeSeed=(Math.imul(_mSnakeSeed,1664525)+1013904223)>>>0; 
 // hook). Any of the real snake colours, so the menu looks different every time you return to it.
 function _menuSnakeEnter(){ _mSnakeCol=Math.floor(Math.random()*SNAKE_COLORS.length); }
 const _M_DIRS=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
-function _menuSnakeStep(){
-    const s=_mSnake;
-    if(_mRand()<0.22){   // occasional turn (never a reverse, never straight-on)
-        const opts=_M_DIRS.filter(d=>!(d.x===s.dir.x&&d.y===s.dir.y)&&!(d.x===-s.dir.x&&d.y===-s.dir.y));
-        s.dir=opts[Math.floor(_mRand()*opts.length)]||s.dir;
+// A step is safe when the tail is still reachable from it across open cells (the body
+// after the step, minus its own tail, is the obstacle). That is the follow-your-tail rule:
+// a walk that only takes safe steps can always keep going without crossing itself, so the
+// wanderer never runs into a pocket of its own making. The board is a torus, 600 cells,
+// one search per 150 ms step.
+function _mSafe(s, c){
+    const L=s.body.length, key=q=>q.y*COLS+q.x, occ=new Set();
+    if(L<2) return true;
+    for(let i=0;i<L-1;i++) occ.add(key(s.body[i]));
+    if(occ.has(key(c))) return false;
+    const goal=key(s.body[L-2]);
+    occ.delete(goal);
+    const seen=new Set([key(c)]), q=[c];
+    while(q.length){
+        const a=q.shift();
+        if(key(a)===goal) return true;
+        for(const d of _M_DIRS){
+            const n={x:(a.x+d.x+COLS)%COLS, y:(a.y+d.y+ROWS)%ROWS}, k=key(n);
+            if(!occ.has(k)&&!seen.has(k)){ seen.add(k); q.push(n); }
+        }
     }
-    const h=s.body[0];
-    s.body.unshift({x:(h.x+s.dir.x+COLS)%COLS, y:(h.y+s.dir.y+ROWS)%ROWS});
+    return false;
+}
+function _menuSnakeStep(){
+    const s=_mSnake, h=s.body[0], f=s.dir;
+    const cell=d=>({x:(h.x+d.x+COLS)%COLS, y:(h.y+d.y+ROWS)%ROWS});
+    // Occasional turn (never a reverse, never straight-on), drawn from the safe sides only;
+    // an unsafe straight-on forces one.
+    const turns=_M_DIRS.filter(d=>(d.x!==f.x||d.y!==f.y)&&(d.x!==-f.x||d.y!==-f.y)&&_mSafe(s, cell(d)));
+    if(turns.length&&(_mRand()<0.22||!_mSafe(s, cell(f)))) s.dir=turns[Math.floor(_mRand()*turns.length)];
+    s.body.unshift(cell(s.dir));
     while(s.body.length>s.len) s.body.pop();
 }
 function _drawMenuSnake(now){

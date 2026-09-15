@@ -552,6 +552,16 @@ runTest('SMOKE-UI', `
         // harness context swallows state writes -- but it is also not what went wrong: the
         // snake was always dim, it was drawn as a 0.72-cell square on a full-cell grid.
         log('menu snake ok: full in-game block on the in-game one-pixel inset, the same shape the real snake draws');
+        // ...and it never crosses itself. Head at (0,0) heading +x with body straight ahead
+        // and above: the one open step is down, so the turn is forced. Then a long random
+        // run with no overlap ever.
+        _mSnake={ dir:{x:1,y:0}, len:11, body:[{x:0,y:0},{x:29,y:0},{x:29,y:19},{x:0,y:19},{x:1,y:19},{x:1,y:0},{x:1,y:1},{x:2,y:1},{x:3,y:1},{x:4,y:1},{x:5,y:1}] };
+        _mSnakeSeed=1; _menuSnakeStep();
+        if(_mSnake.body[0].x!==0||_mSnake.body[0].y!==1) throw 'the menu snake stepped into its own body when boxed in: '+JSON.stringify(_mSnake.body[0]);
+        const crossed=()=>{ const seen=new Set(); return _mSnake.body.some(c=>{ const k=c.y*COLS+c.x; if(seen.has(k)) return true; seen.add(k); return false; }); };
+        for(let n=0;n<20000;n++){ _menuSnakeStep(); if(crossed()) throw 'the menu snake crossed itself at step '+n; }
+        _mSnake=null;
+        log('menu snake ok: never steps into its own body, boxed in or over a 20000-step walk');
     }
 
     // Multi-page newspaper: render and flip pages without error.
