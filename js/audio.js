@@ -393,6 +393,10 @@ const Snd = (() => {
             t(523, now, 0.04); t(659, now + 0.045, 0.08);
         } else if (type === 'bonus') {
             [880,1047,1319,1568].forEach((f,i) => t(f, now + i*0.055, 0.10));
+        } else if (type === '1up') {
+            // Extra life: a quick triangle climb held on its top note.
+            [1047,1319,1568,2093].forEach((f,i) => t(f, now + i*0.06, 0.09, 'triangle'));
+            t(2637, now + 0.26, 0.28, 'triangle');
         } else if (type === 'perfect') {
             [523,659,784,1047,1319,1568].forEach((f,i) => t(f, now + i*0.07, 0.22));
             [784,988,1319].forEach(f => t(f, now + 0.50, 0.30, 'triangle'));

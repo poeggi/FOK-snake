@@ -35,6 +35,9 @@ let settingsCat = -1;              // -1 = category list; else index into SETTIN
 let _dataMsg = '', _dataMsgAt = 0; // transient DATA-menu status line (backup/restore/reset)
 let _resetKind = 'stats';          // which reset the confirm screen is arming: 'stats'|'settings'|'id'
 let _scoreboardCache = null;
+// The run just banked, marked on the board it drops onto: `i` is its row on the LOCAL ten
+// (-1 = fell off), `score` finds it again among the GLOBAL rows. null once the board is left.
+let _scoreFresh = null;
 let scoresTab = 0;                 // scores screen tab: 0 = LOCAL (this device), 1 = GLOBAL (fetched from FOK-server, see net-api.js)
 const _splashText = SPLASHES.length ? SPLASHES[Math.floor(Math.random()*SPLASHES.length)] : '';
 const MENU_ITEMS     = ['SOLO PLAY', 'MULTIPLAYER', 'HIGH SCORES', 'ACHIEVEMENTS', 'SHOP', 'SETTINGS', 'CREDITS'];
@@ -918,7 +921,7 @@ const SCREENS = {
     menu:         { d:()=>drawMenu(simNow),      hud:false },
     news:         { d:()=>drawNews(simNow),      hud:false, freeze:true, anim:()=> simNow-_newsAt < 700 },
     settings:     { d:()=>drawSettings(),        hud:false, freeze:true, anim:()=> _dbgSending || (!!_dataMsg && _msgNow()-_dataMsgAt < 2600) },
-    scores:       { d:()=>drawScores(),          hud:false, freeze:true },
+    scores:       { d:()=>drawScores(),          hud:false, freeze:true, anim:()=> !!_scoreFresh && !_reduceMotion() },
     achievements: { d:()=>drawAchievements(),    hud:false, freeze:true },
     shop:         { d:()=>drawShop(),            hud:false },
     credits:      { d:()=>drawCredits(),         hud:false },
@@ -1086,6 +1089,7 @@ function loop(rafNow) {
     // nothing is animating -- neither a global overlay nor the screen's own anim().
     if(phase!==_lastPhase){
         _uiDirty=true;
+        if(_lastPhase==='scores') _scoreFresh=null;   // the marker lives one visit of the board
         if(phase==='duelOver'){
             quitConfirmSel=0;   // rematch dialog opens with YES pre-selected
             // A tournament match is over the instant the sim says so: report it now, from

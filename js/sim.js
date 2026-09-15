@@ -659,7 +659,7 @@ function duelStep(now) {
         if (_ws && _ws.it && simTick >= _ws.it.at && ck(_ws.it) === ck(moves[i])) _wsTake(i);
         if (heart && ck(heart) === ck(moves[i])) {   // grabbing it is a life back (capped) -- or, at the cap, denies it to the rival
             heart = null;
-            if (P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); }
+            if (P.lives < _duelHeartsMax) { P.lives++; emit({t:'bonus',label:'+1 UP!'}); emit({t:'sfx',name:'1up'}); }
         }
         if ((eater < 0 && gem && ck(gem) === ck(moves[i])) || gAte[i] >= 0) {
             if (gAte[i] < 0) eater = i;
@@ -917,7 +917,7 @@ function step(now) {
         }
     }
     _takePickups(hk, now, n => { score += n; });
-    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;emit({t:'bonus',label:'+1 UP!'});}
+    if(heart&&ck(heart)===hk){lives=Math.min(lives+1,START_LIVES+1);heart=null;emit({t:'bonus',label:'+1 UP!'});emit({t:'sfx',name:'1up'});}
     const ate=gem&&ck(gem)===hk;
     const ateGourangaIdx=_gourangaTake(hk);
     const anyAte=ate||ateGourangaIdx>=0;

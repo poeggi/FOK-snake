@@ -136,7 +136,7 @@ function _submitName(){
         inGame=false; _wsend({t:'phase',phase:'menu'}); phase='menu'; showHUD(false);
         setTimeout(()=>nameInp.blur(),10); Snd.sfxPlay('select',cfg.music); return;
     }
-    addScore(nameStr,score,level,nameReason==='win');Snd.sfxPlay('select',cfg.music);
+    _scoreFresh={ i:addScore(nameStr,score,level,nameReason==='win'), score };Snd.sfxPlay('select',cfg.music);
     if(typeof netSubmitScore==='function') netSubmitScore(nameStr,score,level,nameReason==='win');   // global board (no-op in offline mode)
     inGame=false; _wsend({t:'phase',phase:'menu'});   // leave the gameplay session; main owns phase again
     _scoreboardCache=getScores();scoresTab=0;phase='scores';showHUD(false);setTimeout(()=>nameInp.blur(),10);

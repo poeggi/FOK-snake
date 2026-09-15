@@ -648,6 +648,20 @@ function _drawScoreRow(s, i, g){
     drawScoreHead(568, y, (s.color|0)%SNAKE_COLORS.length, (s.shopItems&&typeof s.shopItems==='object')?s.shopItems:{});
     if(s.platform) drawPlatformIcon(588, y, s.platform, '#8fa6b8');   // device the run was played on
 }
+// The run just banked: a band behind its row in the colour of the head that row shows,
+// breathing so the eye lands on it (held at its middle under REDUCE MOTION). Painted
+// under the row text, which keeps its rank colour.
+function _drawScoreFresh(rows, i){
+    if(i<0||i>=SCORES_SHOWN||!rows[i]) return;
+    const y=SCORE_ROW_Y+i*SCORE_ROW_H, h=SNAKE_COLORS[(rows[i].color|0)%SNAKE_COLORS.length].h;
+    const k=_reduceMotion()?0.5:0.5+0.5*Math.sin(_msgNow()/260), a=0.10+0.12*k;
+    ctx.save();
+    ctx.fillStyle=`hsla(${h},100%,65%,${a.toFixed(3)})`;
+    rr(6,y-SCORE_ROW_H/2+1,CW-12,SCORE_ROW_H-2,4); ctx.fill();
+    ctx.strokeStyle=`hsla(${h},100%,65%,${(a+0.18).toFixed(3)})`; ctx.lineWidth=1;
+    rr(6.5,y-SCORE_ROW_H/2+1.5,CW-13,SCORE_ROW_H-3,4); ctx.stroke();
+    ctx.restore();
+}
 function drawScores() {
     drawGrid(); drawOvBg(0.92);
     drawTitle('HIGH SCORES');
@@ -671,6 +685,9 @@ function drawScores() {
             } else if(!gs.length){
                 ct('NO GLOBAL SCORES YET - BE THE FIRST!',CW/2,CH/2,'#aaa',FONT.HINT);
             } else {
+                // Our fresh run among the server's rows: our id AND its score, because the
+                // server keeps every row of a player and the id alone would mark old runs.
+                if(_scoreFresh){ const me=getPlayerId(); _drawScoreFresh(gs, gs.findIndex(s=>s.player_id===me&&(s.score|0)===_scoreFresh.score)); }
                 ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
                 gs.slice(0,SCORES_SHOWN).forEach((s,i)=>_drawScoreRow(s,i,true));
                 ctx.textAlign='center';
@@ -682,6 +699,7 @@ function drawScores() {
     const scores=_scoreboardCache||[];
     if(!scores.length){ ct('No scores yet!',CW/2,CH/2,'#aaa',FONT.HINT); }
     else {
+        if(_scoreFresh) _drawScoreFresh(scores, _scoreFresh.i);
         ctx.font=`${FONT.MENU}px "Press Start 2P"`; ctx.textBaseline='middle';
         scores.slice(0,SCORES_SHOWN).forEach((s,i)=>_drawScoreRow(s,i,false));
         ctx.textAlign='center';

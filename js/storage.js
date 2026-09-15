@@ -59,11 +59,14 @@ function addScore(name, sc, lvl, won) {
     const now = new Date();
     const date = pad2(now.getDate()) + '.' + pad2(now.getMonth()+1) + '.' + String(now.getFullYear()).slice(-2);
     // won: the run CLEARED level 10 (a finish), not merely reached it. The board stars it.
-    s.push({ name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl, won:!!won,
-             diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date });
+    const row = { name:name.trim().substring(0,MAX_NAME), score:sc, level:lvl, won:!!won,
+                  diff:cfg.diff, color:cfg.snakeColor||0, shopItems:Object.assign({}, cfg.wornItems||{}), date };
+    s.push(row);
     s.sort((a, b) => b.score - a.score);
     try { localStorage.setItem(HS_KEY, JSON.stringify(s.slice(0, 10))); } catch (e) {}
     addFOKoins(sc);
+    const i = s.indexOf(row);
+    return i < 10 ? i : -1;   // the row the run landed on among the ten kept; -1 = it fell off
 }
 // The worker gets its subset NOW (a settings change must reach the sim this tick); the disk copy
 // is batched like every other save, because this runs on gameplay paths (a mid-duel item claim).
