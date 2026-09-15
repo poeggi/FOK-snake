@@ -520,18 +520,16 @@ function _spCtxBuild(){
     // being played, and those move at every boundary. The level is read off the SIM, never
     // off a session: only the host's session learns a level boundary (s.lvl is authored in
     // _netStartNextLevel), so a joiner or a relay quoting its session would name the level
-    // the match OPENED on. Re-sent as first captured they describe a match that has since moved on: the
-    // newcomer boots on a dead epoch, and the gate in _netHandleParsed then drops every
-    // 'in'/'h'/'st'/'rs' that follows -- the checkpoint included, which is the one packet
-    // that could have repaired it.
-    // Nothing notices, which is what made this the watcher's DEAD END rather than a stutter.
-    // Its feed is not silent -- every envelope arrives and is thrown away one layer up -- so
-    // net-spec's silence ladder never fires; and the split ladder that ends a stuck duel is
-    // _netLiveCheck's, which returns early for a spectator by design (no channel, no peer,
-    // nothing to ping). So it watched a board nobody was playing until the next boundary
-    // 'go' -- not gated here, it carries and checks its own epoch -- rebuilt the level out
-    // from under it. In a tournament that is the ordinary case, not a corner: the field
-    // hangs off two primaries, and anyone who arrives after the first level-up arrives late.
+    // the match OPENED on. Re-sent as first captured they describe a match that has since
+    // moved on: the newcomer boots on a dead epoch, and the gate in _netHandleParsed then
+    // drops every 'in'/'h'/'st'/'rs' that follows -- the checkpoint included, the one packet
+    // that could repair it. Nothing notices: the feed is not silent (every envelope arrives
+    // and is thrown away one layer up), so net-spec's silence ladder never fires, and the
+    // split ladder that ends a stuck duel is _netLiveCheck's, which returns early for a
+    // spectator by design. The watcher would sit on a board nobody is playing until the next
+    // boundary 'go' (which carries and checks its own epoch) rebuilt the level. In a
+    // tournament that is the ordinary case: the field hangs off two primaries, and anyone
+    // who arrives after the first level-up arrives late.
     // startPts sheds OUR bias on the way past. The offset is FLAT at every tier, so the node
     // downstream adds its own on boot and at every boundary; a carried one would count twice.
     if(_spOn){
@@ -631,9 +629,9 @@ function _spServeOpen(l){
 // trip: main reserves the checkpoint's number and clears the tail buffer the moment it asks,
 // holds the stream while the worker answers, and on landing fans out the checkpoint and then
 // everything held behind it -- the same [rs, tail] order the in-process mint produces in one
-// call. Main's own ring is EMPTY in that home (netTickPre never runs there), and reading it
-// was the bug: every checkpoint came back null, silently, so a late joiner booted a fresh sim
-// from the seed and was never told where the match actually was.
+// call. Main's own ring is EMPTY in that home (netTickPre never runs there): read it and every
+// checkpoint comes back null, silently, and a late joiner boots a fresh sim from the seed,
+// never told where the match actually is.
 function _spServeTail(l){
     if(_spWorker()){ l.sub = false; l.tail = true; _spCkpt(true); return; }
     const was = l.sub; l.sub = false;   // the checkpoint's own fan-out must not double-send here

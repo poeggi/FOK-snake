@@ -9,11 +9,18 @@
 //   main -> worker : {t:'cfg', cfg}                 set difficulty/turbo config
 //                    {t:'run', on}                  start / stop the tick loop
 //                    {t:'start', seed, bestScore}   startGame()
+//                    {t:'startDuel', ...} / {t:'startDuelLevel'} / {t:'startDuelRespawn'}
 //                    {t:'phase', phase}             UI-driven phase change (menus)
-//                    {t:'dir', dir:{x,y}}           queue a steering input
-//                    {t:'boost', dir} / {t:'boostend'}
-//                    {t:'pause'} / {t:'resume'}
+//                    {t:'dir', p, dir:{x,y}}        queue a steering input
+//                    {t:'arm', p, dir}              arm / release the boost (dir null = release)
+//                    {t:'pause'} / {t:'resume'} / {t:'advance'}
+//                    {t:'lin', k, d}                online duel: a local input for duel-core
+//                    {t:'peerPkt', ...}             online duel: a wire packet for duel-core
+//                    {t:'duelStartNet'|'duelLevelNet'|'duelRespawnNet'|'duelEndNet'|'duelClock'|'duelResync'|'duelClaim'}
+//                    {t:'spCkpt'}                   mint a spectator checkpoint off the ring
 //   worker -> main : {t:'frame', snap, events}      one post per ticked frame
+//                    {t:'wire', o}                  duel-core's outbound packet
+//                    {t:'spCkpt', rs} / {t:'dsig', line} / {t:'err', msg, n, stack}
 //
 // Runs everything Worker-capable browsers play: classic, local 1vs1, and (with
 // duel-core.js, below) the ONLINE duel's sim + rollback. game.js falls back to an

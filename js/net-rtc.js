@@ -230,11 +230,10 @@ async function _netSignalIce(to, payload){
         setTimeout(() => { _netSignal(to, 'ice', payload); }, 400);
 }
 // ---- ICE, batched into one signal (`ices`, API 4.4) ----
-// A duel start trickles a dozen candidates inside a second, and today that is a dozen
-// signal.php POSTs. The measurement that motivates this says the cost is per REQUEST and
-// not per byte: requests fired into the same instant queue behind one another on the one
-// connection, on workers that were already warm. So the TAIL of a gather goes out as one
-// array instead.
+// A duel start trickles a dozen candidates inside a second. Sent one signal.php POST
+// each they queue behind one another on the one connection, on workers that are already
+// warm: the cost is per REQUEST, not per byte. So the TAIL of a gather goes out as one
+// array.
 //
 // The FIRST candidate never waits. It is usually the host candidate that connects a LAN
 // duel outright, and holding it back to save a request would trade the thing being

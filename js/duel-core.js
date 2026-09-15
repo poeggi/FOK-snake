@@ -182,34 +182,19 @@ function _rbReset(){
 function _rbAdoptEpoch(){ if(typeof netEpoch === 'function') _rbEpoch = netEpoch(); }
 // Two identical sims fed identical inputs produce identical state, so a hash that
 // disagrees IS the divergence -- and, with no state on the wire to fake, it is also
-// the only tamper signal a cheat could raise. FNV-1a over the snapshot: simSnapshot
-// builds its keys in a fixed order, so the JSON is byte-stable across clients.
-// Presentation-only, CLIENT-LOCAL snapshot fields must never enter the hash. The
-// snapshot exists to mirror the sim into the worker, so it carries a few things the
-// simulation does not actually depend on -- and _shimmerThreshold is derived from
-// THIS device's best score in localStorage (startGame; startDuel never resets it).
-// Hashing it made two honest clients disagree permanently with nobody even touching
-// a key: the recurring DESYNC on free-running snakes. A divergence must mean the
-// GAME diverged, or the detector is just noise.
-// A duel simulates `players` -- NOT the classic globals. But simSnapshot carries the
-// whole sim (it exists to mirror state into the worker), so it also hauls along each
-// device's leftovers from its own last single-player game: snake, score, lives, heart,
-// _earlyHeartTrigger, _shimmerThreshold (from localStorage!) and the rest. startDuel
-// never resets them because the duel never reads them. Hashing all that compared two
-// devices' single-player history and called the difference a divergence -- every
-// comparison, forever, hash-ok 0, with the two sims in perfect lockstep.
-//
-// So hash exactly what the duel simulates, and nothing else. A whitelist, not a
-// blacklist: a blacklist means the next field added to the snapshot silently rejoins
-// the hash and this comes back.
-// NOT _barsV: it is a change-TICKER for the worker transport ("bars differ from what
-// I last sent"), not game state -- a monotonic counter over every bars change since
-// page load, so two devices carry different bases and it can never match. `bars`
-// itself is here, which is the actual state; the ticker says nothing extra.
+// the only tamper signal a cheat could raise. FNV-1a over a fixed key order, so the
+// JSON is byte-stable across clients.
+// A WHITELIST of exactly what the duel simulates. simSnapshot mirrors the whole sim
+// into the worker, so it also carries each device's leftovers from its last classic
+// game (snake, score, lives, heart, _earlyHeartTrigger, _shimmerThreshold from
+// localStorage...) which the duel never reads or resets: hashing any of them compares
+// two devices' histories and reports a permanent divergence between sims in perfect
+// lockstep. A blacklist would let the next snapshot field silently rejoin the hash.
+// NOT _barsV: a change-ticker for the worker transport, counted since page load, so
+// two devices can never agree on it; `bars` itself is the state.
 // ALSO the 'h' wire contract: the per-field hashes ride as a positional array in THIS
-// order (see _rbHashBoth), so reordering or extending the list changes the wire format.
-// That is a sim-minor bump -- the version gate refuses cross-minor duels, so both ends
-// of any match always share one list.
+// order (_rbHashBoth), so reordering or extending the list changes the wire format --
+// a sim-minor bump (the version gate refuses cross-minor duels).
 const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow',
     'gPer','_gDue','_gAt','phaseAt','gemAt','deathMsg','spawnAt','powerPellet','powerPelletAt',
     '_powerMode','_powerModeAt','heart','heartAt','_barMoveTick','players','duelWinner',
@@ -218,16 +203,11 @@ const RB_HASH_DUEL = ['phase','level','gem','gemsDone','bars','simTick','simNow'
     'timeCrystal','timeCrystalAt','_slowMode','_slowModeAt',
     '_gourangaLine','_gourangaActive','_gourangaEaten','_gourangaSteps'];
 // Ring snapshots are duel-SCOPED: the hash whitelist plus the two unhashed fields a
-// duel tick still touches (_barsV is the bars change-ticker the renderer watches;
-// levelDoneWaiting gates 'advance'). The full simSnapshot would drag every classic-
-// mode leftover (hearts, gouranga sets, the classic snake) through structuredClone
-// dozens of times a second -- dead weight the duel never reads, cloned and GC'd for
-// nothing. Applied back via simApplyDuel (sim.js), which writes exactly this set.
-// Built DIRECTLY from the sim globals -- this runs dozens of times a second, so it
-// must not materialize the full classic-mode snapshot just to subset it. The set =
-// the hash whitelist above plus the two unhashed fields a duel tick still touches.
-// KEEP IN SYNC with simApplyDuel (sim.js), which writes exactly this set back on a
-// rollback restore.
+// duel tick still touches (_barsV, the bars change-ticker the renderer watches;
+// levelDoneWaiting, which gates 'advance'). Built directly from the sim globals: this
+// runs dozens of times a second, and the full simSnapshot would clone every classic
+// leftover for nothing. KEEP IN SYNC with simApplyDuel (sim.js), which writes exactly
+// this set back on a rollback restore.
 function _rbDuelSnap(){
     return { phase, level, gem, gemsDone, bars, _barsV, simTick, simNow, gPer, _gDue, _gAt,
              phaseAt, gemAt, deathMsg, spawnAt, levelDoneWaiting,
@@ -267,19 +247,13 @@ function _rbHashBoth(snap){
         return { h: _rbStrHash('{' + parts.join(',') + '}'), f };
     } catch(e){ return { h: 0, f: null }; }
 }
-// A hash may only be compared once its tick has SETTLED. The peer hashes tick t with
-// its own input already applied; our snapshot for t stays provisional until that
-// input reaches us and rolls us back. Comparing on arrival therefore mismatches
-// every time either player steers -- a false desync once a second, which is not a
-// divergence at all, just a race. So park the peer's hash and check it only after
-// enough ticks have passed for any in-flight input for t to have landed.
-const RB_SETTLE = RB_HASH_LAG + 2;  // HASH settle: judge a tick only once BOTH clients' snapshots
-                             // of it are immutable. Our own copy stops moving once no accepted input
-                             // can still rewrite it -- RB_DEPTH ticks after the tick ran; the sender
-                             // froze it at RB_HASH_LAG+1 old (its emit tick -- the schedule in
-                             // netTickPre). Comparing sooner races an in-flight late input and reads
-                             // a phantom desync once a second. The +2 also gives the typical verdict
-                             // its OWN tick phase (2 mod 64): freeze (0), emit (1), judge (2) never stack.
+// A hash is compared only once BOTH clients' snapshots of its tick are immutable: ours
+// stops moving RB_DEPTH ticks after the tick ran (no accepted input can still rewrite
+// it), the sender froze its copy at RB_HASH_LAG+1 old (its emit tick, see the schedule
+// in netTickPre). Comparing sooner races an in-flight late input and reads a phantom
+// desync once a second. The +2 also gives the verdict its OWN tick phase (2 mod 64):
+// freeze (0), emit (1), judge (2) never stack.
+const RB_SETTLE = RB_HASH_LAG + 2;
 const RB_STATE_SETTLE = 0;   // STATE settle: NONE. The peer's snake is AUTHORITATIVE and does not
                              // depend on our inputs settling, so apply it the moment its tick is in
                              // the past (simTick >= tk) -- no wait. Applying immediately keeps the
@@ -742,14 +716,14 @@ function _rbApplyResync(m){
         // role-agnostic. We produced NO inputs while frozen, so the sender (current on the shared clock)
         // holds the authoritative continuation of BOTH snakes -- including its dead-reckoning of OURS
         // (with no inputs, our snake simply ran straight, which is exactly what the sender simulated).
-        // Adopt the sender's ENTIRE frontier and re-anchor forward. Keeping our stale frozen snake
-        // instead baked an N-cell own-snake divergence into the ring that the 64-lag hash detector
-        // tripped on; a death landing before it aged out then cascaded to a DESYNC match-end. The one
-        // forward catch-up snap of our own head is correct here (duel-suspend.js allows the frozen side
-        // exactly one). Bug C -- an own-head yank BACK to a death cell -- is guarded on the ORDINARY
-        // aged-out path below, where T is NOT a full ring ahead so the sender's copy can predate our
-        // live respawn; here the sender is current, so its copy IS the truth. The shared spawnAt still
-        // respawns both sides in lockstep, and being byte-identical to the sender needs no 'st' back.
+        // Adopt the sender's ENTIRE frontier and re-anchor forward: a kept stale frozen snake is an
+        // N-cell own-snake divergence in the ring that the 64-lag hash detector trips on, and a
+        // death landing before it ages out cascades to a DESYNC match-end. The one forward catch-up
+        // snap of our own head is correct here (duel-suspend.js allows the frozen side exactly one).
+        // An own-head yank BACK to a death cell is guarded on the ORDINARY aged-out path below,
+        // where T is NOT a full ring ahead so the sender's copy can predate our live respawn; here
+        // the sender is current, so its copy IS the truth. The shared spawnAt still respawns both
+        // sides in lockstep, and being byte-identical to the sender needs no 'st' back.
         _rbUnpackPlayer(m.p1, snap.players[1]);   // adopt the sender's copy of the OTHER snake too
         // Ring convention: entry tk=T holds the state at simTick T-1 (snapshot taken in netTickPre
         // BEFORE tick T runs). Anchoring at T put our _gDue countdown one decrement ahead -> a 1-tick
@@ -781,7 +755,7 @@ function _rbApplyResync(m){
     } else {
         // AGED OUT (a long doze / far clock drift): T is gone from the ring, so there is NO log to
         // replay and a hard apply of the host's STALE copy of our snake would yank our own head to
-        // an old/dead cell -- the "after a death the level did not start clean" glitch (bug C). We
+        // an old/dead cell (the level not starting clean after a death). We
         // OWN our snake (the per-owner 'st' ownership rule above), so keep our own geometry and take
         // only the authoritative shared world + our match state (lives/alive/score; the shared
         // respawn timers were already copied into snap). Our snake then simply resumes forward from
@@ -795,13 +769,13 @@ function _rbApplyResync(m){
         if(!spec){ mine.lives = m.p1.l|0; mine.alive = m.p1.al !== false; mine.score = m.p1.sc|0; }
         // Re-anchor our tick to the host's frontier when T is AHEAD (the doze case: we froze, the
         // shared clock ran on, so netTickTarget is already out there). Catching up stops our inputs
-        // from landing in the host's deep past -- which is what made it re-resync every second. Same
-        // ring convention as the catch-up (line 423) and in-ring (line 431) branches: entry tk=T
-        // holds the state at simTick T-1, so we anchor at T-1, NOT T. Anchoring at T (the old bug
-        // here) labelled a T-1 state as tick T -> our _gDue countdown and our kept own-snake both sat
-        // one tick ahead of the adopted world -> a permanent 1-tick game-phase + 1-cell own-snake
-        // divergence (seen when a RESYNC-burst 'rs' lands here right after the catch-up wiped the
-        // ring). Never rewind (T <= simTick: keep our tick so the shared world is not dragged back).
+        // from landing in the host's deep past, which makes it re-resync every second. Same ring
+        // convention as the catch-up and in-ring branches: entry tk=T holds the state at simTick
+        // T-1, so we anchor at T-1, NOT T. Anchoring at T labels a T-1 state as tick T, so the
+        // _gDue countdown and the kept own snake sit one tick ahead of the adopted world: a
+        // permanent 1-tick game-phase + 1-cell own-snake divergence (a RESYNC-burst 'rs' landing
+        // right after the catch-up wiped the ring). Never rewind (T <= simTick: keep our tick so
+        // the shared world is not dragged back).
         // A watcher owns nothing on the board, so it may also go BACK to the checkpoint: the
         // never-rewind rule protects a player's own head, and a watcher has none.
         const anchor = (spec || T > simTick) ? T - 1 : simTick;
@@ -988,11 +962,11 @@ function netTickPre(){
         // EVERY repair that can rebuild the world -- a parked 'rs' draining, a hash-verdict
         // repair, a settled peer 'st' patch -- MUST run BEFORE this tick's snapshot and log-feed
         // below. Each rebuilds from a ring entry and replays the log only up to simTick; tick t
-        // has not run yet, so its records are NOT part of any replay. When a repair ran AFTER
-        // the log-feed (the old order), it silently discarded the records just fed for t: the
-        // pass then stepped t without them while they stayed in the log, so both clients' logs
-        // matched and the worlds diverged anyway -- unhealably, because every later repair ate
-        // that pass's fresh records the same way and re-opened the split it had just closed.
+        // has not run yet, so its records are NOT part of any replay. A repair run AFTER the
+        // log-feed silently discards the records just fed for t: the pass then steps t without
+        // them while they stay in the log, so both clients' logs match and the worlds diverge
+        // anyway -- unhealably, because every later repair eats that pass's fresh records the
+        // same way and re-opens the split it just closed.
         // (The doze residual: the catch-up burst's trailing 'rs' parks, drains one pass later,
         // and lands exactly on a tick just fed a boost -- 'players' splits ~7 ticks after wake.)
         // Parked early 'rs' first (see _rbResyncQ): once the sim reaches its tick it applies
@@ -1260,7 +1234,7 @@ function _netPeerInput(m, srcIdx){
         // past tick, so (a) no rollback can ever start later than it -- every future rollback's
         // replay re-applies the log entry we just added at tk, it can never be skipped -- and (b)
         // there are no already-recorded intermediate snapshots between tk and now to leave stale.
-        // The old unbounded live-apply violated both and was the duel-desync boost/dir bug.
+        // An unbounded live-apply violates both, and desyncs on boost and dir.
         //
         // Anything older than one tick, or a tick that already stepped/accrued: no honest shortcut
         // -- record the earliest such past tick and let netTickPre do ONE rollback+replay covering
@@ -1280,12 +1254,12 @@ function _netPeerInput(m, srcIdx){
 // tick and the same moment on both sides, which is what makes a rollback re-simulation
 // reproduce it exactly.
 //
-// The tick loop must therefore actually be ticking. It once was not: at a match start the
-// clock-driven target is not yet ahead of us, and a logged input just sat there unapplied --
-// dead controls for the first seconds of a duel. That is a property of the LOOP, not of the
-// authoring rule, and the resume/catch-up path owns it now. Do not "fix" it by applying local
-// input on the spot: that reintroduces the one-tick boosting-flag split the settled-history
-// hash reads as a desync, and it forks this mode away from every other one.
+// The tick loop must therefore actually be ticking: at a match start the clock-driven
+// target is not yet ahead of us, and a logged input would sit unapplied -- dead controls for
+// the first seconds of a duel. That is a property of the LOOP, owned by the resume/catch-up
+// path. Do not "fix" it by applying local input on the spot: that is the one-tick
+// boosting-flag split the settled-history hash reads as a desync, and it forks this mode
+// away from every other one.
 // Returns true when the online path consumed it; p!==0 is swallowed (no local P2).
 function netLocalInput(kind, p, d, now){
     if(!netGameActive()) return false;
