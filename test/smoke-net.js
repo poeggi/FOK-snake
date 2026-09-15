@@ -330,8 +330,8 @@ runTest('SMOKE-NET', `
     fakeSess('host'); inGame=true;
     _netSync={ofs:1234, rtt:5, at:1};
     // _netSyncBusy is the synchronous witness that a sync actually STARTED. Counting
-    // _netGet calls does not work: the clock now goes through fetch(t.txt) first, so
-    // the call lands a microtask later and a sync driver would race it.
+    // _netGet calls does not work: the clock goes through fetch(t.txt), so the call
+    // lands a microtask later and a sync driver would race it.
     const _oGet=_netGet; _netGet=async()=>({ok:true,t:Date.now()});
     const _oFetch=globalThis.fetch; globalThis.fetch=()=>({});   // _netOk() must be TRUE or every assertion below passes vacuously
     _netSyncBusy=false;
@@ -491,9 +491,9 @@ runTest('SMOKE-NET', `
         if(_netPace.hold!==false) throw 'an empty pace block must leave the hold in force alone';
         _netPaceOf({pace:{hold:true}});
         // q_ms is the server's own report of how long this request queued before any work ran.
-        // Half of that wait lands straight in the clock offset, so a fresh reading over the
-        // floor is what marks a sample unclean -- and it must EXPIRE, not latch: a host that
-        // recovered would otherwise keep this client on the degraded path for ever.
+        // A fresh reading over the floor reads as a busy host (the overlay, the start.php clock
+        // hint) -- and it must EXPIRE, not latch: a host that recovered would otherwise keep
+        // this client on the degraded path for ever.
         _netQNote({q_ms:51});
         if(!netHostBusy()) throw 'a fresh 51ms queue wait must read as a busy host';
         _netQNote({q_ms:0});

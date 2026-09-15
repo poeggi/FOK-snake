@@ -109,9 +109,10 @@ async function main() {
     // ---- the match handle: start.php must hand out mid + secret ------------
     // The one silent failure mode: a server that answers a start without them
     // leaves every duel unattested, and nothing else would notice.
-    const t = await fetch(BASE + '/api/time.php').then(x => x.json()).catch(() => null);
-    ok('time.php answers', t !== null && typeof t.t === 'number');
-    const pts = (t && t.t ? t.t : Date.now()) - 300;
+    const th = await fetch(BASE + '/api/t.txt', { cache: 'no-store' }).then(x => x.headers.get('x-fok-t')).catch(() => null);
+    const tm = th && /t=([0-9]+)/.exec(th);
+    ok('t.txt is stamped', !!tm);
+    const pts = (tm ? Number(tm[1]) / 1000 : Date.now()) - 300;
 
     // 'first' mints a fresh match and resets the pair's epoch line, so this
     // never 409s on a repeat run. A must go first; B's identical call reads the

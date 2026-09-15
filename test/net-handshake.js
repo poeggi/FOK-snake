@@ -281,10 +281,9 @@ const HOOKS = (myId) => `
     _netFlight = flight|0;
     inGame = false; phase = 'menu';
     const _oFetch = globalThis.fetch;
-    globalThis.fetch = async ()=>{ throw new Error('no header route'); };   // fall through to time.php
-    _netGet = async ()=>({ t: 1700000000000 });
+    globalThis.fetch = async ()=>({ headers: { get: (n)=> n === 'X-Fok-T' ? 't=1700000000000000' : null } });   // a stamped t.txt
     try { await _realTimeSync(true); }
-    finally { globalThis.fetch = _oFetch; _netGet = async ()=>null; _netFlight = 0; }
+    finally { globalThis.fetch = _oFetch; _netFlight = 0; }
     return { anchored: _netSync.ofs != null, reported: !!_netLat.pending };
   };
   globalThis.__state = ()=>({

@@ -578,12 +578,10 @@ function _netLatFromSamples(rtts){
     return Math.round(use.reduce((a,b)=>a+b,0) / use.length);
 }
 let _netSyncBusy = false;
-// The clock source, in PTS milliseconds. PREFERRED: a header on a STATIC file, so
-// the web server stamps it without a worker ever running. That matters because the wait
-// for a worker happens BEFORE it starts -- it cannot see it, cannot subtract it,
-// and it would otherwise land in our offset as if it were network delay, exactly
-// when the server is busiest. time.php stays as the fallback for when the header is
-// unreadable (a proxy stripping it, CORS).
+// The clock source, in PTS milliseconds: the X-Fok-T header on a STATIC file, stamped by
+// the web server without a worker ever running, so no worker wait can land in the offset.
+// The only source; a response without the header is no sample. Ungated: the gate is a
+// WAIT, and a wait taken here would land inside the round trip this function measures.
 async function _netClockMs(){
     // Counted like any request of ours: the gate must see the probe so nothing leaves beside it.
     _netFlight++; _netSentAt = Date.now();
@@ -591,15 +589,9 @@ async function _netClockMs(){
         const r = await fetch(NET_BASE + '/api/t.txt', { cache:'no-store', priority:'high' });
         const h = r.headers && r.headers.get && r.headers.get('X-Fok-T');
         const m = h && /t=(\d+)/.exec(h);
-        if(m) return Number(m[1]) / 1000;   // the header is MICROseconds; PTS is milliseconds
-    } catch(e){}
+        return m ? Number(m[1]) / 1000 : null;   // the header is MICROseconds; PTS is milliseconds
+    } catch(e){ return null; }
     finally { _netFlight--; }
-    // Ungated, and the only round trip left that is: the gate is a WAIT, and a wait taken
-    // here would land inside the round trip this function measures -- straight into the
-    // clock offset both clients start a match from. _netQuiet() has already established a
-    // clear wire before any sweep runs, which is the serialisation this one needs.
-    const j = await _netGet('/api/time.php');
-    return (j && typeof j.t === 'number') ? j.t : null;
 }
 // Wait -- briefly -- for our own wire to go quiet before taking a sample. Quiet means
 // quiet, not "mostly idle". Bounded, because a client that is genuinely busy still needs an
@@ -647,14 +639,14 @@ async function _netTimeSync(force, opts){
     const rtts = [];
     try {
         for(let i = 0; i < n; i++){
-            // CLEAN = nothing of ours was in flight around this sample, and the server was not
-            // queueing while it answered. Only a clean sample may set the offset or be reported
-            // as latency.
+            // CLEAN = nothing of ours was in flight around this sample. Only a clean sample
+            // may set the offset or be reported as latency. The server's queue figure plays
+            // no part: t.txt is static and never waits for a worker.
             const quiet = await _netQuiet();
             const t0 = performance.now();
             const t = await _netClockMs();
             const rtt = performance.now() - t0;
-            const clean = quiet && _netFlight <= 0 && !netHostBusy();
+            const clean = quiet && _netFlight <= 0;
             if(t != null){
                 const smp = { rtt, ofs: t + rtt/2 - _wall() };
                 // Keep the LOWEST-rtt sample, never an average: a sample delayed by queuing
