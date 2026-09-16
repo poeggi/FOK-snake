@@ -1397,6 +1397,10 @@ let _lvlCover = false;
 // run from file:// (or with no Worker at all) reports singleThreaded + offline as ON,
 // their menu entries grey out, and the STORED cfg is never mutated (masked at read only).
 function _runFromFile(){ return typeof location !== 'undefined' && location.protocol === 'file:'; }
+// The server is spoken to over HTTPS from an HTTPS page and nothing else: the identity
+// token rides every request, and a page served any other way (file://, a plain-http host)
+// never carries it. Masked at read like the offline toggle; the stored cfg.offline is kept.
+function _runInsecure(){ return typeof location !== 'undefined' && location.protocol !== 'https:'; }
 function netSingleThread(){ return !!cfg.singleThreaded || _runFromFile() || !_worker; }
 // The single gate for USING the worker: false => the whole app (menus, classic, local,
 // duel) runs the sim in-process on main, byte-identical to the no-Worker fallback.

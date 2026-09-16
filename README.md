@@ -153,9 +153,15 @@ name entry to open the keyboard.
   for networks where WebRTC never connects
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
-- Config backup / restore -- to a JSON file or to the cloud (kept by id + a secret
-  token, with an optional once-a-day auto-backup); the player id also lives in a
-  cookie, so identity survives a browser "clear site data"
+- A proven identity: the 32-bit id is public, a secret token the server mints on
+  the id's first hello proves it on every request (server API 4.20); an id bound
+  to another device is refused and the MY ID screen says so. Id and token live in
+  a cookie too, so identity survives a browser "clear site data", and travel
+  together in the file backup
+- Config backup / restore -- to a JSON file or to the cloud (under the same id +
+  token, with an optional once-a-day auto-backup)
+- HTTPS only: the server is spoken to over TLS from an HTTPS page and nothing
+  else; any other page scheme runs the game offline
 - STRICTLY OFFLINE setting: with it ON (or no network at all) the game never
   sends a single request -- every online feature is strictly additive
 - Debug tools: on-screen network / timing / sim overlays (PTS clock, latency,

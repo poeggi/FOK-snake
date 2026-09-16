@@ -1,0 +1,274 @@
+// Identity smoke (API 4.20, FOK-server docs/API.md "Identity token"): the id is public,
+// the token proves it. Four things are under test, because each one fails silently on
+// the wire:
+//   * every request that names our id carries `tok` -- POST body and GET query alike, the
+//     unload beacon and the relay included -- as null until a hello has minted one;
+//   * a hello answer carrying `tok` is stored, and a 401 stops the wire with no retry loop:
+//     ahead of the first answered hello only the hello's own refusal counts, because a poll
+//     can leave first on a never-bound id and it is the hello that then binds it;
+//   * RESET ID and a restored file move the token with the id and re-open the wire;
+//   * the client speaks HTTPS only: the API origin, the game URL, and the page it runs on.
+// Run: node test/smoke-ident.js
+const { runInGame } = require('./harness');
+const fs = require('fs');
+const path = require('path');
+
+const TOK = 'ab'.repeat(16);
+const TOK2 = 'cd'.repeat(16);
+
+const HOOKS = `
+;(function(){
+  cfg.offline = false; _netApiNewer = false;
+  _netGate = async ()=>{};                        // the pacing gate is not under test
+  _itemTimer = 1;                                 // the item drain rides the first answered hello: parked, it is not under test either
+  globalThis.Blob = undefined;                    // the beacon falls back to a string body the test can read
+  globalThis.__reqs = [];                         // every request: { method, path, body }
+  globalThis.__reply = null;                      // (path, body) -> { status, json }
+  const answer = (rep)=>({ status: rep.status, json: async ()=>rep.json });
+  globalThis.fetch = async (url, opt)=>{
+      const p = String(url).replace(NET_BASE, '');
+      const body = (opt && opt.body) ? JSON.parse(opt.body) : null;
+      __reqs.push({ method: (opt && opt.method) || 'GET', path: p, body });
+      return answer(__reply ? __reply(p, body) : { status:200, json:{ ok:true } });
+  };
+  navigator.sendBeacon = (url, data)=>{ __reqs.push({ method:'BEACON', path:String(url).replace(NET_BASE, ''), body:JSON.parse(data) }); return true; };
+  globalThis.__take = ()=>__reqs.splice(0);
+  globalThis.__hello = ()=>_netHello();
+  globalThis.__post = (p, b)=>_netPostRes(p, b, true);
+  globalThis.__get = (p)=>_netGet(p, undefined, false, NET_BG_SOLO);
+  globalThis.__poll = ()=>_netPollOnce();
+  globalThis.__beacon = (p, b)=>_netBeacon(p, b);
+  globalThis.__relay = (o)=>_netRelayPost({ peer:'deadbeef' }, o);
+  globalThis.__ok = ()=>_netOk();
+  globalThis.__notice = ()=>netStatusNotice();
+  globalThis.__refused = ()=>netIdRefused();
+  globalThis.__seen = ()=>_netHelloSeen;
+  globalThis.__fresh = ()=>{ _netIdRefused = false; _netHelloSeen = false; _netHelloBusy = false; _netSrvErr = false; };
+  globalThis.__tok = ()=>getCloudToken();
+  globalThis.__setTok = (t)=>setCloudToken(t);
+  globalThis.__clearTok = ()=>clearCloudToken();
+  globalThis.__me = ()=>getPlayerId();
+  globalThis.__resetId = ()=>resetPlayerId();
+  globalThis.__restore = (d)=>_applyRestoredConfig(d);
+  globalThis.__snap = ()=>{ const s = _saveSnapshot(); s.crc = _sumOf(s); return s; };
+  globalThis.__backup = ()=>cloudBackup(false);
+  globalThis.__cloudRestore = ()=>cloudRestore();
+  globalThis.__dataMsg = ()=>_dataMsg;
+  globalThis.__offline = ()=>netOffline();
+  globalThis.__setLoc = (proto)=>{ if(proto == null) delete globalThis.location; else globalThis.location = { protocol: proto }; };
+  globalThis.__base = ()=>NET_BASE;
+  globalThis.__gameUrl = ()=>GAME_URL;
+  globalThis.__unlatch = ()=>{ _netIdRefused = false; };
+  globalThis.__latch = ()=>{ _netIdRefused = true; };
+  globalThis.__sumOf = (d)=>_sumOf(d);
+  phase = 'menu'; inGame = false;
+})();
+`;
+
+const S = runInGame(HOOKS);
+const results = [];
+async function check(name, fn) {
+    try { await fn(); results.push('  ok  ' + name); }
+    catch (e) { results.push('  FAIL ' + name + ': ' + (e && e.message || e)); throw e; }
+}
+const eq = (a, b, what) => { if (a !== b) throw new Error(what + ': got ' + JSON.stringify(a) + ', expected ' + JSON.stringify(b)); };
+const one = (reqs, what) => { if (reqs.length !== 1) throw new Error(what + ': expected one request, saw ' + JSON.stringify(reqs)); return reqs[0]; };
+
+(async () => {
+try {
+    // ---- HTTPS only, statically: the two origins, and no other scheme anywhere shipped ----
+    await check('the API origin and the game URL are https, and nothing shipped names an http: URL', () => {
+        const root = path.join(__dirname, '..');
+        eq(/^https:\/\//.test(S.__base()), true, 'NET_BASE');
+        eq(/^https:\/\//.test(S.__gameUrl()), true, 'GAME_URL');
+        const files = fs.readdirSync(path.join(root, 'js')).map(f => 'js/' + f).concat(['index.html', 'sw.js']);
+        const hits = [];
+        for (const f of files) {
+            fs.readFileSync(path.join(root, f), 'utf8').split('\n').forEach((line, i) => {
+                if (/http:\/\//.test(line) && !/www\.w3\.org/.test(line)) hits.push(f + ':' + (i + 1));
+            });
+        }
+        eq(hits.join(' '), '', 'http: URLs in shipped sources');
+    });
+
+    // ---- HTTPS only, at run time: any other page scheme is offline, the toggle greyed ----
+    await check('a page that is not https is offline; an https page is not', () => {
+        eq(S.__offline(), false, 'the harness (no location) reads as online');
+        S.__setLoc('http:');
+        eq(S.__offline(), true, 'a plain-http page is offline');
+        eq(S.__ok(), false, 'and the wire is closed there');
+        S.__setLoc('file:');
+        eq(S.__offline(), true, 'a file:// page is offline');
+        S.__setLoc('https:');
+        eq(S.__offline(), false, 'an https page is online');
+        S.__setLoc(null);
+    });
+
+    // ---- every request that names the id carries tok ----------------------------
+    await check('a POST body that names the id carries tok: null before a hello minted one', async () => {
+        S.__clearTok(); S.__fresh(); S.__take();
+        await S.__post('/api/scores.php', { id: S.__me(), score: 1 });
+        const r = one(S.__take(), 'scores post');
+        eq(r.body.id, S.__me(), 'the id');
+        eq('tok' in r.body, true, 'tok is present');
+        eq(r.body.tok, null, 'tok is null');
+        eq(r.body.score, 1, 'the rest of the body is intact');
+    });
+
+    await check('a hello answer carrying tok is stored, and every later request carries it', async () => {
+        S.__clearTok(); S.__fresh(); S.__take();
+        S.__reply = (p) => (p === '/api/hello.php' ? { status:200, json:{ ok:true, api:'4.20', tok: TOK } } : { status:200, json:{ ok:true } });
+        await S.__hello();
+        const h = one(S.__take(), 'hello');
+        eq(h.body.tok, null, 'the first hello carries tok: null');
+        eq(S.__tok(), TOK, 'the answer was stored');
+        eq(S.__seen(), true, 'the hello counts as answered');
+        await S.__post('/api/items.php', { id: S.__me(), action:'list' });
+        eq(one(S.__take(), 'items post').body.tok, TOK, 'a later POST carries it');
+        await S.__get('/api/poll.php?id=' + S.__me() + '&fs=0');
+        eq(one(S.__take(), 'poll get').path, '/api/poll.php?id=' + S.__me() + '&fs=0&tok=' + TOK, 'the poll GET carries it in the query');
+        await S.__get('/api/scores.php?limit=10');
+        eq(one(S.__take(), 'scores get').path, '/api/scores.php?limit=10', 'a GET naming no id carries nothing');
+        S.__beacon('/api/signal.php', { id: S.__me(), to:'deadbeef', type:'bye', payload:'' });
+        eq(one(S.__take(), 'beacon').body.tok, TOK, 'the unload beacon carries it');
+        await S.__relay({ t:'in', pts: 1 });
+        const rl = one(S.__take(), 'relay post');
+        eq(rl.path, '/api/relay.php', 'the relay POST');
+        eq(rl.body.tok, TOK, 'carries it too');
+        S.__reply = null;
+    });
+
+    await check('the poll goes out as the real client sends it: the id, then the token', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        await S.__poll();                             // the main menu's unheld read: no re-arm, one request
+        const p = one(S.__take(), 'poll');
+        eq(p.path.indexOf('/api/poll.php?id=' + S.__me()), 0, 'names the id: ' + p.path);
+        eq(p.path.indexOf('&tok=' + TOK) > 0, true, 'and carries the token: ' + p.path);
+    });
+
+    // ---- 401: the wire stops, once, and says why ---------------------------------
+    await check('a 401 on a request after an answered hello stops the wire and names the way out', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.20' } });
+        await S.__hello();
+        S.__take();
+        S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });
+        const res = await S.__post('/api/friend.php', { id: S.__me(), action:'list' });
+        eq(res.status, 401, 'the status is reported');
+        eq(S.__refused(), true, 'the refusal is latched');
+        eq(S.__ok(), false, 'the wire is closed');
+        eq(S.__notice(), 'ID BOUND TO ANOTHER DEVICE', 'every online screen says so');
+        S.__take();
+        await S.__post('/api/scores.php', { id: S.__me(), score: 1 });
+        await S.__hello();
+        eq(S.__take().length, 0, 'nothing else leaves: no retry, no beat');
+        S.__reply = null;
+    });
+
+    await check('ahead of the first answered hello, a refused poll is not the verdict; a refused hello is', async () => {
+        S.__clearTok(); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });
+        await S.__get('/api/poll.php?id=' + S.__me());
+        eq(S.__refused(), false, 'a poll leaving before the hello may be refused on a never-bound id');
+        eq(S.__ok(), true, 'and the hello is still free to bind it');
+        await S.__hello();
+        eq(S.__refused(), true, 'the hello being refused is the verdict');
+        eq(S.__ok(), false, 'the wire is closed');
+        eq(S.__notice(), 'ID BOUND TO ANOTHER DEVICE', 'and says so');
+        S.__reply = null;
+    });
+
+    await check('an answered hello re-opens the wire', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });
+        await S.__hello();
+        eq(S.__refused(), true, 'refused');
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.20', tok: TOK2 } });
+        S.__unlatch();                                // as an identity change does, before its hello
+        await S.__hello();
+        eq(S.__refused(), false, 'open again');
+        eq(S.__tok(), TOK2, 'and the re-bound token was taken');
+        S.__reply = null;
+    });
+
+    // ---- the identity moves as one: id and token -----------------------------------
+    await check('RESET ID drops the token with the id and sends the new id to hello at once', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__latch();
+        const was = S.__me();
+        S.__reply = (p) => (p === '/api/hello.php' ? { status:200, json:{ ok:true, api:'4.20', tok: TOK2 } } : { status:200, json:{ ok:true } });
+        const id = S.__resetId();
+        eq(id === was, false, 'a new id');
+        eq(S.__refused(), false, 'the refusal is cleared');
+        await new Promise(res => setTimeout(res, 0));
+        const h = one(S.__take(), 'the hello');
+        eq(h.path, '/api/hello.php', 'a hello went out');
+        eq(h.body.id, id, 'for the new id');
+        eq(h.body.tok, null, 'with no token');
+        eq(S.__tok(), TOK2, 'and the minted one was stored');
+        S.__reply = null;
+    });
+
+    await check('a restored file carries its token; one without it clears ours only when it moves the id', async () => {
+        S.__setTok(TOK); S.__fresh();
+        const mine = S.__me();
+        const d = S.__snap(); d.tok = TOK2;
+        eq(S.__restore(d), true, 'restore with tok');
+        eq(S.__tok(), TOK2, 'the file token is taken');
+        eq(S.__refused(), false, 'the wire is open');
+        const d2 = S.__snap(); d2.pid = '00c0ffee'; d2.crc = S.__sumOf(d2);   // another identity, no token (a file from before the binding)
+        eq(S.__restore(d2), true, 'restore without tok');
+        eq(S.__me(), '00c0ffee', 'the id moved');
+        eq(S.__tok(), null, 'the token did not follow: null binds a free id and is refused on a bound one');
+        const d3 = S.__snap(); delete d3.tok;         // the id this device holds, no token: what it holds stands
+        S.__setTok(TOK);
+        eq(S.__restore(d3), true, 'restore of our own id without tok');
+        eq(S.__tok(), TOK, 'the token here stands');
+        const d4 = { v:1, hs:'[]' };                  // a file from before ids: names none, moves none
+        eq(S.__restore(d4), true, 'restore of a file naming no id');
+        eq(S.__me(), '00c0ffee', 'the id stays');
+        eq(S.__tok(), TOK, 'and so does the token');
+        const back = S.__snap(); back.pid = mine; back.crc = S.__sumOf(back); back.tok = TOK;
+        S.__restore(back);
+        eq(S.__me(), mine, 'restored');
+    });
+
+    // ---- the vault speaks the same token ------------------------------------------
+    await check('the cloud backup and restore carry tok, need it, and a 401 there is the same refusal', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.20' } });
+        await S.__hello(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, updated: 1 } });
+        eq(await S.__backup(), true, 'backup ok');
+        const b = one(S.__take(), 'backup post');
+        eq(b.path, '/api/backup.php', 'the vault');
+        eq(b.body.tok, TOK, 'carries tok');
+        eq('token' in b.body, false, 'and nothing under the old name');
+        eq(JSON.parse(b.body.payload).tok, undefined, 'the payload never carries the token');
+        S.__reply = () => ({ status:200, json:{ ok:true, payload: JSON.stringify(S.__snap()) } });
+        await S.__cloudRestore();
+        const gets = S.__take().filter(r => r.method === 'GET');   // the restore re-hellos beside it
+        eq(one(gets, 'restore get').path, '/api/backup.php?id=' + S.__me() + '&tok=' + TOK, 'the restore GET carries tok');
+        eq(S.__dataMsg(), 'CLOUD RESTORED', 'restored');
+        S.__clearTok(); S.__fresh(); S.__take();
+        eq(await S.__backup(), false, 'no backup without a token');
+        eq(S.__take().length, 0, 'nothing left');
+        eq(S.__dataMsg(), 'NO CLOUD TOKEN', 'said so');
+        S.__setTok(TOK); S.__fresh();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.20' } });
+        await S.__hello(); S.__take();
+        S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });
+        eq(await S.__backup(), false, 'refused');
+        eq(S.__dataMsg(), 'ID BOUND TO ANOTHER DEVICE', 'the same message');
+        eq(S.__refused(), true, 'the same latch');
+        S.__reply = null; S.__fresh();
+    });
+
+    console.log(results.join('\n'));
+    console.log('\nSMOKE-IDENT PASSED');
+} catch (e) {
+    console.log(results.join('\n'));
+    console.log('\nSMOKE-IDENT FAIL: ' + (e && e.stack || e));
+    process.exit(1);
+}
+})();

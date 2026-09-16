@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-se
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 16;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
+const NET_API_BUILT_MINOR = 20;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -33,9 +33,11 @@ let _netDbgSrv = null;      // the server's last debug INSTRUCTION (null = never
 let _netApiNewer = false;   // server MAJOR is newer -> online features disable with a notice
 let _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
 let _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
+let _netIdRefused = false;  // the server refused our token (401): the wire is stopped, see _netTokRefused
 function netStatusNotice(){
     if(netOffline()) return 'OFFLINE MODE (SETTINGS > NETWORK)';
     if(_netApiNewer) return 'GAME UPDATE REQUIRED - PLEASE RELOAD';
+    if(_netIdRefused) return 'ID BOUND TO ANOTHER DEVICE';
     if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
     if(_netSrvErr) return 'SERVER UNREACHABLE - RETRYING';
     return null;
@@ -48,11 +50,11 @@ function netUpdateNotice(){
     if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
     return null;
 }
-// EFFECTIVE offline: the stored toggle, OR forced by a file:// install (null origin -- the
-// server is unreachable anyway, so mask it rather than fail every call). Masked at read; the
+// EFFECTIVE offline: the stored toggle, OR forced on any page that is not HTTPS (a file://
+// install, a plain-http host): the server is never spoken to from one. Masked at read; the
 // stored cfg.offline is never mutated, so a local install keeps its saved preference.
-function netOffline(){ return !!cfg.offline || _runFromFile(); }
-function _netOk(){ return !netOffline() && !_netApiNewer && typeof fetch === 'function'; }
+function netOffline(){ return !!cfg.offline || _runInsecure(); }
+function _netOk(){ return !netOffline() && !_netApiNewer && !_netIdRefused && typeof fetch === 'function'; }
 const _netTimers = (typeof setInterval === 'function' && typeof clearInterval === 'function');
 // How far a peer's PTS may exceed ours before we call it bogus. We check against
 // our ESTIMATE of the server clock (a few ms of sync error) over a jittery link,
@@ -351,6 +353,30 @@ const NET_ICES_PEER_MAJOR = 4;
 // The build line on the wire is APP_VERSION, which carries a leading 'v' ('v4.0.0').
 function _netIcesPeerOk(v){ const m = /^\s*v?(\d+)/i.exec(String(v || '')); return !!m && +m[1] >= NET_ICES_PEER_MAJOR; }
 
+// ---- identity (API 4.20): the id is public, `tok` proves it ----
+// Every request that names our id carries the token hello minted for it, or null until a
+// hello has answered one: the first hello of an unbound id binds the id and answers `tok`,
+// and the one rule is to store whatever a hello answers (a first bind, a re-bind after the
+// operator's reset, a return after the row was forgotten). One stamp site per direction:
+// the POST body here, the GET query in _netGet.
+function _netTokBody(body){ return (body && body.id) ? Object.assign({}, body, { tok: getCloudToken() }) : body; }
+function _netTokQuery(path){ const t = getCloudToken(); return (t && /[?&]id=/.test(path)) ? path + '&tok=' + t : path; }
+// 401 = the server refused our token: the id is bound to another device, or our copy is
+// stale (a restored file that predates the binding, the operator's reset). The wire stops --
+// no retry, no beat -- and the MY ID screen says what to do. Two things re-open it: an
+// answered hello (the id is ours after all) and an identity change (RESET ID, a restored
+// file), which sends that hello. Ahead of the first answered hello of a session only
+// hello's own refusal counts: a poll leaving before it on a never-bound id can be refused,
+// and it is the hello that then binds the id.
+function _netTokRefused(path){
+    if(!_netHelloSeen && path.indexOf('/api/hello.php') !== 0) return;
+    if(_netIdRefused) return;
+    _netIdRefused = true; _uiDirty = true;
+    _netSigLog('! 401 bad token ' + path.replace(/^\/api\/|\.php.*$/g, ''));
+}
+function netIdRefused(){ return _netIdRefused; }
+function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; if(_netOk()) _netHello(); }
+
 // ---- transport (soft-fail JSON; null = any kind of failure) ----
 // Returns {status, json}: json is null unless the server said ok. status 0 = the
 // request never completed. Callers that only care "did it work" use _netPost.
@@ -366,10 +392,11 @@ async function _netPostRes(path, body, bg){
         // priority: the duel path and the heartbeat are what a player is waiting for; the idle
         // tier is not, and telling the browser so lets it put its stream last on the shared
         // connection instead of scheduling it beside the traffic it was asked to stand behind.
-        const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), cache:'no-store', priority: idle ? 'low' : 'high' });
+        const r = await fetch(NET_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(_netTokBody(body)), cache:'no-store', priority: idle ? 'low' : 'high' });
         _netDbg.lastSrvAt = performance.now();   // a POST always carries data both ways = real communication
         let j = null; try{ j = await r.json(); }catch(e){}   // an error status may carry no JSON at all
         _netQNote(j);   // every response carries the queue wait, error replies included
+        if(r.status === 401) _netTokRefused(path);
         // Keep the server's own reason ({"ok":false,"error":"..."}): guessing it
         // from the status alone is how 'invalid pts' got misread as a clock drift.
         return { status: r.status, json: (j && j.ok) ? j : null, body: j, err: (j && j.error) ? String(j.error) : '' };
@@ -391,13 +418,14 @@ async function _netGet(path, signal, held, bg){
         // these are the match's critical path, ahead of any incidental page fetch.
         const _opt = { cache:'no-store', priority:'high' };
         if(signal) _opt.signal = signal;
-        const r = await fetch(NET_BASE + path, _opt);
+        const r = await fetch(NET_BASE + _netTokQuery(path), _opt);
         // A 204 (held long-poll expiring with nothing to say) IS communication: the
         // request went out and the server answered. Stamping only data-bearing
         // replies made this climb forever on an idle-but-healthy link, which is the
         // opposite of what a liveness readout is for. Any completed exchange counts.
         _netDbg.lastSrvAt = performance.now();
         if(r.status === 204) return { ok:true, signals:[] };
+        if(r.status === 401) _netTokRefused(path);
         const j = await r.json();
         _netQNote(j);
         return (j && j.ok) ? j : null;
@@ -1002,7 +1030,7 @@ function _netSrvSays(r){
 }
 let _netHelloBusy = false, _netHelloSeen = false;
 async function _netHello(){
-    if(_netHelloBusy || netOffline() || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
+    if(_netHelloBusy || netOffline() || _netIdRefused || typeof fetch !== 'function') return;   // deliberately NOT _netOk: see the api re-check below
     _netHelloBusy = true;
     const body = { id: getPlayerId() };
     { const n = _netMyName(); if(n) body.name = String(n).slice(0, MAX_NAME); }
@@ -1062,9 +1090,12 @@ async function _netHello(){
     if(_netHs.sent && Date.now() - _netHs.sentAt > NET_INVITE_STALE_MS){ _netHs.sent = null; _netLb.msg = 'NO ANSWER'; _uiDirty = true; }
     if(_netLb.invite && Date.now() - (_netLb.invite.at||0) > NET_INVITE_STALE_MS){ _netLb.invite = null; _uiDirty = true; }
     if(_netHs.accepting && Date.now() - _netHs.acceptingAt > NET_INVITE_STALE_MS){ _netHs.accepting = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; }
-    if(!r){ _netSrvErr = true; _uiDirty = true; return; }
+    if(!r){ _netSrvErr = !_netIdRefused; _uiDirty = true; return; }   // a refused token stopped the wire; that is not the server being down
     if(body.duel_end && _netDuelEnd === body.duel_end) _netDuelEnd = '';   // answered: the end is on record
     _netSrvErr = false;
+    // The id is proven ours by this answer; and whatever token it carries is the one to keep.
+    _netIdRefused = false;
+    if(typeof r.tok === 'string') setCloudToken(r.tok);
     _netPaceOf(r);   // whether we may still hold a worker while we wait
     // The session's FIRST item drain rides the first ANSWERED heartbeat rather than a
     // load-time timer: a fixed delay after load lands in the middle of the resume burst,
@@ -1378,7 +1409,8 @@ if(typeof addEventListener === 'function') addEventListener('online', ()=>{ if(t
 function _netBeacon(path, body){
     try{
         if(typeof navigator === 'undefined' || !navigator.sendBeacon) return false;
-        const b = (typeof Blob === 'function') ? new Blob([JSON.stringify(body)], { type:'application/json' }) : JSON.stringify(body);
+        const data = JSON.stringify(_netTokBody(body));
+        const b = (typeof Blob === 'function') ? new Blob([data], { type:'application/json' }) : data;
         return !!navigator.sendBeacon(NET_BASE + path, b);
     }catch(e){ return false; }
 }

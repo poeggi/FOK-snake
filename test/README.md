@@ -30,6 +30,10 @@ full regression coverage still gates every deploy:
                                  it by hand after a server deploy. Beside it, on
                                  demand and in no tier, node test/hello-live.js
                                  measures what one hello round trip costs there.
+                                 The test ids are bound on the server like any player
+                                 (API 4.20): their tokens live outside the repo in
+                                 ~/.fok-server-livetest.tok (test/live-tok.js), adopted
+                                 from what hello answers on the first run.
 
 RUN `--full` LOCALLY after any significant netcode or sim rework (and before a release).
 The fast tier proves each netcode PATH still works; the regression tier plays many long,

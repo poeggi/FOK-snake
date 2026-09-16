@@ -266,6 +266,7 @@ function getPlayerId() {
 }
 // Mint a NEW identity (new cookie + localStorage) while keeping every OTHER save value. This
 // is the ID-only reset -- distinct from a full settings/data reset, which is a separate action.
+// The token goes with the id it proved: the new id's first hello binds it and mints a new one.
 function resetPlayerId() {
     let b;
     try { b = crypto.getRandomValues(new Uint8Array(4)); }
@@ -273,6 +274,8 @@ function resetPlayerId() {
     let id = ''; for(let i = 0; i < 4; i++) id += (b[i] < 16 ? '0' : '') + b[i].toString(16);
     try { localStorage.setItem(PID_KEY, id); } catch(e) {}
     _pidCookieSet(id);
+    clearCloudToken();
+    netIdentityChanged();
     return id;
 }
 // The name the player CHOSE, or '' when they never did. Unlike the id -- which is minted
@@ -283,10 +286,12 @@ function resetPlayerId() {
 function getPlayerName() {
     try { return (localStorage.getItem('lastSName') || '').substring(0, MAX_NAME); } catch(e) { return ''; }
 }
-// Cloud-backup token: the server mints a 128-bit token on the first cloud backup and REQUIRES
-// it (with the id) for every later backup and every restore. Persist it like the id -- cookie
-// (master) + localStorage backup -- so it too survives a site-data wipe, and carry it in the
-// file backup so restoring a file re-establishes cloud access.
+// Identity token (API 4.20): the id is public, this proves it. The server mints 16 random
+// bytes on the first hello of an unbound id and answers them once; every request that
+// names the id carries them from then on (net-api.js stamps `tok`), the cloud vault
+// included. Persist it like the id -- cookie (master) + localStorage backup -- so it too
+// survives a site-data wipe, and carry it in the file backup so a restored file brings
+// the identity it names, whole.
 const TOK_KEY = 'fok-snake-tok';
 function _tokCookieGet(){
     try { const m = document.cookie.match(/(?:^|;\s*)fok_tok=([0-9a-f]{16,64})(?:;|$)/i); return m ? m[1] : null; }
@@ -302,6 +307,10 @@ function setCloudToken(t){
     if(!/^[0-9a-f]{16,64}$/i.test(t||'')) return;
     try { localStorage.setItem(TOK_KEY, t); } catch(e){}
     _tokCookieSet(t);
+}
+function clearCloudToken(){
+    try { localStorage.removeItem(TOK_KEY); } catch(e){}
+    try { document.cookie = 'fok_tok=; Max-Age=0; Path=/; SameSite=Lax; Secure'; } catch(e){}
 }
 try { getPlayerId(); } catch(e){}                              // establish identity + seed both stores at load
 function fmtPlayerId() { return fmtFriendId(getPlayerId()); }
@@ -372,10 +381,11 @@ function _downloadJSON(filename, obj){
 }
 // Apply a restored config snapshot (from a file OR the cloud) to local storage + the cookie.
 // Rejects a snapshot whose checksum does not match (older, checksumless backups still accepted).
-// Restores the id into the cookie (master) and the cloud token too. Returns true on success.
+// Restores the id into the cookie (master) and the identity token with it. Returns true on success.
 function _applyRestoredConfig(d){
     if(!d || typeof d!=='object') return false;
     if(d.crc && d.crc!==_sumOf(d)) return false;
+    const idMoves = /^[0-9a-f]{8}$/.test(d.pid||'') && d.pid!==getPlayerId();   // judged before the restore moves it
     _lsFlush();   // a pending pre-restore write must not land on top of the restored keys
     const set=(k,key)=>{ if(key in d){ const v=d[key]; if(v==null) localStorage.removeItem(k); else localStorage.setItem(k,v); } };
     set(HS_KEY,'hs'); set(FK_KEY,'coins'); set(ACH_KEY,'ach'); set(CFG_KEY,'cfg'); set('lastSName','name'); set(PID_KEY,'pid'); set(FRIENDS_KEY,'friends');
@@ -385,9 +395,15 @@ function _applyRestoredConfig(d){
     // exactly the requests this save now needs, and the restored player would silently have
     // no friendships on the server at all.
     netFriendMarkersReset();
-    if(d.tok) setCloudToken(d.tok);                            // and the cloud-restore credential
+    // The token follows the id. A file that carries one brings it. A file without one that
+    // moves the id to another leaves none: the token here proves the id it was minted for,
+    // and a null binds a free id on the next hello or is refused on a bound one. A file that
+    // keeps the id (naming it, or predating ids) keeps the token with it.
+    if(d.tok) setCloudToken(d.tok);
+    else if(idMoves) clearCloudToken();
     _cachedFOKoins=getFOKoins(); loadAch(); loadCfg();
     if(cfg.wornItems===null){ cfg.wornItems=Object.assign({}, cfg.shopItems||{}); }
+    netIdentityChanged();   // the wire carries the restored identity from here: unlatched, and told to the server
     // A restored backup carries a SNAPSHOT of the item registry, which is exactly
     // what must not be trusted: re-reconcile against the server now rather than
     // next session, so a restore cannot resurrect an instance for this whole run.
@@ -400,33 +416,27 @@ function backupStats() {
     try {
         const snap=_saveSnapshot();
         snap.crc=_sumOf(snap);              // integrity checksum over the manifest fields (crc + tok excluded)
-        snap.tok=getCloudToken()||undefined;   // FILE-only client extension: carries the cloud token so a file restore re-establishes cloud access
+        snap.tok=getCloudToken()||undefined;   // FILE-only client extension: carries the identity token so a restored file brings the whole identity
         _downloadJSON('snake-fok-backup.json', snap);
         _dataMsg='CONFIG SAVED TO FILE'; _dataMsgAt=_msgNow();
     } catch(e) { _dataMsg='FILE BACKUP FAILED'; _dataMsgAt=_msgNow(); }
 }
-// Cloud backup: POST the whole config to the vault. First time mints a token (store it in
-// both stores + cookie); later backups present it. Payload is opaque to the server.
+// Cloud backup: POST the whole config to the vault, under the identity token (the vault
+// checks the same token every other request carries; hello mints it, so a client that has
+// none yet has not registered). Payload is opaque to the server.
 async function cloudBackup(silent) {
     if(!_netOk()){ if(!silent){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); } return false; }
+    const tok=getCloudToken();
+    if(!tok){ if(!silent){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=_msgNow(); } return false; }
     if(!silent){ _dataMsg='CLOUD BACKUP...'; _dataMsgAt=_msgNow(); }
     let ok=false;
     try {
         const snap=_saveSnapshot(); snap.crc=_sumOf(snap);
         const payload=JSON.stringify(snap);
-        const _post=(body)=>netBgFetch('/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        const tok=getCloudToken();
-        let r=await _post(tok ? { id:getPlayerId(), payload, token:tok } : { id:getPlayerId(), payload });
-        let j=await r.json().catch(()=>null);
-        // The admin can RESET a backup's token (manual recovery of a tokenless backup). If our
-        // stored token is refused, retry once WITHOUT it: a reset backup then mints a FRESH
-        // token, which we adopt into the cookie. A genuine conflict 403s again and we keep ours.
-        if(r.status===403 && tok){
-            r=await _post({ id:getPlayerId(), payload });
-            j=await r.json().catch(()=>null);
-        }
-        if(r.status===200 && j && j.ok){ setCloudToken(j.token); ok=true; if(!silent) _dataMsg='CLOUD BACKUP SAVED'; }
-        else if(r.status===403){ if(!silent) _dataMsg='CLOUD: WRONG DEVICE'; }
+        const r=await netBgFetch('/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:getPlayerId(), tok, payload })});
+        const j=await r.json().catch(()=>null);
+        if(r.status===200 && j && j.ok){ ok=true; if(!silent) _dataMsg='CLOUD BACKUP SAVED'; }
+        else if(r.status===401){ _netTokRefused('/api/backup.php'); if(!silent) _dataMsg='ID BOUND TO ANOTHER DEVICE'; }
         else if(r.status===413){ if(!silent) _dataMsg='CLOUD: TOO LARGE'; }
         else { if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
     } catch(e){ if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
@@ -450,13 +460,13 @@ async function cloudRestore() {
     if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=_msgNow(); return; }
     _dataMsg='CLOUD RESTORE...'; _dataMsgAt=_msgNow();
     try {
-        const r=await netBgFetch('/api/backup.php?id='+getPlayerId()+'&token='+encodeURIComponent(tok));
+        const r=await netBgFetch('/api/backup.php?id='+getPlayerId()+'&tok='+encodeURIComponent(tok));
         const j=await r.json().catch(()=>null);
         if(r.status===200 && j && j.ok && typeof j.payload==='string'){
             let d=null; try{ d=JSON.parse(j.payload); }catch(e){}
             _dataMsg=_applyRestoredConfig(d)?'CLOUD RESTORED':'CLOUD: BAD DATA';
         } else if(r.status===404) _dataMsg='CLOUD: NO BACKUP';
-        else if(r.status===403) _dataMsg='CLOUD: WRONG TOKEN';
+        else if(r.status===401){ _netTokRefused('/api/backup.php'); _dataMsg='ID BOUND TO ANOTHER DEVICE'; }
         else _dataMsg='CLOUD RESTORE FAILED';
     } catch(e){ _dataMsg='CLOUD RESTORE FAILED'; }
     _dataMsgAt=_msgNow();

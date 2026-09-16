@@ -29,14 +29,17 @@
 // the residue to one row.
 
 const http2 = require('http2');
+const { tokOf, adopt } = require('./live-tok');
 
 const BASE = process.argv[2] || 'https://fok-server.poggensee.it';
+if (!/^https:\/\//.test(BASE)) { console.log('[hello-live] ' + BASE + ' is not https -- the client speaks nothing else'); process.exit(2); }
 const N = Math.max(3, Math.min(30, parseInt(process.argv[3] || '8', 10) || 8));
 const ROUNDS = Math.max(1, Math.min(20, parseInt(process.argv[4] || '4', 10) || 4));
 const GAP_MS = 300;                   // between samples: past the client's own 100 ms gap
 const POLL_S = 5;                     // the contract's longest hold
 const ID = '1111c1e7';
 const NAME = 'clnt-CI-' + ID.slice(0, 4);   // the same name items-live.js records for this id
+let TOK = tokOf(BASE, ID);                  // the id's identity token (API 4.20), kept outside the repo; null until a hello minted it
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 let failed = 0;
@@ -66,9 +69,9 @@ function timed(method, path, body) {
         req.on('response', h => { status = h[':status'] | 0; });
         req.on('data', d => { txt += d; });
         req.on('end', () => {
-            let q = null;
-            try { const j = JSON.parse(txt); if (j && typeof j.q_ms === 'number') q = j.q_ms; } catch (e) { /* not JSON */ }
-            res({ ms: performance.now() - t0, status, q, fresh });
+            let q = null, j = null;
+            try { j = JSON.parse(txt); if (j && typeof j.q_ms === 'number') q = j.q_ms; } catch (e) { /* not JSON */ }
+            res({ ms: performance.now() - t0, status, q, fresh, json: j });
         });
         req.setTimeout(20000, () => req.close(http2.constants.NGHTTP2_CANCEL));
         req.on('error', () => res({ ms: performance.now() - t0, status: 0, q: null, fresh }));
@@ -77,8 +80,13 @@ function timed(method, path, body) {
     });
 }
 
-const hello = (extra) => timed('POST', '/api/hello.php', Object.assign({ id: ID, name: NAME }, extra || {}));
-const poll = () => timed('GET', '/api/poll.php?id=' + ID + '&wait=' + POLL_S);
+// Every request naming the id carries its token; what a hello answers is kept (the one rule).
+const hello = async (extra) => {
+    const r = await timed('POST', '/api/hello.php', Object.assign({ id: ID, name: NAME, tok: TOK }, extra || {}));
+    if (r.json && typeof r.json.tok === 'string') { TOK = r.json.tok; adopt(BASE, ID, TOK); }
+    return r;
+};
+const poll = () => timed('GET', '/api/poll.php?id=' + ID + '&wait=' + POLL_S + (TOK ? '&tok=' + TOK : ''));
 const fmt = x => Math.round(x.ms) + (x.fresh ? '*' : '');
 
 function check(label, s, okStatus) {

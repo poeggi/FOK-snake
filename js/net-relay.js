@@ -117,12 +117,13 @@ async function _netRelayPost(s, o){
         // saturated worker pool that stalls the held GET. Harmless on a 3.1 server (ignored),
         // but the reply is DRAINED, so we MUST consume messages[] below -- which we do.
         const r = await fetch(NET_BASE + '/api/relay.php', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
-                                   pts: o.pts != null ? o.pts : undefined, pull: true }),
+            body: JSON.stringify(_netTokBody({ id:getPlayerId(), peer:s.peer, payload:JSON.stringify(o),
+                                               pts: o.pts != null ? o.pts : undefined, pull: true })),
             cache:'no-store', priority:'high' });
         s.lastSent = performance.now();
         _netDbg.relayRtt = performance.now() - _t0;   // client<->server relay-POST round-trip (about half the peer path)
         if(r.status === 503){ _netSessionEnd('SERVER FULL - TRY LATER'); return 'ok'; }   // capped: honest busy, end the attempt
+        if(r.status === 401){ _netTokRefused('/api/relay.php'); return 'drop'; }         // DEPRECATED(relay): the identity refusal, as on every other request
         if(r.status === 400 || r.status === 429){
             // 429 = the per-second rate block, a full peer backlog, or a momentarily-full hub
             // store; 400 is almost always our clock. Named here, or each looks like a healthy

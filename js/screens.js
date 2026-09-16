@@ -443,7 +443,7 @@ const SETTINGS_CATS = [
     ]},
     { label:'NETWORK', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
-          dis:()=>_runFromFile(),   // file:// has a null origin: the server is unreachable, so offline is forced (greyed)
+          dis:()=>_runInsecure(),   // not an HTTPS page (file://, plain http): the server is never spoken to, so offline is forced (greyed)
           act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline)netOfflineClear();} },
         _tog('RELAY ONLY (NO P2P)','noP2P'),
         _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
@@ -1612,7 +1612,11 @@ function drawMyId() {
     drawSubhead(fmtPlayerId()+'   FRIENDS: '+getFriends().length, '#ffd700', FONT.MENU);
     // Scanning this opens the game with #friend=<this player's ID> in the hash.
     const card=drawQrCard(friendUrl(), 64);
-    if(_netFr.msg) ct(_netFr.msg, CW/2, card.bottom+12, '#ffd700', FONT.HINT);   // e.g. X ADDED YOU AS A FRIEND (see _netFrCelebrate)
+    if(netIdRefused()){   // the server refused our token: this screen is where the id is, so this is where the way out is
+        ct('ID BOUND TO ANOTHER DEVICE', CW/2, card.bottom+12, '#ff8888', FONT.HINT);
+        ct('RESTORE YOUR BACKUP OR RESET YOUR ID', CW/2, card.bottom+24, '#ff8888', FONT.HINT);
+    }
+    else if(_netFr.msg) ct(_netFr.msg, CW/2, card.bottom+12, '#ffd700', FONT.HINT);   // e.g. X ADDED YOU AS A FRIEND (see _netFrCelebrate)
     else ct('SCAN TO ADD ME AS A FRIEND', CW/2, card.bottom+12, '#4a7a4a', FONT.HINT);
     ct('A/ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }

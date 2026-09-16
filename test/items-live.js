@@ -15,10 +15,15 @@
 // which is not something to do to production. They are covered in smoke-items.js.
 
 const crypto = require('crypto');
+const { tokOf, adopt } = require('./live-tok');
 
 const BASE = process.argv[2] || 'https://fok-server.poggensee.it';
+if (!/^https:\/\//.test(BASE)) { console.log('[items-live] ' + BASE + ' is not https -- the client speaks nothing else'); process.exit(2); }
 const A = '1111c1e7';                 // the loser / minter side
 const B = '2222c1e7';                 // the taker side
+// The identity token each id carries (API 4.20): what its first hello minted, kept outside
+// the repo per environment (test/live-tok.js); null until that hello has answered.
+const TOK = {}; TOK[A] = tokOf(BASE, A); TOK[B] = tokOf(BASE, B);
 // WHAT THESE TWO ARE CALLED where somebody might have to look at them. Nothing in
 // the item contract reads a display name, but the ids leave rows on a production
 // box, and hello is the only place a name is recorded. clnt-CI-<first four of the
@@ -33,6 +38,7 @@ function ok(name, cond, extra) {
 }
 
 async function post(path, body) {
+    if (body && Object.prototype.hasOwnProperty.call(TOK, body.id)) body = Object.assign({}, body, { tok: TOK[body.id] });
     let r, txt = '';
     try {
         r = await fetch(BASE + path, {
@@ -61,7 +67,11 @@ const ITEMS = '/api/items.php';
 
 async function main() {
     console.log('[items-live] ' + BASE + '   as ' + ciName(A) + ' + ' + ciName(B));
-    for (const id of [A, B]) await post('/api/hello.php', { id, name: ciName(id) });
+    for (const id of [A, B]) {
+        const h = await post('/api/hello.php', { id, name: ciName(id) });
+        ok('hello as ' + id + ' is answered', h.status === 200, 'got ' + h.status + ' ' + h.text);
+        if (h.json && typeof h.json.tok === 'string') { TOK[id] = h.json.tok; adopt(BASE, id, h.json.tok); }   // the one rule: keep what hello answers
+    }
 
     // ---- shape: the wire refuses what it should ---------------------------
     let r = await fetch(BASE + ITEMS).then(x => ({ status: x.status }), () => ({ status: 0 }));
@@ -112,7 +122,7 @@ async function main() {
     const th = await fetch(BASE + '/api/t.txt', { cache: 'no-store' }).then(x => x.headers.get('x-fok-t')).catch(() => null);
     const tm = th && /t=([0-9]+)/.exec(th);
     ok('t.txt is stamped', !!tm);
-    const pts = (tm ? Number(tm[1]) / 1000 : Date.now()) - 300;
+    const pts = (tm ? Math.round(Number(tm[1]) / 1000) : Date.now()) - 300;   // whole ms: the server refuses a fraction
 
     // 'first' mints a fresh match and resets the pair's epoch line, so this
     // never 409s on a repeat run. A must go first; B's identical call reads the
