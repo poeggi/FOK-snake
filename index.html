@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- The policy the whole game is written to (.claude/rules/project_fok_csp.md). Pages sends no
+         CSP header, so this meta IS the policy: nothing inline, scripts and styles from this origin
+         only, the API the one connection. An injected script is refused, not run. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; worker-src 'self'; manifest-src 'self'; connect-src 'self' https://fok-server.poggensee.it; base-uri 'none'; object-src 'none'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FOK - Snake</title>
     <link rel="manifest" href="manifest.json">

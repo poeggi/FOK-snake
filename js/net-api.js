@@ -1093,9 +1093,11 @@ async function _netHello(){
     if(!r){ _netSrvErr = !_netIdRefused; _uiDirty = true; return; }   // a refused token stopped the wire; that is not the server being down
     if(body.duel_end && _netDuelEnd === body.duel_end) _netDuelEnd = '';   // answered: the end is on record
     _netSrvErr = false;
-    // The id is proven ours by this answer; and whatever token it carries is the one to keep.
+    // The id is proven ours by this answer; and whatever token it carries is the one to keep --
+    // for the id this hello named: a RESET ID or a restore while it was in flight makes the
+    // answer somebody else's.
     _netIdRefused = false;
-    if(typeof r.tok === 'string') setCloudToken(r.tok);
+    if(typeof r.tok === 'string' && body.id === getPlayerId()) setCloudToken(r.tok);
     _netPaceOf(r);   // whether we may still hold a worker while we wait
     // The session's FIRST item drain rides the first ANSWERED heartbeat rather than a
     // load-time timer: a fixed delay after load lands in the middle of the resume burst,

@@ -29,7 +29,7 @@ const HOOKS = `
       const p = String(url).replace(NET_BASE, '');
       const body = (opt && opt.body) ? JSON.parse(opt.body) : null;
       __reqs.push({ method: (opt && opt.method) || 'GET', path: p, body });
-      return answer(__reply ? __reply(p, body) : { status:200, json:{ ok:true } });
+      return answer(await (__reply ? __reply(p, body) : { status:200, json:{ ok:true } }));   // a reply may be a promise: a slow wire
   };
   navigator.sendBeacon = (url, data)=>{ __reqs.push({ method:'BEACON', path:String(url).replace(NET_BASE, ''), body:JSON.parse(data) }); return true; };
   globalThis.__take = ()=>__reqs.splice(0);
@@ -206,6 +206,21 @@ try {
         eq(h.body.id, id, 'for the new id');
         eq(h.body.tok, null, 'with no token');
         eq(S.__tok(), TOK2, 'and the minted one was stored');
+        S.__reply = null;
+    });
+
+    await check('a hello answer minted for an id that was reset while it was in flight is not kept', async () => {
+        S.__clearTok(); S.__fresh(); S.__take();
+        let release = null;
+        const slow = new Promise(res => { release = res; });
+        S.__reply = (p) => (p === '/api/hello.php' ? slow.then(() => ({ status:200, json:{ ok:true, api:'4.20', tok: TOK } })) : { status:200, json:{ ok:true } });
+        const h = S.__hello();                        // in flight for the old id
+        await new Promise(res => setTimeout(res, 0));
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.20' } });
+        const id = S.__resetId();                     // the identity moves while the answer is on its way
+        release(); await h;
+        eq(S.__tok(), null, 'the old id token must not land on the new id');
+        eq(S.__me(), id, 'the new id stands');
         S.__reply = null;
     });
 
