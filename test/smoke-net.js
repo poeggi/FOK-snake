@@ -10,6 +10,7 @@ runTest('SMOKE-NET', `
   const R = globalThis.__R = { steps: [], err: null, ok: false };
   const log = (m) => R.steps.push(m);
   function press(k){ handleKey(k, ()=>{}); }
+  const _wire=(p,b)=>p+(b?'?'+Object.keys(b).map(k=>k+'='+b[k]).join('&'):'');   // the request as one line: path + body members
   try {
     simNow=100000; simTick=6000; _splashLeftAt=-1e9;
     // start.php now REFUSES to start a match without a server-issued start moment
@@ -330,9 +331,9 @@ runTest('SMOKE-NET', `
     fakeSess('host'); inGame=true;
     _netSync={ofs:1234, rtt:5, at:1};
     // _netSyncBusy is the synchronous witness that a sync actually STARTED. Counting
-    // _netGet calls does not work: the clock goes through fetch(t.txt), so the call
+    // _netRead calls does not work: the clock goes through fetch(t.txt), so the call
     // lands a microtask later and a sync driver would race it.
-    const _oGet=_netGet; _netGet=async()=>({ok:true,t:Date.now()});
+    const _oGet=_netRead; _netRead=async()=>({ok:true,t:Date.now()});
     const _oFetch=globalThis.fetch; globalThis.fetch=()=>({});   // _netOk() must be TRUE or every assertion below passes vacuously
     _netSyncBusy=false;
     phase='duel'; _netTimeSync(true);
@@ -342,7 +343,7 @@ runTest('SMOKE-NET', `
     phase='duelReady';   _netTimeSync(true);   // outside play: the gate lets a forced sweep through
     if(!_netSyncBusy) throw 'outside play (READY/GO) a forced sweep must run';
     _netSyncBusy=false;   // the async remainder is not under test; do not leave it latched
-    _netGet=_oGet; globalThis.fetch=_oFetch; _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
+    _netRead=_oGet; globalThis.fetch=_oFetch; _netSync={ofs:null, rtt:-1, at:0}; inGame=false; phase='menu'; _netTeardown();
     log('anchor discipline ok: a sweep runs outside play, never mid-game');
 
     // ---- remote DEBUG flag (api v3): report what is true, honour what is asked ----
@@ -424,11 +425,11 @@ runTest('SMOKE-NET', `
     // thing left in the pace block -- and why withdrawing it has to fall back to reading the mailbox
     // on the tick, never to reading nothing.
     {
-        const _oGetP=_netGet, _oFetchP=globalThis.fetch;
+        const _oGetP=_netRead, _oFetchP=globalThis.fetch;
         globalThis.fetch=()=>({});                                  // _netOk(): online
         let _url=null, _heldArg=null, _bgP='none';
-        _netGet=async (p,sig,held,bg)=>{ _url=p; _heldArg=!!held; _bgP=bg; return null; };
-        // _netPollOnce is async, but everything up to the _netGet call is not: the URL is
+        _netRead=async (p,sig,held,bg,body)=>{ _url=_wire(p,body); _heldArg=!!held; _bgP=bg; return null; };
+        // _netPollOnce is async, but everything up to the _netRead call is not: the URL is
         // captured by the time it returns. Clear the busy latch by hand since the tail of
         // the previous call has not run yet.
         const poll=()=>{ _url=null; _heldArg=null; _bgP='none'; _netPollBusy=false; phase='duelLobby'; _netPollOnce(); };
@@ -536,7 +537,7 @@ runTest('SMOKE-NET', `
         poll();
         if(!new RegExp('wait=' + NET_POLL_S).test(_url||'')) throw 'past the old deadline the held poll goes out again, got ' + _url;
         _netPollNotBefore=0; _netPollHoldEnd=0;
-        _netGet=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
+        _netRead=_oGetP; globalThis.fetch=_oFetchP; _netPollBusy=false; phase='menu';
     }
     log('pacing ok: hold alone drives the poll, a retired interval field moves nothing, an unheld poll costs the contract cadence and not 1 Hz (a handshake excepted), q_ms flags a busy host and expires');
 
@@ -547,10 +548,10 @@ runTest('SMOKE-NET', `
     // handshake or a held tournament keeps the hold: their answers ride a ladder that
     // cannot wait a cadence out.
     {
-        const _oGetH=_netGet, _oFetchH=globalThis.fetch, _oHelloH=_netHello, _oSyncH=_netTimeSync, _oNetsH=netNetsRefresh;
+        const _oGetH=_netRead, _oFetchH=globalThis.fetch, _oHelloH=_netHello, _oSyncH=_netTimeSync, _oNetsH=netNetsRefresh;
         const _oHidAt=_netHiddenAt, _oSeekH=_netLb.seeking, _oSessH=_netSess, _oTickH=_netPollTick, _oPhH=phase;
         globalThis.fetch=()=>({});
-        let _u=null; _netGet=async (p)=>{ _u=p; return null; };
+        let _u=null; _netRead=async (p,sig,held,bg,body)=>{ _u=_wire(p,body); return null; };
         _netHello=()=>Promise.resolve(); _netTimeSync=async ()=>{}; netNetsRefresh=()=>{};
         const poll=()=>{ _u=null; _netPollBusy=false; _netPollOnce(); };
         const heldRe=new RegExp('wait=' + NET_POLL_S);
@@ -577,7 +578,7 @@ runTest('SMOKE-NET', `
         if(_netHiddenAt!==0) throw 'showing must clear the away stamp';
         poll();
         if(!heldRe.test(_u||'')) throw 'a shown tab holds again, got ' + _u;
-        _netGet=_oGetH; globalThis.fetch=_oFetchH; _netHello=_oHelloH; _netTimeSync=_oSyncH; netNetsRefresh=_oNetsH;
+        _netRead=_oGetH; globalThis.fetch=_oFetchH; _netHello=_oHelloH; _netTimeSync=_oSyncH; netNetsRefresh=_oNetsH;
         _netHiddenAt=_oHidAt; _netLb.seeking=_oSeekH; _netSess=_oSessH; _netPollTick=_oTickH; _netPollBusy=false; _netPollNotBefore=0; _netPollHoldEnd=0; phase=_oPhH;
     }
     log('hidden tab ok: hiding drops nothing, the hold survives the grace, a long-hidden browsing tab reads unheld on the cadence, a seek or a handshake keeps it');
@@ -587,11 +588,11 @@ runTest('SMOKE-NET', `
     // tournament lobby's 5 s hello -- rides the poll's own query string, because a request
     // sent beside a parked poll can be the one that pays the pool's fork.
     {
-        const _oGet49=_netGet, _oFetch49=globalThis.fetch, _oPost49=_netPost, _oMin=_netSrvMin;
+        const _oGet49=_netRead, _oFetch49=globalThis.fetch, _oPost49=_netPost, _oMin=_netSrvMin;
         const _oDbg=cfg.debug, _oEnd=_netDuelEnd, _oHold=_netPollHoldEnd, _oSrv=_netDbgSrv;
         globalThis.fetch=()=>({});
         let _u=null, _posts=0;
-        _netGet=async (p)=>{ _u=p; return null; };
+        _netRead=async (p,sig,held,bg,body)=>{ _u=_wire(p,body); return null; };
         _netPost=async ()=>{ _posts++; return null; };
         const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); };
         _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now();
@@ -651,7 +652,7 @@ runTest('SMOKE-NET', `
         _netSrvSays({ok:true, signals:[]});
         if(netSrvMinor()!==9) throw 'a 204 has no api and must leave the latch alone';
 
-        _netGet=_oGet49; _netPost=_oPost49; globalThis.fetch=_oFetch49; _netSrvMin=_oMin;
+        _netRead=_oGet49; _netPost=_oPost49; globalThis.fetch=_oFetch49; _netSrvMin=_oMin;
         cfg.debug=_oDbg; _netDuelEnd=_oEnd; _netPollHoldEnd=_oHold; _netDbgSrv=_oSrv;
         _netFlWant=false; _netTtPoll=false; _netFrPoll=false; _netPollBusy=false; phase='menu';
     }
@@ -686,9 +687,9 @@ runTest('SMOKE-NET', `
         // holds open by design. The transport decides that, so ask the transport.
         globalThis.fetch=()=>new Promise(()=>{});   // never settles: the flight counter IS the assertion
         _netFlight=0;
-        _netGet('/api/poll.php?wait=' + NET_POLL_S, undefined, true);
+        _netRead('/api/poll.php', undefined, true, undefined, { id:getPlayerId(), wait:NET_POLL_S });
         if(_netFlight!==0) throw 'a held poll must not make the wire busy, got ' + _netFlight;
-        _netGet('/api/poll.php', undefined, false);
+        _netRead('/api/poll.php', undefined, false, undefined, { id:getPlayerId() });
         if(_netFlight!==1) throw 'an unheld request must count as in flight, got ' + _netFlight;
         if(!(_netFlightMax>=1)) throw 'the field readout must keep the high-water mark of our own concurrency';
         // (c2) ...for the GATE, which is a different question from the wire being busy. A poll
@@ -1170,8 +1171,8 @@ runTest('SMOKE-NET', `
 
     // ---- presence deltas (4.6): one landing place, a cursor, a cap that continues at once ----
     {
-        const _oGetD=_netGet; let _urls=[], _bgD=[];
-        _netGet=async (p,sig,held,bg)=>{ _urls.push(p); _bgD.push(bg); return null; };
+        const _oGetD=_netRead; let _urls=[], _bgD=[];
+        _netRead=async (p,sig,held,bg,body)=>{ _urls.push(_wire(p,body)); _bgD.push(bg); return null; };
         _netFriendsOnline={}; _netFriendsLat={}; _netFriendsPlaying={}; _netFrSince=0; _netFrPages=0;
         _netFr.list=[{id:'00ff00aa', state:'accepted', online:false, latency:null}];
         // A delta entry is the friend's whole state: online, latency, playing and name land
@@ -1209,7 +1210,7 @@ runTest('SMOKE-NET', `
         if(_netFrSince!==0) throw 'opening a presence screen must reset the cursor to 0';
         _netFrSince=5; netOfflineClear();
         if(_netFrSince!==0) throw 'going offline must reset the cursor';
-        _netGet=_oGetD; _netFr.list=null; _netFriendsOnline={}; _netFriendsLat={}; _netFriendsPlaying={}; _netFrSince=0; _netFrPages=0;
+        _netRead=_oGetD; _netFr.list=null; _netFriendsOnline={}; _netFriendsLat={}; _netFriendsPlaying={}; _netFrSince=0; _netFrPages=0;
         log('presence deltas ok: whole-state entries land in the maps and the roster, cursor follows friends_at, more continues at once on the solo lane, bounded');
     }
 
@@ -1812,9 +1813,9 @@ runTest('SMOKE-NET', `
     // that is down was asked again the frame after every failure, and the screen
     // flickered LOADING / UNREACHABLE for as long as the tab was open.
     {
-        const _oGetS=_netGet, _oFetchS=globalThis.fetch, _oCt=ct;
+        const _oGetS=_netRead, _oFetchS=globalThis.fetch, _oCt=ct;
         globalThis.fetch=async()=>null;
-        let asks=0; _netGet=async()=>{ asks++; return null; };
+        let asks=0; _netRead=async()=>{ asks++; return null; };
         const drawn=[]; ct=(t)=>{ drawn.push(String(t)); };
         phase='scores'; scoresTab=1; cfg.offline=false;
         _netScores=null; _netScoresLoading=false; _netScoresErr=true; _netScoresAt=Date.now();
@@ -1832,7 +1833,7 @@ runTest('SMOKE-NET', `
         _netScoresErr=false; drawn.length=0; drawScores();
         if(!drawn.some(t=>t.indexOf('LOADING')===0)) throw 'the first ask reads LOADING: '+JSON.stringify(drawn);
         _netScoresLoading=false; _netScores=null; _netScoresAt=0; _netScoresErr=false;
-        _netGet=_oGetS; globalThis.fetch=_oFetchS; ct=_oCt; scoresTab=0; phase='menu';
+        _netRead=_oGetS; globalThis.fetch=_oFetchS; ct=_oCt; scoresTab=0; phase='menu';
         log('global scores back-off ok: a failure is said, retried after NET_SCORES_RETRY_MS, never every frame');
     }
 

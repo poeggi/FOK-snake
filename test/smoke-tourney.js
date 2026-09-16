@@ -48,14 +48,14 @@ const HOOKS = `
   // success is it coming BACK, and that hands the tournament its doubt -- once per outage.
   globalThis.__pollEdge = async ()=>{
       let fired = 0; const oTml = tourneyMailboxLost; tourneyMailboxLost = ()=>{ fired++; };
-      const oGet = _netGet, oHold = _netPace.hold, oPhase = phase;
+      const oGet = _netRead, oHold = _netPace.hold, oPhase = phase;
       _netPace.hold = false; _netPollTick = 0; _netPollBusy = false; _netPollDown = false; phase = 'duelLobby';
       const seq = [];
-      _netGet = async ()=>null;                      await _netPollOnce(); await _netPollOnce(); seq.push(fired);
-      _netGet = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); await _netPollOnce(); seq.push(fired);
-      _netGet = async ()=>null;                      await _netPollOnce(); seq.push(fired);
-      _netGet = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); seq.push(fired);
-      _netGet = oGet; _netPace.hold = oHold; tourneyMailboxLost = oTml; _netPollDown = false; phase = oPhase;
+      _netRead = async ()=>null;                      await _netPollOnce(); await _netPollOnce(); seq.push(fired);
+      _netRead = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); await _netPollOnce(); seq.push(fired);
+      _netRead = async ()=>null;                      await _netPollOnce(); seq.push(fired);
+      _netRead = async ()=>({ ok:true, signals:[] }); await _netPollOnce(); seq.push(fired);
+      _netRead = oGet; _netPace.hold = oHold; tourneyMailboxLost = oTml; _netPollDown = false; phase = oPhase;
       return seq;
   };
   globalThis.__sig = (d)=>_ttOnSignal(d);

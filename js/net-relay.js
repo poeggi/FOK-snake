@@ -204,8 +204,8 @@ async function _netRelayLoop(s){
         // Held: parked server-side, so not traffic the clock sync has to wait out -- but it
         // owns a worker exactly as a held poll does, and the gate is told so.
         _netRelayHeld = true;
-        const r = await _netGet('/api/relay.php?id=' + getPlayerId() + '&peer=' + s.peer + '&wait=' + NET_POLL_S,
-                                s.relayAbort ? s.relayAbort.signal : undefined, true);
+        const r = await _netRead('/api/relay.php', s.relayAbort ? s.relayAbort.signal : undefined, true, undefined,
+                                 { id:getPlayerId(), peer:s.peer, wait:NET_POLL_S });   // the held read: the POST with no payload member (4.21)
         _netRelayHeld = false;
         s.relayAbort = null;
         if(_netSess !== s || !s.game || !s.relay) return;

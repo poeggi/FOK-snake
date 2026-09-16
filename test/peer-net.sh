@@ -68,10 +68,11 @@ ID_A4=3333c1e7; ID_B4=4444c1e7
 ciname() { echo "clnt-CI-${1:0:4}"; }
 # The identity token each id carries (API 4.20): what its first hello minted, kept outside
 # the repo per environment by test/live-tok.js. tok <id> prints it (or nothing), tokjson
-# <id> renders it for a body, pollq <id> is the poll URL carrying it.
+# <id> renders it for a body. poll <id> reads the mailbox the way the client does (4.21):
+# a POST whose body names the id and the token, nothing on the request line.
 tok() { node test/live-tok.js get "$BASE" "$1"; }
 tokjson() { local t; t=$(tok "$1"); if [ -n "$t" ]; then echo "\"$t\""; else echo null; fi; }
-pollq() { local t; t=$(tok "$1"); echo "$BASE/api/poll.php?id=$1${t:+&tok=$t}"; }
+poll() { post /api/poll.php "{\"id\":\"$1\",\"tok\":$(tokjson "$1")}"; }
 # hello <id>: register under the CI name and keep the token the answer mints (the one rule).
 hello() {
     local out t
@@ -91,10 +92,10 @@ pair() { # pair <id-a> <id-b>
     # Reused ids come with the previous run's undrained bye still sitting in the
     # mailbox this run is about to read, so drain both before the accept: what the
     # assertions below see is then this run's traffic and nothing else.
-    req "$(pollq "$1")" > /dev/null
-    req "$(pollq "$2")" > /dev/null
+    poll "$1" > /dev/null
+    poll "$2" > /dev/null
     post /api/signal.php "{\"id\":\"$2\",\"to\":\"$1\",\"type\":\"accept\",\"payload\":\"x\",\"tok\":$(tokjson "$2")}" > /dev/null
-    req "$(pollq "$1")"
+    poll "$1"
 }
 
 echo "== peer-net hint at $BASE"
@@ -106,7 +107,7 @@ if ! req -o /dev/null "$BASE/api/t.txt"; then
 else
     A="$ID_A6"; B="$ID_B6"
     MB_A=$(pair "$A" "$B")
-    MB_B=$(req "$(pollq "$B")")
+    MB_B=$(poll "$B")
     post /api/signal.php "{\"id\":\"$B\",\"to\":\"$A\",\"type\":\"bye\",\"payload\":\"\",\"tok\":$(tokjson "$B")}" > /dev/null
     expect "over IPv6, A is told the peer's family is 6" '\"family\":6' "$MB_A"
     expect "over IPv6, A is told its own family is 6"    '\"self_family\":6' "$MB_A"

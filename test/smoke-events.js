@@ -552,11 +552,12 @@ const DRIVER = `
     // looking at costs the server nothing. Same rule as the roster and the
     // announce, and the poll and the hello have to agree about it.
     {
-        const _oGet=_netGet, _oFetch=globalThis.fetch, _oPost=_netPost;
+        const _oGet=_netRead, _oFetch=globalThis.fetch, _oPost=_netPost;
         const _oPace=_netPace, _oHold=_netPollHoldEnd;
         globalThis.fetch=()=>({});                 // _netOk(): online, or every check below is vacuous
+        const _wire=(p,b)=>p+(b?'?'+Object.keys(b).map(k=>k+'='+b[k]).join('&'):'');   // the request as one line: path + body members
         let _u=null, _body=null;
-        _netGet=async (p)=>{ _u=p; return null; };
+        _netRead=async (p,sig,held,bg,body)=>{ _u=_wire(p,body); return null; };
         _netPost=async (p,b)=>{ _body=b; return null; };
         _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now(); _netPollHoldEnd=0;
         const due=(ph)=>{ _netEvAt=Date.now()-(ph==='multiplayer'?NET_EVENTS_DOOR_MS:NET_EVENTS_MS)-1; };
@@ -590,10 +591,10 @@ const DRIVER = `
         if(!/[?&]ev=1(&|$)/.test(poll('multiplayer'))) throw 'the door reads once its own cadence is due';
         // The tick is spent only when an answer actually came back: a failed poll
         // must not cost the screen its next read.
-        _netEvAt=0; _netGet=async(p)=>{ _u=p; return null; };
+        _netEvAt=0; _netRead=async(p,sig,held,bg,body)=>{ _u=_wire(p,body); return null; };
         poll('eventPage');
         if(_netEvAt !== 0) throw 'a poll that never answered must not spend the tick';
-        _netGet=_oGet; _netPost=_oPost; globalThis.fetch=_oFetch;
+        _netRead=_oGet; _netPost=_oPost; globalThis.fetch=_oFetch;
         _netPace=_oPace; _netPollHoldEnd=_oHold; _netPollBusy=false; _netHelloBusy=false; phase='menu';
     }
     // ...AND THE ANNOUNCE RIDES THE PAGE. The contract's {event:'tourney'} signal is
@@ -602,9 +603,10 @@ const DRIVER = `
     // members through the ordinary announce, which is why the page asks for it -- on
     // the poll it is already sending for 'ev', so it costs no request of its own.
     {
-        const _oGet=_netGet, _oFetch=globalThis.fetch, _oPace=_netPace, _oHold=_netPollHoldEnd;
+        const _oGet=_netRead, _oFetch=globalThis.fetch, _oPace=_netPace, _oHold=_netPollHoldEnd;
         globalThis.fetch=()=>({});
-        let _u=null; _netGet=async(pth)=>{ _u=pth; return null; };
+        const _wire=(p,b)=>p+(b?'?'+Object.keys(b).map(k=>k+'='+b[k]).join('&'):'');   // the request as one line: path + body members
+        let _u=null; _netRead=async(pth,sig,held,bg,body)=>{ _u=_wire(pth,body); return null; };
         _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netPollHoldEnd=0;
         const poll=(ph)=>{ _u=null; _netPollBusy=false; _netTlAt=0; _netEvAt=Date.now(); phase=ph; _netPollOnce(); return _u||''; };
         _evEid='K7QM';
@@ -614,7 +616,7 @@ const DRIVER = `
         if(/[?&]tl=/.test(poll('eventMembers'))) throw 'a screen that cannot show a tournament asks for none';
         _evEid='';
         if(/[?&]tl=/.test(poll('eventPage'))) throw 'with no event open there is nothing to watch for';
-        _netGet=_oGet; globalThis.fetch=_oFetch; _netPace=_oPace; _netPollHoldEnd=_oHold;
+        _netRead=_oGet; globalThis.fetch=_oFetch; _netPace=_oPace; _netPollHoldEnd=_oHold;
         _netPollBusy=false; phase='menu';
     }
     log('request shape ok: events rides the hello, a poll tick of its own on the seven screens that show it, and the announce rides the page');

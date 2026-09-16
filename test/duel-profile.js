@@ -33,7 +33,7 @@ const HOOKS = (id) => `
   localStorage.setItem('fok-snake-pid', ${JSON.stringify(id)});
   cfg.offline=false;
   globalThis.fetch = async ()=>({ status:0, json:async()=>null });
-  _netPost = async ()=>null; _netGet = async ()=>null; _netTimeSync = async ()=>{};
+  _netPost = async ()=>null; _netRead = async ()=>null; _netTimeSync = async ()=>{};
   _netPollOnce = async ()=>{}; _netRequestStart = async ()=>{}; _netRelayLoop = async ()=>{};
   // Mocked clocks: the driver advances __now (the TRUE shared timeline). performance.now IS that
   // true time -- the frame/rAF domain. Date.now is the client's own WALL clock, which the sync

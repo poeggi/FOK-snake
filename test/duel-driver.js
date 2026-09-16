@@ -21,7 +21,7 @@ const HOOKS = (id) => `
   localStorage.setItem('fok-snake-pid', ${JSON.stringify(id)});
   cfg.offline=false;
   globalThis.fetch = async ()=>({ status:0, json:async()=>null });
-  _netPost = async ()=>null; _netGet = async ()=>null; _netTimeSync = async ()=>{};
+  _netPost = async ()=>null; _netRead = async ()=>null; _netTimeSync = async ()=>{};
   _netPollOnce = async ()=>{}; _netRelayLoop = async ()=>{};
   // NB: _netRequestStart is left REAL. The driver never reaches its server branch (first/rematch
   // boot via __p2pStart, not the server), but the p2pBoundary mode drives its 'level' branch --

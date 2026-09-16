@@ -452,15 +452,16 @@ async function _maybeAutoCloudBackup(){
     if(Date.now()-at < 86400000) return;                                   // at most once per day
     if(await cloudBackup(true)){ try{ localStorage.setItem(AUTOCLOUD_KEY, String(Date.now())); }catch(e){} }
 }
-// Cloud restore: GET the vault with id + token, apply it. Needs the token (from the cookie/
-// localStorage, or a prior file restore) -- id alone cannot read someone else's backup.
+// Cloud restore: ask the vault for the payload under id + token (a POST, 4.21: the token
+// never rides a request line), apply it. Needs the token -- id alone cannot read someone
+// else's backup.
 async function cloudRestore() {
     if(!_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return; }
     const tok=getCloudToken();
     if(!tok){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=_msgNow(); return; }
     _dataMsg='CLOUD RESTORE...'; _dataMsgAt=_msgNow();
     try {
-        const r=await netBgFetch('/api/backup.php?id='+getPlayerId()+'&tok='+encodeURIComponent(tok));
+        const r=await netBgFetch('/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:getPlayerId(), tok, restore:true })});
         const j=await r.json().catch(()=>null);
         if(r.status===200 && j && j.ok && typeof j.payload==='string'){
             let d=null; try{ d=JSON.parse(j.payload); }catch(e){}

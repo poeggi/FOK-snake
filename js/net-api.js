@@ -20,7 +20,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-se
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 20;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
+const NET_API_BUILT_MINOR = 21;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -357,10 +357,11 @@ function _netIcesPeerOk(v){ const m = /^\s*v?(\d+)/i.exec(String(v || '')); retu
 // Every request that names our id carries the token hello minted for it, or null until a
 // hello has answered one: the first hello of an unbound id binds the id and answers `tok`,
 // and the one rule is to store whatever a hello answers (a first bind, a re-bind after the
-// operator's reset, a return after the row was forgotten). One stamp site per direction:
-// the POST body here, the GET query in _netGet.
+// operator's reset, a return after the row was forgotten). ONE stamp site: every request
+// that names the id is a POST and its body passes through here; nothing names the id on a
+// request line (4.21: the poll, the relay's held read and the vault restore are POSTs too),
+// which the web server's access log records on every hit.
 function _netTokBody(body){ return (body && body.id) ? Object.assign({}, body, { tok: getCloudToken() }) : body; }
-function _netTokQuery(path){ const t = getCloudToken(); return (t && /[?&]id=/.test(path)) ? path + '&tok=' + t : path; }
 // 401 = the server refused our token: the id is bound to another device, or our copy is
 // stale (a restored file that predates the binding, the operator's reset). The wire stops --
 // no retry, no beat -- and the MY ID screen says what to do. Two things re-open it: an
@@ -404,7 +405,11 @@ async function _netPostRes(path, body, bg){
     finally { _netFlight--; }
 }
 async function _netPost(path, body, bg){ return (await _netPostRes(path, body, bg)).json; }
-async function _netGet(path, signal, held, bg){
+// The READ: the poll, the relay's held read, a page of presence, the score board. With a
+// body it is a POST that names the id (the token rides inside, never on the request line);
+// without one it is the bare GET of a read that names nobody. Soft-fail like the POST above:
+// null is any failure, a 204 is the empty mailbox.
+async function _netRead(path, signal, held, bg, body){
     if(!_netOk()) return null;
     if(bg) await _netGate(bg);
     if(!_netOk()) return null;
@@ -418,7 +423,8 @@ async function _netGet(path, signal, held, bg){
         // these are the match's critical path, ahead of any incidental page fetch.
         const _opt = { cache:'no-store', priority:'high' };
         if(signal) _opt.signal = signal;
-        const r = await fetch(NET_BASE + _netTokQuery(path), _opt);
+        if(body){ _opt.method = 'POST'; _opt.headers = { 'Content-Type':'application/json' }; _opt.body = JSON.stringify(_netTokBody(body)); }
+        const r = await fetch(NET_BASE + path, _opt);
         // A 204 (held long-poll expiring with nothing to say) IS communication: the
         // request went out and the server answered. Stamping only data-bearing
         // replies made this climb forever on an idle-but-healthy link, which is the
@@ -976,7 +982,7 @@ function _netFrApply(r){
 }
 // One unheld poll on the solo lane: second in line behind whatever is out, never beside it.
 async function _netFrMore(){
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + '&fs=' + _netFrSince, undefined, false, NET_BG_SOLO);
+    const r = await _netRead('/api/poll.php', undefined, false, NET_BG_SOLO, { id:getPlayerId(), fs:_netFrSince });
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
     _netFrApply(r);
 }
@@ -1272,9 +1278,12 @@ async function _netPollOnce(){
     // other request, and holding it back would only park the mailbox itself. An UNHELD one
     // is an ordinary request and takes the solo lane like any other -- second in line rather
     // than beside, which is the whole rule.
-    // fs: on a presence screen the poll's return carries the friend delta, the counters and
-    // the hold decision (4.6), so those screens send no hello of their own.
-    const fs = _netFrScreen() ? '&fs=' + _netFrSince : '';
+    // The body (4.21; the members the query took): fs on a presence screen, where the poll's
+    // return carries the friend delta, the counters and the hold decision (4.6), so those
+    // screens send no hello of their own...
+    const body = { id:getPlayerId() };
+    if(held) body.wait = NET_POLL_S;
+    if(_netFrScreen()) body.fs = _netFrSince;
     // ...and with it (4.9) the rest of what a holding screen needs.
     // fl and tl make the server ANSWER AT ONCE -- a screen that just opened is not waiting
     // for a signal that is not coming -- so tl rides a 5 s tick of its own rather than every
@@ -1285,11 +1294,13 @@ async function _netPollOnce(){
     const tl = _netTlWant() && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
     const ev = _netEvWant() && Date.now() - _netEvAt >= _netEvEvery();
     const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
-    const q = fs + (de ? '&de=' + de : '')
-                 + (_netPoll49() ? '&db=' + ((cfg.debug|0) > 0 ? 1 : 0) : '')   // REPORT what is true: a poll that never says is never woken with an instruction
-                 + (aa ? '&aa=1' : '') + (fl ? '&fl=1' : '') + (tl ? '&tl=1' : '') + (ev ? '&ev=1' : '');
-    const r = await _netGet('/api/poll.php?id=' + getPlayerId() + (held ? '&wait=' + NET_POLL_S : '') + q,
-                            _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO);
+    if(de) body.de = de;
+    if(_netPoll49()) body.db = (cfg.debug|0) > 0 ? 1 : 0;   // REPORT what is true: a poll that never says is never woken with an instruction
+    if(aa) body.aa = 1;
+    if(fl) body.fl = 1;
+    if(tl) body.tl = 1;
+    if(ev) body.ev = 1;
+    const r = await _netRead('/api/poll.php', _netPollAbort ? _netPollAbort.signal : undefined, held, held ? undefined : NET_BG_SOLO, body);
     _netPollBusy = false; _netPollHeld = false; _netPollAbort = null; _netDbg.pollAt = 0;
     if(r) _netPollHoldEnd = 0;   // answered: the worker is free. An abort or a failure leaves the deadline standing.
     if(r && r.signals && r.signals.length) r.signals.forEach(_netOnSignal);
@@ -1764,7 +1775,7 @@ function netFetchScores(){
     if(!_netOk() || _netScoresLoading) return;
     if(Date.now() - _netScoresAt < (_netScores ? NET_SCORES_TTL_MS : (_netScoresErr ? NET_SCORES_RETRY_MS : 0))) return;
     _netScoresLoading = true; _uiDirty = true;
-    _netGet('/api/scores.php?limit=' + SCORES_SHOWN, undefined, false, true).then(r => {   // the tab draws SCORES_SHOWN rows: ask for exactly those
+    _netRead('/api/scores.php?limit=' + SCORES_SHOWN, undefined, false, true).then(r => {   // the tab draws SCORES_SHOWN rows: ask for exactly those
         _netScoresLoading = false; _netScoresAt = Date.now();
         if(r && Array.isArray(r.scores)){ _netScores = r.scores; _netScoresErr = false; }
         else _netScoresErr = true;

@@ -1,13 +1,16 @@
-# Identity - the client half (server API 4.20; contract: FOK-server docs/API.md "Identity token")
+# Identity - the client half (server API 4.21; contract: FOK-server docs/API.md "Identity token")
 
 The id is public (friend code, rosters, sheets). `tok` proves it: 32 hex the
 server mints on the first hello of an unbound id and answers ONCE. It never
 changes for an id; only the operator's reset makes the next hello mint again.
 
-- ONE stamp site per direction (js/net-api.js): `_netTokBody` on every POST
-  body that names an id (the beacon and the relay POST go through it too),
-  `_netTokQuery` on every GET whose query names one. `tok` is sent as null
-  until a hello has minted one; never omitted.
+- ONE stamp site (js/net-api.js): `_netTokBody` on every POST body that
+  names an id (the beacon and the relay POST go through it too). Every
+  request that names the id IS a POST (4.21: the poll, the relay's held
+  read and the vault restore carry their members as a JSON body through
+  `_netRead`); nothing names the id on a request line, which the web
+  server's access log records. The bare GET is only the score board.
+  `tok` is sent as null until a hello has minted one; never omitted.
 - ONE rule for the answer: whatever a hello answers as `tok` is stored
   (`setCloudToken`). Nothing else mints; the cloud vault checks the same
   token, so `cloudBackup` REQUIRES one and never retries without it.

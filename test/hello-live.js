@@ -86,7 +86,7 @@ const hello = async (extra) => {
     if (r.json && typeof r.json.tok === 'string') { TOK = r.json.tok; adopt(BASE, ID, TOK); }
     return r;
 };
-const poll = () => timed('GET', '/api/poll.php?id=' + ID + '&wait=' + POLL_S + (TOK ? '&tok=' + TOK : ''));
+const poll = () => timed('POST', '/api/poll.php', { id: ID, tok: TOK, wait: POLL_S });   // the held read as the client sends it (4.21): nothing on the request line
 const fmt = x => Math.round(x.ms) + (x.fresh ? '*' : '');
 
 function check(label, s, okStatus) {

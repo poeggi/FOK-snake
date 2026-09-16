@@ -51,7 +51,7 @@ const HOOKS = (myId) => `
     return { status:200, json:null, err:'' };
   };
   globalThis.__setFrStatus = (n)=>{ __frStatus = n|0; };
-  _netGet  = async ()=>null;
+  _netRead  = async ()=>null;
   const _realTimeSync = _netTimeSync;
   _netTimeSync = async ()=>{};
   // start.php is stubbed for the handshake tests, but the RESTART tests need the real

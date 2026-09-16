@@ -1,8 +1,9 @@
 // Identity smoke (API 4.20, FOK-server docs/API.md "Identity token"): the id is public,
 // the token proves it. Four things are under test, because each one fails silently on
 // the wire:
-//   * every request that names our id carries `tok` -- POST body and GET query alike, the
-//     unload beacon and the relay included -- as null until a hello has minted one;
+//   * every request that names our id is a POST whose body carries `tok` (the poll, the
+//     relay and the vault restore included, the unload beacon too), null until a hello has
+//     minted one; nothing names the id on a request line;
 //   * a hello answer carrying `tok` is stored, and a 401 stops the wire with no retry loop:
 //     ahead of the first answered hello only the hello's own refusal counts, because a poll
 //     can leave first on a never-bound id and it is the hello that then binds it;
@@ -35,10 +36,11 @@ const HOOKS = `
   globalThis.__take = ()=>__reqs.splice(0);
   globalThis.__hello = ()=>_netHello();
   globalThis.__post = (p, b)=>_netPostRes(p, b, true);
-  globalThis.__get = (p)=>_netGet(p, undefined, false, NET_BG_SOLO);
+  globalThis.__read = (p, b)=>_netRead(p, undefined, false, NET_BG_SOLO, b);
   globalThis.__poll = ()=>_netPollOnce();
   globalThis.__beacon = (p, b)=>_netBeacon(p, b);
   globalThis.__relay = (o)=>_netRelayPost({ peer:'deadbeef' }, o);
+  globalThis.__relayRead = async ()=>{ const s = { peer:'deadbeef', game:true, relay:true }; _netSess = s; s.relay = false; return _netRead('/api/relay.php', undefined, true, undefined, { id:getPlayerId(), peer:s.peer, wait:NET_POLL_S }); };
   globalThis.__ok = ()=>_netOk();
   globalThis.__notice = ()=>netStatusNotice();
   globalThis.__refused = ()=>netIdRefused();
@@ -57,6 +59,7 @@ const HOOKS = `
   globalThis.__offline = ()=>netOffline();
   globalThis.__setLoc = (proto)=>{ if(proto == null) delete globalThis.location; else globalThis.location = { protocol: proto }; };
   globalThis.__base = ()=>NET_BASE;
+  globalThis.__pollS = ()=>NET_POLL_S;
   globalThis.__gameUrl = ()=>GAME_URL;
   globalThis.__unlatch = ()=>{ _netIdRefused = false; };
   globalThis.__latch = ()=>{ _netIdRefused = true; };
@@ -125,25 +128,37 @@ try {
         eq(S.__seen(), true, 'the hello counts as answered');
         await S.__post('/api/items.php', { id: S.__me(), action:'list' });
         eq(one(S.__take(), 'items post').body.tok, TOK, 'a later POST carries it');
-        await S.__get('/api/poll.php?id=' + S.__me() + '&fs=0');
-        eq(one(S.__take(), 'poll get').path, '/api/poll.php?id=' + S.__me() + '&fs=0&tok=' + TOK, 'the poll GET carries it in the query');
-        await S.__get('/api/scores.php?limit=10');
-        eq(one(S.__take(), 'scores get').path, '/api/scores.php?limit=10', 'a GET naming no id carries nothing');
+        await S.__read('/api/poll.php', { id: S.__me(), fs: 0 });
+        const pr = one(S.__take(), 'poll read');
+        eq(pr.method + ' ' + pr.path, 'POST /api/poll.php', 'a read that names the id is a POST');
+        eq(pr.body.tok, TOK, 'and carries it in the body');
+        eq(pr.body.fs, 0, 'with the rest of its members');
+        await S.__read('/api/scores.php?limit=10');
+        const sr = one(S.__take(), 'scores read');
+        eq(sr.method + ' ' + sr.path, 'GET /api/scores.php?limit=10', 'a read naming no id is the bare GET');
+        eq(sr.body, null, 'and carries no body');
         S.__beacon('/api/signal.php', { id: S.__me(), to:'deadbeef', type:'bye', payload:'' });
         eq(one(S.__take(), 'beacon').body.tok, TOK, 'the unload beacon carries it');
         await S.__relay({ t:'in', pts: 1 });
         const rl = one(S.__take(), 'relay post');
         eq(rl.path, '/api/relay.php', 'the relay POST');
         eq(rl.body.tok, TOK, 'carries it too');
+        await S.__relayRead();
+        const rd = one(S.__take(), 'relay read');
+        eq(rd.method + ' ' + rd.path, 'POST /api/relay.php', 'the relay held read is a POST');
+        eq('payload' in rd.body, false, 'with no payload member');
+        eq(rd.body.tok + ' ' + rd.body.wait, TOK + ' ' + S.__pollS(), 'carrying the token and the wait');
         S.__reply = null;
     });
 
-    await check('the poll goes out as the real client sends it: the id, then the token', async () => {
+    await check('the poll goes out as the real client sends it: a POST naming the id and the token, nothing on the line', async () => {
         S.__setTok(TOK); S.__fresh(); S.__take();
         await S.__poll();                             // the main menu's unheld read: no re-arm, one request
         const p = one(S.__take(), 'poll');
-        eq(p.path.indexOf('/api/poll.php?id=' + S.__me()), 0, 'names the id: ' + p.path);
-        eq(p.path.indexOf('&tok=' + TOK) > 0, true, 'and carries the token: ' + p.path);
+        eq(p.method + ' ' + p.path, 'POST /api/poll.php', 'one fixed URL, nothing in the query');
+        eq(p.body.id, S.__me(), 'names the id');
+        eq(p.body.tok, TOK, 'and carries the token');
+        eq('wait' in p.body, false, 'the main menu read is unheld');
     });
 
     // ---- 401: the wire stops, once, and says why ---------------------------------
@@ -168,7 +183,7 @@ try {
     await check('ahead of the first answered hello, a refused poll is not the verdict; a refused hello is', async () => {
         S.__clearTok(); S.__fresh(); S.__take();
         S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });
-        await S.__get('/api/poll.php?id=' + S.__me());
+        await S.__read('/api/poll.php', { id: S.__me() });
         eq(S.__refused(), false, 'a poll leaving before the hello may be refused on a never-bound id');
         eq(S.__ok(), true, 'and the hello is still free to bind it');
         await S.__hello();
@@ -262,8 +277,10 @@ try {
         eq(JSON.parse(b.body.payload).tok, undefined, 'the payload never carries the token');
         S.__reply = () => ({ status:200, json:{ ok:true, payload: JSON.stringify(S.__snap()) } });
         await S.__cloudRestore();
-        const gets = S.__take().filter(r => r.method === 'GET');   // the restore re-hellos beside it
-        eq(one(gets, 'restore get').path, '/api/backup.php?id=' + S.__me() + '&tok=' + TOK, 'the restore GET carries tok');
+        const rs = S.__take().filter(r => r.path === '/api/backup.php');   // the restore re-hellos beside it
+        const rr = one(rs, 'restore read');
+        eq(rr.method, 'POST', 'the restore is a POST');
+        eq(rr.body.tok + ' ' + rr.body.restore, TOK + ' true', 'carrying tok and the restore flag');
         eq(S.__dataMsg(), 'CLOUD RESTORED', 'restored');
         S.__clearTok(); S.__fresh(); S.__take();
         eq(await S.__backup(), false, 'no backup without a token');

@@ -154,7 +154,8 @@ name entry to open the keyboard.
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
 - A proven identity: the 32-bit id is public, a secret token the server mints on
-  the id's first hello proves it on every request (server API 4.20); an id bound
+  the id's first hello proves it on every request, always in a POST body and
+  never on a request line (server API 4.21); an id bound
   to another device is refused and the MY ID screen says so. Id and token live in
   a cookie too, so identity survives a browser "clear site data", and travel
   together in the file backup
