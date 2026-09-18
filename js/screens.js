@@ -392,26 +392,16 @@ const SETTINGS_CATS = [
           act:()=>{ Snd.sfxPlay('select',cfg.music); _entryOpen('user', getPlayerName()); } },
         { lbl:()=>'SHOW MY ID', act:()=>{ Snd.sfxPlay('select',cfg.music); _myIdBack='settings'; phase='myId'; netMyIdEnter(); } },
     ]},
-    { label:'AUDIO', items:[
-        { lbl:()=>'AUDIO: '+(cfg.music?'ON':'OFF'),
-          act:()=>{cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute('mute');else{Snd.audioResume();Snd.musicUnmute('mute');Snd.sfxPlay('select',cfg.music);}updateMuteBtn();} },
-        { lbl:()=>'AUDIO STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
-          act:()=>{cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'VOLUME: '+Math.round(((cfg.volume==null?1:cfg.volume))*100)+'%', bar:'#7fff7f', frac:()=>(cfg.volume==null?1:cfg.volume),
-          adj:(r)=>{cfg.volume=Math.max(0,Math.min(1,Math.round((((cfg.volume==null?1:cfg.volume))+(r?0.1:-0.1))*10)/10));Snd.musicSetVolume(cfg.volume);} },
-        { lbl:()=>'SFX VOL: '+Math.round(((cfg.sfxVol==null?0.5:cfg.sfxVol))*100)+'%', bar:'#aaddff', frac:()=>(cfg.sfxVol==null?0.5:cfg.sfxVol),
-          adj:(r)=>{cfg.sfxVol=Math.max(0,Math.min(1,Math.round((((cfg.sfxVol==null?0.5:cfg.sfxVol))+(r?0.1:-0.1))*10)/10));Snd.sfxSetVolume(cfg.sfxVol);} },
-    ]},
-    { label:'CONTROLS', items:[
-        { lbl:()=>'TURBO BOOST: '+(cfg.turbo!==false?'ON':'OFF'),
-          act:()=>{cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);} },
-        { lbl:()=>'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
-          act:()=>{cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfxPlay('select',cfg.music);},
-          adj:(r)=>{cfg.handed=r?1:0;applyHandedness();} },
-        _tog('TOUCH AUTOSELECT','touchSelect'),
-        { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; also scales menu scroll travel
-          act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
-          adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
+    { label:'DATA', items:[
+        { lbl:()=>'BACKUP CONFIG TO FILE', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
+        { lbl:()=>'RESTORE CONFIG FROM FILE', act:()=>{Snd.sfxPlay('select',cfg.music);restoreStats();} },
+        { lbl:()=>'BACKUP CONFIG TO CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudBackup();} },
+        { lbl:()=>'RESTORE CONFIG FROM CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudRestore();} },
+        { lbl:()=>'AUTO CLOUD BACKUP: '+(cfg.autoCloud?'ON':'OFF'),
+          act:()=>{cfg.autoCloud=!cfg.autoCloud;saveCfg();Snd.sfxPlay('select',cfg.music);if(cfg.autoCloud)_maybeAutoCloudBackup();} },
+        { lbl:()=>'RESET STATS', act:()=>{_resetKind='stats';quitConfirmSel=1;phase='resetConfirm';} },
+        { lbl:()=>'RESET SETTINGS', act:()=>{_resetKind='settings';quitConfirmSel=1;phase='resetConfirm';} },
+        { lbl:()=>'RESET ID', act:()=>{_resetKind='id';quitConfirmSel=1;phase='resetConfirm';} },
     ]},
     { label:'GAME', items:[
         { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
@@ -424,6 +414,17 @@ const SETTINGS_CATS = [
           act:()=>{cfg.keepAwake=cfg.keepAwake===false?true:false;Snd.sfxPlay('select',cfg.music);wakeReconcile();} },
         { lbl:()=>'SHOW FPS: '+(cfg.showFps!==false?'ON':'OFF'),
           act:()=>{cfg.showFps=cfg.showFps===false?true:false;applyFpsBox();Snd.sfxPlay('select',cfg.music);} },
+    ]},
+    { label:'CONTROLS', items:[
+        { lbl:()=>'TURBO BOOST: '+(cfg.turbo!==false?'ON':'OFF'),
+          act:()=>{cfg.turbo=cfg.turbo===false?true:false;Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'LAYOUT: '+(cfg.handed?'LEFT':'RIGHT'),
+          act:()=>{cfg.handed=(cfg.handed+1)%2;applyHandedness();Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.handed=r?1:0;applyHandedness();} },
+        _tog('TOUCH AUTOSELECT','touchSelect'),
+        { lbl:()=>'TOUCH SENS: '+(['LOW','MED','HIGH'][cfg.touchSens==null?1:cfg.touchSens]||'MED'),   // shorter swipe travel steers sooner; also scales menu scroll travel
+          act:()=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+1)%3;Snd.sfxPlay('select',cfg.music);},
+          adj:(r)=>{cfg.touchSens=((cfg.touchSens==null?1:cfg.touchSens)+(r?1:-1)+3)%3;} },
     ]},
     { label:'GRAPHICS', items:[
         _tog('REDUCE MOTION','reduceMotion'),   // suppress decorative motion (near-miss shake, future FX)
@@ -441,6 +442,16 @@ const SETTINGS_CATS = [
           dis:()=>_runFromFile()||!_worker,   // forced (greyed) with no Worker or on file://
           act:()=>{cfg.singleThreaded=!cfg.singleThreaded;Snd.sfxPlay('select',cfg.music);} },
     ]},
+    { label:'AUDIO', items:[
+        { lbl:()=>'AUDIO: '+(cfg.music?'ON':'OFF'),
+          act:()=>{cfg.music=!cfg.music;if(!cfg.music)Snd.musicMute('mute');else{Snd.audioResume();Snd.musicUnmute('mute');Snd.sfxPlay('select',cfg.music);}updateMuteBtn();} },
+        { lbl:()=>'AUDIO STYLE: '+(cfg.musicStyle===0?'NEW':'CLASSIC'),
+          act:()=>{cfg.musicStyle=(cfg.musicStyle+1)%2;Snd.musicStop();Snd.sfxPlay('select',cfg.music);} },
+        { lbl:()=>'VOLUME: '+Math.round(((cfg.volume==null?1:cfg.volume))*100)+'%', bar:'#7fff7f', frac:()=>(cfg.volume==null?1:cfg.volume),
+          adj:(r)=>{cfg.volume=Math.max(0,Math.min(1,Math.round((((cfg.volume==null?1:cfg.volume))+(r?0.1:-0.1))*10)/10));Snd.musicSetVolume(cfg.volume);} },
+        { lbl:()=>'SFX VOL: '+Math.round(((cfg.sfxVol==null?0.5:cfg.sfxVol))*100)+'%', bar:'#aaddff', frac:()=>(cfg.sfxVol==null?0.5:cfg.sfxVol),
+          adj:(r)=>{cfg.sfxVol=Math.max(0,Math.min(1,Math.round((((cfg.sfxVol==null?0.5:cfg.sfxVol))+(r?0.1:-0.1))*10)/10));Snd.sfxSetVolume(cfg.sfxVol);} },
+    ]},
     { label:'NETWORK', items:[
         { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
           dis:()=>_runInsecure(),   // not an HTTPS page (file://, plain http): the server is never spoken to, so offline is forced (greyed)
@@ -450,17 +461,6 @@ const SETTINGS_CATS = [
           adj:(r)=>{cfg.turnMode=((cfg.turnMode|0)+(r?1:-1)+3)%3;} },
         _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
         _tog('MAKE DUELS PRIVATE','privateDuels'),
-    ]},
-    { label:'DATA', items:[
-        { lbl:()=>'BACKUP CONFIG TO FILE', act:()=>{Snd.sfxPlay('select',cfg.music);backupStats();} },
-        { lbl:()=>'RESTORE CONFIG FROM FILE', act:()=>{Snd.sfxPlay('select',cfg.music);restoreStats();} },
-        { lbl:()=>'BACKUP CONFIG TO CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudBackup();} },
-        { lbl:()=>'RESTORE CONFIG FROM CLOUD', act:()=>{Snd.sfxPlay('select',cfg.music);cloudRestore();} },
-        { lbl:()=>'AUTO CLOUD BACKUP: '+(cfg.autoCloud?'ON':'OFF'),
-          act:()=>{cfg.autoCloud=!cfg.autoCloud;saveCfg();Snd.sfxPlay('select',cfg.music);if(cfg.autoCloud)_maybeAutoCloudBackup();} },
-        { lbl:()=>'RESET STATS', act:()=>{_resetKind='stats';quitConfirmSel=1;phase='resetConfirm';} },
-        { lbl:()=>'RESET SETTINGS', act:()=>{_resetKind='settings';quitConfirmSel=1;phase='resetConfirm';} },
-        { lbl:()=>'RESET ID', act:()=>{_resetKind='id';quitConfirmSel=1;phase='resetConfirm';} },
     ]},
 ];
 // Hidden DEBUGGING category: only present when cfg.debug > 0. cfg.debug is NOT settable
