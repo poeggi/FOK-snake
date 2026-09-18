@@ -334,8 +334,9 @@ function _netRtcInit(peer, role){
     return pc;
 }
 // A pc that never came up. Built on a TURN credential it had every path there is (direct,
-// reflexive, relayed), so the attempt ends here and says so. Built STUN-only -- turn.php
-// answered 503 -- it falls back to the deprecated HTTP relay, the only case a 4.22 client
+// reflexive, relayed), so the attempt ends here and says so; under TURN RELAY: DISABLED it
+// had the direct paths, which is all that setting allows. Built STUN-only because turn.php
+// answered 503, it falls back to the deprecated HTTP relay, the only case a 4.22 client
 // ever uses it (a tournament's p2pOnly session refuses that too, in _netRelayStart).
 function _netRtcFailed(s){
     if(_netSess !== s || s.game) return;
@@ -344,6 +345,7 @@ function _netRtcFailed(s){
         _netSessionEnd(s.relayOnly ? 'NO PATH - TURN FAILED' : 'NO PATH - P2P AND TURN FAILED');
         return;
     }
+    if(cfg.turnMode === NET_TURN_DISABLED){ _netSigLog('! no path (p2p only)'); _netSessionEnd('NO PATH - P2P ONLY'); return; }
     _netRelayStart(s);   // DEPRECATED(relay)
 }
 // The lobby line while the pc connects: what it is allowed to connect over.

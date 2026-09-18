@@ -440,6 +440,36 @@ try {
     if(A.__sessTurn()) throw new Error('DISABLED never marks the session');
     if(!same(A.__spMkPc('cafe0001'), { iceServers:STUN_ONLY })) throw new Error('DISABLED covers spectator pcs too');
   });
+  await acheck('turn: DISABLED is P2P only -- the peer\'s relay candidates are dropped and a failed pc takes no HTTP relay', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurnMode(2);
+    // The whole handshake, so the offerer's remote description is set and candidates release (v6: no happy-eyeballs holdback).
+    const full = async ()=>{ await round(A, B); pump(A, B); await flush(); pump(B, A); await flush(); };
+    await full();
+    if(!A.__state().sess) throw new Error('precondition: a session');
+    const relay = { candidate:'candidate:9 1 udp 1 2606:4700::9 5000 typ relay raddr :: rport 0 generation 0', sdpMid:'0', sdpMLineIndex:0 };
+    const host  = { candidate:'candidate:1 1 udp 1 2001:db8::1 5000 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 };
+    A.__deliver({ from:B_ID, to:A_ID, type:'ice', payload:JSON.stringify(relay) });
+    A.__deliver({ from:B_ID, to:A_ID, type:'ices', payload:JSON.stringify([relay, host]) });
+    await flush();
+    const got = A.__iceAdded().map(c => c.candidate.split(' ')[0]);
+    if(JSON.stringify(got) !== JSON.stringify(['candidate:1'])) throw new Error('only the host candidate reaches the pc: ' + JSON.stringify(got));
+    // The same rule on a spectator link.
+    A.__spMkIn('cafe0003', 'v4.0.0');
+    A.__deliver({ from:'cafe0003', to:A_ID, type:'ices', payload:JSON.stringify([{ sp:1, c:relay }, { sp:1, c:host }]) });
+    await flush();
+    if(A.__spAdded('cafe0003').length !== 1) throw new Error('the spectator link drops the relay candidate too: ' + A.__spAdded('cafe0003').length);
+    A.__out.length = 0;
+    A.__rtcFail(); await flush();
+    if(A.__relayStarts !== 0) throw new Error('no HTTP relay under DISABLED');
+    if(A.__state().sess) throw new Error('the attempt ends: ' + JSON.stringify(A.__state()));
+    if(A.__state().msg !== 'NO PATH - P2P ONLY') throw new Error('and says why: ' + A.__state().msg);
+    // AUTO takes the relay candidate.
+    A.__setTurnMode(0);
+    await full();
+    A.__deliver({ from:B_ID, to:A_ID, type:'ice', payload:JSON.stringify(relay) }); await flush();
+    if(A.__iceAdded().length !== 1) throw new Error('AUTO adds the peer relay candidate');
+  });
   await acheck('turn: FORCED builds relay-only pcs on the credential; without one the plain pc', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));

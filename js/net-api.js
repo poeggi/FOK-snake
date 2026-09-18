@@ -33,9 +33,13 @@ const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no a
 // SETTINGS > NETWORK > TURN RELAY (cfg.turnMode). AUTO: the credential rides every pc and
 // ICE picks the path (direct where one exists). FORCED: the pc is built relay-only
 // (iceTransportPolicy 'relay'), so a match runs through TURN even on a LAN -- the way to
-// see the relayed path on a device. DISABLED: never asks, every pc is STUN-only, no match
-// of this client rides a public relay.
+// see the relayed path on a device. DISABLED: P2P only. Never asks, every pc is STUN-only,
+// the PEER's relay candidates are dropped (one relay allocation at either end is a path,
+// so refusing only our own would still ride the peer's) and no HTTP relay: no match of
+// this client rides a relay of any kind.
 const NET_TURN_AUTO = 0, NET_TURN_FORCED = 1, NET_TURN_DISABLED = 2;
+// A remote candidate DISABLED refuses: one whose address is a relay's.
+function netTurnRefused(c){ return cfg.turnMode === NET_TURN_DISABLED && !!c && String(c.candidate || '').indexOf(' typ relay') >= 0; }
 const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-server docs/API.md, Versioning)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null

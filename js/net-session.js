@@ -159,6 +159,7 @@ function _netSeekStop(){
 // take a different path from a lone one.
 function _netIceTake(s, cand){
     if(!cand || typeof cand !== 'object') return;
+    if(netTurnRefused(cand)){ if(!s.relayDropped){ s.relayDropped = true; _netSigLog('ice relay candidates dropped (turn DISABLED)'); } return; }
     _netIceAdd(s, cand);   // parked until the remote description settles
     const extra = _netDeobfuscateCand(cand, _netPeerNet[s.peer]);   // mDNS -> real IPv6, probed in parallel
     if(extra){ _netIceAdd(s, extra); _netDbg.iceDeob = (_netDbg.iceDeob|0)+1; }

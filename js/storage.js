@@ -115,7 +115,7 @@ function _sanitizeCfg() {
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
     cfg.noP2P       = !!cfg.noP2P;   // DEPRECATED(relay): relay-only, off the menu (cleared on load below)
-    cfg.turnMode    = idx(cfg.turnMode, 3, 0);   // TURN RELAY: 0 AUTO (default) / 1 FORCED (relay-only pcs) / 2 DISABLED (never asks; no match rides a public relay)
+    cfg.turnMode    = idx(cfg.turnMode, 3, 0);   // TURN RELAY: 0 AUTO (default) / 1 FORCED (relay-only pcs) / 2 DISABLED (P2P only: never asks, the peer's relay refused, no HTTP relay)
     cfg.privateDuels = !!cfg.privateDuels;   // duels still count, but no friend is offered a spectate link
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;

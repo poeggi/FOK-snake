@@ -423,7 +423,7 @@ function _spIceFlush(l){
     for(const c of q){ try{ l.pc.addIceCandidate(c).catch(()=>{}); }catch(e){} }
 }
 function _spIceAdd(l, c){
-    if(!l || !l.pc || !c) return;
+    if(!l || !l.pc || !c || netTurnRefused(c)) return;
     if(!l.rdOk){ l.iceQ.push(c); return; }
     try{ l.pc.addIceCandidate(c).catch(()=>{}); }catch(e){}
 }

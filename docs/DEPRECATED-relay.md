@@ -16,7 +16,8 @@ The replacement is TURN in the `iceServers` list, and it is in: since server API
 (`_netTurnReady` / `netRtcConfig` in `js/net-api.js`) and passed to every pc it builds.
 That keeps the IDENTICAL DataChannel -- same unreliable-unordered netcode, one forwarding
 hop. A pc built on a credential has every path there is, so when it fails the attempt ends
-(`_netRtcFailed`); the HTTP relay is started only when `turn.php` offered nothing (503).
+(`_netRtcFailed`); the HTTP relay is started only when `turn.php` offered nothing (503),
+and never under TURN RELAY: DISABLED (P2P only).
 What is left is retiring `relay.php`.
 
 ## What already refuses it
