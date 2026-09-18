@@ -7,8 +7,9 @@ it breaks, but do not extend it, and do not build new netcode that needs a relay
 ## Why
 
 The relay forwards duel datagrams through `api/relay.php` over HTTP long-poll (~200-400ms
-one-way). It exists because the shared webhost cannot run a TURN server: `_netRtcInit`
-carries STUN only, so a peer behind a symmetric NAT has no other path.
+one-way). It exists because the shared webhost cannot run a TURN server: without a TURN
+credential (`turn.php` answered 503) `_netRtcInit` builds a STUN-only pc, and a peer behind
+a symmetric NAT has no other path.
 
 The replacement is TURN in the `iceServers` list, and it is in: since server API 4.22
 `turn.php` hands out short-lived credentials for Cloudflare's relay, held per client

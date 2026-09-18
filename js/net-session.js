@@ -23,7 +23,12 @@
 let _netHs = { sent:null, sentAt:0, sentRelay:false,     // we invited; awaiting accept (sentRelay: DEPRECATED(relay))
                accepting:null, acceptingAt:0,            // we accepted; awaiting their offer
                offerTo:null, offerPayload:null, offeredAt:0, offerTries:0 };   // we offered; awaiting answer
-function _netHsClear(){ _netHs = { sent:null, sentAt:0, sentRelay:false, accepting:null, acceptingAt:0,
+// The handshake generation: every clear moves it, and an offer or answer that waited on
+// the TURN credential (net-rtc.js) builds its pc only if the handshake it started in is
+// still the one on foot. BACK, quit, a new invite and the page unload all clear.
+let _netHsGen = 0;
+function _netHsClear(){ _netHsGen++;
+                        _netHs = { sent:null, sentAt:0, sentRelay:false, accepting:null, acceptingAt:0,
                                    offerTo:null, offerPayload:null, offeredAt:0, offerTries:0 }; }
 function _netHsActive(){ return !!(_netHs.sent || _netHs.accepting || _netHs.offerTo); }
 // A session that is NOT an on-screen game and NOT part of a live handshake is
@@ -338,7 +343,9 @@ function _netOnSignal(sig){
             }
             case 'bye':
                 if(_netSess && _netSess.peer === from) _netSessionEnd('OPPONENT LEFT', true);   // they said it first
-                else if(_netHs.accepting === from){ _netHs.accepting = null; _netLb.msg = 'OPPONENT LEFT'; _uiDirty = true; }   // we accepted, they aborted before offering
+                // We accepted and they aborted before offering; or their offer (or our offer to
+                // them) is waiting on the credential, and the pc it would build has no peer.
+                else if(_netHs.accepting === from || _netHsWait === from){ _netHs.accepting = null; _netHsGen++; _netLb.msg = 'OPPONENT LEFT'; _uiDirty = true; }
                 else if(_netLb.invite && _netLb.invite.from === from){ _netLb.invite = null; _netLb.msg = 'INVITE WITHDRAWN'; _uiDirty = true; }
                 else if(_netHs.sent === from){ _netHs.sent = null; _netLb.msg = 'CANCELLED'; _uiDirty = true; }
                 break;

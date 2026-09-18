@@ -243,6 +243,12 @@ function _spKill(l){
 function _spDrop(arr, peer){
     for(let i = arr.length - 1; i >= 0; i--) if(arr[i].peer === peer){ _spKill(arr[i]); arr.splice(i, 1); }
 }
+// One link, by identity: what a failed build drops is the link it built, never a newer one
+// for the same peer.
+function _spDropLink(arr, l){
+    const i = arr.indexOf(l); if(i >= 0) arr.splice(i, 1);
+    _spKill(l);
+}
 function _spPrune(){
     for(let i = _spOut.length - 1; i >= 0; i--) if(_spOut[i].dead) _spOut.splice(i, 1);
     for(let i = _spIn.length - 1; i >= 0; i--) if(_spIn[i].dead) _spIn.splice(i, 1);
@@ -336,21 +342,46 @@ function _spWire(l, onMsg){
     l.dc.onmessage = e => { l.lastAt = _spNow(); onMsg(l, String(e.data)); };
     l.dc.onclose = () => { if(l.kind === 'in') _spFeedGone(l.peer); };
 }
+// A link's pc is built on the TURN credential (net-api.js netRtcConfig), and a node holding
+// none waits on the ask first (_netTurnReady, bounded). While that wait is out the link does
+// not exist, so: a second offer or answer for the same peer folds into the one waiting
+// (`_spWait`, the newest offer is the one answered) instead of building beside it, the
+// peer's candidates drained beside its offer park per peer (`_spIceEarly`) and are fed the
+// moment the link exists, and a stop or serve-end inside the wait (`_spEpoch`) builds nothing.
+// A feeder that is playing holds the credential already: no wait, and the drain that
+// brought the offer still feeds the link it built.
+let _spWait = {};       // peer -> { d }: the offer to answer, or {} for an offer of ours
+let _spIceEarly = {};   // peer -> candidates parked while its wait is out
+let _spEpoch = 0;
+function _spIceEarlyPark(from, c){
+    const q = _spIceEarly[from];
+    if(q && c && q.length < NET_ICES_MAX) q.push(c);
+}
+function _spIceEarlyTake(peer){ const q = _spIceEarly[peer] || []; delete _spIceEarly[peer]; return q; }
 // WE offer: the watcher initiates, so a feeder never has to hold pending state for
 // a spectator that may never come back.
 async function _spOffer(peer){
-    if(!_spRtcOk()) return;
-    const w = _netTurnReady(); if(w) await w;
+    if(!_spRtcOk() || _spWait[peer]) return;
+    const w = _netTurnReady();
+    let early = [];
+    if(w){
+        const gen = _spEpoch;
+        _spWait[peer] = {}; _spIceEarly[peer] = [];
+        await w;
+        delete _spWait[peer]; early = _spIceEarlyTake(peer);
+        if(gen !== _spEpoch) return;
+    }
     _spDrop(_spIn, peer);
     const l = _spMkPc(peer, _spIn, 'in');
     l.dc = l.pc.createDataChannel('fokspec', SPEC_DC_OPTS);
     _spWire(l, _spOnFeedMsg);
+    for(const c of early) _spIceAdd(l, c);
     try{
         const of = await l.pc.createOffer();
         await l.pc.setLocalDescription(of);
         _spSignal(peer, 'offer', { sdp:l.pc.localDescription, v:_swVersion });
         _spArm();
-    }catch(e){ _spDrop(_spIn, peer); }
+    }catch(e){ _spDropLink(_spIn, l); }
 }
 async function _spAnswer(peer, d){
     if(!_spRtcOk() || !d || !d.sdp) return;
@@ -361,12 +392,22 @@ async function _spAnswer(peer, d){
     const g = _spGrant[peer] || 0;
     if(!g || _spNow() - g > SPEC_GRANT_MS) return;
     if(!_spFind(_spOut, peer) && !_spRoomNow(peer)) return;
-    const w = _netTurnReady(); if(w) await w;   // held already by a feeder that is playing (no wait, so the drain that brought the offer still feeds this link); a feeder without one asks once
+    if(_spWait[peer]){ _spWait[peer].d = d; return; }
+    const w = _netTurnReady();
+    let early = [];
+    if(w){
+        const gen = _spEpoch;
+        _spWait[peer] = { d }; _spIceEarly[peer] = [];
+        await w;
+        d = _spWait[peer].d; delete _spWait[peer]; early = _spIceEarlyTake(peer);
+        if(gen !== _spEpoch) return;
+    }
     _spDrop(_spOut, peer);
     const l = _spMkPc(peer, _spOut, 'out');
     l.ver = String(d.v || '');   // named in the offer, so this side may batch from the first candidate
     l.dc = l.pc.createDataChannel('fokspec', SPEC_DC_OPTS);
     _spWire(l, _spOnServeMsg);
+    for(const c of early) _spIceAdd(l, c);   // what the drain delivered during the wait, in order
     try{
         await l.pc.setRemoteDescription(d.sdp);
         l.rdOk = true; _spIceFlush(l);
@@ -374,7 +415,7 @@ async function _spAnswer(peer, d){
         await l.pc.setLocalDescription(an);
         _spSignal(peer, 'answer', { sdp:l.pc.localDescription, v:_swVersion });
         _spArm();
-    }catch(e){ _spDrop(_spOut, peer); }
+    }catch(e){ _spDropLink(_spOut, l); }
 }
 function _spIceFlush(l){
     if(!l.iceQ.length) return;
@@ -392,7 +433,12 @@ function _spOnSignal(type, from, d){
     _spHeard(from);
     if(type === 'offer'){ _spAnswer(from, d); return; }
     const l = _spFind(_spIn, from) || _spFind(_spOut, from);
-    if(!l || !l.pc) return;
+    if(!l || !l.pc){
+        // No link yet: its pc may be waiting on the credential, and these are its candidates.
+        if(type === 'ices'){ const a = Array.isArray(d) ? d : []; for(let i = 0; i < a.length && i < NET_ICES_MAX; i++) _spIceEarlyPark(from, a[i] && a[i].c); }
+        else if(type === 'ice') _spIceEarlyPark(from, d.c);
+        return;
+    }
     if(type === 'answer'){
         if(!d.sdp) return;
         l.ver = String(d.v || '');
@@ -881,7 +927,7 @@ function _spDeliver(env){
 function specStop(msg){
     for(const l of _spIn) _spKill(l);
     for(const l of _spOut) _spKill(l);
-    _spIn = []; _spOut = [];
+    _spIn = []; _spOut = []; _spEpoch++;
     _spWant = []; _spAsk = []; _spQ = []; _spRs = null; _spBuf = []; _spCkptReq = null;
     if(_spBootT != null){ clearTimeout(_spBootT); _spBootT = null; }
     const was = _spOn;
@@ -1029,7 +1075,7 @@ function _spTick(){
 // which is precisely the boundary this runs on. They have their own TTL and their own pump.
 function _spServeEnd(){
     for(const l of _spOut) _spKill(l);
-    _spOut = []; _spRs = null; _spBuf = []; _spCkptReq = null;
+    _spOut = []; _spEpoch++; _spRs = null; _spBuf = []; _spCkptReq = null;
     _spCkptAt = 0;
 }
 // Proactive stand-down: a backgrounded primary cannot forward, and the server can

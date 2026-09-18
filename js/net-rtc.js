@@ -203,6 +203,8 @@ function _netMkSess(peer, role){
              // server relay is not an acceptable transport for them (see _netRelayStart).
              p2pOnly:false,
              turn:false,   // the pc was built on a TURN credential (API 4.22): a failed connect ends the attempt, never the HTTP relay
+             relayOnly:false,   // the pc may only take the relay (TURN RELAY: FORCED, on a credential)
+             pathKind:'',       // 'turn' once the selected ICE pair has a relay end, 'direct' otherwise (_netPathStat)
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false,
              // simSeenWall: the last time we had PROOF the peer's sim advanced (see _netSimStalled).
@@ -312,7 +314,9 @@ function _netIceOut(to, cand, ver){
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
     _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is, so no HTTP relay behind it
-    const pc = new RTCPeerConnection(netRtcConfig());   // the TURN credential held, or STUN alone (API 4.22)
+    const rc = netRtcConfig();         // the TURN credential held, or STUN alone (API 4.22)
+    _netSess.relayOnly = rc.iceTransportPolicy === 'relay';
+    const pc = new RTCPeerConnection(rc);
     _netSess.pc = pc;
     _netIceTxReset(peer);
     pc.onicecandidate = e => { if(e.candidate) _netIceOut(peer, e.candidate); };
@@ -335,13 +339,28 @@ function _netRtcInit(peer, role){
 // ever uses it (a tournament's p2pOnly session refuses that too, in _netRelayStart).
 function _netRtcFailed(s){
     if(_netSess !== s || s.game) return;
-    if(s.turn){ _netSigLog('! no path (p2p + turn)'); _netSessionEnd('NO PATH - P2P AND TURN FAILED'); return; }
+    if(s.turn){   // relay-only never tried a direct path, so it says only what it tried
+        _netSigLog('! no path (' + (s.relayOnly ? 'turn' : 'p2p + turn') + ')');
+        _netSessionEnd(s.relayOnly ? 'NO PATH - TURN FAILED' : 'NO PATH - P2P AND TURN FAILED');
+        return;
+    }
     _netRelayStart(s);   // DEPRECATED(relay)
 }
+// The lobby line while the pc connects: what it is allowed to connect over.
+function _netConnMsg(s){ return s && s.relayOnly ? 'CONNECTING (TURN)...' : 'CONNECTING (P2P)...'; }
+// The peer whose offer or answer is waiting on the credential (net-session.js reads it: a
+// bye from that peer voids the wait).
+let _netHsWait = '';
 async function _netRtcOffer(peer, peerProfile){   // we invited / we are the quick-match offerer: we make the seed
     if(!_netRtcAvail() || inGame){ _netSigLog('> offer SKIP'); return; }
     const w = _netTurnReady();            // the one request before the pc: a TURN credential, when the server offers one
-    if(w){ await w; if(inGame){ _netSigLog('> offer SKIP'); return; } }
+    if(w){
+        const gen = _netHsGen; _netHsWait = peer;
+        await w;
+        _netHsWait = '';
+        // The handshake moved on inside the wait (BACK, a new invite, their bye): no pc.
+        if(inGame || gen !== _netHsGen){ _netSigLog('> offer ' + (inGame ? 'SKIP' : 'ABORTED')); return; }
+    }
     if(_netSess) _netTeardown();          // debris: replace it, never silently skip the offer
     const pc = _netRtcInit(peer, 'host');
     if(peerProfile) _netSess.peerProfile = peerProfile;
@@ -353,7 +372,7 @@ async function _netRtcOffer(peer, peerProfile){   // we invited / we are the qui
         const payload = JSON.stringify({ sdp:pc.localDescription, seed:_netSess.seed, profile:_netProfile(), v:_swVersion });
         _netHs.offerTo = peer; _netHs.offerPayload = payload; _netHs.offeredAt = Date.now(); _netHs.offerTries = 1;
         _netSignal(peer, 'offer', payload);
-        _netLb.msg = 'CONNECTING (P2P)...'; _uiDirty = true;
+        _netLb.msg = _netConnMsg(_netSess); _uiDirty = true;
     } catch(e){ _netSessionEnd('CONNECTION FAILED'); }
 }
 let _netAnswering = '';   // the offer sdp whose credential ask is out (see _netRtcAnswer)
@@ -390,10 +409,15 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     const w = _netTurnReady();            // the one request before the pc: a TURN credential, when the server offers one
     let early = [];
     if(w){
-        _netAnswering = okey; _netIceEarly = { peer, list:[] };
+        const gen = _netHsGen;
+        _netAnswering = okey; _netHsWait = peer; _netIceEarly = { peer, list:[] };
         await w;
-        _netAnswering = ''; early = _netIceEarly.peer === peer ? _netIceEarly.list : []; _netIceEarly = { peer:'', list:[] };   // a second offer from ANOTHER peer during the ask re-keys the lot; only this peer's list is ours
-        if(inGame){ _netSigLog('< offer SKIP'); return; }
+        _netAnswering = ''; _netHsWait = '';
+        early = _netIceEarly.peer === peer ? _netIceEarly.list : []; _netIceEarly = { peer:'', list:[] };   // a second offer from ANOTHER peer during the ask re-keys the lot; only this peer's list is ours
+        // The handshake moved on inside the wait (BACK, their bye): no pc, no answer. A
+        // tournament sheet that landed meanwhile may name another peer: asked again.
+        if(inGame || gen !== _netHsGen){ _netSigLog('< offer ' + (inGame ? 'SKIP' : 'ABORTED')); return; }
+        if(!tourneyOfferOk(peer)){ _netSigLog('< offer ABORTED'); return; }
     }
     if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
     const pc = _netRtcInit(peer, 'peer');
@@ -419,7 +443,7 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
         const an = await pc.createAnswer();
         await pc.setLocalDescription(an);
         _netSignal(peer, 'answer', JSON.stringify({ sdp:pc.localDescription, profile:_netProfile(), v:_swVersion, rc:(d && d.rc)|0 }));
-        _netLb.msg = 'CONNECTING (P2P)...'; _uiDirty = true;
+        _netLb.msg = _netConnMsg(_netSess); _uiDirty = true;
     } catch(e){ _netSessionEnd('CONNECTION FAILED'); }
 }
 function _netWire(dc){
@@ -699,7 +723,7 @@ function _netBurstThenStart(s, then){
 }
 // Read the SELECTED ICE candidate pair so we KNOW the real path: host = direct LAN (~1ms),
 // srflx/prflx = reflexive -- hairpins out through the router/internet even on one LAN, the usual
-// cause of "same-Wifi but 100ms jitter" -- relay = via a TURN server. Plus the true P2P RTT.
+// cause of "same-Wifi but 100ms jitter" -- relay = via the TURN relay. Plus the pair's RTT.
 function _netPathStat(s){
     // DEPRECATED(relay): the relay branch reports the server RTT; without it this is a plain `if(!s) return`.
     if(!s || s.relay){ if(s && s.relay){ _netDbg.path = 'relay  srv ' + (_netDbg.relayRtt>=0 ? Math.round(_netDbg.relayRtt)+'ms' : '--'); _netDbg.p2pRtt = -1; } return; }
@@ -721,10 +745,12 @@ function _netPathStat(s){
         // (LAN mDNS resolved), srflx (STUN reflexive) or prflx pair.
         const deob = pn && pn.ip && addr(rem) === pn.ip ? ' deob' : '';
         const p = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob;
+        // A relay at either end = the match rides TURN: the overlay's vs line says so.
+        s.pathKind = (ty(loc) === 'relay' || ty(rem) === 'relay') ? 'turn' : 'direct';
         // On record whenever it changes: which path carried the match, and a relay pair
         // nominated first and swapped for a direct one later would show as two lines.
         if(p !== s.pathSeen){ s.pathSeen = p; _netSigLog('path ' + p); }
-        _netDbg.path = p + '  p2p-rtt ' + rtt;
+        _netDbg.path = p + '  rtt ' + rtt;
     }).catch(()=>{});
 }
 // TIMELINE BREAK (the tick target >600 ticks, ~10s, AHEAD of our sim): the sim was FROZEN while

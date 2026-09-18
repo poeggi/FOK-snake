@@ -26,6 +26,10 @@ const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
 const NET_TURN_MIN_MS = 15 * 60000;   // a pc is built on a credential with at least this much life left, else a fresh one is asked for (the contract's floor on a fresh answer: half the server's ttl)
 const NET_TURN_WAIT_MS = 1000;        // how long a build waits for the ask: the server answers (credential or 503) within 0.6 s plus the round trip; past this the pc goes STUN-only and an answer landing later is held for the next one
 const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no ask for this long: a tournament feeder answers a whole fan-out of spectator offers in that window
+// No refresh inside a match: a pc keeps the credential it was built with (a rebuild takes
+// whatever life is left), so a relayed match ends when the relay stops honouring the
+// allocation past the credential's end -- 15 to 30 minutes after the build, plus the
+// allocation's own lifetime. A refresh would be an ICE restart on a new configuration.
 // SETTINGS > NETWORK > TURN RELAY (cfg.turnMode). AUTO: the credential rides every pc and
 // ICE picks the path (direct where one exists). FORCED: the pc is built relay-only
 // (iceTransportPolicy 'relay'), so a match runs through TURN even on a LAN -- the way to
@@ -392,7 +396,7 @@ function _netTokRefused(path){
     _netSigLog('! 401 bad token ' + path.replace(/^\/api\/|\.php.*$/g, ''));
 }
 function netIdRefused(){ return _netIdRefused; }
-function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; _netTurn = null; if(_netOk()) _netHello(); }   // a credential is minted for an id, so the old one goes with it
+function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; _netTurn = null; _netTurnNoAt = 0; if(_netOk()) _netHello(); }   // a credential is minted for an id, so the old one goes with it, and so does a refusal's backoff
 
 // ---- transport (soft-fail JSON; null = any kind of failure) ----
 // Returns {status, json}: json is null unless the server said ok. status 0 = the
@@ -768,15 +772,16 @@ async function _netTimeSync(force){
 // caller's -- it owns the layout numbers). N = network/transport (top-left),
 // T = timing/timekeeping (top-right), S = sim/rollback health (bottom-right).
 //   pts = engine tick clock (60/s). srv rtt/lat = round-trip to the SERVER / reported latency.
-//   vs <peer> <v4|v6|relay> = who + how we are connected; p2p <ms> = the DIRECT peer RTT
-//   (from the ICE candidate-pair, NOT the server) -- the number that governs duel lag.
+//   vs <peer> <v4|v6 p2p|turn|relay> <ms> = who + how we are connected (turn = the ICE pair
+//   has a relay end; relay = the deprecated HTTP relay); the ms is the peer RTT off the ICE
+//   candidate-pair, NOT the server -- the number that governs duel lag.
 //   anc = this device's clock offset vs the server (mr = min-rtt, a = age); PTS
 //   rests on it, so a wrong anc puts us out of step with the peer.
-//   P<i>[R] = my index, R=relay; ep = epoch; tgt = clock-driven tick target
+//   P<i>[R|T] = my index, R = the HTTP relay, T = a TURN-relayed pair; ep = epoch; tgt = clock-driven tick target
 //   ptk = peer-tick (sub-tick, ~0 = aligned); pts live/avg = peer one-way pts-delta (latest, then avg + min/max)
 //   rb = rollbacks/resim-ticks, mx = deepest; live = inputs applied with NO rewind
 //   dsy = desync, hok = hash-ok; in = input records rx/tx; pkt = ALL packets rx/tx
-//   path = ICE pair (host=LAN, srflx=hairpin), also carrying p2p-rtt at level 3
+//   path = ICE pair (host=LAN, srflx=hairpin, relay=TURN), also carrying its rtt at level 3
 // A PTS as UTC time-of-day (hh:mm:ss.t): the shared server clock is unix ms, so the
 // same PTS renders identically on every device regardless of its timezone.
 function _netHms(pts){
@@ -799,14 +804,17 @@ function netDebugQuad(){
     Nm.push('srv rtt ' + (d.rtt<0?'--':Math.round(d.rtt)) + ' lat ' + (_netLat.value==null?'--':_netLat.value));
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
-        Nx.push('P' + netMyIndex() + (_netSess.relay?'R':'') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
+        const _turn = _netSess.pathKind === 'turn';
+        Nx.push('P' + netMyIndex() + (_netSess.relay ? 'R' : _turn ? 'T' : '') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
         // WHO + HOW we are connected to the other side. Name from their profile; IP/family from
         // the server's peer-net hint (present on BOTH sides -- offerer and accepter alike).
         const _pn = _netPeerNet[_netSess.peer];
         const _pnm = (_netSess.peerProfile && _netSess.peerProfile.name) || ('#' + String(_netSess.peer).slice(0,4));
         // The peer's IP gets its OWN line: a full IPv6 next to the name overflows the quadrant.
-        Nm.push('vs ' + _pnm + '  ' + (_netSess.relay ? 'relay' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam : 'p2p') : 'p2p (no ip hint)')
-            + (!_netSess.relay && d.p2pRtt >= 0 ? '  p2p ' + d.p2pRtt + 'ms' : ''));
+        // The IP hint says which family a direct path would use; once the pair is read off
+        // the pc (_netPathStat) a relay end outranks it: the match rides TURN.
+        const _how = _netSess.relay ? 'relay' : _turn ? 'turn' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam + '  p2p' : 'p2p') : 'p2p (no ip hint)';
+        Nm.push('vs ' + _pnm + '  ' + _how + (!_netSess.relay && d.p2pRtt >= 0 ? ' ' + d.p2pRtt + 'ms' : ''));
         if(!_netSess.relay && _pn && _pn.ip) Nx.push(_pn.ip);
         Nx.push(d.path || 'path ?');
         Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
@@ -974,6 +982,7 @@ function netDebugInfo(){
              session: _netSess ? { peer:_netSess.peer, role:_netSess.role, game:_netSess.game } : null,
              iceDeob:_netDbg.iceDeob|0, peerNet: _netSess ? (_netPeerNet[_netSess.peer] || null) : null,
              turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, turnMode: cfg.turnMode|0,   // the TURN credential held (API 4.22): seconds left, or none; the setting (0 auto, 1 forced, 2 disabled)
+             turnPc: !!(_netSess && _netSess.turn), pathKind: _netSess ? (_netSess.pathKind || '') : null,   // this session's pc was built on the credential; what its selected ICE pair is ('turn' / 'direct', '' unread)
              // 4.4, and the whole point of it: iceSignals vs iceBatches says how many
              // requests the batching actually saved, and srvQueueMs is the server telling
              // us how long its last answer waited for a worker.

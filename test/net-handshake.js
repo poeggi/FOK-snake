@@ -38,7 +38,17 @@ const HOOKS = (myId) => `
     this._ice = [];
     this.addIceCandidate = async (c)=>{ this._ice.push(c); };
     this.close = ()=>{};
+    // getStats answers the selected pair __statsPair names (local type / remote type), or nothing.
+    this.getStats = async ()=>{
+      const m = new Map();
+      if(!__statsPair) return m;
+      m.set('L', { type:'local-candidate', candidateType:__statsPair[0], address:'10.0.0.1' });
+      m.set('R', { type:'remote-candidate', candidateType:__statsPair[1], address:'10.0.0.2' });
+      m.set('P', { type:'candidate-pair', nominated:true, state:'succeeded', localCandidateId:'L', remoteCandidateId:'R', currentRoundTripTime:0.042 });
+      return m;
+    };
   };
+  globalThis.__statsPair = null;
   // friend.php: records the request order so a test can prove the invite waited.
   // Stubbed at the _netPostRes layer, not _netPost: the friend path reads the STATUS
   // (429 = request ban), and _netPost is just its .json, so this covers both.
@@ -113,6 +123,12 @@ const HOOKS = (myId) => `
   globalThis.__pcCfg     = ()=> (_netSess && _netSess.pc) ? _netSess.pc.cfgArg : null;
   globalThis.__pcCount   = ()=> __pcN;
   globalThis.__sessTurn  = ()=> !!(_netSess && _netSess.turn);
+  globalThis.__pathStat  = async (pair)=>{ __statsPair = pair; if(_netSess && !_netSess.pc) _netSess.pc = new RTCPeerConnection({}); _netPathStat(_netSess); await new Promise(r=>setTimeout(r,0)); return { path:_netDbg.path, kind:_netSess && _netSess.pathKind, vs:netDebugQuad().net.main.find(x => x.indexOf('vs ') === 0) || '', p:netDebugQuad().net.more.find(x => /^P[0-9]/.test(x)) || '', info:netDebugInfo() }; };
+  globalThis.__end       = ()=> netEndSession();
+  globalThis.__spGrant   = (peer)=> specGrant([peer]);
+  globalThis.__spOutCfg  = (peer)=>{ const l = _spFind(_spOut, peer); return l ? l.pc.cfgArg : null; };
+  globalThis.__spOutN    = (peer)=> _spOut.filter(l => l.peer === peer).length;
+  globalThis.__spAnswer  = (peer, d)=> _spAnswer(peer, d);
   globalThis.__turnCalls = ()=> __calls.filter(c => /turn/.test(c)).length;
   globalThis.__rtcFail   = ()=>{ const pc = _netSess && _netSess.pc; if(!pc) throw new Error('no pc to fail'); pc.connectionState = 'failed'; pc.onconnectionstatechange(); };
   globalThis.__relayStarts = 0;
@@ -484,6 +500,91 @@ try {
     pump(A, B);   // no flush: the drain itself
     if(!B.__state().sess || !same(B.__pcCfg(), { iceServers:ICE_B })) throw new Error('held = no wait, the pc exists when the drain ends');
     if(B.__turnCalls() !== 0) throw new Error('nothing asked');
+  });
+  await acheck('turn: the overlay names the path -- a relay end on the selected pair reads turn, a host pair p2p', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    A.__setTurnMode(1);
+    await round(A, B);
+    if(A.__state().msg !== 'CONNECTING (TURN)...') throw new Error('a relay-only pc says so on the lobby line: ' + A.__state().msg);
+    A.__gameSess(B_ID, 'host'); A.__turnSet(ICE_A, 1800000);
+    let r = await A.__pathStat(['relay', 'relay']);
+    if(r.path.indexOf('relay/relay') !== 0 || r.path.indexOf('rtt 42ms') < 0) throw new Error('path line: ' + r.path);
+    if(r.kind !== 'turn') throw new Error('pathKind: ' + r.kind);
+    if(!/^vs .*  turn 42ms$/.test(r.vs)) throw new Error('vs line must say turn: ' + r.vs);
+    if(r.p.indexOf('P0T') !== 0) throw new Error('the P line marks a relayed match T: ' + r.p);
+    if(r.info.pathKind !== 'turn') throw new Error('the export carries pathKind: ' + JSON.stringify(r.info.pathKind));
+    r = await A.__pathStat(['host', 'host']);
+    if(r.kind !== 'direct') throw new Error('a host pair is direct: ' + r.kind);
+    if(!/^vs .*p2p.* 42ms$/.test(r.vs)) throw new Error('vs line must say p2p: ' + r.vs);
+    if(r.p.indexOf('P0 ') !== 0) throw new Error('no mark on a direct match: ' + r.p);
+    A.__setTurnMode(0);
+    await round(A, B);
+    if(A.__state().msg !== 'CONNECTING (P2P)...') throw new Error('AUTO keeps the P2P line: ' + A.__state().msg);
+  });
+  await acheck('turn: BACK during the credential wait builds no pc and sends nothing -- offerer', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let release = null;
+    A.__setTurn(()=> new Promise(r => { release = r; }));
+    await round(A, B);
+    A.__out.length = 0;
+    A.__end();
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    if(A.__state().sess) throw new Error('no session after BACK');
+    if(A.__out.some(s => s.type === 'offer')) throw new Error('no offer goes out: ' + JSON.stringify(A.__out.map(s => s.type)));
+    if(A.__turnLife() < 1700000) throw new Error('the answer is still held for the next pc');
+    await round(A, B); await flush();
+    if(!A.__state().sess) throw new Error('the next handshake builds normally');
+  });
+  await acheck('turn: BACK or the peer\'s bye during the credential wait builds no pc and answers nothing -- answerer', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let release = null;
+    B.__setTurn(()=> new Promise(r => { release = r; }));
+    await round(A, B);
+    const offer = A.__out.find(s => s.type === 'offer');
+    B.__deliver(offer); await flush();
+    B.__end();
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    if(B.__state().sess) throw new Error('no session after BACK');
+    if(B.__out.some(s => s.type === 'answer')) throw new Error('no answer goes out: ' + JSON.stringify(B.__out.map(s => s.type)));
+    // Their bye inside the wait: the pc it would build has no peer.
+    B.__turnReset(); B.__setTurn(()=> new Promise(r => { release = r; }));
+    A.__out.length = 0; B.__out.length = 0;
+    await round(A, B);
+    B.__deliver(A.__out.find(s => s.type === 'offer')); await flush();
+    B.__deliver({ from:A_ID, to:B_ID, type:'bye', payload:'' });
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    if(B.__state().sess) throw new Error('no session after their bye');
+    if(B.__state().msg !== 'OPPONENT LEFT') throw new Error('the lobby says why: ' + B.__state().msg);
+    if(B.__out.some(s => s.type === 'answer')) throw new Error('no answer after their bye');
+  });
+  await acheck('turn: a feeder waiting on the credential parks the watcher\'s candidates and answers the newest offer once', async () => {
+    const A = mk(A_ID);
+    let release = null;
+    A.__setTurn(()=> new Promise(r => { release = r; }));
+    A.__spGrant('cafe0002');
+    const cand = (n)=> ({ candidate:'candidate:' + n + ' 1 udp 1 10.0.0.' + n + ' 5000 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 });
+    // One drain: the watcher's offer, a single, a batch, then a fresh offer (it rebuilt).
+    A.__deliver({ from:'cafe0002', to:A_ID, type:'offer', payload:JSON.stringify({ sp:1, sdp:{ type:'offer', sdp:'w1' }, v:'v4.0.0' }) });
+    A.__deliver({ from:'cafe0002', to:A_ID, type:'ice', payload:JSON.stringify({ sp:1, c:cand(1) }) });
+    A.__deliver({ from:'cafe0002', to:A_ID, type:'ices', payload:JSON.stringify([{ sp:1, c:cand(2) }, { sp:1, c:cand(3) }]) });
+    A.__deliver({ from:'cafe0002', to:A_ID, type:'offer', payload:JSON.stringify({ sp:1, sdp:{ type:'offer', sdp:'w2' }, v:'v4.0.0' }) });
+    await flush();
+    if(A.__spOutN('cafe0002') !== 0) throw new Error('no link while the wait is out');
+    if(A.__turnCalls() !== 1) throw new Error('one ask, got ' + A.__turnCalls());
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    if(A.__spOutN('cafe0002') !== 1) throw new Error('exactly one link for the two offers, got ' + A.__spOutN('cafe0002'));
+    if(!same(A.__spOutCfg('cafe0002'), { iceServers:ICE_A })) throw new Error('built on the answered credential');
+    const got = A.__spAdded('cafe0002').map(c => c.candidate.split(' ')[0]);
+    if(JSON.stringify(got) !== JSON.stringify(['candidate:1', 'candidate:2', 'candidate:3'])) throw new Error('every parked candidate reaches the link, in order: ' + JSON.stringify(got));
+    if(A.__out.filter(s => s.type === 'answer').length !== 1) throw new Error('exactly one answer: ' + JSON.stringify(A.__out.map(s => s.type)));
+    // A stranger's candidate during a wait is not parked.
+    A.__turnReset(); A.__setTurn(()=> new Promise(r => { release = r; }));
+    A.__deliver({ from:'cafe0002', to:A_ID, type:'offer', payload:JSON.stringify({ sp:1, sdp:{ type:'offer', sdp:'w3' }, v:'v4.0.0' }) });
+    A.__deliver({ from:'cafe0009', to:A_ID, type:'ice', payload:JSON.stringify({ sp:1, c:cand(9) }) });
+    await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    if(A.__spAdded('cafe0002').length !== 0) throw new Error('a stranger is not parked: ' + A.__spAdded('cafe0002').length);
   });
   await acheck('turn: a second copy of the offer during the ask is dropped, never answered twice', async () => {
     const A = mk(A_ID), B = mk(B_ID);
