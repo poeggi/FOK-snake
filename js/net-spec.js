@@ -315,7 +315,7 @@ function _spIceOut(l, cand){
     _spSignal(l.peer, 'ice', { c:cand });
 }
 function _spMkPc(peer, arr, kind){
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
+    const pc = new RTCPeerConnection({ iceServers:netTurnIce() });   // the player's TURN credential serves its spectator links too (API 4.22)
     const l = { peer, pc, dc:null, rdOk:false, iceQ:[], sub:false, kind, dead:false,
                 openAt:0, lastAt:_spNow(), live:false, ver:'' };
     // A fresh pc gathers afresh, so whatever is still buffered for this peer belongs to a
@@ -340,6 +340,7 @@ function _spWire(l, onMsg){
 // a spectator that may never come back.
 async function _spOffer(peer){
     if(!_spRtcOk()) return;
+    const w = _netTurnReady(); if(w) await w;
     _spDrop(_spIn, peer);
     const l = _spMkPc(peer, _spIn, 'in');
     l.dc = l.pc.createDataChannel('fokspec', SPEC_DC_OPTS);
@@ -360,6 +361,7 @@ async function _spAnswer(peer, d){
     const g = _spGrant[peer] || 0;
     if(!g || _spNow() - g > SPEC_GRANT_MS) return;
     if(!_spFind(_spOut, peer) && !_spRoomNow(peer)) return;
+    const w = _netTurnReady(); if(w) await w;   // held already by a feeder that is playing (no wait, so the drain that brought the offer still feeds this link); a feeder without one asks once
     _spDrop(_spOut, peer);
     const l = _spMkPc(peer, _spOut, 'out');
     l.ver = String(d.v || '');   // named in the offer, so this side may batch from the first candidate

@@ -84,7 +84,7 @@ function _prefersReducedMotion() {
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, smoothMotion:0, reduceMotion:_prefersReducedMotion(),
-             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, privateDuels:false, cfgVer:3,
+             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, noTurn:false, privateDuels:false, cfgVer:4,
              itemReg:{}, mintQ:[], claimQ:[], itemsSeeded:0 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
@@ -114,7 +114,8 @@ function _sanitizeCfg() {
     cfg.reduceMotion = !!cfg.reduceMotion;   // absent -> defaultCfg() already seeded it from the OS pref
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
-    cfg.noP2P       = !!cfg.noP2P;   // DEPRECATED(relay): relay-only network toggle
+    cfg.noP2P       = !!cfg.noP2P;   // DEPRECATED(relay): relay-only, off the menu (cleared on load below)
+    cfg.noTurn      = !!cfg.noTurn;   // P2P ONLY: never asks for TURN credentials, so no match of ours rides a public relay
     cfg.privateDuels = !!cfg.privateDuels;   // duels still count, but no friend is offered a spectate link
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
@@ -138,16 +139,17 @@ function loadCfg() {
     try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch(e) {}
     if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
     if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
-    // v3: relay-only was a stop-gap default while the handshake was unreliable.
-    // Drop the saved value so P2P (the low-latency path) is used again; anyone who
-    // really wants the relay can turn it back on in SETTINGS > NETWORK.
-    if(!s.cfgVer || s.cfgVer < 3) delete s.noP2P;
+    // v3: relay-only was a stop-gap default while the handshake was unreliable. v4: its
+    // RELAY ONLY row is gone from the menu (P2P ONLY took its place), so a save that still
+    // holds it would route every duel through the HTTP relay with no way back. One rule
+    // covers both: the saved value is dropped and P2P (the low-latency path) is used.
+    if(!s.cfgVer || s.cfgVer < 4) delete s.noP2P;
     Object.assign(cfg, defaultCfg(), s);
     // The migrations above key off the STORED version; the live cfg must always carry the
     // current one. Otherwise a stale stored cfgVer overrides the default here and every
     // saveCfg re-persists it, so each one-shot migration re-fires on every load (a set
     // setting silently reverts). Bump this in lockstep whenever a new migration is added.
-    cfg.cfgVer = 3;
+    cfg.cfgVer = 4;
     _sanitizeCfg();
 }
 

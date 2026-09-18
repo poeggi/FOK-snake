@@ -929,10 +929,14 @@ runTest('SMOKE-NET', `
         };
         const _reset=()=>{ _netNets=[]; _netNetsAt=0; _netNetsBusy=false; _pcN=0; _pc=null; };
         _reset();
+        // A TURN credential is held (API 4.22): a relay candidate would report the relay's
+        // address as our own network, so the probe stays STUN-only whatever is held.
+        const _oTurn=_netTurn; _netTurn={ ice:[{urls:['turn:turn.cloudflare.com:3478'],username:'u',credential:'c'}], exp:Date.now()+1800000 };
         netNetsRefresh();
+        _netTurn=_oTurn;
         if(_pcN!==1) throw 'the first refresh must open exactly one RTCPeerConnection';
         if(_pc.chans.length!==1) throw 'no m-line means nothing to gather for';
-        if(JSON.stringify(_pc.cfgArg)!==JSON.stringify({iceServers:[{urls:NET_STUN_URL}]})) throw 'the gather must use the one shared STUN host';
+        if(JSON.stringify(_pc.cfgArg)!==JSON.stringify({iceServers:[{urls:NET_STUN_URL}]})) throw 'the gather must use the one shared STUN host, never the TURN credential';
         if(netPublicNets().length) throw 'nothing may be reported before the gather finishes';
         _pc.emit('a1b2c3d4-0001.local','host');   // mDNS placeholder: not an address
         _pc.emit('192.168.1.31','host');          // the LAN side of our own NAT

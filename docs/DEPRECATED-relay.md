@@ -10,9 +10,13 @@ The relay forwards duel datagrams through `api/relay.php` over HTTP long-poll (~
 one-way). It exists because the shared webhost cannot run a TURN server: `_netRtcInit`
 carries STUN only, so a peer behind a symmetric NAT has no other path.
 
-The replacement is coturn in the `iceServers` list. That keeps the IDENTICAL DataChannel --
-same unreliable-unordered netcode, one forwarding hop -- and retires `relay.php` entirely.
-It is an infrastructure change (a host with open UDP), not a code change.
+The replacement is TURN in the `iceServers` list, and it is in: since server API 4.22
+`turn.php` hands out short-lived credentials for Cloudflare's relay, held per client
+(`_netTurnReady` / `netTurnIce` in `js/net-api.js`) and passed to every pc it builds.
+That keeps the IDENTICAL DataChannel -- same unreliable-unordered netcode, one forwarding
+hop. A pc built on a credential has every path there is, so when it fails the attempt ends
+(`_netRtcFailed`); the HTTP relay is started only when `turn.php` offered nothing (503).
+What is left is retiring `relay.php`.
 
 ## What already refuses it
 
@@ -23,8 +27,10 @@ deliberate rather than an omission:
   link is its own RTCPeerConnection with its own reliable ordered DataChannel; there is no
   relay equivalent and none is to be built.
 - TOURNAMENT matches set `s.p2pOnly` on the session (`tourneyDressSession`), so a pairing
-  that cannot connect P2P fails outright instead of falling back. A tournament is watched by
-  everyone in it, and a relayed match cannot be forwarded to them.
+  that cannot connect over its pc fails outright instead of falling back. A tournament is
+  watched by everyone in it, and an HTTP-relayed match cannot be forwarded to them. A
+  TURN-relayed one is a DataChannel like any other and can: `p2pOnly` refuses only the HTTP
+  relay.
 
 ## What removal looks like
 
@@ -33,15 +39,17 @@ deliberate rather than an omission:
    `test/check-ownership.js`.
 3. Delete the residual hooks below. Every one carries a `DEPRECATED(relay)` marker, so
    `grep -rn "DEPRECATED(relay)" js/` is the authoritative list -- this file is a summary.
-4. Retire the `NETWORK > NO P2P` setting (`cfg.noP2P`) and `api/relay.php` server-side.
+4. Retire `cfg.noP2P` (off the menu since the P2P ONLY row replaced it, cleared on load,
+   honoured from a save edit) and `api/relay.php` server-side.
 
 ## Residual hooks (all marked `DEPRECATED(relay)`)
 
 `js/net-rtc.js`
 - `_netMkSess`: the `relay/connT/relayAbort/relaySeq/relayGraceUntil/relayPending/relayBusy`
   session slots.
-- `_netRtcInit`: the `s.relay` ownership guard, the `_netRelayStart` call on a failed
-  connection, and the 6s fallback timer. Without the relay a failed P2P just ends the attempt.
+- `_netRtcInit` / `_netRtcFailed`: the `s.relay` ownership guard and the `_netRelayStart`
+  call for a failed STUN-only pc. Without the relay a failed P2P just ends the attempt, as
+  a failed pc built on a TURN credential already does; the 6 s timer stays as the deadline.
 - `_netRtcDc`: the "P2P completed after the fallback" upgrade branch, and the `!s.relay`
   guard on `dc.onclose`.
 - `_netSend`: the warm-ping `s.relay` skip and the `_netRelaySend` transport fork.

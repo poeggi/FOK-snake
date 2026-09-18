@@ -25,8 +25,9 @@ const HOOKS = (myId) => `
   // Every pc gets its OWN sdp: a real one mints fresh ICE credentials, and two attempts
   // that read alike would hide the difference between a re-sent offer and a new one.
   var __pcN = 0;
-  globalThis.RTCPeerConnection = function(){
+  globalThis.RTCPeerConnection = function(c){
     const sdp = 'stub-' + (++__pcN);
+    this.cfgArg = c;   // what the pc was built with: the iceServers under test
     this.localDescription = { type:'offer', sdp:sdp };
     this.connectionState = 'new';
     this.createDataChannel = ()=>({ readyState:'connecting', send(){}, close(){} });
@@ -44,10 +45,14 @@ const HOOKS = (myId) => `
   globalThis.__calls = [];
   globalThis.__frState = 'accepted';
   globalThis.__frStatus = 200;
+  // turn.php answers what __setTurn installed (a response, or a promise of one); nothing
+  // installed = a server without TURN, which every case not about it runs against.
+  globalThis.__turnFn = null;
   _netPostRes = async (path, body)=>{
     __calls.push((body && body.action) ? 'friend:' + body.action : path);
     if(/friend\.php/.test(path))
       return { status:__frStatus, json: __frStatus === 200 ? { ok:true, state:__frState } : null, err:'' };
+    if(/turn\.php/.test(path) && __turnFn) return await __turnFn(body);
     return { status:200, json:null, err:'' };
   };
   globalThis.__setFrStatus = (n)=>{ __frStatus = n|0; };
@@ -98,6 +103,27 @@ const HOOKS = (myId) => `
   globalThis.__answer    = (ok)=>{ _netInviteAnswer(ok); };
   globalThis.__dialog    = ()=>  _netLb.invite ? _netLb.invite.from : null;
   globalThis.__setRelay  = (on)=>{ cfg.noP2P = !!on; };
+  // TURN (API 4.22): the credential held, the pc it built, the fallback it did or did not take.
+  globalThis.__setTurn   = (fn)=>{ __turnFn = fn; };
+  globalThis.__turnReset = ()=>{ _netTurn = null; _netTurnNoAt = 0; __turnFn = null; cfg.noTurn = false; };
+  globalThis.__turnSet   = (ice, lifeMs)=>{ _netTurn = { ice, exp: Date.now() + lifeMs }; };
+  globalThis.__turnLife  = ()=> _netTurnLife();
+  globalThis.__setNoTurn = (on)=>{ cfg.noTurn = !!on; };
+  globalThis.__pcCfg     = ()=> (_netSess && _netSess.pc) ? _netSess.pc.cfgArg : null;
+  globalThis.__pcCount   = ()=> __pcN;
+  globalThis.__sessTurn  = ()=> !!(_netSess && _netSess.turn);
+  globalThis.__turnCalls = ()=> __calls.filter(c => /turn/.test(c)).length;
+  globalThis.__rtcFail   = ()=>{ const pc = _netSess && _netSess.pc; if(!pc) throw new Error('no pc to fail'); pc.connectionState = 'failed'; pc.onconnectionstatechange(); };
+  globalThis.__relayStarts = 0;
+  const _realRelayStart = _netRelayStart;
+  _netRelayStart = (s)=>{ __relayStarts++; return _realRelayStart(s); };
+  globalThis.__spMkPc    = (peer)=>{ const arr = []; _spMkPc(peer, arr, 'in'); return arr[0].pc.cfgArg; };
+  globalThis.__spOffer   = (peer)=> _spOffer(peer);
+  globalThis.__spInCfg   = (peer)=>{ const l = _spFind(_spIn, peer); return l ? l.pc.cfgArg : null; };
+  // Every timer the client arms from here on fires within 5 ms, and the delay it ASKED for
+  // is on record: the bound on the credential wait is proven by its number, not waited out.
+  globalThis.__tmReq = [];
+  globalThis.__clampTimers = ()=>{ const o = setTimeout; globalThis.setTimeout = (f, ms)=>{ __tmReq.push(ms); return o(f, Math.min(ms|0, 5)); }; };
   globalThis.__setOffline= (on)=>{ cfg.offline = !!on; };
   globalThis.__setLook   = (col, items)=>{ cfg.snakeColor = col; cfg.wornItems = items||{}; };
   globalThis.__look      = ()=>  netDuelLook();
@@ -318,6 +344,149 @@ async function acheck(name, fn){
 
 (async () => {
 try {
+  // ---------------------------------------------------------------- TURN (API 4.22)
+  // turn.php answers an iceServers list; the pc is built on it, or on STUN alone when the
+  // server offers nothing, and only THAT pc may fall back to the deprecated HTTP relay.
+  const ICE_A = [{ urls:['stun:stun.cloudflare.com:3478'] }, { urls:['turn:turn.cloudflare.com:3478?transport=udp'], username:'ua', credential:'ca' }];
+  const ICE_B = [{ urls:['turn:turn.cloudflare.com:3478?transport=udp'], username:'ub', credential:'cb' }];
+  const STUN_ONLY = [{ urls:'stun:stun.cloudflare.com:3478' }];
+  const flush = async (n)=>{ for(let i = 0; i < (n || 4); i++) await new Promise(r=>setTimeout(r,0)); };
+  const same = (a, b)=> JSON.stringify(a) === JSON.stringify(b);
+  // One invite round: A invites, B accepts, the accept reaches A (its offer awaits the ask).
+  const round = async (A, B)=>{ A.__invite(B_ID); await flush(); pump(A, B); B.__answer(true); pump(B, A); await flush(); };
+  await acheck('turn: one ask before the pc, on both sides, and the pc is built on the answer', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    B.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }));
+    await round(A, B);
+    if(A.__turnCalls() !== 1) throw new Error('the offerer asks turn.php once, got ' + A.__turnCalls());
+    if(!same(A.__pcCfg(), { iceServers:ICE_A })) throw new Error('the offerer pc must carry the answered list: ' + JSON.stringify(A.__pcCfg()));
+    if(!A.__sessTurn()) throw new Error('a pc built on a credential must say so on the session');
+    if(A.__turnLife() < 1700000) throw new Error('the credential is held with its ttl: ' + A.__turnLife());
+    const t = pump(A, B); await flush();
+    if(!t.includes('offer')) throw new Error('no offer went out: ' + t);
+    if(B.__turnCalls() !== 1) throw new Error('the answerer asks once, after the offer arrives, got ' + B.__turnCalls());
+    if(!same(B.__pcCfg(), { iceServers:ICE_B })) throw new Error('the answerer pc must carry ITS answered list: ' + JSON.stringify(B.__pcCfg()));
+    if(!pump(B, A).includes('answer')) throw new Error('no answer went out');
+    // The same player's spectator links ride the credential too, with no ask of their own.
+    if(!same(A.__spMkPc('cafe0001'), { iceServers:ICE_A })) throw new Error('a spectator pc must be built on the held credential');
+    await A.__spOffer('cafe0002'); await flush();
+    if(!same(A.__spInCfg('cafe0002'), { iceServers:ICE_A })) throw new Error('_spOffer must build on the held credential');
+    if(A.__turnCalls() !== 1) throw new Error('a held credential is never asked for again: ' + A.__turnCalls());
+  });
+  await acheck('turn: a held credential is reused while it has NET_TURN_MIN_MS of life, else a fresh one is asked for', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let n = 0;
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:[{ urls:['turn:x'], username:'u' + (++n), credential:'c' }], ttl:1800 }, err:'' }));
+    A.__turnSet(ICE_A, 15 * 60000 + 5000);   // just above the line: reused
+    await round(A, B);
+    if(A.__turnCalls() !== 0) throw new Error('a credential with life must not be asked for again');
+    if(!same(A.__pcCfg(), { iceServers:ICE_A })) throw new Error('the held one builds the pc');
+    A.__turnSet(ICE_A, 15 * 60000 - 5000);   // just below: a fresh one is asked for and used
+    await round(A, B);
+    if(A.__turnCalls() !== 1) throw new Error('under the line the credential is refreshed, got ' + A.__turnCalls());
+    if(A.__pcCfg().iceServers[0].username !== 'u1') throw new Error('the pc must be built on the fresh answer: ' + JSON.stringify(A.__pcCfg()));
+    if(A.__turnLife() < 1700000) throw new Error('the fresh one is held with its ttl');
+  });
+  await acheck('turn: 503 = STUN only, no retry within NET_TURN_RETRY_MS, and the HTTP relay stays that pc\'s fallback', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurn(()=>({ status:503, json:null, err:'turn_unavailable' }));
+    await round(A, B);
+    if(A.__turnCalls() !== 1) throw new Error('asked once, got ' + A.__turnCalls());
+    if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('a refusal builds the pre-4.22 pc: ' + JSON.stringify(A.__pcCfg()));
+    if(A.__sessTurn()) throw new Error('a STUN-only pc must not claim a credential');
+    if(A.__turnLife() !== 0) throw new Error('nothing is held after a refusal');
+    await round(A, B);
+    if(A.__turnCalls() !== 1) throw new Error('a refusal holds the next ask off; got ' + A.__turnCalls());
+    A.__rtcFail(); await flush();
+    if(A.__relayStarts !== 1) throw new Error('a failed STUN-only pc falls back to the HTTP relay (the one case left for it)');
+    if(!A.__state().sess || !A.__state().sess.relay) throw new Error('the session must have gone over to the relay');
+  });
+  await acheck('turn: a pc built on a credential never falls back to the HTTP relay -- a failed connect ends the attempt', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    await round(A, B);
+    if(!A.__sessTurn()) throw new Error('precondition: built on the credential');
+    A.__out.length = 0;
+    A.__rtcFail(); await flush();
+    if(A.__relayStarts !== 0) throw new Error('the HTTP relay must not start behind a TURN pc');
+    if(A.__state().sess) throw new Error('the attempt must have ended: ' + JSON.stringify(A.__state()));
+    if(!A.__out.some(s => s.type === 'bye')) throw new Error('the peer is told');
+  });
+  await acheck('turn: P2P ONLY (cfg.noTurn) never asks and builds STUN only, whatever is held', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    A.__turnSet(ICE_A, 1800000); A.__setNoTurn(true);
+    await round(A, B);
+    if(A.__turnCalls() !== 0) throw new Error('P2P ONLY asks for nothing');
+    if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('P2P ONLY builds on STUN alone: ' + JSON.stringify(A.__pcCfg()));
+    if(A.__sessTurn()) throw new Error('P2P ONLY never marks the session');
+    if(!same(A.__spMkPc('cafe0001'), { iceServers:STUN_ONLY })) throw new Error('P2P ONLY covers spectator pcs too');
+  });
+  await acheck('turn: the wait for the ask is bounded at NET_TURN_WAIT_MS; a late answer is held for the next pc', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let release = null;
+    A.__setTurn(()=> new Promise(r => { release = r; }));
+    A.__clampTimers();
+    await round(A, B);
+    await new Promise(r=>setTimeout(r, 20)); await flush();
+    if(!A.__tmReq.includes(1500)) throw new Error('the bound must be armed at NET_TURN_WAIT_MS: ' + JSON.stringify(A.__tmReq));
+    if(!A.__pcCfg()) throw new Error('past the bound the pc is built without waiting further');
+    if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('...on STUN alone: ' + JSON.stringify(A.__pcCfg()));
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    if(A.__turnLife() < 1700000) throw new Error('the late answer is held: ' + A.__turnLife());
+    await round(A, B);
+    if(A.__turnCalls() !== 1) throw new Error('the next pc uses what landed, no new ask; got ' + A.__turnCalls());
+    if(!same(A.__pcCfg(), { iceServers:ICE_A })) throw new Error('the next pc is built on the late answer');
+  });
+  await acheck('turn: candidates drained beside the offer while the ask is out are parked, then fed to the pc', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let release = null;
+    B.__setTurn(()=> new Promise(r => { release = r; }));
+    await round(A, B);
+    const offer = A.__out.find(s => s.type === 'offer');
+    const cand = (n)=> ({ candidate:'candidate:' + n + ' 1 udp 2113937151 2001:db8::' + n + ' 5000 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 });   // v6: a v4 literal waits out the happy-eyeballs head start
+    // One drain: the offer, a single, a batch -- the host ships all three within a poll.
+    B.__deliver(offer);
+    B.__deliver({ from:A_ID, to:B_ID, type:'ice', payload:JSON.stringify(cand(1)) });
+    B.__deliver({ from:A_ID, to:B_ID, type:'ices', payload:JSON.stringify([cand(2), cand(3)]) });
+    await flush();
+    if(B.__state().sess) throw new Error('no session while the ask is out');
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    if(!B.__state().sess) throw new Error('the session is built once the ask lands');
+    const got = B.__iceAdded().map(c => c.candidate.split(' ')[0]);
+    if(JSON.stringify(got) !== JSON.stringify(['candidate:1', 'candidate:2', 'candidate:3'])) throw new Error('every drained candidate reaches the pc, in order: ' + JSON.stringify(got));
+    // A candidate for somebody else, or after the ask, is not parked for this offer.
+    B.__deliver({ from:'cafe0009', to:B_ID, type:'ice', payload:JSON.stringify(cand(4)) }); await flush();
+    if(B.__iceAdded().length !== 3) throw new Error('a stranger is not parked');
+  });
+  await acheck('turn: with a credential held the answerer builds inside the drain that brought the offer', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    B.__turnSet(ICE_B, 1800000);
+    await round(A, B);
+    pump(A, B);   // no flush: the drain itself
+    if(!B.__state().sess || !same(B.__pcCfg(), { iceServers:ICE_B })) throw new Error('held = no wait, the pc exists when the drain ends');
+    if(B.__turnCalls() !== 0) throw new Error('nothing asked');
+  });
+  await acheck('turn: a second copy of the offer during the ask is dropped, never answered twice', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let release = null;
+    B.__setTurn(()=> new Promise(r => { release = r; }));
+    await round(A, B);
+    const offer = A.__out.find(s => s.type === 'offer');
+    if(!offer) throw new Error('no offer');
+    const pcs = B.__pcCount();
+    B.__deliver(offer); B.__deliver(offer); await flush();   // two in one drain, the ask still out
+    if(B.__turnCalls() !== 1) throw new Error('one ask in flight at a time, got ' + B.__turnCalls());
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    if(B.__pcCount() !== pcs + 1) throw new Error('exactly one pc for the two copies, got ' + (B.__pcCount() - pcs));
+    if(B.__out.filter(s => s.type === 'answer').length !== 1) throw new Error('exactly one answer: ' + JSON.stringify(B.__out.map(s => s.type)));
+    if(!same(B.__pcCfg(), { iceServers:ICE_B })) throw new Error('built on the answer');
+    B.__deliver(offer); await flush();   // the host re-sends: the pc exists now, the re-send path answers again
+    if(B.__out.filter(s => s.type === 'answer').length !== 2) throw new Error('a re-sent offer after the pc exists is answered off it');
+    if(B.__pcCount() !== pcs + 1) throw new Error('...without a new pc');
+  });
+
   // ---------------------------------------------------------------- P2P mode
   // No RTCPeerConnection in the harness, so the SIGNALS are what we verify: the
   // relay bit must NOT appear and the invite/accept types must be the plain ones.
@@ -341,6 +510,7 @@ try {
   await acheck('peer-net de-obfuscates an mDNS IPv6 candidate to a real one', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setRelay(false); B.__setRelay(false);
+    B.__turnSet(ICE_B, 1800000);      // a credential held: nothing to ask, so B builds inside the drain
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
     B.__answer(true); pump(B, A);     // A gets the accept and kicks off its async offer

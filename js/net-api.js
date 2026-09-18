@@ -16,11 +16,21 @@ const NET_BASE = 'https://fok-server.poggensee.it';
 // BOTH A and AAAA: the p2p connect wants candidates on whichever family works, and the
 // public-address discovery in net-rtc.js can only name a family it gathered over.
 const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
+// TURN (API 4.22). A peer behind a NAT that STUN cannot open has no direct path, and the
+// relay ICE adds to its candidates by itself is the standard way through: the same pc, the
+// same DataChannel, the same netcode, one forwarding hop. The server hands out short-lived
+// credentials for it, per id, as a ready iceServers list (turn.php); the client holds ONE
+// and builds every pc on it until it runs low. Asked right before a pc is built -- that is
+// when a duel is forming -- and never on a screen open: a mint counts against the server's
+// monthly cap, and a lobby visit is not a duel.
+const NET_TURN_MIN_MS = 15 * 60000;   // a pc is built on a credential with at least this much life left, else a fresh one is asked for (the contract's floor on a fresh answer: half the server's ttl)
+const NET_TURN_WAIT_MS = 1500;        // how long a build waits for the ask; past it the pc goes STUN-only and the answer, when it lands, is held for the next one
+const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no ask for this long: a tournament feeder answers a whole fan-out of spectator offers in that window
 const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-server docs/API.md, Versioning)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 21;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
+const NET_API_BUILT_MINOR = 22;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -376,7 +386,7 @@ function _netTokRefused(path){
     _netSigLog('! 401 bad token ' + path.replace(/^\/api\/|\.php.*$/g, ''));
 }
 function netIdRefused(){ return _netIdRefused; }
-function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; if(_netOk()) _netHello(); }
+function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; _netTurn = null; if(_netOk()) _netHello(); }   // a credential is minted for an id, so the old one goes with it
 
 // ---- transport (soft-fail JSON; null = any kind of failure) ----
 // Returns {status, json}: json is null unless the server said ok. status 0 = the
@@ -456,6 +466,54 @@ async function netBgFetch(path, opt){
     if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
     try { return await fetch(NET_BASE + path, opt); }
     finally { _netFlight--; }
+}
+// ---- TURN credentials (turn.php, API 4.22) ----
+// The one credential this client holds: the iceServers list as the server issued it, and
+// when it runs out. Null until an ask is answered. A refusal (503: nothing on offer right
+// now, one answer for every reason) or any failure leaves it as it is, and a pc built
+// meanwhile is STUN-only -- exactly the pre-4.22 pc, never a failed match. One ask in
+// flight at a time; a refusal holds the next ask off for NET_TURN_RETRY_MS.
+let _netTurn = null;        // { ice, exp }
+let _netTurnP = null;       // the ask in flight
+let _netTurnNoAt = 0;       // when the last refusal landed
+function _netTurnLife(){ return _netTurn ? _netTurn.exp - Date.now() : 0; }
+// The iceServers for a pc built now: the held credential while it has life, else STUN alone.
+// P2P ONLY (cfg.noTurn) never hands the relay out, whatever is held.
+function netTurnHeld(){ return (!cfg.noTurn && _netTurnLife() > 0) ? _netTurn.ice : null; }
+function netTurnIce(){ return netTurnHeld() || [{ urls:NET_STUN_URL }]; }
+async function _netTurnAsk(){
+    if(_netTurnP) return _netTurnP;
+    _netTurnP = (async () => {
+        try {
+            // The solo lane: a player is waiting on the pc this builds.
+            const r = await _netPostRes('/api/turn.php', { id:getPlayerId() }, NET_BG_SOLO);
+            const j = r.json;
+            if(j && Array.isArray(j.ice) && j.ice.length && j.ttl > 0){
+                _netTurn = { ice:j.ice, exp:Date.now() + j.ttl * 1000 };
+                _netSigLog('turn ok ' + Math.round(j.ttl / 60) + 'min');
+            } else {
+                _netTurnNoAt = Date.now();
+                _netSigLog('turn ' + (r.status === 503 ? 'none on offer' : 'FAILED ' + (r.status || 'net')) + ' -> stun only');
+            }
+        } finally { _netTurnP = null; }
+    })();
+    return _netTurnP;
+}
+// Before a pc is built: a credential with NET_TURN_MIN_MS of life, asked for when what is
+// held has less. NULL when there is nothing to ask, so the caller builds the pc in the same
+// turn it was called in (a mailbox drain delivers the offer and the first candidates in one
+// loop; a build deferred past it would miss them). Otherwise a promise, bounded: past
+// NET_TURN_WAIT_MS the pc is built with what there is, and the answer, when it lands, is
+// held for the next one.
+function _netTurnReady(){
+    if(cfg.noTurn || !_netOk() || _netTurnLife() >= NET_TURN_MIN_MS) return null;
+    if(_netTurnNoAt && Date.now() - _netTurnNoAt < NET_TURN_RETRY_MS) return null;
+    return new Promise(res => {
+        let t = null;
+        const done = () => { if(t != null && typeof clearTimeout === 'function') clearTimeout(t); t = null; res(); };
+        _netTurnAsk().then(done, done);
+        if(typeof setTimeout === 'function') t = setTimeout(done, NET_TURN_WAIT_MS);
+    });
 }
 // Every caller ignored the result of this, so the server REFUSING a signal was
 // indistinguishable from success: a 403 (no accepted friendship), a 400 (our clock
@@ -899,6 +957,7 @@ function netDebugInfo(){
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,
              session: _netSess ? { peer:_netSess.peer, role:_netSess.role, game:_netSess.game } : null,
              iceDeob:_netDbg.iceDeob|0, peerNet: _netSess ? (_netPeerNet[_netSess.peer] || null) : null,
+             turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, noTurn: !!cfg.noTurn,   // the TURN credential held (API 4.22): seconds left, or none
              // 4.4, and the whole point of it: iceSignals vs iceBatches says how many
              // requests the batching actually saved, and srvQueueMs is the server telling
              // us how long its last answer waited for a worker.

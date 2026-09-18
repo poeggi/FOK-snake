@@ -143,14 +143,17 @@ name entry to open the keyboard.
   version 3 holding 53 bytes, and 42 of those are the URL itself
 - Online matchmaking via FOK-server (invite friends with live online status and
   latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
-  DataChannel, with an HTTP relay fallback when P2P cannot connect. The netcode is
+  DataChannel. Where no direct path exists, ICE falls back to a TURN relay on
+  short-lived credentials the server hands out per player (server API 4.22), the
+  same DataChannel one hop longer; the deprecated HTTP relay is used only where the
+  server offers no TURN. The netcode is
   deterministic lockstep with rollback: both clients run the same inputs-only sim
   off a shared PTS clock, so neither side owns the game state and controls feel
   local on both ends. Every timeline boundary (match start, level, rematch,
   death respawn, outage recovery) is agreed over an acknowledged go/req exchange
   with a peer-to-peer clock burst, and a periodic authoritative-state exchange
-  heals any divergence. A RELAY ONLY (NO P2P) setting forces the HTTP relay path
-  for networks where WebRTC never connects
+  heals any divergence. A P2P ONLY (NO TURN RELAY) setting never asks for TURN
+  credentials, so no match of that client rides a public relay
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
 - A proven identity: the 32-bit id is public, a secret token the server mints on

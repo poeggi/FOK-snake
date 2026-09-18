@@ -20,6 +20,22 @@ runTest('SMOKE-GAME', `
     if(cfg.diff!==1 || cfg.music!==true) throw 'garbage save did not fall back to defaults';
     log('config load tolerance ok');
 
+    // cfgVer 4: the RELAY ONLY row is gone (P2P ONLY took its place), so a save from before
+    // drops noP2P on load -- a client stuck on the HTTP relay would have no row to leave it
+    // by. A cfgVer-4 save keeps it (a save edit is the one way left onto the relay).
+    localStorage.setItem(CFG_KEY, JSON.stringify({ noP2P:true, cfgVer:3 })); loadCfg();
+    if(cfg.noP2P!==false) throw 'a pre-v4 save must lose noP2P';
+    if(cfg.cfgVer!==4) throw 'the live cfg carries the current version';
+    if(cfg.noTurn!==false) throw 'P2P ONLY defaults to OFF';
+    localStorage.setItem(CFG_KEY, JSON.stringify({ noP2P:true, noTurn:true, cfgVer:4 })); loadCfg();
+    if(cfg.noP2P!==true) throw 'a v4 save edit onto the relay is honoured';
+    if(cfg.noTurn!==true) throw 'P2P ONLY persists';
+    { const net = SETTINGS_CATS.find(c=>c.label==='NETWORK').items.map(it=>it.lbl());
+      if(!net.some(l=>l.indexOf('P2P ONLY (NO TURN RELAY)')===0)) throw 'the P2P ONLY row is on the NETWORK page: '+JSON.stringify(net);
+      if(net.some(l=>l.indexOf('RELAY ONLY')===0)) throw 'the RELAY ONLY row is gone: '+JSON.stringify(net); }
+    localStorage.setItem(CFG_KEY, JSON.stringify({})); loadCfg();
+    log('cfgVer 4 ok: noP2P dropped from an older save, P2P ONLY on the menu');
+
     // THE SPLASH HOLD: frame 0 (dark, no coin) holds SPLASH_HOLD_S after the splash comes
     // up, then the 4 s cycle runs as before, its first drop at 1.5 s. drawSplash and the
     // fast-forward read the same clock, so a press inside the hold starts the 2x replay

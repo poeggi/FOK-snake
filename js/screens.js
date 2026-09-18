@@ -445,7 +445,7 @@ const SETTINGS_CATS = [
         { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
           dis:()=>_runInsecure(),   // not an HTTPS page (file://, plain http): the server is never spoken to, so offline is forced (greyed)
           act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline)netOfflineClear();} },
-        _tog('RELAY ONLY (NO P2P)','noP2P'),
+        _tog('P2P ONLY (NO TURN RELAY)','noTurn'),
         _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
         _tog('MAKE DUELS PRIVATE','privateDuels'),
     ]},

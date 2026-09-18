@@ -76,7 +76,7 @@ async function _netInviteSend(to){
     if(inGame) return;
     if(_netSess) _netTeardown();          // debris from a dead attempt: drop it silently, never bye the new target
     if(!_netOk()) return;
-    const relay = !!cfg.noP2P;   // DEPRECATED(relay): true only while the RELAY ONLY toggle is on; the relay still ships, but is not extended
+    const relay = !!cfg.noP2P;   // DEPRECATED(relay): cfg.noP2P has no menu row (P2P ONLY replaced it) and is cleared on load; a save edit still routes here. The relay still ships, but is not extended
     if(!relay && !_netRtcAvail()){ _netLb.msg = 'WEBRTC NOT SUPPORTED'; return; }   // relay mode needs no WebRTC
     if(_netHs.sent && _netHs.sent !== to) _netSignal(_netHs.sent, 'bye', '');       // switching targets: withdraw the old one
     _netHsClear();
@@ -295,9 +295,10 @@ function _netOnSignal(sig){
                     }
                     if(d.relay && _netSess.pc && !_netSess.game){   // DEPRECATED(relay): whole branch
                         // They answered in relay mode (their setting, not ours). Switch
-                        // this attempt over at once rather than letting the pc time out.
-                        _netRelayStart(_netSess);
-                        _netLb.msg = 'RELAY MODE - CONNECTING...';   // nothing failed here: their choice
+                        // this attempt over at once rather than letting the pc time out --
+                        // unless our pc holds a TURN credential, which never rides the relay.
+                        _netRtcFailed(_netSess);
+                        if(_netSess) _netLb.msg = 'RELAY MODE - CONNECTING...';   // nothing failed here: their choice
                     }
                     // rc is the offer generation: an answer only fits the pc built for THAT offer.
                     // Signals are one-shot but not ordered, so an answer to a superseded offer can
@@ -313,14 +314,15 @@ function _netOnSignal(sig){
             }
             case 'ice':
                 if(_netSess && _netSess.peer === from && _netSess.pc) _netIceTake(_netSess, _netJson(pl));
+                else _netIceEarlyPark(from, _netJson(pl));   // the offer is being answered, its credential ask out
                 break;
             // 4.4: SEVERAL candidates in one signal, in the order they were gathered. The
             // batch is a cheaper envelope and nothing else -- each candidate takes exactly
             // the path it would have taken alone, so nothing downstream can tell them apart.
             case 'ices': {
-                if(!(_netSess && _netSess.peer === from && _netSess.pc)) break;
+                const live = !!(_netSess && _netSess.peer === from && _netSess.pc);
                 const arr = _netJsonArr(pl);
-                for(let i = 0; i < arr.length && i < NET_ICES_MAX; i++) _netIceTake(_netSess, arr[i]);
+                for(let i = 0; i < arr.length && i < NET_ICES_MAX; i++){ if(live) _netIceTake(_netSess, arr[i]); else _netIceEarlyPark(from, arr[i]); }
                 break;
             }
             case 'peer-net': {

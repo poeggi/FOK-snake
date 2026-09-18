@@ -202,6 +202,7 @@ function _netMkSess(peer, role){
              // Tournament matches and every spectator link are P2P-ONLY: the deprecated
              // server relay is not an acceptable transport for them (see _netRelayStart).
              p2pOnly:false,
+             turn:false,   // the pc was built on a TURN credential (API 4.22): a failed connect ends the attempt, never the HTTP relay
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false,
              // simSeenWall: the last time we had PROOF the peer's sim advanced (see _netSimStalled).
@@ -310,7 +311,8 @@ function _netIceOut(to, cand, ver){
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
+    _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is, so no HTTP relay behind it
+    const pc = new RTCPeerConnection({ iceServers:netTurnIce() });   // the TURN credential held, or STUN alone (API 4.22)
     _netSess.pc = pc;
     _netIceTxReset(peer);
     pc.onicecandidate = e => { if(e.candidate) _netIceOut(peer, e.candidate); };
@@ -319,16 +321,27 @@ function _netRtcInit(peer, role){
         // DEPRECATED(relay): the fallback hook -- without net-relay.js a failed P2P just ends the attempt.
         if(!s || s.pc !== pc || s.relay) return;   // relay mode: the RTC attempt no longer owns the session
         if(pc.connectionState === 'failed' || pc.connectionState === 'closed'){
-            if(!s.game) _netRelayStart(s);              // P2P never came up: fall back NOW (earlier than the 6s timer)
+            if(!s.game) _netRtcFailed(s);               // P2P never came up: give up on it NOW (earlier than the 6s timer)
             else if(!s.reconnectAt) _netReconnect(s);   // an established game lost its channel: rebuild it, do NOT end
         }
     };
-    // P2P gets 6 seconds; then the match falls back to the server relay. DEPRECATED(relay)
-    if(_netTimers) _netSess.connT = setTimeout(()=>{ if(_netSess && _netSess.pc === pc && !_netSess.game) _netRelayStart(_netSess); }, 6000);
+    // P2P gets 6 seconds; then the attempt ends, or falls back to the server relay. DEPRECATED(relay)
+    if(_netTimers) _netSess.connT = setTimeout(()=>{ if(_netSess && _netSess.pc === pc && !_netSess.game) _netRtcFailed(_netSess); }, 6000);
     return pc;
+}
+// A pc that never came up. Built on a TURN credential it had every path there is (direct,
+// reflexive, relayed), so the attempt ends here and says so. Built STUN-only -- turn.php
+// answered 503 -- it falls back to the deprecated HTTP relay, the only case a 4.22 client
+// ever uses it (a tournament's p2pOnly session refuses that too, in _netRelayStart).
+function _netRtcFailed(s){
+    if(_netSess !== s || s.game) return;
+    if(s.turn){ _netSigLog('! no path (p2p + turn)'); _netSessionEnd('NO PATH - P2P AND TURN FAILED'); return; }
+    _netRelayStart(s);   // DEPRECATED(relay)
 }
 async function _netRtcOffer(peer, peerProfile){   // we invited / we are the quick-match offerer: we make the seed
     if(!_netRtcAvail() || inGame){ _netSigLog('> offer SKIP'); return; }
+    const w = _netTurnReady();            // the one request before the pc: a TURN credential, when the server offers one
+    if(w){ await w; if(inGame){ _netSigLog('> offer SKIP'); return; } }
     if(_netSess) _netTeardown();          // debris: replace it, never silently skip the offer
     const pc = _netRtcInit(peer, 'host');
     if(peerProfile) _netSess.peerProfile = peerProfile;
@@ -342,6 +355,16 @@ async function _netRtcOffer(peer, peerProfile){   // we invited / we are the qui
         _netSignal(peer, 'offer', payload);
         _netLb.msg = 'CONNECTING (P2P)...'; _uiDirty = true;
     } catch(e){ _netSessionEnd('CONNECTION FAILED'); }
+}
+let _netAnswering = '';   // the offer sdp whose credential ask is out (see _netRtcAnswer)
+// Candidates that arrive for that offer while the ask is out. The host ships its first one
+// right behind the offer, so one mailbox drain can carry both, and a session that does not
+// exist yet would drop it: parked here and handed to the session the moment it is built,
+// where they park again until the remote description settles.
+let _netIceEarly = { peer:'', list:[] };
+function _netIceEarlyPark(from, cand){
+    if(_netIceEarly.peer !== from || _netIceEarly.list.length >= NET_ICES_MAX) return;
+    _netIceEarly.list.push(cand);
 }
 async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match answerer: seed comes with the offer
     if(d && !_netVerOk(d.v)){
@@ -360,9 +383,22 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
         _netSignal(peer, 'answer', JSON.stringify({ sdp: _netSess.pc && _netSess.pc.localDescription, profile:_netProfile(), v:_swVersion, rc:(d && d.rc)|0 }));
         return;
     }
+    // A copy of the offer we are already answering (two in one mailbox drain) is dropped
+    // while the credential ask below is out: the host re-sends anyway, and by then the pc
+    // exists and the re-send path above answers it.
+    if(_netAnswering === okey) return;
+    const w = _netTurnReady();            // the one request before the pc: a TURN credential, when the server offers one
+    let early = [];
+    if(w){
+        _netAnswering = okey; _netIceEarly = { peer, list:[] };
+        await w;
+        _netAnswering = ''; early = _netIceEarly.peer === peer ? _netIceEarly.list : []; _netIceEarly = { peer:'', list:[] };   // a second offer from ANOTHER peer during the ask re-keys the lot; only this peer's list is ours
+        if(inGame){ _netSigLog('< offer SKIP'); return; }
+    }
     if(_netSess) _netTeardown();          // unrelated debris must not swallow the offer
     const pc = _netRtcInit(peer, 'peer');
     _netSess.offKey = okey;
+    for(const c of early) _netIceTake(_netSess, c);   // what the drain delivered during the ask, in order
     _netSess.peerProfile = _netClampProfile(d.profile);
     // The offer names the peer's build, so the ANSWERER may batch its ICE from the very
     // first candidate. The offerer only learns it from the answer and sends singles until
@@ -684,7 +720,11 @@ function _netPathStat(s){
         // connected, i.e. the direct IPv6 path won past mDNS. Otherwise it is a normal host
         // (LAN mDNS resolved), srflx (STUN reflexive) or prflx pair.
         const deob = pn && pn.ip && addr(rem) === pn.ip ? ' deob' : '';
-        _netDbg.path = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob + '  p2p-rtt ' + rtt;
+        const p = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob;
+        // On record whenever it changes: which path carried the match, and a relay pair
+        // nominated first and swapped for a direct one later would show as two lines.
+        if(p !== s.pathSeen){ s.pathSeen = p; _netSigLog('path ' + p); }
+        _netDbg.path = p + '  p2p-rtt ' + rtt;
     }).catch(()=>{});
 }
 // TIMELINE BREAK (the tick target >600 ticks, ~10s, AHEAD of our sim): the sim was FROZEN while
@@ -802,7 +842,8 @@ function _netRtcRebuild(s){
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null;
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
-    const pc = new RTCPeerConnection({ iceServers:[{ urls:NET_STUN_URL }] });
+    s.turn = !!netTurnHeld();
+    const pc = new RTCPeerConnection({ iceServers:netTurnIce() });   // what is held, no ask: the kill clock is running
     s.pc = pc;
     _netIceTxReset(s.peer);
     pc.onicecandidate = e => { if(e.candidate) _netIceOut(s.peer, e.candidate); };
