@@ -2,7 +2,7 @@
 
 An EVENT is a room an operator opens on the server. You get in by scanning
 its QR (straight in when OPEN, after organizer approval when CLOSED). Inside:
-member-only tournaments, an archive, a secret achievement, and a 20 s live
+member-only tournaments, an archive, a secret achievement, and a 30 s live
 pass any member can show. Everything lives in `js/events.js` and its screens.
 
 ## The server is the roster; nothing here keeps a copy

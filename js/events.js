@@ -29,10 +29,11 @@
 
 // ---- constants -------------------------------------------------------------
 // The pass answer states its own step and validity (they are admin-configurable
-// server-side), so nothing here hard-codes 10 and 20. These are the fallbacks
-// for an answer that omits them, and the bounds that keep a wrong number from
+// server-side), so nothing here hard-codes 20 and 30. These are the fallbacks
+// for an answer that omits them (the server's defaults: a code is on screen for
+// 20 s and opens the door for 30), and the bounds that keep a wrong number from
 // turning the QR screen into a request loop.
-const EV_STEP_MS_DEF = 10000, EV_VALID_MS_DEF = 20000;
+const EV_STEP_MS_DEF = 20000, EV_VALID_MS_DEF = 30000;
 const EV_STEP_MS_MIN = 2000, EV_STEP_MS_MAX = 120000;
 
 // ---- state -----------------------------------------------------------------
@@ -682,10 +683,10 @@ function eventTourneyNew(){
 // is no room for one in 53 bytes -- so the server never learns who passed it on
 // and could not be made to.
 //
-// ONE CALL gives six 10-second slots, a minute of QR, and the screen rotates
-// LOCALLY on the synced clock. Nothing here polls: the codes for the next minute
-// are already in hand, and the only request is the one that fetches the next
-// minute before this one runs out.
+// ONE CALL gives six slots (one step each, 20 s by default: two minutes of QR),
+// and the screen rotates LOCALLY on the synced clock. Nothing here polls: the
+// codes for the next slots are already in hand, and the only request is the one
+// that fetches the next six before these run out.
 let _evPass = null;      // { step, valid, slots:[{at, code}] }
 let _evPassT = null;     // the 1 Hz tick that re-asks before the last slot lapses
 let _evPassBusy = false;
@@ -693,7 +694,7 @@ let _evPassDenyAt = 0;   // when a read was last refused: the tick waits EV_PASS
 const EV_PASS_RETRY_MS = 30000;
 function eventPassView(){ return _evPass; }
 // step and valid are ADMIN-CONFIGURABLE and ride the answer, so nothing here
-// hard-codes 10 and 20. The bounds are not a second opinion on the server's
+// hard-codes 20 and 30. The bounds are not a second opinion on the server's
 // numbers -- they are what stops a wrong or missing one turning this screen into
 // a request loop.
 function _evPassStep(){
@@ -705,9 +706,10 @@ function _evPassValid(){
     return Math.max(_evPassStep(), Math.min(EV_STEP_MS_MAX * 2, ms || EV_VALID_MS_DEF));
 }
 // THE SLOT ON SCREEN: the NEWEST one that has begun. The windows overlap on
-// purpose -- a code stays valid for two slots, so one already read off a screen
-// still opens the door while the screen has moved on -- and when two are valid
-// the newer is the one with longer left to live.
+// purpose -- a code stays valid past its step (30 s on a 20 s step: 10 s of
+// grace), so one already read off a screen still opens the door while the
+// screen has moved on -- and when two are valid the newer is the one with
+// longer left to live.
 function eventPassSlot(now){
     if(!_evPass || !_evPass.slots || !_evPass.slots.length) return null;
     if(now == null) now = _evNow();
@@ -770,8 +772,8 @@ function _evPassArm(){
     eventPassRead();
 }
 // Ask again BEFORE the last slot lapses, never after: a screen that waited for
-// the gap would show nothing across it. One request a minute, which is what six
-// slots were handed out for.
+// the gap would show nothing across it. One request per six slots, which is
+// what they were handed out for.
 function _evPassTick(){
     if(!_evPassWanted()){ eventPassLeave(); return; }
     const now = _evNow();
