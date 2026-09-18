@@ -24,8 +24,14 @@ const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
 // when a duel is forming -- and never on a screen open: a mint counts against the server's
 // monthly cap, and a lobby visit is not a duel.
 const NET_TURN_MIN_MS = 15 * 60000;   // a pc is built on a credential with at least this much life left, else a fresh one is asked for (the contract's floor on a fresh answer: half the server's ttl)
-const NET_TURN_WAIT_MS = 1500;        // how long a build waits for the ask; past it the pc goes STUN-only and the answer, when it lands, is held for the next one
+const NET_TURN_WAIT_MS = 1000;        // how long a build waits for the ask: the server answers (credential or 503) within 0.6 s plus the round trip; past this the pc goes STUN-only and an answer landing later is held for the next one
 const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no ask for this long: a tournament feeder answers a whole fan-out of spectator offers in that window
+// SETTINGS > NETWORK > TURN RELAY (cfg.turnMode). AUTO: the credential rides every pc and
+// ICE picks the path (direct where one exists). FORCED: the pc is built relay-only
+// (iceTransportPolicy 'relay'), so a match runs through TURN even on a LAN -- the way to
+// see the relayed path on a device. DISABLED: never asks, every pc is STUN-only, no match
+// of this client rides a public relay.
+const NET_TURN_AUTO = 0, NET_TURN_FORCED = 1, NET_TURN_DISABLED = 2;
 const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-server docs/API.md, Versioning)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
@@ -478,9 +484,19 @@ let _netTurnP = null;       // the ask in flight
 let _netTurnNoAt = 0;       // when the last refusal landed
 function _netTurnLife(){ return _netTurn ? _netTurn.exp - Date.now() : 0; }
 // The iceServers for a pc built now: the held credential while it has life, else STUN alone.
-// P2P ONLY (cfg.noTurn) never hands the relay out, whatever is held.
-function netTurnHeld(){ return (!cfg.noTurn && _netTurnLife() > 0) ? _netTurn.ice : null; }
-function netTurnIce(){ return netTurnHeld() || [{ urls:NET_STUN_URL }]; }
+// DISABLED never hands the relay out, whatever is held.
+function netTurnHeld(){ return (cfg.turnMode !== NET_TURN_DISABLED && _netTurnLife() > 0) ? _netTurn.ice : null; }
+// The whole RTCPeerConnection configuration for a duel or spectator pc (the nets probe has
+// its own, STUN-only). FORCED without a credential (the server offered none) builds the
+// plain pc: a match is never failed on TURN, and the signal log says what happened.
+function netRtcConfig(){
+    const held = netTurnHeld();
+    if(cfg.turnMode === NET_TURN_FORCED){
+        if(held) return { iceServers:held, iceTransportPolicy:'relay' };
+        _netSigLog('turn FORCED, none held -> plain pc');
+    }
+    return { iceServers:held || [{ urls:NET_STUN_URL }] };
+}
 async function _netTurnAsk(){
     if(_netTurnP) return _netTurnP;
     _netTurnP = (async () => {
@@ -506,7 +522,7 @@ async function _netTurnAsk(){
 // NET_TURN_WAIT_MS the pc is built with what there is, and the answer, when it lands, is
 // held for the next one.
 function _netTurnReady(){
-    if(cfg.noTurn || !_netOk() || _netTurnLife() >= NET_TURN_MIN_MS) return null;
+    if(cfg.turnMode === NET_TURN_DISABLED || !_netOk() || _netTurnLife() >= NET_TURN_MIN_MS) return null;
     if(_netTurnNoAt && Date.now() - _netTurnNoAt < NET_TURN_RETRY_MS) return null;
     return new Promise(res => {
         let t = null;
@@ -957,7 +973,7 @@ function netDebugInfo(){
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,
              session: _netSess ? { peer:_netSess.peer, role:_netSess.role, game:_netSess.game } : null,
              iceDeob:_netDbg.iceDeob|0, peerNet: _netSess ? (_netPeerNet[_netSess.peer] || null) : null,
-             turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, noTurn: !!cfg.noTurn,   // the TURN credential held (API 4.22): seconds left, or none
+             turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, turnMode: cfg.turnMode|0,   // the TURN credential held (API 4.22): seconds left, or none; the setting (0 auto, 1 forced, 2 disabled)
              // 4.4, and the whole point of it: iceSignals vs iceBatches says how many
              // requests the batching actually saved, and srvQueueMs is the server telling
              // us how long its last answer waited for a worker.

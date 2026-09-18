@@ -315,7 +315,7 @@ function _spIceOut(l, cand){
     _spSignal(l.peer, 'ice', { c:cand });
 }
 function _spMkPc(peer, arr, kind){
-    const pc = new RTCPeerConnection({ iceServers:netTurnIce() });   // the player's TURN credential serves its spectator links too (API 4.22)
+    const pc = new RTCPeerConnection(netRtcConfig());   // the player's TURN credential serves its spectator links too (API 4.22)
     const l = { peer, pc, dc:null, rdOk:false, iceQ:[], sub:false, kind, dead:false,
                 openAt:0, lastAt:_spNow(), live:false, ver:'' };
     // A fresh pc gathers afresh, so whatever is still buffered for this peer belongs to a

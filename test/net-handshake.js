@@ -105,10 +105,11 @@ const HOOKS = (myId) => `
   globalThis.__setRelay  = (on)=>{ cfg.noP2P = !!on; };
   // TURN (API 4.22): the credential held, the pc it built, the fallback it did or did not take.
   globalThis.__setTurn   = (fn)=>{ __turnFn = fn; };
-  globalThis.__turnReset = ()=>{ _netTurn = null; _netTurnNoAt = 0; __turnFn = null; cfg.noTurn = false; };
+  globalThis.__turnReset = ()=>{ _netTurn = null; _netTurnNoAt = 0; __turnFn = null; cfg.turnMode = 0; };
   globalThis.__turnSet   = (ice, lifeMs)=>{ _netTurn = { ice, exp: Date.now() + lifeMs }; };
   globalThis.__turnLife  = ()=> _netTurnLife();
-  globalThis.__setNoTurn = (on)=>{ cfg.noTurn = !!on; };
+  globalThis.__setTurnMode = (m)=>{ cfg.turnMode = m|0; };
+  globalThis.__turnWaitMs = ()=> NET_TURN_WAIT_MS;
   globalThis.__pcCfg     = ()=> (_netSess && _netSess.pc) ? _netSess.pc.cfgArg : null;
   globalThis.__pcCount   = ()=> __pcN;
   globalThis.__sessTurn  = ()=> !!(_netSess && _netSess.turn);
@@ -413,15 +414,31 @@ try {
     if(A.__state().sess) throw new Error('the attempt must have ended: ' + JSON.stringify(A.__state()));
     if(!A.__out.some(s => s.type === 'bye')) throw new Error('the peer is told');
   });
-  await acheck('turn: P2P ONLY (cfg.noTurn) never asks and builds STUN only, whatever is held', async () => {
+  await acheck('turn: DISABLED never asks and builds STUN only, whatever is held', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
-    A.__turnSet(ICE_A, 1800000); A.__setNoTurn(true);
+    A.__turnSet(ICE_A, 1800000); A.__setTurnMode(2);
     await round(A, B);
-    if(A.__turnCalls() !== 0) throw new Error('P2P ONLY asks for nothing');
-    if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('P2P ONLY builds on STUN alone: ' + JSON.stringify(A.__pcCfg()));
-    if(A.__sessTurn()) throw new Error('P2P ONLY never marks the session');
-    if(!same(A.__spMkPc('cafe0001'), { iceServers:STUN_ONLY })) throw new Error('P2P ONLY covers spectator pcs too');
+    if(A.__turnCalls() !== 0) throw new Error('DISABLED asks for nothing');
+    if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('DISABLED builds on STUN alone: ' + JSON.stringify(A.__pcCfg()));
+    if(A.__sessTurn()) throw new Error('DISABLED never marks the session');
+    if(!same(A.__spMkPc('cafe0001'), { iceServers:STUN_ONLY })) throw new Error('DISABLED covers spectator pcs too');
+  });
+  await acheck('turn: FORCED builds relay-only pcs on the credential; without one the plain pc', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    A.__setTurnMode(1);
+    await round(A, B);
+    if(A.__turnCalls() !== 1) throw new Error('FORCED asks like AUTO, got ' + A.__turnCalls());
+    if(!same(A.__pcCfg(), { iceServers:ICE_A, iceTransportPolicy:'relay' })) throw new Error('FORCED = relay-only on the credential: ' + JSON.stringify(A.__pcCfg()));
+    if(!A.__sessTurn()) throw new Error('a forced pc is a TURN pc: no HTTP relay behind it');
+    if(!same(A.__spMkPc('cafe0001'), { iceServers:ICE_A, iceTransportPolicy:'relay' })) throw new Error('FORCED covers spectator pcs too');
+    // The server offers nothing: the match still happens, on the plain pc.
+    A.__turnReset(); A.__setTurnMode(1);
+    A.__setTurn(()=>({ status:503, json:null, err:'turn_unavailable' }));
+    await round(A, B);
+    if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('FORCED with no credential builds the plain pc: ' + JSON.stringify(A.__pcCfg()));
+    if(A.__sessTurn()) throw new Error('...and it is not a TURN pc');
   });
   await acheck('turn: the wait for the ask is bounded at NET_TURN_WAIT_MS; a late answer is held for the next pc', async () => {
     const A = mk(A_ID), B = mk(B_ID);
@@ -430,7 +447,7 @@ try {
     A.__clampTimers();
     await round(A, B);
     await new Promise(r=>setTimeout(r, 20)); await flush();
-    if(!A.__tmReq.includes(1500)) throw new Error('the bound must be armed at NET_TURN_WAIT_MS: ' + JSON.stringify(A.__tmReq));
+    if(!A.__tmReq.includes(A.__turnWaitMs())) throw new Error('the bound must be armed at NET_TURN_WAIT_MS: ' + JSON.stringify(A.__tmReq));
     if(!A.__pcCfg()) throw new Error('past the bound the pc is built without waiting further');
     if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('...on STUN alone: ' + JSON.stringify(A.__pcCfg()));
     release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();

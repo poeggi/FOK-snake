@@ -152,8 +152,9 @@ name entry to open the keyboard.
   local on both ends. Every timeline boundary (match start, level, rematch,
   death respawn, outage recovery) is agreed over an acknowledged go/req exchange
   with a peer-to-peer clock burst, and a periodic authoritative-state exchange
-  heals any divergence. A P2P ONLY (NO TURN RELAY) setting never asks for TURN
-  credentials, so no match of that client rides a public relay
+  heals any divergence. A TURN RELAY setting picks AUTO (ICE chooses), FORCED
+  (relay-only, to see the relayed path) or DISABLED (never asks, so no match of
+  that client rides a public relay)
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
 - A proven identity: the 32-bit id is public, a secret token the server mints on

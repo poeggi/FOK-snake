@@ -12,7 +12,7 @@ carries STUN only, so a peer behind a symmetric NAT has no other path.
 
 The replacement is TURN in the `iceServers` list, and it is in: since server API 4.22
 `turn.php` hands out short-lived credentials for Cloudflare's relay, held per client
-(`_netTurnReady` / `netTurnIce` in `js/net-api.js`) and passed to every pc it builds.
+(`_netTurnReady` / `netRtcConfig` in `js/net-api.js`) and passed to every pc it builds.
 That keeps the IDENTICAL DataChannel -- same unreliable-unordered netcode, one forwarding
 hop. A pc built on a credential has every path there is, so when it fails the attempt ends
 (`_netRtcFailed`); the HTTP relay is started only when `turn.php` offered nothing (503).
@@ -39,7 +39,7 @@ deliberate rather than an omission:
    `test/check-ownership.js`.
 3. Delete the residual hooks below. Every one carries a `DEPRECATED(relay)` marker, so
    `grep -rn "DEPRECATED(relay)" js/` is the authoritative list -- this file is a summary.
-4. Retire `cfg.noP2P` (off the menu since the P2P ONLY row replaced it, cleared on load,
+4. Retire `cfg.noP2P` (off the menu since the TURN RELAY row replaced it, cleared on load,
    honoured from a save edit) and `api/relay.php` server-side.
 
 ## Residual hooks (all marked `DEPRECATED(relay)`)

@@ -76,7 +76,7 @@ async function _netInviteSend(to){
     if(inGame) return;
     if(_netSess) _netTeardown();          // debris from a dead attempt: drop it silently, never bye the new target
     if(!_netOk()) return;
-    const relay = !!cfg.noP2P;   // DEPRECATED(relay): cfg.noP2P has no menu row (P2P ONLY replaced it) and is cleared on load; a save edit still routes here. The relay still ships, but is not extended
+    const relay = !!cfg.noP2P;   // DEPRECATED(relay): cfg.noP2P has no menu row (TURN RELAY replaced it) and is cleared on load; a save edit still routes here. The relay still ships, but is not extended
     if(!relay && !_netRtcAvail()){ _netLb.msg = 'WEBRTC NOT SUPPORTED'; return; }   // relay mode needs no WebRTC
     if(_netHs.sent && _netHs.sent !== to) _netSignal(_netHs.sent, 'bye', '');       // switching targets: withdraw the old one
     _netHsClear();

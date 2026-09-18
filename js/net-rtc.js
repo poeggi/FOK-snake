@@ -312,7 +312,7 @@ function _netIceOut(to, cand, ver){
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
     _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is, so no HTTP relay behind it
-    const pc = new RTCPeerConnection({ iceServers:netTurnIce() });   // the TURN credential held, or STUN alone (API 4.22)
+    const pc = new RTCPeerConnection(netRtcConfig());   // the TURN credential held, or STUN alone (API 4.22)
     _netSess.pc = pc;
     _netIceTxReset(peer);
     pc.onicecandidate = e => { if(e.candidate) _netIceOut(peer, e.candidate); };
@@ -842,8 +842,11 @@ function _netRtcRebuild(s){
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null;
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
+    // What is held, with whatever life it has left, no ask: the kill clock is running. A
+    // rebuild deep into a relayed match may build on a credential with minutes left; the
+    // match would have ended at the credential's end anyway (no mid-match refresh).
     s.turn = !!netTurnHeld();
-    const pc = new RTCPeerConnection({ iceServers:netTurnIce() });   // what is held, no ask: the kill clock is running
+    const pc = new RTCPeerConnection(netRtcConfig());
     s.pc = pc;
     _netIceTxReset(s.peer);
     pc.onicecandidate = e => { if(e.candidate) _netIceOut(s.peer, e.candidate); };
