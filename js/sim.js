@@ -859,10 +859,32 @@ function _pathDist(start, goal) {
     }
     return Infinity;
 }
+// The fewest-steps budget from the head to `goal`: actual moves, routing around the snake's
+// own body and solid barricades (Manhattan distance ignored those, making the "fewest steps"
+// x2 bonus unfairly hard whenever the body blocked the direct line), +2 slack. A goal that
+// is walled off falls back to the wrapped Manhattan estimate with a turn penalty.
+function _gemBudget(goal){
+    const pd=_pathDist(snake[0], goal);
+    if(pd!==Infinity) return pd+2;
+    let dgx=goal.x-snake[0].x, dgy=goal.y-snake[0].y;
+    if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
+    if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
+    const turnPenalty=(dgx*dir.x+dgy*dir.y<0&&Math.abs(dgx*dir.y-dgy*dir.x)===0)?2:0;
+    return Math.abs(dgx)+Math.abs(dgy)+turnPenalty+2;
+}
+// A bead is scored like a gem, on the budget to the NEAREST uneaten bead from where the
+// head is now: set when the line spawns and again after every bead. Along the line that is
+// 1+2 moves per bead (orthogonal) or 2+2 (diagonal); the approach to the first bead is
+// what a detour can cost.
+function _gourangaBudget(){
+    let best=Infinity;
+    for(let i=0;i<_gourangaLine.length;i++) if(!((_gourangaEaten>>i)&1)) best=Math.min(best,_gemBudget(_gourangaLine[i]));
+    gemOptimal=best===Infinity?0:best; gemSteps=0;
+}
 function spawnGem() {
     // Gouranga is the only collectible while active: _gourangaMaybe drops any lingering gem
     // (the one just eaten still sits in `gem` here) so it can't be re-collected on the board.
-    if(_gourangaMaybe(new Set(snake.concat(bars).map(ck)))) return;
+    if(_gourangaMaybe(new Set(snake.concat(bars).map(ck)))){ _gourangaBudget(); return; }
     gem=freeCell(new Set(snake.concat(bars).map(ck)));
     const rv=rng();
     const rareMult=[1,1,2][cfg.diff]||1;   // hard doubles the epic/lucky odds; easy/normal unchanged
@@ -870,21 +892,7 @@ function spawnGem() {
     if(gem.tier===2) emit({t:'sfx',name:'epic_spawn'});
     else if(gem.tier===1) emit({t:'sfx',name:'lucky_spawn'});
     gemAt=gem.spawnAt=simNow;
-    // Fewest actual moves to the gem, routing around the snake's own body and solid
-    // barricades. Manhattan distance ignored those, making the "fewest steps" x2 bonus
-    // unfairly hard whenever the body blocked the direct line. +2 preserves the original
-    // slack; if the gem is walled off, fall back to the wrapped Manhattan estimate.
-    const pd=_pathDist(snake[0], gem);
-    if(pd===Infinity){
-        let dgx=gem.x-snake[0].x, dgy=gem.y-snake[0].y;
-        if(dgx>COLS/2) dgx-=COLS; if(dgx<-COLS/2) dgx+=COLS;
-        if(dgy>ROWS/2) dgy-=ROWS; if(dgy<-ROWS/2) dgy+=ROWS;
-        const turnPenalty=(dgx*dir.x+dgy*dir.y<0&&Math.abs(dgx*dir.y-dgy*dir.x)===0)?2:0;
-        gemOptimal=Math.abs(dgx)+Math.abs(dgy)+turnPenalty+2;
-    } else {
-        gemOptimal=pd+2;
-    }
-    gemSteps=0;
+    gemOptimal=_gemBudget(gem); gemSteps=0;
     _spawnExtras(new Set(snake.concat(bars).map(ck)));
     if(!_earlyHeartUsed&&level>=4&&level<=6){
         // Drop the one early heart at the trigger-th L4-6 gem. If a heart is already on the
@@ -929,19 +937,23 @@ function step(now) {
     if(anyAte){
         gemsDone++;
         if(ateGourangaIdx>=0){
+            // The same rule as a gem: the streak multiplier on the fewest-steps budget to
+            // the nearest bead, the flat value and a reset streak off it.
+            const bonus=gemOptimal>0&&gemSteps<=gemOptimal;
+            if(!bonus) perfectLevel=false;
             const bonusMult=(levelBonusCount+1)*2;
-            score+=level*100*bonusMult;
-            levelBonusCount++;
-            if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'});
+            score+=bonus?level*100*bonusMult:level*100;
             const swept=_gourangaSwept();
             if(swept===true){                             // clean end-to-end sweep: full GOURANGA payoff
                 emit({t:'ach',id:'gouranga'});
                 emit({t:'bonus',label:'GOURANGA!'}); emit({t:'sfx',name:'perfect'});
-            } else {                                      // mid-line, or a detoured completion: ordinary bead
+            } else if(bonus){                             // mid-line, or a detoured completion: an ordinary bead
                 emit({t:'bonus',label:`x${bonusMult} BONUS!`});
-                emit({t:'sfx',name:'eat'});
-            }
+                emit({t:'sfx',name:'bonus'});
+            } else emit({t:'sfx',name:'eat'});
             emit({t:'ach',id:'first_gem'});
+            if(bonus){ levelBonusCount++; if(levelBonusCount>=5) emit({t:'ach',id:'bonus_3'}); } else levelBonusCount=0;
+            if(_gourangaActive) _gourangaBudget();       // the next bead's budget starts here
         }
         if(ate){
             const base=level*100;

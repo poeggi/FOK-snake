@@ -20,6 +20,52 @@ runTest('SMOKE-GAME', `
     if(cfg.diff!==1 || cfg.music!==true) throw 'garbage save did not fall back to defaults';
     log('config load tolerance ok');
 
+    // GOURANGA beads score like gems: the streak multiplier only on the fewest-steps budget
+    // to the nearest uneaten bead (set at the line spawn and after every bead), the flat
+    // level*100 and a reset streak off it. A detoured line still finishes, just not clean.
+    {
+      startGame(); phase='playing'; level=3; score=0; gemsDone=1; lives=3;
+      bars=[]; gem=null; heart=null; powerPellet=null; timeCrystal=null; _powerMode=false; _slowMode=false;
+      spawnAt=-1e9; simNow=100000;
+      snake=[{x:10,y:10},{x:9,y:10},{x:8,y:10}]; dir={x:1,y:0}; dirQueue=[];
+      _gourangaLine=[13,14,15,16,17,18,19].map(x=>({x,y:10})); _gourangaActive=true; _gourangaEaten=0; _gourangaSteps=0;
+      levelBonusCount=0; perfectLevel=true;
+      _gourangaBudget();
+      if(gemOptimal!==5||gemSteps!==0) throw 'the first budget is the nearest bead: 3 moves + 2 slack, got '+gemOptimal;
+      const labels=()=>{ const l=simEvents.filter(e=>e.t==='bonus').map(e=>e.label); simEvents.length=0; return l; };
+      const go=(d,n)=>{ dir=d; for(let i=0;i<n;i++) step(simNow); };
+      simEvents.length=0;
+      go({x:1,y:0},3);   // 11,12,13: bead 0 on budget
+      if(score!==600||levelBonusCount!==1) throw 'bead 0 on budget: x2 (600) and the streak starts, got '+score+'/'+levelBonusCount;
+      if(labels().join()!=='x2 BONUS!') throw 'bead 0 says x2';
+      if(gemOptimal!==3||gemSteps!==0) throw 'along the line the budget is 1 + 2 per bead, got '+gemOptimal+'/'+gemSteps;
+      go({x:1,y:0},1);   // 14: bead 1 on budget
+      if(score!==1800||levelBonusCount!==2) throw 'bead 1: x4 (1200) on top, got '+score+'/'+levelBonusCount;
+      if(labels().join()!=='x4 BONUS!') throw 'bead 1 says x4';
+      // The count is the moves BEFORE the eating one (the gem rule): 5 moves on a budget of 3.
+      go({x:0,y:-1},1); go({x:1,y:0},3); go({x:0,y:1},1);   // 14,9 -> 17,9 -> 17,10: bead 4, skipping 2 and 3
+      if(score!==2100||levelBonusCount!==0) throw 'a bead off budget is flat level*100 and resets the streak, got '+score+'/'+levelBonusCount;
+      if(labels().length) throw 'no BONUS label off budget';
+      if(perfectLevel) throw 'a bead off budget breaks the perfect level, like a gem';
+      if(!_gourangaActive||_gourangaEaten!==0b10011) throw 'beads 0,1,4 gone, the line stands: '+_gourangaEaten.toString(2);
+      if(gemOptimal!==3) throw 'the next budget is the nearest uneaten bead (16,10), 1 + 2, got '+gemOptimal;
+      go({x:-1,y:0},1);  // 16,10: bead 3 at once: the streak restarts at x2
+      if(score!==2700||levelBonusCount!==1) throw 'back on budget the streak restarts at x2, got '+score+'/'+levelBonusCount;
+      if(labels().join()!=='x2 BONUS!') throw 'bead 3 says x2 again';
+      go({x:-1,y:0},1);  // 15,10: bead 2, x4
+      if(score!==3900||levelBonusCount!==2) throw 'bead 2: x4, got '+score+'/'+levelBonusCount;
+      // 18 and 19 remain, and the body now lies across the line: the budget is routed around
+      // it (Manhattan would say 3 + 2), so the 5-move detour 15,11 .. 18,11 .. 18,10 is within it.
+      if(gemOptimal<=5) throw 'the budget routes around the body in the way, got '+gemOptimal;
+      go({x:0,y:1},1); go({x:1,y:0},3); go({x:0,y:-1},1); go({x:1,y:0},1);
+      if(score!==8100||levelBonusCount!==4) throw 'x6 then x8 finish the line, got '+score+'/'+levelBonusCount;
+      if(_gourangaActive||_gourangaEaten!==0x7f) throw 'the line must be finished: '+_gourangaEaten.toString(2);
+      const l=labels(); if(l.indexOf('GOURANGA!')>=0) throw 'a detoured completion is not the clean sweep';
+      if(!gem) throw 'a finished line hands the level back to an ordinary gem';
+      startGame(); phase='menu';
+    }
+    log('gouranga beads on the gem rule ok: multiplier on budget, flat + reset off it');
+
     // cfgVer 4: the RELAY ONLY row is gone (TURN RELAY took its place), so a save from before
     // drops noP2P on load -- a client stuck on the HTTP relay would have no row to leave it
     // by. A cfgVer-4 save keeps it (a save edit is the one way left onto the relay).
