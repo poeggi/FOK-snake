@@ -38,14 +38,13 @@ function _netIceAdd(s, cand){
     if(!s.rdOk){ s.iceQ.push(cand); return; }
     _netIceRelease(s, cand);
 }
-// HAPPY EYEBALLS for the ICE race: v6 should win wherever it is viable, v4 stays the
-// automatic fallback. Two levers, both on the REMOTE candidates we feed the pc:
-//  - v4 literals wait out a short head start, so the v6 pairs run their checks
-//    uncontested first (worst case: +200ms setup on a v4-only path);
-//  - v6 candidates get HALF a type-preference step of extra priority -- outranks any
-//    v4 twin of the same type without ever reordering host vs srflx.
-// mDNS .local candidates (family unknown until resolved) enter immediately.
-const NET_ICE_V4_HOLD_MS = 200;
+// v6 wins wherever it is viable, v4 stays the automatic fallback. ICE's own priority does
+// that (libwebrtc ranks a global v6 address above v4 within a type, RFC 6724 precedence),
+// and the one lever of ours is that same priority, on the REMOTE candidates we feed the
+// pc: a v6 candidate gets HALF a type-preference step extra, so it outranks any v4 twin of
+// the same type on a browser that does not rank by family itself, without ever reordering
+// host vs srflx. No timer, no filter: a v4 candidate enters the moment it arrives. mDNS
+// .local candidates (family unknown until resolved) are left alone.
 function _netCandFam(cand){
     const p = (cand && cand.candidate || '').split(' '), a = p[4] || '';
     if(/\.local$/i.test(a)) return 0;
@@ -58,10 +57,7 @@ function _netIceBias(cand){
     return { candidate: p.join(' '), sdpMid: cand.sdpMid, sdpMLineIndex: cand.sdpMLineIndex, usernameFragment: cand.usernameFragment };
 }
 function _netIceRelease(s, cand){
-    const pc = s.pc;
-    const add = () => { if(s.pc === pc){ try{ pc.addIceCandidate(_netIceBias(cand)).catch(()=>{}); }catch(e){} } };
-    if(_netCandFam(cand) === 4 && typeof setTimeout === 'function') setTimeout(add, NET_ICE_V4_HOLD_MS);
-    else add();
+    try{ s.pc.addIceCandidate(_netIceBias(cand)).catch(()=>{}); }catch(e){}
 }
 function _netIceFlush(s){
     if(!s || !s.pc || !s.iceQ.length) return;
@@ -742,6 +738,9 @@ function _netPathStat(s){
         // TCP's head-of-line blocking under it. The peer's end reports no protocol.
         const lbl = c => ty(c) + (ty(c) === 'relay' && c.relayProtocol ? '(' + c.relayProtocol + ')' : '');
         const addr = c => (c && (c.address || c.ip)) || '';
+        // The family of the peer's address, the truthful reading of what carried the match
+        // for a host/srflx/prflx end. A relay end is left unlabelled: its address is the
+        // relay's (always v4 from Cloudflare) and says nothing about the leg behind it.
         const fam = a => a ? (a.indexOf(':') >= 0 ? 'v6' : 'v4') : '';
         _netDbg.p2pRtt = (typeof pair.currentRoundTripTime === 'number') ? Math.round(pair.currentRoundTripTime * 1000) : -1;
         const rtt = _netDbg.p2pRtt >= 0 ? _netDbg.p2pRtt + 'ms' : '?';
@@ -750,7 +749,7 @@ function _netPathStat(s){
         // connected, i.e. the direct IPv6 path won past mDNS. Otherwise it is a normal host
         // (LAN mDNS resolved), srflx (STUN reflexive) or prflx pair.
         const deob = pn && pn.ip && addr(rem) === pn.ip ? ' deob' : '';
-        const p = lbl(loc) + '/' + lbl(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob;
+        const p = lbl(loc) + '/' + lbl(rem) + (ty(rem) !== 'relay' && fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob;
         // A relay at either end = the match rides TURN: the overlay's vs line says so.
         s.pathKind = (ty(loc) === 'relay' || ty(rem) === 'relay') ? 'turn' : 'direct';
         // On record whenever it changes: which path carried the match, and a relay pair

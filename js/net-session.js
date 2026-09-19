@@ -1230,6 +1230,6 @@ function _netTeardown(){
     if(s.relayAbort){ try{ s.relayAbort.abort(); }catch(e){} s.relayAbort = null; }   // DEPRECATED(relay): close the held relay socket now
     try{ if(s.dc){ s.dc.onopen=s.dc.onmessage=s.dc.onclose=null; s.dc.close(); } }catch(e){}
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
-    s.dc = null; s.pc = null; s.rdOk = false; s.iceQ = [];   // a deferred ICE-holdback timer then sees s.pc !== its captured pc and skips
+    s.dc = null; s.pc = null; s.rdOk = false; s.iceQ = [];
 }
 

@@ -466,7 +466,7 @@ try {
   await acheck('turn: DISABLED is P2P only -- the peer\'s relay candidates are dropped and a failed pc takes no HTTP relay', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurnMode(2);
-    // The whole handshake, so the offerer's remote description is set and candidates release (v6: no happy-eyeballs holdback).
+    // The whole handshake, so the offerer's remote description is set and candidates release.
     const full = async ()=>{ await round(A, B); pump(A, B); await flush(); pump(B, A); await flush(); };
     await full();
     if(!A.__state().sess) throw new Error('precondition: a session');
@@ -531,7 +531,7 @@ try {
     B.__setTurn(()=> new Promise(r => { release = r; }));
     await round(A, B);
     const offer = A.__out.find(s => s.type === 'offer');
-    const cand = (n)=> ({ candidate:'candidate:' + n + ' 1 udp 2113937151 2001:db8::' + n + ' 5000 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 });   // v6: a v4 literal waits out the happy-eyeballs head start
+    const cand = (n)=> ({ candidate:'candidate:' + n + ' 1 udp 2113937151 2001:db8::' + n + ' 5000 typ host generation 0', sdpMid:'0', sdpMLineIndex:0 });
     // One drain: the offer, a single, a batch -- the host ships all three within a poll.
     B.__deliver(offer);
     B.__deliver({ from:A_ID, to:B_ID, type:'ice', payload:JSON.stringify(cand(1)) });
@@ -571,7 +571,9 @@ try {
     if(r.path.indexOf('relay(udp)/relay') !== 0) throw new Error('our relay end names its transport: ' + r.path);
     if(r.kind !== 'turn') throw new Error('and is still a relayed match: ' + r.kind);
     r = await A.__pathStat(['srflx', 'relay', 'tcp']);
-    if(r.path.indexOf('srflx/relay ') !== 0) throw new Error('a direct end carries no protocol, the peer end never does: ' + r.path);
+    if(r.path.indexOf('srflx/relay  rtt') !== 0) throw new Error('a direct end carries no protocol, the peer end never does, and a relay end gets no family: ' + r.path);
+    r = await A.__pathStat(['host', 'srflx']);
+    if(r.path.indexOf('host/srflx v4') !== 0) throw new Error('a direct peer end carries its family: ' + r.path);
     r = await A.__pathStat(['host', 'host']);
     if(r.kind !== 'direct') throw new Error('a host pair is direct: ' + r.kind);
     if(!/^vs .*p2p.* 42ms$/.test(r.vs)) throw new Error('vs line must say p2p: ' + r.vs);
@@ -710,19 +712,17 @@ try {
     const deob = added.find(c=>/ 2001:db8::a 51234 typ host/.test(c.candidate||''));
     if(!deob) throw new Error('no de-obfuscated real-IPv6 candidate was added');
     if((+deob.candidate.split(' ')[3]) <= 2113937151) throw new Error('the de-obfuscated candidate must outrank its mDNS twin');
-    // A server-reflexive candidate (already a real IP) must NOT be grafted again --
-    // and a v4 literal waits out the v6 head start before entering the race.
+    // A server-reflexive candidate (already a real IP) must NOT be grafted again, and a
+    // v4 literal enters the moment it arrives: no timer of ours in front of ICE.
     const n0 = B.__iceAdded().length;
     B.__deliver({ from:A_ID, to:B_ID, type:'ice',
       payload: JSON.stringify({ candidate:'candidate:2 1 udp 1694498815 203.0.113.7 40000 typ srflx raddr 0.0.0.0 rport 0', sdpMid:'0', sdpMLineIndex:0 }) });
-    if(B.__iceAdded().length !== n0) throw new Error('a v4 literal must wait out the v6 head start');
-    await new Promise(r => setTimeout(r, 250));
-    if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once (no graft)');
+    if(B.__iceAdded().length !== n0 + 1) throw new Error('a non-mDNS candidate must add exactly once, at once (no graft, no hold)');
+    const v4 = B.__iceAdded()[n0];
+    if((+v4.candidate.split(' ')[3]) !== 1694498815) throw new Error('a v4 candidate keeps its own priority: ' + v4.candidate);
   });
 
   // ------------------------------------------------- API 4.4: batched ICE (`ices`)
-  // v6 literals so every arrival is immediate: a v4 literal waits out the happy-eyeballs
-  // head start, which would confuse "did the batch arrive" with "did it arrive yet".
   const cand = (i)=>({ candidate:'candidate:' + i + ' 1 udp 2113937151 2001:db8::' + i + ' 5000 typ host',
                        sdpMid:'0', sdpMLineIndex:0 });
   const addrs = (list)=> list.map(c => (/ (2001:db8::[0-9a-f]+) /.exec(c.candidate||'')||[])[1]).join(',');
