@@ -64,6 +64,11 @@ const HOOKS = `
   globalThis.__unlatch = ()=>{ _netIdRefused = false; };
   globalThis.__latch = ()=>{ _netIdRefused = true; };
   globalThis.__sumOf = (d)=>_sumOf(d);
+  globalThis.__delete = ()=>deleteAccount();
+  globalThis.__upgrade = ()=>_netUpgrade;
+  globalThis.__updNote = ()=>netUpdateNotice();
+  globalThis.__ver = ()=>APP_VERSION;
+  globalThis.__setShell = (v)=>{ if(v == null) delete globalThis.FOK_SHELL; else globalThis.FOK_SHELL = v; };
   phase = 'menu'; inGame = false;
 })();
 `;
@@ -221,6 +226,86 @@ try {
         eq(h.body.id, id, 'for the new id');
         eq(h.body.tok, null, 'with no token');
         eq(S.__tok(), TOK2, 'and the minted one was stored');
+        S.__reply = null;
+    });
+
+    // ---- the build on every hello, the operator's word on it (API 4.23) --------------
+    await check('every hello names the build (no v) and where it runs; a shell names itself', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23' } });
+        await S.__hello();
+        let h = one(S.__take(), 'the hello');
+        eq(h.body.client, S.__ver().replace(/^v/, ''), 'client is APP_VERSION without the v');
+        eq(/^[0-9]{1,4}(\.[0-9]{1,4}){1,3}$/.test(h.body.client), true, 'in the shape the server reads');
+        eq(h.body.platform, 'web', 'the web build says web');
+        S.__setShell('ios');
+        await S.__hello();
+        h = one(S.__take(), 'the hello');
+        eq(h.body.platform, 'ios', 'a shell says which');
+        S.__setShell('tv');
+        await S.__hello();
+        eq(one(S.__take(), 'the hello').body.platform, 'web', 'an unknown shell word reads as web');
+        S.__setShell(null); S.__reply = null;
+    });
+
+    await check('upgrade: required closes online until a hello answers without it; advised is a note', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23', upgrade:'required' } });
+        await S.__hello(); S.__take();
+        eq(S.__upgrade(), 'required', 'latched');
+        eq(S.__ok(), false, 'the wire is closed');
+        eq(S.__notice(), 'GAME UPDATE REQUIRED - PLEASE RELOAD', 'the notice');
+        eq(S.__updNote(), 'UPDATE REQUIRED - PLEASE RELOAD', 'the menu note');
+        await S.__post('/api/scores.php', { id: S.__me(), score: 1 });
+        eq(S.__take().length, 0, 'nothing else leaves');
+        S.__setShell('android');
+        eq(S.__notice(), 'GAME UPDATE REQUIRED - UPDATE THE APP', 'a store build is sent to its store');
+        S.__setShell(null);
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23', upgrade:'advised' } });
+        await S.__hello(); S.__take();                // the beat is not gated: a lowered floor re-opens
+        eq(S.__upgrade(), 'advised', 're-read');
+        eq(S.__ok(), true, 'open');
+        eq(S.__notice(), 'UPDATE AVAILABLE - PLEASE RELOAD', 'a note');
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23' } });
+        await S.__hello(); S.__take();
+        eq(S.__upgrade(), null, 'absent = nothing to do');
+        eq(S.__notice(), null, 'no notice');
+        S.__reply = null;
+    });
+
+    // ---- DELETE MY DATA: the server forgets the id, then this device starts over ------
+    await check('DELETE MY DATA posts account.php delete under tok, then mints a new id; a refusal keeps it', async () => {
+        S.__clearTok(); S.__fresh(); S.__take();
+        eq(await S.__delete(), false, 'no delete without a token');
+        eq(S.__take().length, 0, 'nothing sent');
+        eq(S.__dataMsg(), 'NO CLOUD TOKEN', 'said so');
+        S.__setTok(TOK); S.__fresh();
+        S.__reply = (p) => (p === '/api/account.php' ? { status:500, json:{ ok:false, error:'busy' } } : { status:200, json:{ ok:true, api:'4.23' } });
+        const was = S.__me();
+        eq(await S.__delete(), false, 'a failed delete');
+        let d = one(S.__take().filter(r => r.path === '/api/account.php'), 'the delete');
+        eq(d.body.id + ' ' + d.body.tok + ' ' + d.body.action, was + ' ' + TOK + ' delete', 'the body');
+        eq(S.__me(), was, 'keeps the id');
+        eq(S.__tok(), TOK, 'and the token');
+        eq(S.__dataMsg(), 'DELETE FAILED', 'said so');
+        S.__reply = (p) => (p === '/api/account.php' ? { status:401, json:{ ok:false, error:'bad token' } } : { status:200, json:{ ok:true, api:'4.23' } });
+        await S.__hello(); S.__take();                // an answered hello: from here a 401 is the verdict
+        eq(await S.__delete(), false, 'refused');
+        S.__take();
+        eq(S.__refused(), true, 'the same latch as everywhere');
+        eq(S.__dataMsg(), 'ID BOUND TO ANOTHER DEVICE', 'the same message');
+        S.__fresh();
+        S.__reply = (p) => (p === '/api/account.php' ? { status:200, json:{ ok:true } } : { status:200, json:{ ok:true, api:'4.23', tok: TOK2 } });
+        eq(await S.__delete(), true, 'deleted');
+        await new Promise(res => setTimeout(res, 0));
+        const reqs = S.__take();
+        d = one(reqs.filter(r => r.path === '/api/account.php'), 'the delete');
+        eq(d.body.id, was, 'for the old id');
+        eq(S.__me() === was, false, 'a new id');
+        const h = one(reqs.filter(r => r.path === '/api/hello.php'), 'the hello that follows');
+        eq(h.body.id + ' ' + h.body.tok, S.__me() + ' null', 'for the new id, with no token');
+        eq(S.__tok(), TOK2, 'and the minted one was stored');
+        eq(S.__dataMsg().indexOf('DATA DELETED'), 0, 'said so');
         S.__reply = null;
     });
 

@@ -375,7 +375,7 @@ function drawMenu(now) {
     _drawMenuSnake(now);                       // decorative ambient wanderer (under the title)
     drawSplashText(now);                       // animated overlay
     const _upd=netUpdateNotice();   // server contract ahead of this build
-    if(_upd) ct(_upd, CW/2, 12, _netApiNewer?'#ff6666':'#ffcc44', FONT.HINT);   // pin to the very top, clear of the title/DEBUG stamp
+    if(_upd) ct(_upd, CW/2, 12, netUpdateHard()?'#ff6666':'#ffcc44', FONT.HINT);   // pin to the very top, clear of the title/DEBUG stamp
     if(ANNOUNCEMENT) _drawNewspaperBadge(now, !announceSeen());
 }
 
@@ -402,6 +402,7 @@ const SETTINGS_CATS = [
         { lbl:()=>'RESET STATS', act:()=>{_resetKind='stats';quitConfirmSel=1;phase='resetConfirm';} },
         { lbl:()=>'RESET SETTINGS', act:()=>{_resetKind='settings';quitConfirmSel=1;phase='resetConfirm';} },
         { lbl:()=>'RESET ID', act:()=>{_resetKind='id';quitConfirmSel=1;phase='resetConfirm';} },
+        { lbl:()=>'DELETE MY DATA', act:()=>{_resetKind='delete';quitConfirmSel=1;phase='resetConfirm';} },
     ]},
     { label:'GAME', items:[
         { lbl:()=>'DIFFICULTY: '+DIFF[cfg.diff].label,
@@ -1843,9 +1844,10 @@ function drawDuelBoard(now) {
 }
 function drawResetConfirm() {
     const K = _resetKind;
-    const title = K==='settings' ? 'RESET ALL SETTINGS?' : K==='id' ? 'RESET PLAYER ID?' : 'RESET ALL STATS?';
+    const title = K==='settings' ? 'RESET ALL SETTINGS?' : K==='id' ? 'RESET PLAYER ID?' : K==='delete' ? 'DELETE MY DATA?' : 'RESET ALL STATS?';
     const note  = K==='settings' ? 'audio  controls  display  network   (stats + id kept)'
                 : K==='id'       ? 'NEW ID -- your old friends can no longer invite you'
+                : K==='delete'   ? 'the server forgets this id: friends  scores  backup  items'
                 :                  'scores  fokoins  achievements  shop';
     drawConfirm({ title, note, sel:quitConfirmSel, behind:drawSettings, danger:true });
 }

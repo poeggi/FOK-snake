@@ -697,6 +697,7 @@ const UI_INPUT = {
             if(quitConfirmSel===0){
                 if(_resetKind==='settings') resetSettings();
                 else if(_resetKind==='id'){ resetPlayerId(); _dataMsg='NEW ID '+fmtPlayerId(); _dataMsgAt=_msgNow(); }
+                else if(_resetKind==='delete') deleteAccount();
                 else resetStats();
             }
             phase='settings'; quitConfirmSel=1;

@@ -447,6 +447,21 @@ async function cloudBackup(silent) {
     if(!silent) _dataMsgAt=_msgNow();
     return ok;
 }
+// DELETE MY DATA (API 4.23): the server forgets the id -- row, name, friendships, scores,
+// backup, items, event memberships, the binding -- and this device starts over on a new id,
+// exactly as RESET ID does. Needs the wire and the token that proves the id: a dead wire or
+// a refusal leaves everything standing.
+async function deleteAccount() {
+    if(!_netOk()){ _dataMsg='OFFLINE'; _dataMsgAt=_msgNow(); return false; }
+    if(!getCloudToken()){ _dataMsg='NO CLOUD TOKEN'; _dataMsgAt=_msgNow(); return false; }
+    _dataMsg='DELETING...'; _dataMsgAt=_msgNow();
+    const r=await _netPostRes('/api/account.php', { id:getPlayerId(), action:'delete' }, NET_BG_SOLO);
+    const ok=(r.status===200 && !!r.json);
+    if(ok){ resetPlayerId(); _dataMsg='DATA DELETED - NEW ID '+fmtPlayerId(); }
+    else _dataMsg = r.status===401 ? 'ID BOUND TO ANOTHER DEVICE' : 'DELETE FAILED';
+    _dataMsgAt=_msgNow();
+    return ok;
+}
 // Daily automatic cloud backup (opt-in via cfg.autoCloud). Called on a timer; the 24h throttle
 // lives here, so callers can fire it freely. Silent -- no menu feedback line for the auto path.
 const AUTOCLOUD_KEY='fok-snake-autocloud-at';

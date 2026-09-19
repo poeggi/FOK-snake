@@ -46,7 +46,7 @@ const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-se
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 22;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
+const NET_API_BUILT_MINOR = 23;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -60,11 +60,18 @@ let _netApiNewer = false;   // server MAJOR is newer -> online features disable 
 let _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
 let _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
 let _netIdRefused = false;  // the server refused our token (401): the wire is stopped, see _netTokRefused
+// The operator's word on THIS build (API 4.23, hello's `upgrade`): 'advised' = a newer build
+// exists, say so, play on; 'required' = online is closed until the player updates. Re-read
+// on every hello answer, so a floor the operator lowers re-opens the wire by itself. The
+// server enforces nothing: the beat keeps going, only _netOk() closes.
+let _netUpgrade = null;
+// Where an update comes from: the web build arrives on a reload, a store build from its store.
+function _netUpdHow(){ return netPlatform() === 'web' ? 'PLEASE RELOAD' : 'UPDATE THE APP'; }
 function netStatusNotice(){
     if(netOffline()) return 'OFFLINE MODE (SETTINGS > NETWORK)';
-    if(_netApiNewer) return 'GAME UPDATE REQUIRED - PLEASE RELOAD';
+    if(_netApiNewer || _netUpgrade === 'required') return 'GAME UPDATE REQUIRED - ' + _netUpdHow();
     if(_netIdRefused) return 'ID BOUND TO ANOTHER DEVICE';
-    if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
+    if(_netApiOutdated || _netUpgrade === 'advised') return 'UPDATE AVAILABLE - ' + _netUpdHow();
     if(_netSrvErr) return 'SERVER UNREACHABLE - RETRYING';
     return null;
 }
@@ -72,15 +79,18 @@ function netStatusNotice(){
 // ahead of this build. REQUIRED = a newer major (online is disabled); AVAILABLE = a newer
 // minor (online still works, but new features are missing). null when we are up to date.
 function netUpdateNotice(){
-    if(_netApiNewer) return 'UPDATE REQUIRED - PLEASE RELOAD';
-    if(_netApiOutdated) return 'UPDATE AVAILABLE - PLEASE RELOAD';
+    if(_netApiNewer || _netUpgrade === 'required') return 'UPDATE REQUIRED - ' + _netUpdHow();
+    if(_netApiOutdated || _netUpgrade === 'advised') return 'UPDATE AVAILABLE - ' + _netUpdHow();
     return null;
 }
+// Whether an update note is the hard one (online closed) rather than a hint.
+function netUpdateHard(){ return _netApiNewer || _netUpgrade === 'required'; }
 // EFFECTIVE offline: the stored toggle, OR forced on any page that is not HTTPS (a file://
 // install, a plain-http host): the server is never spoken to from one. Masked at read; the
 // stored cfg.offline is never mutated, so a local install keeps its saved preference.
 function netOffline(){ return !!cfg.offline || _runInsecure(); }
-function _netOk(){ return !netOffline() && !_netApiNewer && !_netIdRefused && typeof fetch === 'function'; }
+function _netReach(){ return !netOffline() && !_netApiNewer && !_netIdRefused && typeof fetch === 'function'; }
+function _netOk(){ return _netReach() && _netUpgrade !== 'required'; }
 const _netTimers = (typeof setInterval === 'function' && typeof clearInterval === 'function');
 // How far a peer's PTS may exceed ours before we call it bogus. We check against
 // our ESTIMATE of the server clock (a few ms of sync error) over a jittery link,
@@ -408,10 +418,13 @@ function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; _ne
 // Returns {status, json}: json is null unless the server said ok. status 0 = the
 // request never completed. Callers that only care "did it work" use _netPost.
 async function _netPostRes(path, body, bg){
-    if(!_netOk()) return { status:0, json:null };
+    // The beat passes a 'required' upgrade closure: it is the one request that can carry the
+    // word back (a floor the operator lowers), and it is the only one that does.
+    const pass = () => _netOk() || (path === '/api/hello.php' && _netReach());
+    if(!pass()) return { status:0, json:null };
     const idle = (bg === NET_BG_IDLE);
     if(bg) await _netGate(bg);
-    if(!_netOk()) return { status:0, json:null };   // the gate is a wait, and offline can be switched on inside it
+    if(!pass()) return { status:0, json:null };   // the gate is a wait, and offline can be switched on inside it
     _netFlight++;   // ...so the clock sync can tell a quiet wire from this one
     _netSentAt = Date.now();
     if(_netFlight > _netFlightMax) _netFlightMax = _netFlight;
@@ -611,6 +624,15 @@ function _netMyName(){
 // Name entry wrote lastSName: drop the cache so the next read sees it (the TTL alone
 // only covers writes that bypass the game, e.g. a cloud-backup restore).
 function netNameChanged(){ _netMyNameC.at = 0; }
+// Where this client runs, as hello's `platform` names it (API 4.23): 'web' unless a store
+// shell says otherwise. A shell (an iOS or Android web view) declares itself through ONE
+// global, FOK_SHELL, set by the script it injects ahead of ours; no UA is read for it.
+function netPlatform(){
+    const s = (typeof FOK_SHELL === 'string') ? FOK_SHELL : '';
+    return (s === 'ios' || s === 'android') ? s : 'web';
+}
+// The build as the server's floors read it (API 4.23): APP_VERSION without its leading v.
+function netClientVersion(){ return String(APP_VERSION || '').replace(/^v/, ''); }
 // Device CATEGORY (API 3.4 'platform' tag): one of pc/mobile/tv/console, best-effort
 // from the UA plus touch/pointer/screen. Cached -- the answer is fixed for the tab. It
 // is deliberately coarse and never authoritative: the server whitelists these four and
@@ -1186,6 +1208,10 @@ async function _netHello(){
     // the client has not picked up yet ('pending') from a client that turned debug on
     // by itself ('self'), and deriving one from the other would erase that difference.
     if((cfg.debug|0) > 0) body.debug = true;
+    // The build and where it runs, on EVERY beat (API 4.23): the floors `upgrade` is judged
+    // on may move between two of them, and a hello that names no version is told nothing.
+    body.client = netClientVersion();
+    body.platform = netPlatform();
     const t0 = performance.now();
     const r = await _netPost('/api/hello.php', body, true);
     _netHelloBusy = false;
@@ -1211,6 +1237,7 @@ async function _netHello(){
     // arrives with the pace the server just named already applied.
     if(!_netHelloSeen){ _netHelloSeen = true; itemKick(); }
     _netSrvSays(r);
+    _netUpgrade = (r.upgrade === 'required' || r.upgrade === 'advised') ? r.upgrade : null;   // absent = nothing to do
     if(body.latency != null) _netLat.pending = false;   // delivered; omit until the next measurement
     _netFrApply(r);   // the counters, and the presence delta where one was asked for
     if(body.tourneys) _netTtApply(r.tourneys);
