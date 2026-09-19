@@ -1722,6 +1722,8 @@ function drawFriends(){
         else if(r.state==='accepted'){ st=r.online?('ONLINE'+(r.latency!=null?' '+r.latency+'ms':'')):'OFF'; col=r.online?'#7fff7f':'#555'; }
         else if(r.state==='pending' && !r.outgoing){ st='WANTS TO JOIN'; col='#ffd700'; }
         else if(r.state==='pending'){ st='REQUEST SENT'; col='#888'; }
+        else if(r.state==='blocked'){ st='BLOCKED'; col='#ff8888'; }
+        else if(r.state==='opponent'){ st='LAST OPPONENT'; col='#888'; }
         else { st='NOT SYNCED'; col='#888'; }
         ct(st, CW/2+180, y, col, FONT.HINT);
     });
@@ -1729,19 +1731,18 @@ function drawFriends(){
     if(_netFr.msg) drawStatus(_netFr.msg);
     menuItem('BACK', BACK_Y, _netFr.sel===rows.length);   // BACK toward the bottom, like drawSettings
     if(_netFr.confirm){
-        // Local safety confirm before removing a friend (the SERVER removal itself
-        // is silent/auto-confirmed, but the UI still guards an accidental delete).
+        // The row dialog: what can be done to this player, CANCEL preselected so a double
+        // press does nothing (the server-side verbs are silent and final).
         ctx.fillStyle='#07070e'; ctx.fillRect(0,0,CW,CH);
         drawGrid(); drawOvBg(0.92);
-        drawDialogTitle('REMOVE FRIEND', '#ff8888');
+        drawDialogTitle(_netFr.report ? 'REPORT WHY?' : 'PLAYER', _netFr.report ? '#ff8888' : '#ffd700');
         const nm=netFriendName(_netFr.confirm);
         ct((nm?nm+'  ':'')+fmtFriendId(_netFr.confirm), CW/2, CH/2-48, '#aaa', FONT.MENU);
-        ct('THE SERVER FORGETS THE RELATION TOO', CW/2, CH/2-22, '#888', FONT.HINT);
-        _drawModalYesNo(_netFr.confirmSel);
-        ct('L/R:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
+        _netFrMenu().forEach((t,i)=>menuItem(t, CH/2-14+i*MENU_ROW, _netFr.confirmSel===i));
+        ct('UP/DN:choose  A:ok  ESC:cancel', CW/2, HINT_Y, '#888', FONT.HINT);
         return;
     }
-    ct('UP/DN:nav  A:accept/remove  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
+    ct('UP/DN:nav  A:actions  ESC:back', CW/2, HINT_Y, '#888', FONT.HINT);
 }
 
 // Invite landing (iOS Safari only, see the boot hash parse): the scanned friend code

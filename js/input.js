@@ -432,30 +432,22 @@ const UI_INPUT = {
     },
     friends: {
         nav(key){
-            if(_netFr.confirm){ const s=_navLR(key); if(s>=0) _netFr.confirmSel=s; return; }
+            if(_netFr.confirm){ _netFr.confirmSel=_navStep(key, _netFr.confirmSel, _netFrMenu().length); return; }
             _netFr.sel=_navStep(key, _netFr.sel, _netFrRows().length+1);   // rows + BACK
         },
         confirm(){
             if(_netFr.confirm){
-                Snd.sfxPlay(_netFr.confirmSel===0?'select':'nav',cfg.music);
-                if(_netFr.confirmSel===0) _netFrRemove(_netFr.confirm);   // server removal auto-confirms; this is the local safety prompt
-                _netFr.confirm=null; return;
+                Snd.sfxPlay('select',cfg.music);
+                if(_netFrAct(_netFr.confirmSel)) _netFrDialogClose();
+                return;
             }
             const rows=_netFrRows();
             if(_netFr.sel>=rows.length){ netFriendsLeave(); Snd.sfxPlay('nav',cfg.music); return; }
-            const r=rows[_netFr.sel];
-            if(r.state==='pending' && !r.outgoing){ Snd.sfxPlay('select',cfg.music); _netFrAccept(r.id); }   // incoming request: accept
-            else { Snd.sfxPlay('nav',cfg.music); _netFr.confirm=r.id; _netFr.confirmSel=1; }                  // remove: local confirm (NO preselected)
+            Snd.sfxPlay('nav',cfg.music); _netFrDialogOpen(rows[_netFr.sel]);   // every row opens the same dialog: accept, decline, remove, block, report
         },
         back(){
-            if(_netFr.confirm){ _netFr.confirm=null; Snd.sfxPlay('nav',cfg.music); }
+            if(_netFr.confirm){ _netFrDialogClose(); Snd.sfxPlay('nav',cfg.music); }
             else { netFriendsLeave(); Snd.sfxPlay('nav',cfg.music); }
-        },
-        other(key){
-            if(!_netFr.confirm) return false;
-            if(key==='y'||key==='Y'){ Snd.sfxPlay('select',cfg.music); _netFrRemove(_netFr.confirm); _netFr.confirm=null; return true; }
-            if(key==='n'||key==='N'){ Snd.sfxPlay('nav',cfg.music); _netFr.confirm=null; return true; }
-            return false;
         },
     },
     duelLobby: {

@@ -309,6 +309,7 @@ function _netIceOut(to, cand, ver){
 }
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
+    _netLastPeer = peer;   // the FRIENDS screen offers BLOCK / REPORT on the last opponent
     _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is, so no HTTP relay behind it
     const rc = netRtcConfig();         // the TURN credential held, or STUN alone (API 4.22)
     _netSess.relayOnly = rc.iceTransportPolicy === 'relay';

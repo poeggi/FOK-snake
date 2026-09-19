@@ -1462,13 +1462,15 @@ runTest('SMOKE-NET', `
     let rows=_netFrRows();
     if(rows.length!==2||rows[0].state!=='local') throw 'offline rows must show the local list';
     drawFriends();
-    // remove: local safety confirm (server removal itself is auto-confirmed)
+    // remove: the row dialog, CANCEL preselected, REMOVE at the top
     localStorage.removeItem('fok-snake-friend-rm');
     _netFr.sel=0; press('Enter');
-    if(_netFr.confirm!=='00ff00aa') throw 'remove must open the local confirm';
-    drawFriends();                        // confirm dialog renders
-    press('ArrowLeft'); press('Enter');   // YES
-    if(getFriends().includes('00ff00aa')) throw 'friend not removed after YES';
+    if(_netFr.confirm!=='00ff00aa') throw 'a row must open the dialog';
+    drawFriends();                        // the dialog renders
+    press('Enter');                       // CANCEL: nothing happens
+    if(_netFr.confirm||!getFriends().includes('00ff00aa')) throw 'CANCEL must close the dialog and keep the friend';
+    press('Enter'); press('ArrowDown'); press('Enter');   // open, wrap to REMOVE, ok
+    if(getFriends().includes('00ff00aa')) throw 'friend not removed after REMOVE';
     // server list drives states incl. incoming requests
     _netFr.list=[{id:'00ff00bb',state:'accepted',outgoing:false,name:'BUD',online:true,latency:12},
                  {id:'00ff00cc',state:'pending',outgoing:false,name:'NEW',online:true,latency:5}];
@@ -1479,7 +1481,7 @@ runTest('SMOKE-NET', `
     if(phase!=='multiplayer') throw 'friends ESC did not return';
     _netFr.list=null; localStorage.removeItem('fok-snake-friends'); localStorage.removeItem('fok-snake-friend-rm');
     phase='menu';
-    log('friends screen ok: merge, remove confirm, states, nav');
+    log('friends screen ok: merge, row dialog, states, nav');
 
     // ---- friendship markers: ASK ONCE, and forget everything on a restore ----
     // Two different facts. _netFrOk = the server called it accepted. _netFrSent = the server

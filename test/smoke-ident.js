@@ -69,6 +69,18 @@ const HOOKS = `
   globalThis.__updNote = ()=>netUpdateNotice();
   globalThis.__ver = ()=>APP_VERSION;
   globalThis.__setShell = (v)=>{ if(v == null) delete globalThis.FOK_SHELL; else globalThis.FOK_SHELL = v; };
+  globalThis.__rows = ()=>_netFrRows();
+  globalThis.__frOpen = (r)=>_netFrDialogOpen(r);
+  globalThis.__frMenu = ()=>_netFrMenu();
+  globalThis.__frAct = (i)=>_netFrAct(i);
+  globalThis.__frSel = ()=>_netFr.confirmSel;
+  globalThis.__frMsg = ()=>_netFr.msg;
+  globalThis.__addFriend = (id)=>addFriend(id);
+  globalThis.__friends = ()=>getFriends();
+  globalThis.__setLastPeer = (id)=>{ _netLastPeer = id; };
+  globalThis.__blocked = ()=>_netBlocked;
+  globalThis.__name = ()=>getPlayerName();
+  globalThis.__setName = (n)=>{ localStorage.setItem('lastSName', n); netNameChanged(); };
   phase = 'menu'; inGame = false;
 })();
 `;
@@ -307,6 +319,74 @@ try {
         eq(S.__tok(), TOK2, 'and the minted one was stored');
         eq(S.__dataMsg().indexOf('DATA DELETED'), 0, 'said so');
         S.__reply = null;
+    });
+
+    // ---- block, report, the blocked list, a masked name (API 4.23) --------------------
+    await check('hello hands over the blocked list and a name the server kept differently', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__setName('KAI');
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23', blocked:['b10c4ed0', 7], name:'PLAYER' } });
+        await S.__hello();
+        const h = one(S.__take(), 'the hello');
+        eq(h.body.name, 'KAI', 'the name went out');
+        eq(S.__name(), 'PLAYER', 'the server\'s word on it is adopted');
+        eq(S.__blocked().join(','), 'b10c4ed0', 'the blocked list, ids only');
+        eq(S.__rows().filter(r => r.state === 'blocked').map(r => r.id).join(','), 'b10c4ed0', 'drawn as a BLOCKED row');
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23', name:'KAI' } });
+        await S.__hello(); S.__take();
+        eq(S.__name(), 'KAI', 'a name answered as sent changes nothing');
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'4.23' } });
+        await S.__hello(); S.__take();
+        eq(S.__blocked().join(','), 'b10c4ed0', 'an answer without the list leaves it alone');
+        S.__reply = null;
+    });
+
+    await check('the row dialog: BLOCK ends the friendship and lists the id, UNBLOCK frees it, REPORT names a reason', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__addFriend('f00d1234');
+        await new Promise(res => setTimeout(res, 0)); S.__take();   // the add sends its request; not under test
+        let row = S.__rows().filter(r => r.id === 'f00d1234')[0];
+        S.__frOpen(row);
+        eq(S.__frMenu().join(' '), 'REMOVE BLOCK REPORT CANCEL', 'a friend row');
+        eq(S.__frSel(), 3, 'CANCEL preselected');
+        S.__reply = () => ({ status:200, json:{ ok:true } });
+        eq(S.__frAct(1), true, 'BLOCK closes the dialog');
+        await new Promise(res => setTimeout(res, 0));
+        let r = one(S.__take(), 'the block');
+        eq(r.path + ' ' + r.body.action + ' ' + r.body.peer + ' ' + r.body.tok, '/api/friend.php block f00d1234 ' + TOK, 'the verb, under tok, naming the peer as every friend verb does');
+        eq(S.__friends().indexOf('f00d1234'), -1, 'no longer a friend here');
+        eq(S.__blocked().indexOf('f00d1234') >= 0, true, 'listed as blocked');
+        row = S.__rows().filter(r => r.id === 'f00d1234')[0];
+        eq(row.state, 'blocked', 'the row says so');
+        S.__frOpen(row);
+        eq(S.__frMenu().join(' '), 'UNBLOCK CANCEL', 'a blocked row');
+        S.__reply = () => ({ status:500, json:{ ok:false, error:'busy' } });
+        eq(S.__frAct(0), true, 'UNBLOCK closes the dialog');
+        await new Promise(res => setTimeout(res, 0)); S.__take();
+        eq(S.__blocked().indexOf('f00d1234') >= 0, true, 'a failed unblock changes nothing');
+        eq(S.__frMsg(), 'UNBLOCK FAILED', 'and says so');
+        S.__reply = () => ({ status:200, json:{ ok:true } });
+        S.__frOpen(row); S.__frAct(0);
+        await new Promise(res => setTimeout(res, 0));
+        eq(one(S.__take(), 'the unblock').body.action, 'unblock', 'the verb');
+        eq(S.__blocked().indexOf('f00d1234'), -1, 'freed');
+        // the last opponent: a stranger the seek paired, one row, BLOCK / REPORT only
+        S.__setLastPeer('5ee75ee7');
+        row = S.__rows().filter(r => r.id === '5ee75ee7')[0];
+        eq(row && row.state, 'opponent', 'the LAST OPPONENT row');
+        S.__frOpen(row);
+        eq(S.__frMenu().join(' '), 'BLOCK REPORT CANCEL', 'a stranger row');
+        eq(S.__frAct(1), false, 'REPORT asks why');
+        eq(S.__frMenu().join(' '), 'BAD NAME ABUSE CHEATING OTHER CANCEL', 'the reasons');
+        eq(S.__frSel(), 4, 'CANCEL preselected again');
+        eq(S.__frAct(1), true, 'a reason closes the dialog');
+        await new Promise(res => setTimeout(res, 0));
+        r = one(S.__take(), 'the report');
+        eq(r.body.action + ' ' + r.body.peer + ' ' + r.body.reason, 'report 5ee75ee7 abuse', 'the report');
+        eq(S.__frMsg(), 'REPORTED - THANK YOU', 'thanked');
+        S.__frOpen(row); S.__frAct(1); S.__frAct(4);
+        eq(S.__take().length, 0, 'CANCEL on the reasons sends nothing');
+        S.__setLastPeer(''); S.__reply = null;
     });
 
     await check('a hello answer minted for an id that was reset while it was in flight is not kept', async () => {

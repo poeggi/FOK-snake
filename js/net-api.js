@@ -1247,6 +1247,10 @@ async function _netHello(){
     // and the periodic friend.php list stands down. It never answered = that call stays,
     // which is the whole reason this is a fallback and not a minor check.
     if(body.friends_list && Array.isArray(r.friends)){ _netFrHello = true; _netFrAdopt(r.friends, false); }
+    if(Array.isArray(r.blocked)) _netBlocked = r.blocked.filter(b => typeof b === 'string');   // API 4.23, feature-detected
+    // A name the server kept differently from the one sent (its word filter, API 4.23): adopt
+    // it, so this screen shows what everyone else sees. Only ever answered when it changed.
+    if(body.name && typeof r.name === 'string' && r.name !== body.name){ try{ localStorage.setItem('lastSName', r.name.slice(0, MAX_NAME)); }catch(e){} netNameChanged(); }
     _netFrFlushRemovals();
     (r.signals||[]).forEach(_netOnSignal);
     _uiDirty = true;
@@ -1592,7 +1596,7 @@ async function netActionPost(path, action, extra){
 // ---- friendships (friend.php): relations exist only once the SERVER recorded
 // them -- the local list is just the UI seed. Adds run the request handshake,
 // removals reach the server (queued through localStorage when offline). ----
-let _netFr = { list:null, at:0, loading:false, sel:0, confirm:null, confirmSel:1, msg:'' };
+let _netFr = { list:null, at:0, loading:false, sel:0, confirm:null, confirmSel:1, kind:'', report:false, msg:'' };   // confirm = the row dialog's id; kind + report say what it offers
 // Has a hello ever come back carrying the roster? Latched on the first one that does, and
 // never re-checked: this is a property of the server, not of a response.
 let _netFrHello = false;
@@ -1631,9 +1635,10 @@ function _netFrWait(res){ const w = res.body && +res.body.retry_after; return w 
 // 'request' and an 'accept' are NOT: somebody pressed a button and the invite path awaits
 // the answer before it may offer at all, so those take the exempt lane -- never beside
 // another request of ours, but never held back for a poll either.
-function _netFriendApi(action, peer, bg){
+function _netFriendApi(action, peer, bg, extra){
     const body = { id: getPlayerId(), action };
     if(peer) body.peer = peer;
+    if(extra) Object.assign(body, extra);
     return _netPostRes('/api/friend.php', body, bg).then(res => {
         if(res.status === 429) _netFrBannedUntil = Date.now() + _netFrWait(res)*1000;   // re-checked, not trusted: quiet for the stated wait, then try again
         return res.json;
@@ -1841,11 +1846,14 @@ function _netFrAccept(id){
 // server-side too, since the server only serves data between recorded friends.
 function _netFrRmQueue(){ try{ return JSON.parse(localStorage.getItem('fok-snake-friend-rm')||'[]')||[]; }catch(e){ return []; } }
 function _netFrRmSave(q){ try{ localStorage.setItem('fok-snake-friend-rm', JSON.stringify(q)); }catch(e){} }
-function _netFrRemove(id){
+function _netFrDrop(id){   // the local half of a removal: the server side is the caller's
     _netFrOkClear(id);
     removeFriend(id);
     if(_netFr.list) _netFr.list = _netFr.list.filter(f => f.id !== id);
     delete _netFrRequested[id];
+}
+function _netFrRemove(id){
+    _netFrDrop(id);
     _netFr.msg = 'REMOVED ' + (netFriendName(id) || fmtFriendId(id));
     const done = _netFriendApi('remove', id, true);
     if(done && done.then) done.then(r => { if(!r){ const q=_netFrRmQueue(); if(q.indexOf(id) < 0){ q.push(id); _netFrRmSave(q); } } });
@@ -1861,8 +1869,60 @@ function _netFrFlushRemovals(){
 function _netFrRows(){
     const rows = [], seen = {};
     if(_netFr.list) for(const f of _netFr.list){ seen[f.id]=true; rows.push({ id:f.id, state:f.state, outgoing:!!f.outgoing, online:f.online===true, latency:(f.latency==null?null:f.latency|0) }); }
-    for(const id of getFriends()) if(!seen[id]) rows.push({ id, state:'local', outgoing:true, online:false, latency:null });
+    for(const id of getFriends()) if(!seen[id]){ seen[id]=true; rows.push({ id, state:'local', outgoing:true, online:false, latency:null }); }
+    for(const id of _netBlocked) if(!seen[id]){ seen[id]=true; rows.push({ id, state:'blocked', outgoing:false, online:false, latency:null }); }
+    if(_netLastPeer && !seen[_netLastPeer] && _netLastPeer !== getPlayerId()) rows.push({ id:_netLastPeer, state:'opponent', outgoing:false, online:false, latency:null });
     return rows;
+}
+// ---- block + report (API 4.23) ----
+// The blocked list is the server's: hello answers `blocked` (feature-detected) and what is
+// held here is that answer with this device's own verbs applied, so a row changes the moment
+// the server said ok. A blocked pair exchanges nothing: the server drops their signals, never
+// pairs them and answers a friend request as if sent. Both lists draw on the FRIENDS screen,
+// and the last opponent gets a row there too, so a stranger the seek paired can be blocked or
+// reported after the match.
+let _netBlocked = [];
+let _netLastPeer = '';
+const _FR_REASONS = [['BAD NAME','name'], ['ABUSE','abuse'], ['CHEATING','cheat'], ['OTHER','other']];
+// The row dialog: what A offers on a row of this kind, CANCEL last and preselected.
+function _netFrMenu(){
+    if(_netFr.report) return _FR_REASONS.map(r => r[0]).concat(['CANCEL']);
+    const k = _netFr.kind;
+    if(k === 'blocked') return ['UNBLOCK', 'CANCEL'];
+    if(k === 'opponent') return ['BLOCK', 'REPORT', 'CANCEL'];
+    if(k === 'in') return ['ACCEPT', 'DECLINE', 'BLOCK', 'REPORT', 'CANCEL'];
+    return ['REMOVE', 'BLOCK', 'REPORT', 'CANCEL'];
+}
+function _netFrDialogOpen(r){ _netFr.confirm = r.id; _netFr.kind = _netFrKind(r) === 'in' ? 'in' : r.state; _netFr.report = false; _netFr.confirmSel = _netFrMenu().length - 1; }
+function _netFrDialogClose(){ _netFr.confirm = null; _netFr.report = false; }
+// The chosen entry; true when the dialog is done with.
+function _netFrAct(i){
+    const t = _netFrMenu()[i], id = _netFr.confirm;
+    if(t === 'REPORT'){ _netFr.report = true; _netFr.confirmSel = _FR_REASONS.length; return false; }
+    if(t === 'ACCEPT') _netFrAccept(id);
+    else if(t === 'REMOVE' || t === 'DECLINE') _netFrRemove(id);
+    else if(t === 'BLOCK') _netFrBlock(id);
+    else if(t === 'UNBLOCK') _netFrUnblock(id);
+    else if(_netFr.report && t !== 'CANCEL') _netFrReport(id, _FR_REASONS[i][1]);
+    return true;
+}
+function _netFrBlock(id){
+    _netFriendApi('block', id, NET_BG_SOLO).then(r => {
+        if(!r){ _netFr.msg = 'BLOCK FAILED'; _uiDirty = true; return; }
+        if(_netBlocked.indexOf(id) < 0) _netBlocked.push(id);
+        _netFrDrop(id);   // the server ended the friendship in the same call
+        _netFr.msg = 'BLOCKED ' + (netFriendName(id) || fmtFriendId(id)); _uiDirty = true;
+    });
+}
+function _netFrUnblock(id){
+    _netFriendApi('unblock', id, NET_BG_SOLO).then(r => {
+        if(!r){ _netFr.msg = 'UNBLOCK FAILED'; _uiDirty = true; return; }
+        _netBlocked = _netBlocked.filter(b => b !== id);
+        _netFr.msg = 'UNBLOCKED ' + fmtFriendId(id); _uiDirty = true;
+    });
+}
+function _netFrReport(id, reason){
+    _netFriendApi('report', id, NET_BG_SOLO, { reason }).then(r => { _netFr.msg = r ? 'REPORTED - THANK YOU' : 'REPORT FAILED'; _uiDirty = true; });
 }
 
 // ---- global highscores ----
