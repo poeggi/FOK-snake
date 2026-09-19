@@ -795,6 +795,7 @@ function _netLiveCheck(){
     if(netSpectating()) return;
     const nowMs = performance.now();
     if(!s.pathAt || nowMs - s.pathAt > 2000){ s.pathAt = nowMs; _netPathStat(s); }   // refresh the ICE-path readout ~0.5Hz
+    if(s.pathKind === 'turn') _netTurnTopUp();   // a match riding the relay keeps a fresh credential in hand for a rebuild (net-api.js)
     // A desync whose one-shot-per-verdict repairs keep failing is a dead match too:
     // same deadline as a failed reconnect. Worker mode mirrors the age in each frame.
     const _dsyFor = _netWD() ? (_netDbg.dsyFor|0) : (_rbBadSince ? Date.now() - _rbBadSince : 0);
@@ -870,9 +871,8 @@ function _netRtcRebuild(s){
     try{ if(s.pc){ s.pc.onconnectionstatechange=s.pc.onicecandidate=s.pc.ondatachannel=null; s.pc.close(); } }catch(e){}
     s.dc = null;
     s.rdOk = false; s.iceQ = [];   // candidates for the dead pc are void; the rebuild parks afresh
-    // What is held, with whatever life it has left, no ask: the kill clock is running. A
-    // rebuild deep into a relayed match may build on a credential with minutes left; the
-    // match would have ended at the credential's end anyway (no mid-match refresh).
+    // What is held, no ask: the kill clock is running. A match that rode the relay topped
+    // its credential up as it ran low (_netTurnTopUp), so the rebuild finds a fresh one here.
     s.turn = !!netTurnHeld();
     const pc = new RTCPeerConnection(netRtcConfig());
     s.pc = pc;

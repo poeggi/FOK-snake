@@ -106,6 +106,7 @@ const HOOKS = (myId) => `
   globalThis.__iceAdded  = ()=> (_netSess && _netSess.pc && _netSess.pc._ice) ? _netSess.pc._ice.slice() : [];
   globalThis.__gameSess  = (peer, role)=>{ _netSess = _netMkSess(peer, role); _netSess.seed=0x515ED; _netSess.game=true; _netSess.dc={readyState:'open',send(){},close(){}}; _netSess.lastRecv=performance.now(); _netSess.lastRecvWall=Date.now(); };
   globalThis.__reconnect = ()=>{ _netReconnect(_netSess); };
+  globalThis.__live      = ()=>{ _netLiveCheck(); };   // one real liveness pass
   globalThis.__rcDbg = ()=>({ has:!!_netSess, rc:!!(_netSess&&_netSess.reconnecting), rcAt:_netSess&&_netSess.reconnectAt, rtc:(typeof _netRtcAvail==='function')?_netRtcAvail():'nofn', relay:!!(_netSess&&_netSess.relay), game:!!(_netSess&&_netSess.game) });
   globalThis.__invite    = (to)=> _netInviteSend(to);   // async: await it to see the server's verdict
   globalThis.__frOk      = (id)=>{ _netFrOkMark(id); };
@@ -373,13 +374,13 @@ try {
   const round = async (A, B)=>{ A.__invite(B_ID); await flush(); pump(A, B); B.__answer(true); pump(B, A); await flush(); };
   await acheck('turn: one ask before the pc, on both sides, and the pc is built on the answer', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
-    B.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }));
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
+    B.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_B, ttl:3600 }, err:'' }));
     await round(A, B);
     if(A.__turnCalls() !== 1) throw new Error('the offerer asks turn.php once, got ' + A.__turnCalls());
     if(!same(A.__pcCfg(), { iceServers:ICE_A })) throw new Error('the offerer pc must carry the answered list: ' + JSON.stringify(A.__pcCfg()));
     if(!A.__sessTurn()) throw new Error('a pc built on a credential must say so on the session');
-    if(A.__turnLife() < 1700000) throw new Error('the credential is held with its ttl: ' + A.__turnLife());
+    if(A.__turnLife() < 3500000) throw new Error('the credential is held with its ttl: ' + A.__turnLife());
     const t = pump(A, B); await flush();
     if(!t.includes('offer')) throw new Error('no offer went out: ' + t);
     if(B.__turnCalls() !== 1) throw new Error('the answerer asks once, after the offer arrives, got ' + B.__turnCalls());
@@ -394,16 +395,38 @@ try {
   await acheck('turn: a held credential is reused while it has NET_TURN_MIN_MS of life, else a fresh one is asked for', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     let n = 0;
-    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:[{ urls:['turn:x'], username:'u' + (++n), credential:'c' }], ttl:1800 }, err:'' }));
-    A.__turnSet(ICE_A, 15 * 60000 + 5000);   // just above the line: reused
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:[{ urls:['turn:x'], username:'u' + (++n), credential:'c' }], ttl:3600 }, err:'' }));
+    A.__turnSet(ICE_A, 30 * 60000 + 5000);   // just above the line: reused
     await round(A, B);
     if(A.__turnCalls() !== 0) throw new Error('a credential with life must not be asked for again');
     if(!same(A.__pcCfg(), { iceServers:ICE_A })) throw new Error('the held one builds the pc');
-    A.__turnSet(ICE_A, 15 * 60000 - 5000);   // just below: a fresh one is asked for and used
+    A.__turnSet(ICE_A, 30 * 60000 - 5000);   // just below: a fresh one is asked for and used
     await round(A, B);
     if(A.__turnCalls() !== 1) throw new Error('under the line the credential is refreshed, got ' + A.__turnCalls());
     if(A.__pcCfg().iceServers[0].username !== 'u1') throw new Error('the pc must be built on the fresh answer: ' + JSON.stringify(A.__pcCfg()));
-    if(A.__turnLife() < 1700000) throw new Error('the fresh one is held with its ttl');
+    if(A.__turnLife() < 3500000) throw new Error('the fresh one is held with its ttl');
+  });
+  await acheck('turn: a match riding the relay tops its credential up under the floor; a direct one never asks; the rebuild rides the fresh one', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    let n = 0;
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:[{ urls:['turn:x'], username:'u' + (++n), credential:'c' }], ttl:3600 }, err:'' }));
+    A.__gameSess(B_ID, 'host'); A.__turnSet(ICE_A, 30 * 60000 - 5000);
+    await A.__pathStat(['host', 'host']);
+    A.__live(); await flush();
+    if(A.__turnCalls() !== 0) throw new Error('a direct match never asks: ' + A.__turnCalls());
+    await A.__pathStat(['relay', 'relay']);
+    A.__live(); A.__live(); await flush();
+    if(A.__turnCalls() !== 1) throw new Error('a relayed match under the floor asks once: ' + A.__turnCalls());
+    if(A.__turnLife() < 3500000) throw new Error('the fresh one is held with its ttl: ' + A.__turnLife());
+    A.__live(); await flush();
+    if(A.__turnCalls() !== 1) throw new Error('with life in hand it asks no more: ' + A.__turnCalls());
+    A.__reconnect(); await flush();
+    if(!A.__pcCfg() || A.__pcCfg().iceServers[0].username !== 'u1') throw new Error('the rebuild builds on the fresh credential: ' + JSON.stringify(A.__pcCfg()));
+    if(A.__turnCalls() !== 1) throw new Error('the rebuild itself asks nothing: ' + A.__turnCalls());
+    // Under DISABLED the pass asks nothing, whatever the path says.
+    A.__turnSet(ICE_A, 1000); A.__setTurnMode(2);
+    A.__live(); await flush();
+    if(A.__turnCalls() !== 1) throw new Error('DISABLED tops nothing up: ' + A.__turnCalls());
   });
   await acheck('turn: 503 = STUN only, no retry within NET_TURN_RETRY_MS, and the HTTP relay stays that pc\'s fallback', async () => {
     const A = mk(A_ID), B = mk(B_ID);
@@ -421,7 +444,7 @@ try {
   });
   await acheck('turn: a pc built on a credential never falls back to the HTTP relay -- a failed connect ends the attempt', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
     await round(A, B);
     if(!A.__sessTurn()) throw new Error('precondition: built on the credential');
     A.__out.length = 0;
@@ -432,8 +455,8 @@ try {
   });
   await acheck('turn: DISABLED never asks and builds STUN only, whatever is held', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
-    A.__turnSet(ICE_A, 1800000); A.__setTurnMode(2);
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
+    A.__turnSet(ICE_A, 3600000); A.__setTurnMode(2);
     await round(A, B);
     if(A.__turnCalls() !== 0) throw new Error('DISABLED asks for nothing');
     if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('DISABLED builds on STUN alone: ' + JSON.stringify(A.__pcCfg()));
@@ -472,7 +495,7 @@ try {
   });
   await acheck('turn: FORCED builds relay-only pcs on the credential; without one the plain pc', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
     A.__setTurnMode(1);
     await round(A, B);
     if(A.__turnCalls() !== 1) throw new Error('FORCED asks like AUTO, got ' + A.__turnCalls());
@@ -496,8 +519,8 @@ try {
     if(!A.__tmReq.includes(A.__turnWaitMs())) throw new Error('the bound must be armed at NET_TURN_WAIT_MS: ' + JSON.stringify(A.__tmReq));
     if(!A.__pcCfg()) throw new Error('past the bound the pc is built without waiting further');
     if(!same(A.__pcCfg(), { iceServers:STUN_ONLY })) throw new Error('...on STUN alone: ' + JSON.stringify(A.__pcCfg()));
-    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
-    if(A.__turnLife() < 1700000) throw new Error('the late answer is held: ' + A.__turnLife());
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }); await flush();
+    if(A.__turnLife() < 3500000) throw new Error('the late answer is held: ' + A.__turnLife());
     await round(A, B);
     if(A.__turnCalls() !== 1) throw new Error('the next pc uses what landed, no new ask; got ' + A.__turnCalls());
     if(!same(A.__pcCfg(), { iceServers:ICE_A })) throw new Error('the next pc is built on the late answer');
@@ -515,7 +538,7 @@ try {
     B.__deliver({ from:A_ID, to:B_ID, type:'ices', payload:JSON.stringify([cand(2), cand(3)]) });
     await flush();
     if(B.__state().sess) throw new Error('no session while the ask is out');
-    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:3600 }, err:'' }); await flush();
     if(!B.__state().sess) throw new Error('the session is built once the ask lands');
     const got = B.__iceAdded().map(c => c.candidate.split(' ')[0]);
     if(JSON.stringify(got) !== JSON.stringify(['candidate:1', 'candidate:2', 'candidate:3'])) throw new Error('every drained candidate reaches the pc, in order: ' + JSON.stringify(got));
@@ -525,7 +548,7 @@ try {
   });
   await acheck('turn: with a credential held the answerer builds inside the drain that brought the offer', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    B.__turnSet(ICE_B, 1800000);
+    B.__turnSet(ICE_B, 3600000);
     await round(A, B);
     pump(A, B);   // no flush: the drain itself
     if(!B.__state().sess || !same(B.__pcCfg(), { iceServers:ICE_B })) throw new Error('held = no wait, the pc exists when the drain ends');
@@ -533,11 +556,11 @@ try {
   });
   await acheck('turn: the overlay names the path -- a relay end on the selected pair reads turn, a host pair p2p', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }));
+    A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
     A.__setTurnMode(1);
     await round(A, B);
     if(A.__state().msg !== 'CONNECTING (TURN)...') throw new Error('a relay-only pc says so on the lobby line: ' + A.__state().msg);
-    A.__gameSess(B_ID, 'host'); A.__turnSet(ICE_A, 1800000);
+    A.__gameSess(B_ID, 'host'); A.__turnSet(ICE_A, 3600000);
     let r = await A.__pathStat(['relay', 'relay']);
     if(r.path.indexOf('relay/relay') !== 0 || r.path.indexOf('rtt 42ms') < 0) throw new Error('path line: ' + r.path);
     if(r.kind !== 'turn') throw new Error('pathKind: ' + r.kind);
@@ -559,10 +582,10 @@ try {
     await round(A, B);
     A.__out.length = 0;
     A.__end();
-    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }); await flush();
     if(A.__state().sess) throw new Error('no session after BACK');
     if(A.__out.some(s => s.type === 'offer')) throw new Error('no offer goes out: ' + JSON.stringify(A.__out.map(s => s.type)));
-    if(A.__turnLife() < 1700000) throw new Error('the answer is still held for the next pc');
+    if(A.__turnLife() < 3500000) throw new Error('the answer is still held for the next pc');
     await round(A, B); await flush();
     if(!A.__state().sess) throw new Error('the next handshake builds normally');
   });
@@ -574,7 +597,7 @@ try {
     const offer = A.__out.find(s => s.type === 'offer');
     B.__deliver(offer); await flush();
     B.__end();
-    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:3600 }, err:'' }); await flush();
     if(B.__state().sess) throw new Error('no session after BACK');
     if(B.__out.some(s => s.type === 'answer')) throw new Error('no answer goes out: ' + JSON.stringify(B.__out.map(s => s.type)));
     // Their bye inside the wait: the pc it would build has no peer.
@@ -583,7 +606,7 @@ try {
     await round(A, B);
     B.__deliver(A.__out.find(s => s.type === 'offer')); await flush();
     B.__deliver({ from:A_ID, to:B_ID, type:'bye', payload:'' });
-    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:3600 }, err:'' }); await flush();
     if(B.__state().sess) throw new Error('no session after their bye');
     if(B.__state().msg !== 'OPPONENT LEFT') throw new Error('the lobby says why: ' + B.__state().msg);
     if(B.__out.some(s => s.type === 'answer')) throw new Error('no answer after their bye');
@@ -602,7 +625,7 @@ try {
     await flush();
     if(A.__spOutN('cafe0002') !== 0) throw new Error('no link while the wait is out');
     if(A.__turnCalls() !== 1) throw new Error('one ask, got ' + A.__turnCalls());
-    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }); await flush();
     if(A.__spOutN('cafe0002') !== 1) throw new Error('exactly one link for the two offers, got ' + A.__spOutN('cafe0002'));
     if(!same(A.__spOutCfg('cafe0002'), { iceServers:ICE_A })) throw new Error('built on the answered credential');
     const got = A.__spAdded('cafe0002').map(c => c.candidate.split(' ')[0]);
@@ -613,7 +636,7 @@ try {
     A.__deliver({ from:'cafe0002', to:A_ID, type:'offer', payload:JSON.stringify({ sp:1, sdp:{ type:'offer', sdp:'w3' }, v:'v4.0.0' }) });
     A.__deliver({ from:'cafe0009', to:A_ID, type:'ice', payload:JSON.stringify({ sp:1, c:cand(9) }) });
     await flush();
-    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }); await flush();
     if(A.__spAdded('cafe0002').length !== 0) throw new Error('a stranger is not parked: ' + A.__spAdded('cafe0002').length);
   });
   await acheck('turn: a second copy of the offer during the ask is dropped, never answered twice', async () => {
@@ -626,7 +649,7 @@ try {
     const pcs = B.__pcCount();
     B.__deliver(offer); B.__deliver(offer); await flush();   // two in one drain, the ask still out
     if(B.__turnCalls() !== 1) throw new Error('one ask in flight at a time, got ' + B.__turnCalls());
-    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:1800 }, err:'' }); await flush();
+    release({ status:200, json:{ ok:true, ice:ICE_B, ttl:3600 }, err:'' }); await flush();
     if(B.__pcCount() !== pcs + 1) throw new Error('exactly one pc for the two copies, got ' + (B.__pcCount() - pcs));
     if(B.__out.filter(s => s.type === 'answer').length !== 1) throw new Error('exactly one answer: ' + JSON.stringify(B.__out.map(s => s.type)));
     if(!same(B.__pcCfg(), { iceServers:ICE_B })) throw new Error('built on the answer');
@@ -658,7 +681,7 @@ try {
   await acheck('peer-net de-obfuscates an mDNS IPv6 candidate to a real one', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setRelay(false); B.__setRelay(false);
-    B.__turnSet(ICE_B, 1800000);      // a credential held: nothing to ask, so B builds inside the drain
+    B.__turnSet(ICE_B, 3600000);      // a credential held: nothing to ask, so B builds inside the drain
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
     B.__answer(true); pump(B, A);     // A gets the accept and kicks off its async offer

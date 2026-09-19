@@ -23,13 +23,15 @@ const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
 // and builds every pc on it until it runs low. Asked right before a pc is built -- that is
 // when a duel is forming -- and never on a screen open: a mint counts against the server's
 // monthly cap, and a lobby visit is not a duel.
-const NET_TURN_MIN_MS = 15 * 60000;   // a pc is built on a credential with at least this much life left, else a fresh one is asked for (the contract's floor on a fresh answer: half the server's ttl)
+const NET_TURN_MIN_MS = 30 * 60000;   // a pc is built on a credential with at least this much life left, else a fresh one is asked for (the contract's floor on a fresh answer: half the server's 60 min ttl)
 const NET_TURN_WAIT_MS = 1000;        // how long a build waits for the ask: the server answers (credential or 503) within 0.6 s plus the round trip; past this the pc goes STUN-only and an answer landing later is held for the next one
 const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no ask for this long: a tournament feeder answers a whole fan-out of spectator offers in that window
-// No refresh inside a match: a pc keeps the credential it was built with (a rebuild takes
-// whatever life is left), so a relayed match ends when the relay stops honouring the
-// allocation past the credential's end -- 15 to 30 minutes after the build, plus the
-// allocation's own lifetime. A refresh would be an ICE restart on a new configuration.
+// A pc keeps the credential it was built with: nothing re-authenticates an open allocation,
+// and a refresh would be an ICE restart on a new configuration. Past the credential's end
+// the relay stops honouring the allocation -- 30 to 60 minutes after the build, plus the
+// allocation's own lifetime -- and the match's reconnect ladder rebuilds the pc on what is
+// held. So a match that rides the relay asks for a fresh credential the moment the held
+// one drops under the floor (_netTurnTopUp): the rebuild finds it in hand, the match goes on.
 // SETTINGS > NETWORK > TURN RELAY (cfg.turnMode). AUTO: the credential rides every pc and
 // ICE picks the path (direct where one exists). FORCED: the pc is built relay-only
 // (iceTransportPolicy 'relay'), so a match runs through TURN even on a LAN -- the way to
@@ -523,6 +525,16 @@ async function _netTurnAsk(){
     })();
     return _netTurnP;
 }
+// Whether an ask is due: a credential with NET_TURN_MIN_MS of life is wanted and what is
+// held has less; never under DISABLED, off the wire, or inside the hold after a refusal.
+function _netTurnDue(){
+    if(cfg.turnMode === NET_TURN_DISABLED || !_netOk() || _netTurnLife() >= NET_TURN_MIN_MS) return false;
+    return !(_netTurnNoAt && Date.now() - _netTurnNoAt < NET_TURN_RETRY_MS);
+}
+// The top-up a relayed match runs from its liveness pass (net-rtc.js _netLiveCheck): the ask
+// when one is due, nothing waited on. One ask in flight at a time (_netTurnAsk), so calling
+// it every pass costs a compare.
+function _netTurnTopUp(){ if(_netTurnDue()) _netTurnAsk(); }
 // Before a pc is built: a credential with NET_TURN_MIN_MS of life, asked for when what is
 // held has less. NULL when there is nothing to ask, so the caller builds the pc in the same
 // turn it was called in (a mailbox drain delivers the offer and the first candidates in one
@@ -530,8 +542,7 @@ async function _netTurnAsk(){
 // NET_TURN_WAIT_MS the pc is built with what there is, and the answer, when it lands, is
 // held for the next one.
 function _netTurnReady(){
-    if(cfg.turnMode === NET_TURN_DISABLED || !_netOk() || _netTurnLife() >= NET_TURN_MIN_MS) return null;
-    if(_netTurnNoAt && Date.now() - _netTurnNoAt < NET_TURN_RETRY_MS) return null;
+    if(!_netTurnDue()) return null;
     return new Promise(res => {
         let t = null;
         const done = () => { if(t != null && typeof clearTimeout === 'function') clearTimeout(t); t = null; res(); };
