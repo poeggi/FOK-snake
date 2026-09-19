@@ -796,7 +796,7 @@ async function _netTimeSync(force){
 //   ptk = peer-tick (sub-tick, ~0 = aligned); pts live/avg = peer one-way pts-delta (latest, then avg + min/max)
 //   rb = rollbacks/resim-ticks, mx = deepest; live = inputs applied with NO rewind
 //   dsy = desync, hok = hash-ok; in = input records rx/tx; pkt = ALL packets rx/tx
-//   path = ICE pair (host=LAN, srflx=hairpin, relay=TURN), also carrying its rtt at level 3
+//   path = ICE pair (host=LAN, srflx=hairpin, relay=TURN; our relay end adds what it speaks: relay(udp) fast, relay(tcp)/(tls) UDP blocked), also carrying its rtt at level 3
 // A PTS as UTC time-of-day (hh:mm:ss.t): the shared server clock is unix ms, so the
 // same PTS renders identically on every device regardless of its timezone.
 function _netHms(pts){

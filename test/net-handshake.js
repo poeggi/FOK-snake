@@ -42,7 +42,7 @@ const HOOKS = (myId) => `
     this.getStats = async ()=>{
       const m = new Map();
       if(!__statsPair) return m;
-      m.set('L', { type:'local-candidate', candidateType:__statsPair[0], address:'10.0.0.1' });
+      m.set('L', { type:'local-candidate', candidateType:__statsPair[0], address:'10.0.0.1', relayProtocol:__statsPair[2] });   // [2]: what our relay end speaks (udp/tcp/tls), absent on a direct one
       m.set('R', { type:'remote-candidate', candidateType:__statsPair[1], address:'10.0.0.2' });
       m.set('P', { type:'candidate-pair', nominated:true, state:'succeeded', localCandidateId:'L', remoteCandidateId:'R', currentRoundTripTime:0.042 });
       return m;
@@ -567,6 +567,11 @@ try {
     if(!/^vs .*  turn 42ms$/.test(r.vs)) throw new Error('vs line must say turn: ' + r.vs);
     if(r.p.indexOf('P0T') !== 0) throw new Error('the P line marks a relayed match T: ' + r.p);
     if(r.info.pathKind !== 'turn') throw new Error('the export carries pathKind: ' + JSON.stringify(r.info.pathKind));
+    r = await A.__pathStat(['relay', 'relay', 'udp']);
+    if(r.path.indexOf('relay(udp)/relay') !== 0) throw new Error('our relay end names its transport: ' + r.path);
+    if(r.kind !== 'turn') throw new Error('and is still a relayed match: ' + r.kind);
+    r = await A.__pathStat(['srflx', 'relay', 'tcp']);
+    if(r.path.indexOf('srflx/relay ') !== 0) throw new Error('a direct end carries no protocol, the peer end never does: ' + r.path);
     r = await A.__pathStat(['host', 'host']);
     if(r.kind !== 'direct') throw new Error('a host pair is direct: ' + r.kind);
     if(!/^vs .*p2p.* 42ms$/.test(r.vs)) throw new Error('vs line must say p2p: ' + r.vs);

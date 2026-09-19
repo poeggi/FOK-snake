@@ -737,6 +737,10 @@ function _netPathStat(s){
         if(!pair) return;
         const loc = st.get(pair.localCandidateId), rem = st.get(pair.remoteCandidateId);
         const ty = c => (c && c.candidateType) ? c.candidateType : '?';
+        // Our relay end says what it speaks to the relay: relay(udp) got the fast transport,
+        // relay(tcp) / relay(tls) means UDP was blocked on this network and the pair has
+        // TCP's head-of-line blocking under it. The peer's end reports no protocol.
+        const lbl = c => ty(c) + (ty(c) === 'relay' && c.relayProtocol ? '(' + c.relayProtocol + ')' : '');
         const addr = c => (c && (c.address || c.ip)) || '';
         const fam = a => a ? (a.indexOf(':') >= 0 ? 'v6' : 'v4') : '';
         _netDbg.p2pRtt = (typeof pair.currentRoundTripTime === 'number') ? Math.round(pair.currentRoundTripTime * 1000) : -1;
@@ -746,7 +750,7 @@ function _netPathStat(s){
         // connected, i.e. the direct IPv6 path won past mDNS. Otherwise it is a normal host
         // (LAN mDNS resolved), srflx (STUN reflexive) or prflx pair.
         const deob = pn && pn.ip && addr(rem) === pn.ip ? ' deob' : '';
-        const p = ty(loc) + '/' + ty(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob;
+        const p = lbl(loc) + '/' + lbl(rem) + (fam(addr(rem)) ? ' ' + fam(addr(rem)) : '') + deob;
         // A relay at either end = the match rides TURN: the overlay's vs line says so.
         s.pathKind = (ty(loc) === 'relay' || ty(rem) === 'relay') ? 'turn' : 'direct';
         // On record whenever it changes: which path carried the match, and a relay pair
