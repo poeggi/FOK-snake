@@ -66,26 +66,23 @@ runTest('SMOKE-GAME', `
     }
     log('gouranga beads on the gem rule ok: multiplier on budget, flat + reset off it');
 
-    // noP2P is a retired key: no save keeps it, whatever its version.
     // cfgVer 5: the P2P ONLY toggle became the three-way row; ON reads as DISABLED.
-    localStorage.setItem(CFG_KEY, JSON.stringify({ noP2P:true, cfgVer:3 })); loadCfg();
-    if('noP2P' in cfg) throw 'an old save must lose noP2P';
+    localStorage.setItem(CFG_KEY, JSON.stringify({ cfgVer:3 })); loadCfg();
     if(cfg.cfgVer!==5) throw 'the live cfg carries the current version';
     if(cfg.turnMode!==0) throw 'TURN RELAY defaults to AUTO';
-    localStorage.setItem(CFG_KEY, JSON.stringify({ noP2P:true, noTurn:true, cfgVer:4 })); loadCfg();
-    if('noP2P' in cfg) throw 'a v4 save must lose noP2P too';
+    localStorage.setItem(CFG_KEY, JSON.stringify({ noTurn:true, cfgVer:4 })); loadCfg();
     if(cfg.turnMode!==2 || 'noTurn' in cfg) throw 'a v4 P2P ONLY save reads as DISABLED and drops the old key';
     localStorage.setItem(CFG_KEY, JSON.stringify({ turnMode:7, cfgVer:5 })); loadCfg();
     if(cfg.turnMode!==0) throw 'an out-of-range mode falls back to AUTO';
     { const row = SETTINGS_CATS.find(c=>c.label==='NETWORK').items.find(it=>it.lbl().indexOf('TURN RELAY: ')===0);
       const net = SETTINGS_CATS.find(c=>c.label==='NETWORK').items.map(it=>it.lbl());
       if(!row) throw 'the TURN RELAY row is on the NETWORK page: '+JSON.stringify(net);
-      if(net.some(l=>l.indexOf('RELAY ONLY')===0||l.indexOf('P2P ONLY')===0)) throw 'the old rows are gone: '+JSON.stringify(net);
+      if(net.some(l=>l.indexOf('P2P ONLY')===0)) throw 'the old row is gone: '+JSON.stringify(net);
       const seen=[]; for(let i=0;i<4;i++){ seen.push(row.lbl()); row.act(); }
       if(seen.join('|')!=='TURN RELAY: AUTO|TURN RELAY: FORCED|TURN RELAY: DISABLED|TURN RELAY: AUTO') throw 'the row cycles AUTO -> FORCED -> DISABLED -> AUTO: '+seen.join('|');
       cfg.turnMode=0; row.adj(false); if(cfg.turnMode!==2) throw 'left from AUTO wraps to DISABLED'; }
     localStorage.setItem(CFG_KEY, JSON.stringify({})); loadCfg();
-    log('cfgVer 5 ok: noP2P dropped from every save, TURN RELAY three-way row on the menu');
+    log('cfgVer 5 ok: a P2P ONLY save reads as DISABLED, TURN RELAY three-way row on the menu');
 
     // THE SPLASH HOLD: frame 0 (dark, no coin) holds SPLASH_HOLD_S after the splash comes
     // up, then the 4 s cycle runs as before, its first drop at 1.5 s. drawSplash and the

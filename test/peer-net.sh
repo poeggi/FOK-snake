@@ -11,8 +11,8 @@
 # hint is therefore the ONLY source of a peer's real IPv6 -- _netDeobfuscateCand
 # in js/net-rtc.js grafts it onto the peer's mDNS candidate to obtain an address
 # that is actually connectable. If the hint ever stops carrying a true observed
-# address, every direct IPv6 duel silently degrades to the server relay, with
-# nothing in any log to say why.
+# address, every direct IPv6 duel silently loses its direct path, with nothing
+# in any log to say why.
 #
 # The test asks the deployment the same question over both families and checks
 # that the answers differ accordingly: connect over IPv6, be told 6 and our

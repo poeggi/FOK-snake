@@ -1,8 +1,7 @@
 // DUEL desync regression test (DEFAULT suite). Two full clients play a REAL match --
 // autopilot toward gems (so levels advance), boost engaged on straightaways and braked into
-// turns -- over an independently-phased, jittery, mildly-lossy wire. This is the coverage the
-// dir-only convergence tests (relay-sim.js) never had: NO boosting, so the boost path shipped
-// a desync no test could see.
+// turns -- over an independently-phased, jittery, mildly-lossy wire. Boosting is the point: a
+// dir-only convergence test cannot see a desync on the boost path.
 //
 // A healthy lockstep pair guarantees three things, all asserted here:
 //   1. your OWN head never teleports  -- it is a pure function of your own logged inputs, so a

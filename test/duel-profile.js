@@ -60,7 +60,7 @@ const HOOKS = (id) => `
   globalThis.setTimeout = (fn, ms)=>{ __ivals.push({ fn, ms:0, next: __now + ms, once:true }); return -1; };
   globalThis.__fire = ()=>{ for(const iv of __ivals){ if(iv.done) continue;
       while(__now >= iv.next){ iv.fn(); if(iv.once){ iv.done=true; break; } iv.next += iv.ms; } } };
-  // Mock DataChannel: _netSend routes here when not in relay mode, so every real packet
+  // Mock DataChannel: _netSend routes here, so every real packet
   // (pts-stamped, size-checked, congestion-guarded) lands on our wire. bufferedAmount stays
   // 0: at this bitrate the congestion guard never trips.
   globalThis.__out = [];

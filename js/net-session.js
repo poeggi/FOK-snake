@@ -1148,8 +1148,7 @@ function _netStartNextLevel(s){
 function netEndSession(){
     // The ONE universal abort. Safe to call in any state -- it withdraws a pending
     // sent invite, dismisses a received invite dialog, stops matchmaking, and tears
-    // down a session whether it is still negotiating, relay-initialising, or a
-    // running game. Every exit path (lobby leave/enter, quit, duel exit) uses it.
+    // down a session whether it is still negotiating or a running game. Every exit path (lobby leave/enter, quit, duel exit) uses it.
     _netSeekStop();
     if(_netHs.sent) _netSignal(_netHs.sent, 'bye', '');            // withdraw a pending invite
     if(_netHs.accepting) _netSignal(_netHs.accepting, 'bye', '');   // we accepted but bail out

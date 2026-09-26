@@ -29,7 +29,7 @@ const table = (sw.match(/const ASSETS = \{([\s\S]*?)\};/) || [])[1] || '';
 const listed = new Map([...table.matchAll(/'\.\/([^']*)': '([0-9a-f]{12})'/g)].map(m => [m[1] || 'index.html', m[2]]));
 const tracked = new Map(execSync('git ls-files -s', { encoding: 'utf8' })
     .split('\n').filter(Boolean).map(l => { const [meta, f] = l.split('\t'); return [f, meta.split(' ')[1].slice(0, 12)]; })
-    .filter(([f]) => f === 'index.html' || (ASSET.test(f) && f !== 'sw.js' && !/^(test\/|\.github\/)/.test(f))));
+    .filter(([f]) => f === 'index.html' || (ASSET.test(f) && f !== 'sw.js' && !/^(test\/|\.github\/|deprecated\/)/.test(f))));
 
 const missing = [...tracked.keys()].filter(f => !listed.has(f));
 const stale = [...listed.keys()].filter(f => !tracked.has(f));

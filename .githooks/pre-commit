@@ -60,12 +60,13 @@ if [ -f js/assets.js ]; then
     git add js/assets.js
 fi
 
-# Build ASSETS from the tracked runtime files (exclude sw.js and the test/CI dirs): path -> the
+# Build ASSETS from the tracked runtime files (exclude sw.js, the test/CI dirs and deprecated/,
+# code kept for reference that the game never loads): path -> the
 # first 12 hex of the STAGED blob id. The service worker copies an asset whose id is unchanged
 # from the previous version's cache and downloads only what really differs. './' is index.html.
 ASSETS="'./': '$(git ls-files -s -- index.html | awk '{print substr($2,1,12)}')'"
 ASSETS="$ASSETS$(git ls-files -s | awk -F'\t' -v q="'" \
-    '$2 ~ /\.(js|css|json|svg|woff2|woff|ttf)$/ && $2 != "sw.js" && $2 !~ /^(test|\.github)\// { split($1, m, " "); printf ", %s./%s%s: %s%s%s", q, $2, q, q, substr(m[2], 1, 12), q }')"
+    '$2 ~ /\.(js|css|json|svg|woff2|woff|ttf)$/ && $2 != "sw.js" && $2 !~ /^(test|\.github|deprecated)\// { split($1, m, " "); printf ", %s./%s%s: %s%s%s", q, $2, q, q, substr(m[2], 1, 12), q }')"
 
 # Enforce auto-managed header on line 1
 sed -i "1s|.*|// AUTO-MANAGED: version, CACHE and ASSETS are updated by the pre-commit hook -- do not edit manually|" "$SW"

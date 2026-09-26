@@ -5,7 +5,7 @@
   and stages it, then rewrites sw.js (AUTO-MANAGED header, `// version`
   comment, `const CACHE`, `const ASSETS` = path -> first 12 hex of the STAGED
   blob id, from `git ls-files -s` js/css/json/svg/woff2/woff/ttf minus sw.js
-  and ^(test/|.github/), './' = index.html) and `git add sw.js`. Checks run
+  and ^(test/|.github/|deprecated/), './' = index.html) and `git add sw.js`. Checks run
   BEFORE the bump. Needs Git Bash on Windows. test/check-sw.js (CI) verifies
   the three stamps agree and every id matches the tree.
 - Version `snake-vMAJOR.MINOR.PATCH`: MAJOR.MINOR from the latest `v[0-9]*`

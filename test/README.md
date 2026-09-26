@@ -6,7 +6,7 @@ a 1Hz hash of the rollback ring. These tests boot TWO full clients over a simula
 wire and prove the pair stays in lockstep while a real, boosting match is played.
 
 Everything here is headless Node against the real `js/*` (loaded in a VM by
-`harness.js`) -- no browser, no server, no relay.
+`harness.js`) -- no browser, no server.
 
 ## Test tiers
 
@@ -177,8 +177,8 @@ this banner, so the debounce drops no real signal.
 ### duel-desync.js  (REGRESSION tier -- the boost-lockstep guard)
 
 Runs six scenarios through the driver and FAILS if a boosting duel does not stay
-in lockstep. This is the coverage the dir-only convergence test (`relay-sim.js`)
-never had: it never boosts, so the boost path shipped a desync no test could see.
+in lockstep. Boosting is the point: a dir-only convergence test cannot see a
+desync on the boost path.
 
     clean-boost      phase offset only, no loss -- isolates the boost/rollback path
     lossy-boost      + 5% packet loss           -- stresses the redundancy/loss window

@@ -200,7 +200,7 @@ const HOOKS = (myId) => `
     try { await _realReqStart(_netSess, reason); }
     finally { globalThis.setTimeout = realST; _netBurstPing = realPing; }
   };
-  // Reliable-control dedup + relay-coalesce probes. beginOnlineDuel is stubbed to a
+  // Reliable-control dedup probes. beginOnlineDuel is stubbed to a
   // counter so a repeated start is OBSERVABLE without running the whole duel setup --
   // and with it stubbed, inGame never flips, so the dedup that fires is the epoch one
   // (s.ctlEpoch), not the incidental inGame guard.

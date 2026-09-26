@@ -138,7 +138,6 @@ function loadCfg() {
     try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch(e) {}
     if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
     if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
-    delete s.noP2P;   // a retired key: nothing reads it, so no save keeps it
     // v5: the P2P ONLY toggle became the three-way TURN RELAY row; ON reads as DISABLED.
     if(!s.cfgVer || s.cfgVer < 5){ if(s.noTurn) s.turnMode = 2; delete s.noTurn; }
     Object.assign(cfg, defaultCfg(), s);

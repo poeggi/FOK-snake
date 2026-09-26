@@ -1,6 +1,6 @@
 // Online-features smoke: the OFFLINE-FIRST contract (nothing may break local play
 // -- with cfg.offline ON, with no fetch/WebRTC at all, or with the server down),
-// the lobby flow, the host<->peer duel netcode (state relay + input relay + the
+// the lobby flow, the host<->peer duel netcode (state + input exchange + the
 // PLAY AGAIN handshake) driven headlessly over a fake DataChannel.
 // Run: node test/smoke-net.js
 const { runTest } = require('./harness');

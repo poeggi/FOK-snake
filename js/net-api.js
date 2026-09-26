@@ -564,7 +564,7 @@ function _netTurnReady(){
 }
 // Every caller ignored the result of this, so the server REFUSING a signal was
 // indistinguishable from success: a 403 (no accepted friendship), a 400 (our clock
-// drifted ahead of the server's), a 503 (relay full) or a plain blip all vanished
+// drifted ahead of the server's), a 503 (server full) or a plain blip all vanished
 // while the UI sat on "INVITED - WAITING" until the staleness timeout. Failures are now
 // logged in the debug overlay, and the invite path reports them to the user.
 async function _netSignal(to, type, payload){
@@ -1320,9 +1320,7 @@ function _netPollDue(){
 // and expire, so without this a single lost offer killed the whole attempt.
 function _netHsTick(){
     if(!_netOk() || !_netHs.offerTo || inGame) return;   // reconnect re-offers are driven by the liveness loop, not here (no 3-try cap)
-    // NOTE: do NOT stop on _netSess.game -- a relay session is game=true from the
-    // first instant, which killed this retry on the default path. Only the peer's
-    // ANSWER (handled in the signal switch) proves delivery and clears offerTo.
+    // Only the peer's ANSWER (handled in the signal switch) proves delivery and clears offerTo.
     const age = Date.now() - _netHs.offeredAt;
     if(age < 2000) return;
     if(_netHs.offerTries >= 3){ _netHs.offerTo = null; _netHs.offerPayload = null; _netLb.msg = 'NO RESPONSE'; _uiDirty = true; return; }
@@ -1573,7 +1571,7 @@ function _netUnload(){
     if(_netSeekT){ clearInterval(_netSeekT); _netSeekT = null; _netLb.seeking = false; }
     _netPollAbortNow();   // abort() really does close the held long-poll's socket
     _netHsClear();
-    _netTeardown();       // DataChannel + RTCPeerConnection closed, relay poll aborted, timers cleared
+    _netTeardown();       // DataChannel + RTCPeerConnection closed, timers cleared
 }
 if(typeof window !== 'undefined' && window.addEventListener) window.addEventListener('beforeunload', _netUnload);
 

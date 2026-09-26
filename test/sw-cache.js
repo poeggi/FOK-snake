@@ -150,7 +150,7 @@ function boot() {
         check(other.value && other.value.tag === 'doc' && !sw.store(sw.CACHE).has(sw.urlOf('./docs/API.md')), 'a URL outside the bundle passes through and is not stored');
     }
 
-    // 3. API/relay traffic is never cached: a stale clock sample or an ancient long-poll
+    // 3. API traffic is never cached: a stale clock sample or an ancient long-poll
     //    payload served from a cache is worse than no answer.
     {
         const sw = boot();

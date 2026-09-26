@@ -24,8 +24,6 @@
 //     adopted before tick 0, absent reading as OFF. They cannot be left to each side to work
 //     out for itself -- a disagreement is silent on both screens, and the only place it ever
 //     surfaces is the item registry, as gains nobody corroborated.
-//   * P2P-ONLY. A tournament match and every spectator link refuse the deprecated server
-//     relay, at all three of its entry points.
 // Run: node test/duel-hearts.js
 const fs = require('fs');
 const path = require('path');

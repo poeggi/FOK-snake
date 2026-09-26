@@ -1,8 +1,8 @@
 // Identity smoke (API 4.20, FOK-server docs/API.md "Identity token"): the id is public,
 // the token proves it. Four things are under test, because each one fails silently on
 // the wire:
-//   * every request that names our id is a POST whose body carries `tok` (the poll, the
-//     relay and the vault restore included, the unload beacon too), null until a hello has
+//   * every request that names our id is a POST whose body carries `tok` (the poll and
+//     the vault restore included, the unload beacon too), null until a hello has
 //     minted one; nothing names the id on a request line;
 //   * a hello answer carrying `tok` is stored, and a 401 stops the wire with no retry loop:
 //     ahead of the first answered hello only the hello's own refusal counts, because a poll

@@ -1,7 +1,7 @@
 # DEPRECATED: the HTTP server relay (unused)
 
-Status: **unused, deprecated, not loaded.** `js/net-relay.js` stays in the repository
-for reference only (educational). It is not part of the game.
+Status: **unused, deprecated, not loaded.** `net-relay.js` in this folder stays in the
+repository for reference only (educational). It is not part of the game.
 
 ## What is in the file
 
@@ -12,11 +12,13 @@ the `invite-relay` / `accept-relay` signal types) and its own liveness rules.
 ## Why nothing can start it
 
 - index.html has no script tag for it.
+- The service worker does not cache it: the commit hook leaves `deprecated/` out of the
+  bundle.
 - The sim worker and the test harness do not load it.
 - The netcode has no call into it and no fallback to it.
 - The `invite-relay` and `accept-relay` signal types are neither sent nor handled.
 - An offer without an sdp is logged and ignored.
-- `cfg.noP2P` is a retired key: every load drops it from the save.
+- Nothing reads `cfg.noP2P`.
 
 ## What covers its case
 

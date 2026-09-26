@@ -1,14 +1,14 @@
 // net-relay.js -- UNUSED AND DEPRECATED. Kept in the repository for reference only
 // (educational). It is not part of the game.
 //
-// Nothing loads it: index.html, the sim worker and the test harness leave it out, and
-// no code path calls into it. It shows an HTTP long-poll duel transport over
+// Nothing loads it: index.html, the sim worker and the test harness leave it out, the
+// service worker does not cache it, and no code path calls into it. It shows an HTTP long-poll duel transport over
 // api/relay.php: every datagram forwarded through the server, ~200-400 ms one-way.
 // TURN (server API 4.22) covers the same case on the DataChannel itself.
 //
 // It depends on hooks the live netcode does not provide (netP2POnly, _netRelayHeld,
 // the session's relay slots, the invite-relay / accept-relay signals, cfg.noP2P).
-// Loaded as it stands, it does not run. See docs/DEPRECATED-relay.md.
+// Loaded as it stands, it does not run. See README.md beside it.
 
 // The P2P-ONLY refusal (see netP2POnly in net-rtc.js). Relay mode has three ways in -- the
 // offerer's and the answerer's deliberate relay handshake, and _netRelayStart's fallback
