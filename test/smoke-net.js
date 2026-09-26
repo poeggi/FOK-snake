@@ -706,13 +706,6 @@ runTest('SMOKE-NET', `
         _netPollHeld=false;
         if(_netGapFlight(NET_BG_IDLE)!==0) throw 'with no poll open the idle tier owes nothing extra';
         if(_netGapFlight(true)!==0) throw 'with no poll open the background lane owes nothing extra';
-        // ...and a worker does not know which endpoint parked it: DEPRECATED(relay)'s held
-        // GET is the other hold a client can have open, and it counts the same.
-        _netRelayHeld=true;
-        if(_netGapFlight(true)!==1) throw 'a held relay GET parks a worker too and must be waited out';
-        if(_netGapFlight(NET_BG_SOLO)!==0) throw 'the exempt lane goes beside either kind of hold';
-        _netRelayHeld=false;
-        if(_netGapFlight(true)!==0) throw 'with no hold open the background lane owes nothing extra';
         _netFlight=1;
         if(_netGapFlight(true)!==1) throw 'a real request of ours in flight counts for every tier';
         if(_netGapFlight(NET_BG_SOLO)!==1) throw 'and counts for the exempt lane as well -- a THIRD is forbidden';
@@ -1240,10 +1233,10 @@ runTest('SMOKE-NET', `
     // 20 s at either end, an offer is re-sent for 6 s and given up on -- and answering each
     // of them was a burst of no's and answers into mailboxes at the other end.
     {
-        const _oW=_spOnWatch, _oA=_netRtcAnswer, _oSess=_netSess, _oTt=_tt, _oP2P=cfg.noP2P;
+        const _oW=_spOnWatch, _oA=_netRtcAnswer, _oSess=_netSess, _oTt=_tt;
         let asks=0, answers=0;
         _spOnWatch=()=>{ asks++; }; _netRtcAnswer=()=>{ answers++; };
-        _netSess=null; _tt=null; cfg.noP2P=false;
+        _netSess=null; _tt=null;
         _netOnSignal({from:'00ff00aa', type:'watch', payload:'{"k":"req"}', created:_nowS-1000});
         if(asks) throw 'a stale watch ask must be dropped, not answered';
         _netOnSignal({from:'00ff00aa', type:'watch', payload:'{"k":"req"}', created:_nowS});
@@ -1252,7 +1245,7 @@ runTest('SMOKE-NET', `
         if(answers) throw 'a stale offer must not be answered';
         _netOnSignal({from:'00ff00aa', type:'offer', payload:'{"sdp":{"type":"offer","sdp":"v=0"},"seed":1}', created:_nowS});
         if(answers!==1) throw 'a fresh offer must still be answered';
-        _spOnWatch=_oW; _netRtcAnswer=_oA; _netSess=_oSess; _tt=_oTt; cfg.noP2P=_oP2P;
+        _spOnWatch=_oW; _netRtcAnswer=_oA; _netSess=_oSess; _tt=_oTt;
     }
     log('stale invite ok: refused on arrival by its stamp, fresh and unstamped ones unaffected; a stale watch ask and a stale offer are dropped the same way');
 
@@ -1285,7 +1278,7 @@ runTest('SMOKE-NET', `
         specNode('t1','n2');
         if(_spSilent['aaaa1111']) throw 'a new match forgets who was silent in the last one';
         _spWatchSig=_oSig; _netAnchorRefresh=_oAnch; _spSilent=_oSil; _spTid=_oTid; _spNid=_oNid;
-        _spWant=_oWant; netP2POnlySet(false);
+        _spWant=_oWant;
     }
     log('sparse ladder ok: a peer that never answered a whole ladder gets one ask per ladder until it speaks or the match changes');
 
@@ -1684,10 +1677,10 @@ runTest('SMOKE-NET', `
     log('invite withdraw ok: bye closes the dialog, re-invite unblocked');
 
     // ---- universal teardown: EVERY leftover state is reaped on lobby transitions ----
-    // (1) a relay session that reached game=true but is not on-screen (inGame=false)
-    _netSess=_netMkSess('00ff00aa','peer'); _netSess.relay=true; _netSess.game=true; inGame=false;
+    // (1) a session that reached game=true but is not on-screen (inGame=false)
+    _netSess=_netMkSess('00ff00aa','peer'); _netSess.game=true; inGame=false;
     phase='duelLobby'; netLobbyLeave();
-    if(_netSess!==null) throw 'a not-yet-playing relay session must be reaped';
+    if(_netSess!==null) throw 'a session that is not on-screen must be reaped';
     // (2) a P2P session still negotiating (game=false) with mock RTC objects closed
     let _pcC=false,_dcC=false;
     _netSess=_netMkSess('00ff00bb','host'); _netSess.pc={close(){_pcC=true;}}; _netSess.dc={close(){_dcC=true;}};
@@ -1715,28 +1708,29 @@ runTest('SMOKE-NET', `
     // ---- HANDSHAKE RESILIENCE (the restructure): every case below silently
     // destroyed a connection attempt before _netHs existed. ----
     cfg.offline=false; inGame=false;
+    // The pc's own offer and answer are net-handshake.js's (this harness has no
+    // RTCPeerConnection); here the dispatcher only has to route to them.
+    const _oRtcOffer=_netRtcOffer, _oRtcAnswer=_netRtcAnswer; const _offers=[], _answers=[];
+    _netRtcOffer=(peer)=>{ _offers.push(peer); }; _netRtcAnswer=(peer, d)=>{ _answers.push([peer, d]); };
     // (1) navigation must NOT wipe an in-flight handshake nor bye the peer
-    _netHsClear(); _netSess=null; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now(); _netHs.sentRelay=true;
+    _netHsClear(); _netSess=null; _netHs.sent='00ff00aa'; _netHs.sentAt=Date.now();
     phase='multiplayer'; netLobbyEnter(); phase='duelLobby';
     if(_netHs.sent!=='00ff00aa') throw 'entering a screen must not wipe the handshake';
-    // ...and the peer's accept is then still recognised (was dropped forever)
-    _netOnSignal({from:'00ff00aa', type:'accept-relay', payload:JSON.stringify({profile:{name:'P'}})});
-    if(!_netSess||_netSess.role!=='host') throw 'accept after navigation must still produce an offer';
-    if(!_netHs.offerTo) throw 'the offer must be remembered for re-send';
+    // ...and the peer's accept is then still recognised
+    _netOnSignal({from:'00ff00aa', type:'accept', payload:JSON.stringify({profile:{name:'P'}})});
+    if(_offers.join()!=='00ff00aa') throw 'accept after navigation must still produce an offer';
     _netTeardown(); _netHsClear();
-    // (2) an offer arriving OFF the lobby screen is honoured (phase guard gone)
+    // (2) an offer arriving OFF the lobby screen is honoured (no phase guard)
     phase='multiplayer'; _netSess=null;
-    _netOnSignal({from:'00ff00bb', type:'offer', payload:JSON.stringify({seed:9, profile:{name:'Q'}})});
-    if(!_netSess||_netSess.role!=='peer') throw 'an offer off the lobby screen must still connect';
-    if((_netSess.seed>>>0)!==9) throw 'offer seed lost';
+    _netOnSignal({from:'00ff00bb', type:'offer', payload:JSON.stringify({sdp:{type:'offer',sdp:'v=0'}, seed:9, profile:{name:'Q'}})});
+    if(_answers.length!==1||_answers[0][0]!=='00ff00bb') throw 'an offer off the lobby screen must still connect';
+    if((_answers[0][1].seed>>>0)!==9) throw 'offer seed lost';
+    // ...and an offer without an sdp is answered by nobody
+    _netOnSignal({from:'00ff00b1', type:'offer', payload:JSON.stringify({seed:9, profile:{name:'Q'}})});
+    if(_answers.length!==1||_netSess) throw 'an offer without an sdp must not be answered';
+    _netRtcOffer=_oRtcOffer; _netRtcAnswer=_oRtcAnswer;
     _netTeardown(); _netHsClear();
-    // (3) debris must not swallow the offer (was: if(_netSess) return -> silence)
-    _netSess=_netMkSess('00ff00cc','peer'); _netSess.game=false; phase='duelLobby';
-    _netHs.sent='00ff00cc'; _netHs.sentAt=Date.now(); _netHs.sentRelay=true;
-    _netOnSignal({from:'00ff00cc', type:'accept-relay', payload:JSON.stringify({profile:{name:'R'}})});
-    if(!_netSess||_netSess.role!=='host'||!_netSess.relay) throw 'debris must be replaced, offer still sent';
-    _netTeardown(); _netHsClear();
-    // (4) unanswered offers re-send (max 3), then give up loudly
+    // (3) unanswered offers re-send (max 3), then give up loudly
     const _ofetch=globalThis.fetch;
     globalThis.fetch = ()=>({ then:()=>({ catch:()=>{} }) });   // presence only: _netOk() true
     _netHs.offerTo='00ff00dd'; _netHs.offerPayload='{}'; _netHs.offeredAt=Date.now()-3000; _netHs.offerTries=1;
@@ -1747,7 +1741,7 @@ runTest('SMOKE-NET', `
     _netHs.offeredAt=Date.now()-3000; _netHsTick();
     if(_netHs.offerTo!==null||_netLb.msg!=='NO RESPONSE') throw 'must give up after 3 tries, loudly';
     _netHsClear(); _netLb.msg='';
-    // (5) friend requests retry over time (were latched once per session forever)
+    // (4) friend requests retry over time (were latched once per session forever)
     localStorage.removeItem('fok-snake-friend-ok'); _netFrOk={};
     delete _netFrRequested['00ff00ee'];
     netFriendRequest('00ff00ee');                       // soft (no fetch) but stamps the attempt
@@ -1758,7 +1752,7 @@ runTest('SMOKE-NET', `
     netFriendRequest('00ff00ee');
     if(_netFrRequested['00ff00ee']===Date.now()-31000) throw 'a request must retry after 30s';
     delete _netFrRequested['00ff00ee']; globalThis.fetch=_ofetch; phase='menu';
-    // (6) focus loss must not latch the poll loop: the zombie watchdog frees it
+    // (5) focus loss must not latch the poll loop: the zombie watchdog frees it
     _netPollBusy=true; _netPollBusyAt=Date.now()-20000; _netPollAbort=null;
     _netPollAbortNow();
     if(_netPollBusy) throw 'a zombie held poll must be cut loose';
@@ -1766,18 +1760,7 @@ runTest('SMOKE-NET', `
     _netPollBusy=true; _netPollAbort={ abort(){ _aborted=true; } };
     _netPollAbortNow();
     if(!_aborted||_netPollBusy||_netPollAbort!==null) throw 'abort must cancel the held poll and clear the latch';
-    // (7) the offer retry must survive a relay session (game=true instantly):
-    // only the peer's ANSWER stops it
-    const _of2=globalThis.fetch;
-    globalThis.fetch = ()=>({ then:()=>({ catch:()=>{} }) });
-    _netSess=_netMkSess('00ff00dd','host'); _netSess.relay=true; _netSess.game=true;
-    _netHs.offerTo='00ff00dd'; _netHs.offerPayload='{}'; _netHs.offeredAt=Date.now()-3000; _netHs.offerTries=1;
-    _netHsTick();
-    if(_netHs.offerTries!==2) throw 'a relay offer must still re-send (game=true must not cancel it)';
-    _netOnSignal({from:'00ff00dd', type:'answer', payload:JSON.stringify({profile:{name:'D'}})});
-    if(_netHs.offerTo!==null) throw 'the answer must stop the offer retry';
-    globalThis.fetch=_of2; _netTeardown(); _netHsClear(); _netLb.msg='';
-    log('handshake resilience ok: survives navigation, no phase guard, debris replaced, offer re-sends, friend retry');
+    log('handshake resilience ok: survives navigation, no phase guard, no sdp no answer, offer re-sends, friend retry');
 
     // ---- PRNG rides the frames: after reconciliation both sims roll the same dice ----
     simTick=0; simNow=0; startDuel(0xD1CE); bars=[];

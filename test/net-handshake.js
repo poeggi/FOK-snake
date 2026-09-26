@@ -1,7 +1,7 @@
 // TWO-CLIENT handshake test: the only test that proves client A's real output is
 // exactly what client B needs as input. Every other net test pokes a single
 // client with hand-written signals, which is precisely how the protocol bugs
-// survived (accept-relay ignored, offers silently skipped, dup offers resetting
+// survived (accepts ignored, offers silently skipped, dup offers resetting
 // a forming session). Here two full game instances run in separate vm contexts
 // and every signal is delivered between them through a bus, exactly like the
 // server mailbox does.  Run: node test/net-handshake.js
@@ -74,7 +74,6 @@ const HOOKS = (myId) => `
   const _realReqStart = _netRequestStart;
   _netRequestStart = async ()=>{};
   _netLiveStart = ()=>{};              // no timers in the test
-  _netRelayLoop = async ()=>{};        // relay transport: not under test here
   // The friendship gate is stubbed out for the handshake tests, but the invite
   // path RACES it, so that race needs the real one.
   const _realFrRequest = netFriendRequest;
@@ -106,14 +105,16 @@ const HOOKS = (myId) => `
   globalThis.__iceAdded  = ()=> (_netSess && _netSess.pc && _netSess.pc._ice) ? _netSess.pc._ice.slice() : [];
   globalThis.__gameSess  = (peer, role)=>{ _netSess = _netMkSess(peer, role); _netSess.seed=0x515ED; _netSess.game=true; _netSess.dc={readyState:'open',send(){},close(){}}; _netSess.lastRecv=performance.now(); _netSess.lastRecvWall=Date.now(); };
   globalThis.__reconnect = ()=>{ _netReconnect(_netSess); };
+  // The stub pc never opens its channel; this fires the real onopen on the one it made.
+  globalThis.__dcOpen    = ()=>{ const dc = _netSess && _netSess.dc; if(!dc || !dc.onopen) throw new Error('no channel to open'); dc.readyState = 'open'; dc.onopen(); };
+  globalThis.__debris    = (peer)=>{ _netSess = _netMkSess(peer, 'peer'); };
   globalThis.__live      = ()=>{ _netLiveCheck(); };   // one real liveness pass
-  globalThis.__rcDbg = ()=>({ has:!!_netSess, rc:!!(_netSess&&_netSess.reconnecting), rcAt:_netSess&&_netSess.reconnectAt, rtc:(typeof _netRtcAvail==='function')?_netRtcAvail():'nofn', relay:!!(_netSess&&_netSess.relay), game:!!(_netSess&&_netSess.game) });
+  globalThis.__rcDbg = ()=>({ has:!!_netSess, rc:!!(_netSess&&_netSess.reconnecting), rcAt:_netSess&&_netSess.reconnectAt, rtc:(typeof _netRtcAvail==='function')?_netRtcAvail():'nofn', game:!!(_netSess&&_netSess.game) });
   globalThis.__invite    = (to)=> _netInviteSend(to);   // async: await it to see the server's verdict
   globalThis.__frOk      = (id)=>{ _netFrOkMark(id); };
   globalThis.__isFrOk    = (id)=> !!_netFrOk[id];
   globalThis.__answer    = (ok)=>{ _netInviteAnswer(ok); };
   globalThis.__dialog    = ()=>  _netLb.invite ? _netLb.invite.from : null;
-  globalThis.__setRelay  = (on)=>{ cfg.noP2P = !!on; };
   // TURN (API 4.22): the credential held, the pc it built, the fallback it did or did not take.
   globalThis.__setTurn   = (fn)=>{ __turnFn = fn; };
   globalThis.__turnReset = ()=>{ _netTurn = null; _netTurnNoAt = 0; __turnFn = null; cfg.turnMode = 0; };
@@ -132,9 +133,6 @@ const HOOKS = (myId) => `
   globalThis.__spAnswer  = (peer, d)=> _spAnswer(peer, d);
   globalThis.__turnCalls = ()=> __calls.filter(c => /turn/.test(c)).length;
   globalThis.__rtcFail   = ()=>{ const pc = _netSess && _netSess.pc; if(!pc) throw new Error('no pc to fail'); pc.connectionState = 'failed'; pc.onconnectionstatechange(); };
-  globalThis.__relayStarts = 0;
-  const _realRelayStart = _netRelayStart;
-  _netRelayStart = (s)=>{ __relayStarts++; return _realRelayStart(s); };
   globalThis.__spMkPc    = (peer)=>{ const arr = []; _spMkPc(peer, arr, 'in'); return arr[0].pc.cfgArg; };
   globalThis.__spOffer   = (peer)=> _spOffer(peer);
   globalThis.__spInCfg   = (peer)=>{ const l = _spFind(_spIn, peer); return l ? l.pc.cfgArg : null; };
@@ -259,7 +257,7 @@ const HOOKS = (myId) => `
   globalThis.__unload    = ()=>{ _netUnload(); };
   // Quick match: match.php hands over a stranger id and a role, with NO profile
   // (unlike an invite, whose accept payload carries one).
-  globalThis.__qmOffer   = (to)=> cfg.noP2P ? _netRelayOffer(to) : _netRtcOffer(to);   // returns the offer promise: the p2p path is async
+  globalThis.__qmOffer   = (to)=> _netRtcOffer(to);   // returns the offer promise: the offer is async
   globalThis.__ageOffer  = (ms)=>{ _netHs.offeredAt -= ms; };
   // API 4.4. The stub pc never gathers, so hand candidates to _netIceOut directly --
   // that IS the callback the real pc.onicecandidate calls, so the batcher under test is
@@ -334,7 +332,7 @@ const HOOKS = (myId) => `
     return { anchored: _netSync.ofs != null, rtt: _netSync.rtt, reported: !!_netLat.pending, lat: _netLat.value, calls };
   };
   globalThis.__state = ()=>({
-    sess: _netSess ? { peer:_netSess.peer, role:_netSess.role, relay:!!_netSess.relay,
+    sess: _netSess ? { peer:_netSess.peer, role:_netSess.role,
                        game:!!_netSess.game, seed:_netSess.seed>>>0 } : null,
     hs:   { sent:_netHs.sent, accepting:_netHs.accepting, offerTo:_netHs.offerTo, tries:_netHs.offerTries },
     msg:  _netLb.msg,
@@ -364,7 +362,7 @@ async function acheck(name, fn){
 try {
   // ---------------------------------------------------------------- TURN (API 4.22)
   // turn.php answers an iceServers list; the pc is built on it, or on STUN alone when the
-  // server offers nothing, and only THAT pc may fall back to the deprecated HTTP relay.
+  // server offers nothing.
   const ICE_A = [{ urls:['stun:stun.cloudflare.com:3478'] }, { urls:['turn:turn.cloudflare.com:3478?transport=udp'], username:'ua', credential:'ca' }];
   const ICE_B = [{ urls:['turn:turn.cloudflare.com:3478?transport=udp'], username:'ub', credential:'cb' }];
   const STUN_ONLY = [{ urls:'stun:stun.cloudflare.com:3478' }];
@@ -372,6 +370,10 @@ try {
   const same = (a, b)=> JSON.stringify(a) === JSON.stringify(b);
   // One invite round: A invites, B accepts, the accept reaches A (its offer awaits the ask).
   const round = async (A, B)=>{ A.__invite(B_ID); await flush(); pump(A, B); B.__answer(true); pump(B, A); await flush(); };
+  // The whole handshake: the offer answered and the answer set on the offerer.
+  const connect = async (A, B)=>{ await round(A, B); pump(A, B); await flush(); pump(B, A); await flush(); };
+  // ...and both channels open: the match is on.
+  const play = async (A, B)=>{ await connect(A, B); A.__dcOpen(); B.__dcOpen(); };
   await acheck('turn: one ask before the pc, on both sides, and the pc is built on the answer', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
@@ -428,7 +430,7 @@ try {
     A.__live(); await flush();
     if(A.__turnCalls() !== 1) throw new Error('DISABLED tops nothing up: ' + A.__turnCalls());
   });
-  await acheck('turn: 503 = STUN only, no retry within NET_TURN_RETRY_MS, and the HTTP relay stays that pc\'s fallback', async () => {
+  await acheck('turn: 503 = STUN only, no retry within NET_TURN_RETRY_MS, and a failed STUN-only pc ends the attempt', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurn(()=>({ status:503, json:null, err:'turn_unavailable' }));
     await round(A, B);
@@ -438,18 +440,19 @@ try {
     if(A.__turnLife() !== 0) throw new Error('nothing is held after a refusal');
     await round(A, B);
     if(A.__turnCalls() !== 1) throw new Error('a refusal holds the next ask off; got ' + A.__turnCalls());
+    A.__out.length = 0;
     A.__rtcFail(); await flush();
-    if(A.__relayStarts !== 1) throw new Error('a failed STUN-only pc falls back to the HTTP relay (the one case left for it)');
-    if(!A.__state().sess || !A.__state().sess.relay) throw new Error('the session must have gone over to the relay');
+    if(A.__state().sess) throw new Error('the attempt must have ended: ' + JSON.stringify(A.__state()));
+    if(A.__state().msg !== 'NO PATH - P2P FAILED') throw new Error('and says why: ' + A.__state().msg);
+    if(!A.__out.some(s => s.type === 'bye')) throw new Error('the peer is told');
   });
-  await acheck('turn: a pc built on a credential never falls back to the HTTP relay -- a failed connect ends the attempt', async () => {
+  await acheck('turn: a failed connect on a credential ends the attempt', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurn(()=>({ status:200, json:{ ok:true, ice:ICE_A, ttl:3600 }, err:'' }));
     await round(A, B);
     if(!A.__sessTurn()) throw new Error('precondition: built on the credential');
     A.__out.length = 0;
     A.__rtcFail(); await flush();
-    if(A.__relayStarts !== 0) throw new Error('the HTTP relay must not start behind a TURN pc');
     if(A.__state().sess) throw new Error('the attempt must have ended: ' + JSON.stringify(A.__state()));
     if(!A.__out.some(s => s.type === 'bye')) throw new Error('the peer is told');
   });
@@ -463,7 +466,7 @@ try {
     if(A.__sessTurn()) throw new Error('DISABLED never marks the session');
     if(!same(A.__spMkPc('cafe0001'), { iceServers:STUN_ONLY })) throw new Error('DISABLED covers spectator pcs too');
   });
-  await acheck('turn: DISABLED is P2P only -- the peer\'s relay candidates are dropped and a failed pc takes no HTTP relay', async () => {
+  await acheck('turn: DISABLED is P2P only -- the peer\'s relay candidates are dropped and a failed pc ends the attempt', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     A.__setTurnMode(2);
     // The whole handshake, so the offerer's remote description is set and candidates release.
@@ -484,7 +487,6 @@ try {
     if(A.__spAdded('cafe0003').length !== 1) throw new Error('the spectator link drops the relay candidate too: ' + A.__spAdded('cafe0003').length);
     A.__out.length = 0;
     A.__rtcFail(); await flush();
-    if(A.__relayStarts !== 0) throw new Error('no HTTP relay under DISABLED');
     if(A.__state().sess) throw new Error('the attempt ends: ' + JSON.stringify(A.__state()));
     if(A.__state().msg !== 'NO PATH - P2P ONLY') throw new Error('and says why: ' + A.__state().msg);
     // AUTO takes the relay candidate.
@@ -500,7 +502,7 @@ try {
     await round(A, B);
     if(A.__turnCalls() !== 1) throw new Error('FORCED asks like AUTO, got ' + A.__turnCalls());
     if(!same(A.__pcCfg(), { iceServers:ICE_A, iceTransportPolicy:'relay' })) throw new Error('FORCED = relay-only on the credential: ' + JSON.stringify(A.__pcCfg()));
-    if(!A.__sessTurn()) throw new Error('a forced pc is a TURN pc: no HTTP relay behind it');
+    if(!A.__sessTurn()) throw new Error('a forced pc is a TURN pc');
     if(!same(A.__spMkPc('cafe0001'), { iceServers:ICE_A, iceTransportPolicy:'relay' })) throw new Error('FORCED covers spectator pcs too');
     // The server offers nothing: the match still happens, on the plain pc.
     A.__turnReset(); A.__setTurnMode(1);
@@ -666,20 +668,16 @@ try {
   });
 
   // ---------------------------------------------------------------- P2P mode
-  // No RTCPeerConnection in the harness, so the SIGNALS are what we verify: the
-  // relay bit must NOT appear and the invite/accept types must be the plain ones.
+  // The SIGNALS are what we verify: the invite/accept types on the wire.
   check('p2p mode: plain invite/accept types on the wire', () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false); B.__setRelay(false);
     A.__invite(B_ID);
     const t1 = pump(A, B);
     if(!t1.includes('invite')) throw new Error('expected a plain invite, got ' + t1);
-    if(t1.includes('invite-relay')) throw new Error('p2p mode must not declare the relay bit');
     if(B.__dialog() !== A_ID) throw new Error('B did not surface the p2p invite');
     B.__answer(true);
     const t2 = pump(B, A);
     if(!t2.includes('accept')) throw new Error('expected a plain accept, got ' + t2);
-    if(t2.includes('accept-relay')) throw new Error('p2p acceptor must not declare relay');
   });
 
   // peer-net hint: the server's IPv6 for the peer de-obfuscates its mDNS host
@@ -687,7 +685,6 @@ try {
   // and non-mDNS candidates are left alone.
   await acheck('peer-net de-obfuscates an mDNS IPv6 candidate to a real one', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false); B.__setRelay(false);
     B.__turnSet(ICE_B, 3600000);      // a credential held: nothing to ask, so B builds inside the drain
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
@@ -731,7 +728,7 @@ try {
   // the wire carries APP_VERSION, never a hand-typed version.
   const txSess = (srvMin, peerV)=>{
     const A = mk(A_ID);
-    A.__setRelay(false); A.__gameSess(B_ID, 'host');
+    A.__gameSess(B_ID, 'host');
     A.__srvMin(srvMin); A.__setPeerV(peerV === null ? A.__peerV4() : peerV);
     A.__out.splice(0);
     return A;
@@ -840,7 +837,6 @@ try {
   // a batched candidate must take exactly the path a lone one takes.
   await acheck('4.4: the batch A sends is the candidate set B adds, in order', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false); B.__setRelay(false);
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
     B.__answer(true); pump(B, A);
@@ -915,7 +911,6 @@ try {
   // here from the SAME id, which is what the router has to get right with nobody to ask.
   await acheck('4.4: an ices is routed by its marker, never by who sent it', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false); B.__setRelay(false);
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
     B.__answer(true); pump(B, A);
@@ -1028,7 +1023,6 @@ try {
   // the SAME session (epoch, seed, sim) -- it must not restart the match.
   await acheck('a reconnect rebuilds the link (rc offer/answer) without restarting the match', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false); B.__setRelay(false);
     A.__gameSess(B_ID, 'host'); B.__gameSess(A_ID, 'peer');
     const seedBefore = B.__state().sess.seed, epochBefore = B.__state().sess.epoch;
     A.__reconnect();
@@ -1047,7 +1041,6 @@ try {
   // ---------------------------------------------------------------- decline
   check('decline: the inviter is told and drops the handshake', () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__invite(B_ID); pump(A, B);
     B.__answer(false);
     const t = pump(B, A);
@@ -1060,35 +1053,34 @@ try {
   // ---------------------------------------------------------------- lost offer
   // The real-world killer: signals are one-shot. Drop A's offer entirely and the
   // retry must re-deliver it and still connect both sides.
-  check('lost offer: the retry re-delivers it and the connect still completes', () => {
+  await acheck('lost offer: the retry re-delivers it and the connect still completes', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);
+    await round(A, B);                 // A has offered
     A.__out.splice(0);                 // <-- the offer is LOST in transit
     if(B.__state().sess) throw new Error('B must not have a session yet');
     A.__ageOffer(3000); A.__hsTick();  // retry fires
     const t = pump(A, B);
     if(!t.includes('offer')) throw new Error('the lost offer must be re-sent, got ' + t);
     if(A.__state().hs.tries !== 2) throw new Error('retry count not tracked');
+    await flush();
     const bs = B.__state();
-    if(!bs.sess || !bs.sess.relay) throw new Error('B must connect from the re-sent offer');
+    if(!bs.sess) throw new Error('B must connect from the re-sent offer');
     if(bs.sess.seed !== A.__state().sess.seed) throw new Error('re-sent offer carried a different seed');
+    if(!B.__out.some(s => s.type === 'answer')) throw new Error('B must answer the re-sent offer');
   });
 
   // ---------------------------------------------------------------- lost answer
   // A's answer never arrives, so A re-sends the offer. B already has the session:
   // the duplicate must NOT reset it, only re-answer.
-  check('lost answer: a duplicate offer re-answers without resetting B', () => {
+  await acheck('lost answer: a duplicate offer re-answers without resetting B', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);
-    pump(A, B);                        // offer delivered, B builds its session
+    await round(A, B);
+    pump(A, B); await flush();         // offer delivered, B builds its session
+    if(!B.__state().sess) throw new Error('B has no session to keep');
     const seedBefore = B.__state().sess.seed;
     B.__out.splice(0);                 // <-- B's answer is LOST
     A.__ageOffer(3000); A.__hsTick();
-    pump(A, B);                        // duplicate offer reaches B
+    pump(A, B); await flush();         // duplicate offer reaches B
     const bs = B.__state();
     if(!bs.sess) throw new Error('a duplicate offer destroyed B\s session');
     if(bs.sess.seed !== seedBefore) throw new Error('a duplicate offer rebuilt B\s session');
@@ -1107,7 +1099,6 @@ try {
   // and the match hangs until it is given up on.
   await acheck('re-offer: a NEW offer is answered off a fresh pc, a re-sent one is not', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(false); B.__setRelay(false);
     const flush = () => new Promise(r => setTimeout(r, 0));
     A.__qmOffer(B_ID); await flush();
     const off1 = A.__out.find(s => s.type === 'offer');
@@ -1139,30 +1130,39 @@ try {
   // ---------------------------------------------------------------- navigation
   // The bug that started the review: an invite arriving on another screen used to
   // route through netLobbyEnter and wipe our own in-flight handshake.
-  check('navigation: an incoming invite does not kill our outgoing handshake', () => {
+  await acheck('navigation: an incoming invite does not kill our outgoing handshake', async () => {
     const A = mk(A_ID), B = mk(B_ID), C = mk('cccccccc');
-    A.__setRelay(true); B.__setRelay(true);
     A.__invite(B_ID); pump(A, B);      // A is waiting on B
     // ...meanwhile C invites A while A sits on the 1vs1 menu
-    C.__setRelay(true); C.__invite(A_ID); pump(C, A);
+    C.__invite(A_ID); pump(C, A);
     if(A.__state().hs.sent !== B_ID) throw new Error('C\s invite wiped A\s handshake with B');
     // B's accept must still be honoured
-    B.__answer(true); pump(B, A);
+    B.__answer(true); pump(B, A); await flush();
     if(!A.__state().sess) throw new Error('A ignored B\s accept after C\s invite arrived');
+  });
+
+  // ------------------------------------------------------------------ debris
+  // A dead session with the very peer who accepts must not swallow the accept: the offer
+  // is built off a fresh session and still goes out.
+  await acheck('debris: a stale session never swallows the accept -- the offer still goes out', async () => {
+    const A = mk(A_ID), B = mk(B_ID);
+    A.__invite(B_ID); pump(A, B);
+    A.__debris(B_ID);
+    B.__answer(true); pump(B, A); await flush();
+    const st = A.__state();
+    if(!st.sess || st.sess.role !== 'host') throw new Error('debris must be replaced by the offerer session: ' + JSON.stringify(st));
+    if(!A.__out.some(s => s.type === 'offer')) throw new Error('the offer must still go out');
   });
 
   // ------------------------------------------------------- snake looks in sync
   // Both clients must derive the SAME colour/cosmetic pair, keyed on player index
   // (P0 = host). Before, each side rendered P0 with its OWN colour, so the two
   // players saw different colours for the same snakes.
-  check('duel looks: both clients agree on colours and cosmetics', () => {
+  await acheck('duel looks: both clients agree on colours and cosmetics', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__setLook(0, { hat: 1 });      // host picks colour 0 + a hat
     B.__setLook(3, { glasses3d: 1 }); // joiner picks colour 3 + glasses
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);
-    pump(A, B); pump(B, A);
+    await play(A, B);
     const la = A.__look(), lb = B.__look();
     if(!la || !lb) throw new Error('no duel look on one side');
     if(la.c0 !== lb.c0 || la.c1 !== lb.c1)
@@ -1175,14 +1175,14 @@ try {
   // Quick match reaches the offer with NO peer profile in hand -- the answer is
   // the only carrier. The invite tests above cannot catch a broken answer path,
   // because there the accept payload supplies the profile first.
-  check('duel looks: quick match agrees too (profile arrives via the answer)', () => {
+  await acheck('duel looks: quick match agrees too (profile arrives via the answer)', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__setLook(1, { hat: 1 });
     B.__setLook(4, { glasses3d: 1 });
-    A.__qmOffer(B_ID);       // match.php made A the offerer: no profile passed
-    pump(A, B);              // A's offer (carries A's profile)
-    pump(B, A);              // B's answer (the ONLY place A learns B's look)
+    A.__qmOffer(B_ID); await flush();   // match.php made A the offerer: no profile passed
+    pump(A, B); await flush();          // A's offer (carries A's profile)
+    pump(B, A); await flush();          // B's answer (the ONLY place A learns B's look)
+    A.__dcOpen(); B.__dcOpen();
     const la = A.__look(), lb = B.__look();
     if(!la || !lb) throw new Error('no duel look on one side');
     if(la.c0 !== lb.c0 || la.c1 !== lb.c1)
@@ -1191,13 +1191,10 @@ try {
     if(!la.i1.glasses3d) throw new Error('the offerer never received the stranger cosmetics: ' + JSON.stringify(la));
   });
 
-  check('duel looks: identical colour picks are nudged the same way on both', () => {
+  await acheck('duel looks: identical colour picks are nudged the same way on both', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__setLook(2, {}); B.__setLook(2, {});   // both picked colour 2
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);
-    pump(A, B); pump(B, A);
+    await play(A, B);
     const la = A.__look(), lb = B.__look();
     if(la.c0 === la.c1) throw new Error('identical picks must be nudged apart');
     if(la.c0 !== lb.c0 || la.c1 !== lb.c1)
@@ -1208,15 +1205,12 @@ try {
   // default snake and must leave OUR OWN snake exactly as we picked it. The trap is the
   // same-pick nudge: it moves P1 by slot, and a joiner whose own colour is the default 0
   // meets a peer forced to 0 -- the slot rule then recolours the joiner's own snake.
-  check('duel looks: hiding the peer never recolours our own snake', () => {
+  await acheck('duel looks: hiding the peer never recolours our own snake', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__setLook(0, { hat: 1 });          // host: the default colour, so the peer collides with it
     B.__setLook(0, { glasses3d: 1 });    // joiner: same pick
     B.__setHide(true);                   // ...and the joiner hides the peer
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);
-    pump(A, B); pump(B, A);
+    await play(A, B);
     const la = A.__look(), lb = B.__look();
     if(!la || !lb) throw new Error('no duel look on one side');
     if(lb.hid !== 0) throw new Error('the joiner must mark P0 as the hidden peer: ' + JSON.stringify(lb));
@@ -1232,14 +1226,11 @@ try {
 
   // The host half of the same setting: there the peer IS P1, so the slot nudge already
   // moves the right snake -- what this pins is that it keeps doing so.
-  check('duel looks: a hiding host keeps P0 and blanks P1', () => {
+  await acheck('duel looks: a hiding host keeps P0 and blanks P1', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__setLook(0, { hat: 1 }); A.__setHide(true);
     B.__setLook(0, { glasses3d: 1 });
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);
-    pump(A, B); pump(B, A);
+    await play(A, B);
     const la = A.__look();
     if(la.hid !== 1) throw new Error('the host must mark P1 as the hidden peer: ' + JSON.stringify(la));
     if(la.c0 !== 0) throw new Error('the hiding host lost its own colour: ' + JSON.stringify(la));
@@ -1252,12 +1243,11 @@ try {
   // A reload/close kills every JS timer we own, so the ONLY thing that spares the
   // peer its own timeout (3s in-game, 30s mid-handshake) is a goodbye on the way
   // out -- and it must go by sendBeacon, since fetch() is cancelled on unload.
-  check('unload: a running match byes its peer and tears down', () => {
+  await acheck('unload: a running match byes its peer and tears down', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A); pump(A, B);
-    if(!A.__state().sess) throw new Error('no session to leave');
+    await connect(A, B);
+    A.__dcOpen();
+    if(!A.__state().sess || !A.__state().sess.game) throw new Error('no running match to leave');
     A.__unload();
     const bye = A.__beacons.find(b => b.body.type === 'bye' && b.body.to === B_ID);
     if(!bye) throw new Error('no bye beacon: ' + JSON.stringify(A.__beacons));
@@ -1267,7 +1257,6 @@ try {
 
   check('unload: an unanswered invite is withdrawn, and the peer is told once', () => {
     const A = mk(A_ID);
-    A.__setRelay(true);
     A.__invite(B_ID); A.__out.splice(0);        // invite is out, nobody answered
     if(A.__state().hs.sent !== B_ID) throw new Error('no pending invite to withdraw');
     A.__unload();
@@ -1278,11 +1267,9 @@ try {
 
   // Reloading mid-connect: the peer occupies BOTH the forming session and the
   // unanswered-offer slot, and must still hear exactly one goodbye.
-  check('unload: mid-connect sends one bye, not one per slot', () => {
+  await acheck('unload: mid-connect sends one bye, not one per slot', async () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
-    A.__invite(B_ID); pump(A, B);
-    B.__answer(true); pump(B, A);               // A offers; B's answer is NOT pumped back
+    await round(A, B);                          // A offers; B's answer is NOT pumped back
     const st = A.__state();
     if(!st.sess || st.hs.offerTo !== B_ID) throw new Error('expected a forming session AND a live offer: ' + JSON.stringify(st));
     A.__unload();
@@ -1294,7 +1281,6 @@ try {
   // a decline -- the same thing we send when an invite arrives outside a duel menu.
   check('unload: an open incoming invite is declined', () => {
     const A = mk(A_ID), B = mk(B_ID);
-    A.__setRelay(true); B.__setRelay(true);
     A.__invite(B_ID); pump(A, B);
     if(B.__dialog() !== A_ID) throw new Error('no invite dialog to decline');
     B.__unload();
@@ -1304,7 +1290,7 @@ try {
 
   check('unload: offline mode says nothing at all', () => {
     const A = mk(A_ID);
-    A.__setRelay(true); A.__invite(B_ID);
+    A.__invite(B_ID);
     A.__setOffline(true);
     A.__unload();
     if(A.__beacons.length) throw new Error('offline client phoned home on unload: ' + JSON.stringify(A.__beacons));
@@ -1316,7 +1302,7 @@ try {
   // reached the server's mailbox, and the UI showed WAITING until the 30s timeout.
   await acheck('refused invite: the user is told, not left waiting', async () => {
     const A = mk(A_ID);
-    A.__setRelay(true); A.__setSigFail(500);
+    A.__setSigFail(500);
     await A.__invite(B_ID);
     if(A.__state().hs.sent) throw new Error('still waiting on an invite the server refused');
     if(!/FAILED|TRY AGAIN/.test(A.__state().msg)) throw new Error('no failure shown, msg was: ' + A.__state().msg);
@@ -1328,7 +1314,6 @@ try {
   // invite 403s -- silently, forever. A 403 must reset the belief.
   await acheck('403 invite: the stale friendship belief is dropped and re-requested', async () => {
     const A = mk(A_ID);
-    A.__setRelay(true);
     A.__frOk(B_ID);                       // we believe we are friends...
     if(!A.__isFrOk(B_ID)) throw new Error('setup failed');
     A.__setSigFail(403);                  // ...the server disagrees
@@ -1342,7 +1327,7 @@ try {
   // could not succeed for an hour, and kept asking on every invite.
   await acheck('429 friend ban: the user is told, and we stop asking', async () => {
     const A = mk(A_ID);
-    A.__setRelay(true); A.__useRealFr();
+    A.__useRealFr();
     A.__setSigFail(403);                  // the invite is refused: not friends
     A.__setFrStatus(429);                 // ...and the friend request is banned
     await A.__invite(B_ID);
@@ -1362,11 +1347,11 @@ try {
   // second attempt the friendship had landed, so that one worked.
   await acheck('invite waits for the friendship instead of racing it', async () => {
     const A = mk(A_ID);
-    A.__setRelay(true); A.__useRealFr();
+    A.__useRealFr();
     if(A.__isFrOk(B_ID)) throw new Error('setup: must start as not-yet-friends');
     await A.__invite(B_ID);
     if(A.__calls[0] !== 'friend:request') throw new Error('the friendship must be requested first, got: ' + JSON.stringify(A.__calls));
-    const inv = A.__out.find(s => s.type === 'invite-relay');
+    const inv = A.__out.find(s => s.type === 'invite');
     if(!inv) throw new Error('no invite reached the wire: ' + JSON.stringify(A.__out));
     // The point: the friendship must already be ESTABLISHED at the instant the
     // invite is sent. Racing it means the server sees the invite first -> 403.

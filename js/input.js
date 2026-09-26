@@ -160,14 +160,14 @@ function _duelExit(){
     // teardown: the report reads the score off the live session.
     tourneyMatchLeft();
     netEndSession();
-    // A watch does not end with the session: the links, the ask ladder and netP2POnly
+    // A watch does not end with the session: the links and the ask ladder
     // are the spectator's own and only specStop puts them down. AFTER the teardown, so
     // that its session-end branch finds nothing left to do -- walking out on purpose is
     // not a lost feed and must not sound like one.
     if(netSpectating()) specStop('');
     inGame=false; _wsend({t:'phase',phase:'menu'});
     // Leaving on purpose says nothing. _duelMsg is never cleared, only overwritten, so
-    // an in-game line (DESYNC DETECTED, RELAY MODE) stamped in the last 2.6s would
+    // an in-game line (DESYNC DETECTED, RECONNECTED) stamped in the last 2.6s would
     // follow us out and render on the menu as if it had just happened there.
     _duelMsg=''; _duelMsgAt=0;
     // Back to where the match was watched or played FROM, not the main menu: a
@@ -875,11 +875,12 @@ function handleKey(key, pde) {
 // ================================================================
 // TV remotes as data: Back + the RED colour button map to Escape (exit shop / back /
 // quit-to-menu -- RED is the reliable exit when a remote has no usable Back), the BLUE
-// colour button to Space (pause / credits speed / name space). webOS keyCodes + names.
+// colour button to Space (pause / credits speed / name space). The key NAME decides; the
+// webOS keyCode is read only when a remote reports no name we know.
 const TV_CODES={461:'Escape',403:'Escape',406:' '};
 const TV_NAMES={BrowserBack:'Escape',GoBack:'Escape',XF86Back:'Escape',ColorF0Red:'Escape',Red:'Escape',ColorF3Blue:' ',Blue:' '};
 document.addEventListener('keydown', e=>{
-    const tv=TV_CODES[e.keyCode]||TV_NAMES[e.key];
+    const tv=TV_NAMES[e.key]||TV_CODES[e.keyCode];
     if(tv){ e.preventDefault(); handleKey(tv,null); return; }
     if(e.ctrlKey||e.metaKey||e.altKey) return;   // let browser/OS shortcuts (Ctrl+Shift+R etc.) through
     // Held-key auto-repeat is NOISE during play: steering is a one-shot (the dpad

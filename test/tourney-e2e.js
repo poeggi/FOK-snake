@@ -230,7 +230,6 @@ async function node(plan){
     A(C[ia].rec().offers.length === 1 && C[ia].rec().offers[0] === pb,
       '2 ' + nid + ': the feeder sent ' + JSON.stringify(C[ia].rec().offers) + ' instead of one offer to its opponent');
     A(C[ib].rec().offers.length === 0, '2 ' + nid + ': the answerer offered too -- both sides would mint a session');
-    A(C[ia].p2p() && C[ib].p2p(), '2 ' + nid + ': a tournament match was left willing to fall back on the relay');
 
     // -- the session both sides mint carries the sheet's parameters --
     const sa = C[ia].sess(pb, 'host'), sb = C[ib].sess(pa, 'guest');
@@ -241,7 +240,6 @@ async function node(plan){
           '2 ' + nid + ': ' + who + ' opens the match on level ' + s.lvl0 + ' and expects ' + s.levelWant
           + ', the sheet says ' + nd.lvl);
         A(s.stakes === srv.T.stakes, '2 ' + nid + ': ' + who + ' lost the stakes flag');
-        A(s.p2pOnly === true, '2 ' + nid + ': ' + who + ' minted a relay-capable tournament session');
     }
 
     // -- the watchers connected where the tree told them to --
@@ -293,9 +291,9 @@ async function finish(m, plan){
         const sBefore = srv.log.filter(x => x.action === 'result' && x.id === IDS[isp]).length;
         C[isp].spFeedDead();
         C[isp].quitOut('peer', m.pa, [0, 0]);
-        A(!C[isp].spOn() && !C[isp].p2p() && C[isp].phase().indexOf('tourney') === 0,
+        A(!C[isp].spOn() && C[isp].phase().indexOf('tourney') === 0,
           '2 ' + m.nid + ': a spectator that quit sits on ' + C[isp].phase()
-          + ' watching=' + C[isp].spOn() + ' p2pOnly=' + C[isp].p2p());
+          + ' watching=' + C[isp].spOn());
         A(srv.log.filter(x => x.action === 'result' && x.id === IDS[isp]).length === sBefore,
           '2 ' + m.nid + ': a spectator that quit reported a result of its own');
         // The other side's duel ends too, with a win it dutifully reports -- onto a node
@@ -804,7 +802,7 @@ async function passBreak(opts){
     late.sigTo({ event:'roles', tid:late.tt().tid, nid:'late1', round:9, hm:2, stakes:false,
                  players:[lp, IDS[4]], feeder:lp, primaries:[], secondaries:[], you:'play' });
     let ls = late.mint(lp, 'guest');   // the offer lands first and is answered
-    A(ls && ls.heartsWant === null && ls.stakesWant === null && ls.stakes === true && !ls.p2pOnly,
+    A(ls && ls.heartsWant === null && ls.stakesWant === null && ls.stakes === true,
       '13: the session was dressed before the sheet was engaged -- there is no window left to test');
     late.inGame(false);
     late.tick();
@@ -813,7 +811,6 @@ async function passBreak(opts){
       '13: engaging the sheet left the live session at ' + (ls && ls.hearts) + ' hearts');
     A(ls && ls.stakes === false && ls.stakesWant === false,
       '13: engaging the sheet left the live session playing for the wrong stakes');
-    A(ls && ls.p2pOnly === true, '13: engaging the sheet left the live session relay-capable');
     rows.push('13 late sheet: a session minted before its roles sheet was engaged is dressed when it lands');
 
     // ---- 14. a finished-match stamp must not outlive its match -----------------------

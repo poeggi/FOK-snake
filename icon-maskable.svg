@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable variant of icon.svg: full-bleed background, the art scaled into the
+       safe zone (a centred circle of radius 0.4 * 512) so no launcher mask clips it -->
+  <rect width="512" height="512" fill="#07070e"/>
+  <g transform="translate(256 256) scale(0.8) translate(-256 -300)">
+    <path d="M128 176 H352 L400 176 400 224 V256 L400 304 352 304 H160 L112 304 112 352 V368 L112 416 160 416 H352"
+          stroke="#4db84d" stroke-width="76" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+    <rect x="306" y="370" width="92" height="92" fill="#7fff7f"/>
+    <rect x="361" y="390" width="18" height="18" fill="#001500"/>
+    <rect x="361" y="424" width="18" height="18" fill="#001500"/>
+    <polygon points="220,208 250,240 220,272 190,240" fill="#00cccc"/>
+    <polygon points="220,208 250,240 220,224" fill="#ffffff" opacity="0.45"/>
+  </g>
+</svg>

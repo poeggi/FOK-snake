@@ -39,8 +39,6 @@ const HOOKS = `
   globalThis.__read = (p, b)=>_netRead(p, undefined, false, NET_BG_SOLO, b);
   globalThis.__poll = ()=>_netPollOnce();
   globalThis.__beacon = (p, b)=>_netBeacon(p, b);
-  globalThis.__relay = (o)=>_netRelayPost({ peer:'deadbeef' }, o);
-  globalThis.__relayRead = async ()=>{ const s = { peer:'deadbeef', game:true, relay:true }; _netSess = s; s.relay = false; return _netRead('/api/relay.php', undefined, true, undefined, { id:getPlayerId(), peer:s.peer, wait:NET_POLL_S }); };
   globalThis.__ok = ()=>_netOk();
   globalThis.__notice = ()=>netStatusNotice();
   globalThis.__refused = ()=>netIdRefused();
@@ -156,15 +154,6 @@ try {
         eq(sr.body, null, 'and carries no body');
         S.__beacon('/api/signal.php', { id: S.__me(), to:'deadbeef', type:'bye', payload:'' });
         eq(one(S.__take(), 'beacon').body.tok, TOK, 'the unload beacon carries it');
-        await S.__relay({ t:'in', pts: 1 });
-        const rl = one(S.__take(), 'relay post');
-        eq(rl.path, '/api/relay.php', 'the relay POST');
-        eq(rl.body.tok, TOK, 'carries it too');
-        await S.__relayRead();
-        const rd = one(S.__take(), 'relay read');
-        eq(rd.method + ' ' + rd.path, 'POST /api/relay.php', 'the relay held read is a POST');
-        eq('payload' in rd.body, false, 'with no payload member');
-        eq(rd.body.tok + ' ' + rd.body.wait, TOK + ' ' + S.__pollS(), 'carrying the token and the wait');
         S.__reply = null;
     });
 

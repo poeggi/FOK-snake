@@ -98,7 +98,7 @@ async function playNode(seen){
           nid + ': ' + who + ' opens on level ' + s.lvl0 + ', the sheet says ' + nd.lvl);
         A(s.hearts === nd.hm && s.heartsWant === nd.hm,
           nid + ': ' + who + ' opened at ' + s.hearts + ' hearts, sheet says ' + nd.hm);
-        A(s.stakes === srv.T.stakes && s.p2pOnly === true,
+        A(s.stakes === srv.T.stakes,
           nid + ': ' + who + ' minted a tournament session with the wrong terms');
     }
 

@@ -83,8 +83,8 @@ let _rbPeerSeq = [-1, -1];   // highest sequence applied, PER AUTHOR index. A du
 let _lastLocalDir = null;    // last dir we AUTHORED for our snake -- the intent-change gate (netLocalInput)
 // Every packet repeats the recent inputs, so a lost one is repaired by the next without a
 // retransmit (the DataChannel is deliberately unreliable). 8 covers far more than any hand
-// generates inside a round trip, and keeps the worst-case packet (~500 bytes) well inside both
-// the 1280-byte datagram budget and the relay's 2KB cap.
+// generates inside a round trip, and keeps the worst-case packet (~500 bytes) well inside
+// the 1280-byte datagram budget.
 const RB_REDUNDANCY = 8;
 // What we ACCEPT from a peer: exactly what an honest one can emit. Every gate-passing peer
 // sends at most RB_REDUNDANCY records (the version gate refuses cross-minor duels). The cap
@@ -1068,8 +1068,6 @@ function netTickPre(){
     } else if(!_inFlushed && (t % NET_WARM_EVERY) === 0 && !_replaying){
         // Radio-warm keepalive (see NET_WARM_EVERY): a bare ~15B ping on the ticks that would
         // otherwise be silent, so the wire never idles long enough for an iOS radio to doze.
-        // p2p ONLY -- _netSend drops a warm ping on the relay path (HTTP-polled; a ~20Hz ping
-        // there would hammer the server). The 267ms/1Hz sends already keep those ticks awake.
         _netSend({ t:'pi', w:1 });
     }
     // Full resync burst (role-agnostic): ship the whole duel state on consecutive ticks so at least

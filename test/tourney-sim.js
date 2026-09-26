@@ -192,7 +192,7 @@ async function playNode(seen){
           nid + ': ' + who + ' opened at ' + s.hearts + ' hearts, sheet says ' + nd.hm);
         A(s.lvl0 === nd.lvl && s.levelWant === nd.lvl,
           nid + ': ' + who + ' opens on level ' + s.lvl0 + ', sheet says ' + nd.lvl);
-        A(s.stakes === srv.T.stakes && s.p2pOnly === true,
+        A(s.stakes === srv.T.stakes,
           nid + ': ' + who + ' minted a tournament session with the wrong terms');
     }
     // -- the watchers connected where the tree told them to --

@@ -167,7 +167,7 @@ runTest('SMOKE-DUEL', `
     document.body.dataset = document.body.dataset || {};
     const _ow=_worker; _worker=null;
     cfg.offline=false; globalThis.fetch=()=>({then:()=>({catch:()=>{}})});
-    _netTimeSync=async()=>{}; _netRequestStart=async()=>{}; _netLiveStart=()=>{}; _netRelayLoop=async()=>{};
+    _netTimeSync=async()=>{}; _netRequestStart=async()=>{}; _netLiveStart=()=>{};
     let _raf=1000;   // MONOTONIC across cases: loop() reads frame deltas, so restarting it goes backwards
     for(const off of [0, 500, 1500, -800]){   // startPts at/ahead/behind our clock
         _netSess=_netMkSess('ffffffff','host'); _netSess.game=true;

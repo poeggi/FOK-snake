@@ -1,14 +1,14 @@
-// net-relay.js -- DEPRECATED: the HTTP server-relay fallback for duels (api/relay.php).
+// net-relay.js -- UNUSED AND DEPRECATED. Kept in the repository for reference only
+// (educational). It is not part of the game.
 //
-// Do NOT extend this. It exists only as the p2p-failed path on hosts where WebRTC cannot
-// reach the peer, and it is on the way out: the replacement is a TURN server (coturn) in
-// _netRtcInit's iceServers, which keeps the IDENTICAL DataChannel (same unreliable-unordered
-// netcode, one forwarding hop) and retires relay.php entirely. That is infra, not logic --
-// coturn needs a host with open UDP, which the current shared webhost cannot provide.
+// Nothing loads it: index.html, the sim worker and the test harness leave it out, and
+// no code path calls into it. It shows an HTTP long-poll duel transport over
+// api/relay.php: every datagram forwarded through the server, ~200-400 ms one-way.
+// TURN (server API 4.22) covers the same case on the DataChannel itself.
 //
-// Everything relay-specific lives in THIS FILE so the removal is a file delete plus the
-// residual hook list in docs/DEPRECATED-relay.md. New netcode belongs in net-rtc.js /
-// net-session.js and must work over the DataChannel without a relay equivalent.
+// It depends on hooks the live netcode does not provide (netP2POnly, _netRelayHeld,
+// the session's relay slots, the invite-relay / accept-relay signals, cfg.noP2P).
+// Loaded as it stands, it does not run. See docs/DEPRECATED-relay.md.
 
 // The P2P-ONLY refusal (see netP2POnly in net-rtc.js). Relay mode has three ways in -- the
 // offerer's and the answerer's deliberate relay handshake, and _netRelayStart's fallback

@@ -2,7 +2,8 @@
 
 Online 1vs1 is deterministic lockstep: no host authority over the sim,
 inputs-only JSON on the wire (redundant input log + ~1/s state hash),
-rollback, WebRTC + HTTP relay fallback, NET_PKT_MAX=1200 one-datagram cap.
+rollback, WebRTC DataChannel only (TURN is its relayed path; the HTTP relay
+in js/net-relay.js is unused and never loaded), NET_PKT_MAX=1200 one-datagram cap.
 
 ## Tick model
 - ENGINE tick = fixed 1/60 s (`simTick`); every duration, catch-up and

@@ -550,7 +550,6 @@ function specWatch(peer, tid, nid){
     // The feed's startPts is on the shared clock, and a watcher applies none of the players'
     // P2P burst -- this is its ONLY correction, so it gets the same age rule as a match start.
     _netAnchorRefresh();
-    netP2POnlySet(true);     // every spectator link is direct or nothing
     _spWatchSig(peer, 'req');
     _spArm();
 }
@@ -889,7 +888,6 @@ function _spBoot(){
     // has a feed, and the feed is owned by _spIn.
     _netSess = _netMkSess('', 'peer');
     _netSess.game = true;
-    _netSess.p2pOnly = true;
     _netSess.seed = ctx.seed >>> 0;
     _netSess.hearts = _duelHearts(ctx.hm);
     // The level the match is ON, not the one it started at: a spectator boots straight into
@@ -933,7 +931,6 @@ function specStop(msg){
     const was = _spOn;
     _spOn = false; _spCtx = null; _spRole = ''; _spSeen = -1; _spLine = ''; _spFeedAt = 0; _spLostAt = 0; _spSrc = ''; _spOrphanG = -1;
     _spDisarm();
-    netP2POnlySet(false);
     if(was) _netSessionEnd(msg || 'STOPPED WATCHING');
 }
 // Ask the OTHER PLAYER to become the backup feeder. Under lockstep it holds both input

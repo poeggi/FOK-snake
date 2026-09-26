@@ -37,10 +37,10 @@ jobs:
         shard: [1, 2, 3, 4, 5]
     name: checks ${{ matrix.shard }}/5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Code checks (full regression tier -- includes the heavy duel sweeps)
         run: bash test/checks.sh --full --shard ${{ matrix.shard }}/${{ strategy.job-total }}

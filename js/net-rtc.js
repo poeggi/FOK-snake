@@ -3,8 +3,6 @@
 // SDP/ICE), mDNS candidate de-obfuscation, path stats, liveness checks and
 // mid-game reconnect. Loads after net-api.js, before net-session.js.
 // Offline-first contract: see net-api.js.
-// The HTTP server-relay fallback is DEPRECATED and lives in net-relay.js; what
-// remains here are the hooks that hand it the session (docs/DEPRECATED-relay.md).
 // ============================================================================
 // ---- WebRTC session: P2P DataChannel; the server only relays SDP/ICE ----
 let _netSess = null;   // {peer, role:'host'|'peer', pc, dc, ...} -- var: hoisted callers must see undefined, never TDZ
@@ -158,22 +156,11 @@ function netNetsRefresh(force){
 }
 function netPublicNets(){ return _netNets.slice(0, NET_NETS_MAX); }
 
-// P2P-ONLY MODE. Tournament matches and every spectator link must run on a direct
-// DataChannel: the deprecated server relay's jittered HTTP round trips cannot hold the
-// spectator tree's forwarding budget, and a bracket must not score a match that ran on a
-// transport the rest of the tournament is not using. The LATCH covers the window before a
-// session exists (the relay handshake mints its own), the per-session flag covers a link
-// that is already up; either one refuses.
-let _netP2POnly = false;
-function netP2POnlySet(v){ _netP2POnly = !!v; }
-function netP2POnly(){ return _netP2POnly || !!(_netSess && _netSess.p2pOnly); }
 function _netMkSess(peer, role){
     const s = { peer, role, pc:null, dc:null, seed:0, peerProfile:null, game:false,
              rdOk:false, iceQ:[],   // remote description settled; candidates parked until it is
              offKey:'',   // the offer sdp this session answers: a DIFFERENT one is a new attempt, not a re-send
-             // DEPRECATED(relay): session slots owned by net-relay.js -- drop with it.
-             relay:false, connT:null, relayAbort:null, relaySeq:-1, relayGraceUntil:0,
-             relayPending:null, relayBusy:false,   // relay outbound coalesce: latest-wins slot + one-in-flight guard
+             connT:null,   // the 6 s connect deadline (_netRtcInit)
              rc:0,   // offer GENERATION: bumped per re-offer, echoed by the answerer, checked on receive (a stale answer must not poison a fresh pc)
              ctlEpoch:-1,   // last epoch we started via a control message: dedups the transition retries
              epoch:0,   // halts so far in THIS connection: both peers count identically (a bye resets the line)
@@ -195,10 +182,7 @@ function _netMkSess(peer, role){
              hearts:START_LIVES, stakes:true, speed:false,
              heartsWant:null, stakesWant:null, speedWant:null,
              lvl0:1, levelWant:null,
-             // Tournament matches and every spectator link are P2P-ONLY: the deprecated
-             // server relay is not an acceptable transport for them (see _netRelayStart).
-             p2pOnly:false,
-             turn:false,   // the pc was built on a TURN credential (API 4.22): a failed connect ends the attempt, never the HTTP relay
+             turn:false,   // the pc was built on a TURN credential (API 4.22): a failed connect had every path there is
              relayOnly:false,   // the pc may only take the relay (TURN RELAY: FORCED, on a credential)
              pathKind:'',       // 'turn' once the selected ICE pair has a relay end, 'direct' otherwise (_netPathStat)
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
@@ -310,7 +294,7 @@ function _netIceOut(to, cand, ver){
 function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
     _netLastPeer = peer;   // the FRIENDS screen offers BLOCK / REPORT on the last opponent
-    _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is, so no HTTP relay behind it
+    _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is
     const rc = netRtcConfig();         // the TURN credential held, or STUN alone (API 4.22)
     _netSess.relayOnly = rc.iceTransportPolicy === 'relay';
     const pc = new RTCPeerConnection(rc);
@@ -319,22 +303,20 @@ function _netRtcInit(peer, role){
     pc.onicecandidate = e => { if(e.candidate) _netIceOut(peer, e.candidate); };
     pc.onconnectionstatechange = () => {
         const s = _netSess;
-        // DEPRECATED(relay): the fallback hook -- without net-relay.js a failed P2P just ends the attempt.
-        if(!s || s.pc !== pc || s.relay) return;   // relay mode: the RTC attempt no longer owns the session
+        if(!s || s.pc !== pc) return;
         if(pc.connectionState === 'failed' || pc.connectionState === 'closed'){
             if(!s.game) _netRtcFailed(s);               // P2P never came up: give up on it NOW (earlier than the 6s timer)
             else if(!s.reconnectAt) _netReconnect(s);   // an established game lost its channel: rebuild it, do NOT end
         }
     };
-    // P2P gets 6 seconds; then the attempt ends, or falls back to the server relay. DEPRECATED(relay)
+    // P2P gets 6 seconds; then the attempt ends.
     if(_netTimers) _netSess.connT = setTimeout(()=>{ if(_netSess && _netSess.pc === pc && !_netSess.game) _netRtcFailed(_netSess); }, 6000);
     return pc;
 }
-// A pc that never came up. Built on a TURN credential it had every path there is (direct,
-// reflexive, relayed), so the attempt ends here and says so; under TURN RELAY: DISABLED it
-// had the direct paths, which is all that setting allows. Built STUN-only because turn.php
-// answered 503, it falls back to the deprecated HTTP relay, the only case a 4.22 client
-// ever uses it (a tournament's p2pOnly session refuses that too, in _netRelayStart).
+// A pc that never came up: the attempt ends here and says what it tried. Built on a TURN
+// credential it had every path there is (direct, reflexive, relayed). Under TURN RELAY:
+// DISABLED it had the direct paths, which is all that setting allows. Built STUN-only
+// because turn.php answered 503, it had the direct paths and nothing else.
 function _netRtcFailed(s){
     if(_netSess !== s || s.game) return;
     if(s.turn){   // relay-only never tried a direct path, so it says only what it tried
@@ -343,7 +325,7 @@ function _netRtcFailed(s){
         return;
     }
     if(cfg.turnMode === NET_TURN_DISABLED){ _netSigLog('! no path (p2p only)'); _netSessionEnd('NO PATH - P2P ONLY'); return; }
-    _netRelayStart(s);   // DEPRECATED(relay)
+    _netSigLog('! no path (p2p, no turn)'); _netSessionEnd('NO PATH - P2P FAILED');
 }
 // The lobby line while the pc connects: what it is allowed to connect over.
 function _netConnMsg(s){ return s && s.relayOnly ? 'CONNECTING (TURN)...' : 'CONNECTING (P2P)...'; }
@@ -456,12 +438,6 @@ function _netWire(dc){
             _duelMsg = 'RECONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
             return;
         }
-        if(s.relay){   // DEPRECATED(relay): P2P completed AFTER the fallback -- upgrade to the direct path
-            s.relay = false;
-            _netLb.msg = 'P2P CONNECTED'; _duelMsg = 'P2P CONNECTED'; _duelMsgAt = _msgNow(); _uiDirty = true;
-            _netMarkRecv(s);
-            return;
-        }
         if(s.connT){ clearTimeout(s.connT); s.connT = null; }
         _netSeekStop();
         s.game = true; _netMarkRecv(s);
@@ -475,15 +451,14 @@ function _netWire(dc){
         // the shared start (seed + start_pts) arrives via this request; no state frames
     };
     dc.onmessage = e => { if(_netSess){ _netMarkRecv(_netSess); _netHandleMsg(String(e.data)); } };
-    dc.onclose = () => { const s = _netSess; if(s && s.game && !s.relay && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end (!s.relay: DEPRECATED(relay))
+    dc.onclose = () => { const s = _netSess; if(s && s.game && !s.reconnectAt) _netReconnect(s); };   // unexpected close mid-game: rebuild, do not end
 }
 // A message type that is a one-shot CONTROL transition (a phase change), as opposed to the
 // self-healing input/liveness stream. The wire knows exactly three: 'go' (the one timeline
 // opener), 'req' (the one intent ask) and 'bye' (best-effort farewell). go/req are ECHO-
 // ACKNOWLEDGED: the sender keeps the pending packet in s.tx and retries until the receiver
-// answers it back verbatim with a:1 (_netTxShip/_netTxEcho in net-session.js); the relay
-// transport additionally retries the raw send (_netRelayCtl). bye rides best-effort -- its
-// server-side signal twin is the reliable copy.
+// answers it back verbatim with a:1 (_netTxShip/_netTxEcho in net-session.js). bye rides
+// best-effort -- its server-side signal twin is the reliable copy.
 function _netIsCtl(t){ return t === 'go' || t === 'req' || t === 'bye'; }
 // Every drop/divert decision runs FIRST; the time stamps are the FINAL act before serialize+send,
 // for every packet type alike. What sits between a stamp and the wire is pure one-way-delta error,
@@ -511,19 +486,18 @@ function _netSend(o){
     if(o.w){
         // The radio-warm ping only needs SOMETHING on the wire within the doze interval, so if
         // real traffic (a turn, boost or heartbeat) already went out this window the ping is
-        // redundant -- skip it. p2p-only regardless: an HTTP-polled relay cannot doze, and 20Hz
-        // posts would hammer it. Threshold sits one tick under the warm cadence so the idle beat
+        // redundant -- skip it. Threshold sits one tick under the warm cadence so the idle beat
         // itself is never suppressed by frame jitter -- only genuinely recent real traffic is.
-        if(s.relay || performance.now() - s.lastSent < (NET_WARM_EVERY - 1) * TICK_MS) return;   // s.relay: DEPRECATED(relay)
+        if(performance.now() - s.lastSent < (NET_WARM_EVERY - 1) * TICK_MS) return;
     }
     if(o.t === 'in' || o.t === 'pi') _netDbg.hbTx++;   // input-channel packets sent (incl. idle keepalives)
-    if(!s.relay && (!s.dc || s.dc.readyState !== 'open')) return;
+    if(!s.dc || s.dc.readyState !== 'open') return;
     // Congestion guard (see NET_SEND_CONG): drop the repairable types rather than
     // queue them late. Rare one-shot control messages (go/req/bye) still queue --
     // for those, late beats never (go/req are retried until echoed anyway) -- and
     // 'bs' is deliberately not listed: a queued burst probe is rejected by its own
     // min-filter, while a dropped one starves the boundary.
-    if(!s.relay && s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
+    if(s.dc.bufferedAmount > NET_SEND_CONG && (o.t==='in'||o.t==='pi'||o.t==='h'||o.t==='st'||o.t==='rs')){
         _netDbg.congDrop = (_netDbg.congDrop|0) + 1;
         if(!_netDbg.congAt || performance.now() - _netDbg.congAt > 1000){
             _netDbg.congAt = performance.now();
@@ -541,7 +515,6 @@ function _netSend(o){
     const pts = netPts();
     if(pts != null && o.pts === undefined) o.pts = pts;   // API: every peer message carries the sender's PTS
     if(o.t === 'bs' && o.rts === undefined) o.rts = netRawPts();
-    if(s.relay){ _netRelaySend(s, o); return; }   // DEPRECATED(relay): the transport fork -- drop this line with net-relay.js
     try{
         const j = JSON.stringify(o);
         // One datagram or nothing. Over the path MTU, SCTP fragments the message and
@@ -724,9 +697,7 @@ function _netBurstThenStart(s, then){
 // srflx/prflx = reflexive -- hairpins out through the router/internet even on one LAN, the usual
 // cause of "same-Wifi but 100ms jitter" -- relay = via the TURN relay. Plus the pair's RTT.
 function _netPathStat(s){
-    // DEPRECATED(relay): the relay branch reports the server RTT; without it this is a plain `if(!s) return`.
-    if(!s || s.relay){ if(s && s.relay){ _netDbg.path = 'relay  srv ' + (_netDbg.relayRtt>=0 ? Math.round(_netDbg.relayRtt)+'ms' : '--'); _netDbg.p2pRtt = -1; } return; }
-    if(!s.pc || typeof s.pc.getStats !== 'function') return;
+    if(!s || !s.pc || typeof s.pc.getStats !== 'function') return;
     s.pc.getStats().then(st => {
         let pair = null;
         st.forEach(r => { if(r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
@@ -781,8 +752,7 @@ function _netLiveStart(){
     // built on -- the burst-to-tick-0 lead, level/respawn boundaries, a resume negotiation
     // -- silent long enough for a cellular radio to doze right before the most
     // latency-critical packets. The w-gate in _netSend does ALL the suppression: any real
-    // traffic (burst probes included) within the warm window skips the ping, and the relay
-    // path never pings at all.
+    // traffic (burst probes included) within the warm window skips the ping.
     _netSess.warmT = setInterval(()=>{ _netSend({ t:'pi', w:1 }); }, NET_WARM_EVERY * TICK_MS);
 }
 // ONE liveness pass (ping-when-idle, reconnect/kill on silence, end a stuck desync). Split out
@@ -826,11 +796,6 @@ function _netLiveCheck(){
     // the timers, so only real elapsed time reveals the gap on the side that was asleep.
     const nowW = Date.now();
     const silent = nowW - s.lastRecvWall;
-    if(s.relay){   // DEPRECATED(relay): whole branch
-        if(nowMs < s.relayGraceUntil) return;                             // relay just engaged: let the peer catch up
-        if(silent > RB_PERSIST_KILL_MS) _netSessionEnd('CONNECTION LOST'); // relay has no transport to rebuild -> silence past the deadline ends it
-        return;
-    }
     // A sim that is ENTITLED to sit still pushes the stall baseline forward instead of being
     // judged by it, so the deadline starts at the end of a legitimate pause. Done here, on the
     // one pass that already owns the liveness clocks, so the predicate itself stays pure.
@@ -850,7 +815,7 @@ function _netLiveCheck(){
 // packets flow again the periodic state+hash recovery re-converges them. We only rebuild the
 // dead RTCPeerConnection/DataChannel; epoch, seed and sim state are untouched.
 function _netReconnect(s){
-    if(!s || s.reconnectAt || s.relay || !_netRtcAvail()) return;   // s.relay: DEPRECATED(relay)
+    if(!s || s.reconnectAt || !_netRtcAvail()) return;
     // A watcher's session has no channel of its own to rebuild -- its feed links are
     // net-spec's, repaired on their own ladder -- and nothing would ever take down the
     // RECONNECTING banner this puts up (_netReconnectDone is the live check's, which a

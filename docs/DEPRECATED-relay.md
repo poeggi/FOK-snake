@@ -1,83 +1,47 @@
-# DEPRECATED: the HTTP server relay
+# DEPRECATED: the HTTP server relay (unused)
 
-Status: **deprecated, still shipping.** The relay is the live p2p-failed fallback and is
-NOT removed. Nothing in this document has been switched off. Treat it as frozen: fix it if
-it breaks, but do not extend it, and do not build new netcode that needs a relay equivalent.
+Status: **unused, deprecated, not loaded.** `js/net-relay.js` stays in the repository
+for reference only (educational). It is not part of the game.
 
-## Why
+## What is in the file
 
-The relay forwards duel datagrams through `api/relay.php` over HTTP long-poll (~200-400ms
-one-way). It exists because the shared webhost cannot run a TURN server: without a TURN
-credential (`turn.php` answered 503) `_netRtcInit` builds a STUN-only pc, and a peer behind
-a symmetric NAT has no other path.
+An HTTP long-poll duel transport. Every duel datagram goes through `api/relay.php` on
+the server. One way takes ~200-400 ms. It has its own handshake (an offer with no sdp,
+the `invite-relay` / `accept-relay` signal types) and its own liveness rules.
 
-The replacement is TURN in the `iceServers` list, and it is in: since server API 4.22
-`turn.php` hands out short-lived credentials for Cloudflare's relay, held per client
-(`_netTurnReady` / `netRtcConfig` in `js/net-api.js`) and passed to every pc it builds.
-That keeps the IDENTICAL DataChannel -- same unreliable-unordered netcode, one forwarding
-hop. A pc built on a credential has every path there is, so when it fails the attempt ends
-(`_netRtcFailed`); the HTTP relay is started only when `turn.php` offered nothing (503),
-and never under TURN RELAY: DISABLED (P2P only).
-What is left is retiring `relay.php`.
+## Why nothing can start it
 
-## What already refuses it
+- index.html has no script tag for it.
+- The sim worker and the test harness do not load it.
+- The netcode has no call into it and no fallback to it.
+- The `invite-relay` and `accept-relay` signal types are neither sent nor handled.
+- An offer without an sdp is logged and ignored.
+- `cfg.noP2P` is a retired key: every load drops it from the save.
 
-Two 2026 features never touch the relay, and their absence from the hook list below is
-deliberate rather than an omission:
+## What covers its case
 
-- SPECTATING and the relay tree (`js/net-spec.js`) are P2P-only by construction. A spectator
-  link is its own RTCPeerConnection with its own reliable ordered DataChannel; there is no
-  relay equivalent and none is to be built.
-- TOURNAMENT matches set `s.p2pOnly` on the session (`tourneyDressSession`), so a pairing
-  that cannot connect over its pc fails outright instead of falling back. A tournament is
-  watched by everyone in it, and an HTTP-relayed match cannot be forwarded to them. A
-  TURN-relayed one is a DataChannel like any other and can: `p2pOnly` refuses only the HTTP
-  relay.
+TURN (server API 4.22). `turn.php` hands out short-lived credentials. A pc built on one
+has direct, reflexive and relayed paths on the same DataChannel.
 
-## What removal looks like
+A pc that fails to connect ends the attempt and says why:
 
-1. `rm js/net-relay.js` -- the whole relay transport and relay-mode handshake.
-2. Drop its `<script>` tag from `index.html`, its entry in `test/harness.js` (`src`) and in
-   `test/check-ownership.js`.
-3. Delete the residual hooks below. Every one carries a `DEPRECATED(relay)` marker, so
-   `grep -rn "DEPRECATED(relay)" js/` is the authoritative list -- this file is a summary.
-4. Retire `cfg.noP2P` (off the menu since the TURN RELAY row replaced it, cleared on load,
-   honoured from a save edit) and `api/relay.php` server-side.
+- built on a TURN credential: `NO PATH - P2P AND TURN FAILED`
+- TURN RELAY: FORCED: `NO PATH - TURN FAILED`
+- TURN RELAY: DISABLED: `NO PATH - P2P ONLY`
+- STUN only, because turn.php answered 503: `NO PATH - P2P FAILED`
 
-## Residual hooks (all marked `DEPRECATED(relay)`)
+## Why the file does not run as it stands
 
-`js/net-rtc.js`
-- `_netMkSess`: the `relay/connT/relayAbort/relaySeq/relayGraceUntil/relayPending/relayBusy`
-  session slots.
-- `_netRtcInit` / `_netRtcFailed`: the `s.relay` ownership guard and the `_netRelayStart`
-  call for a failed STUN-only pc. Without the relay a failed P2P just ends the attempt, as
-  a failed pc built on a TURN credential already does; the 6 s timer stays as the deadline.
-- `_netRtcDc`: the "P2P completed after the fallback" upgrade branch, and the `!s.relay`
-  guard on `dc.onclose`.
-- `_netSend`: the warm-ping `s.relay` skip and the `_netRelaySend` transport fork.
-- `_netPathProbe`: the relay branch that reports the server RTT; without it the head of the
-  function is a plain `if(!s) return`.
-- the liveness pass: the whole `if(s.relay)` branch (grace window + silence kill).
-- `_netReconnect`: the `s.relay` guard.
+It calls hooks the live code does not have:
 
-`js/net-session.js`
-- `_netHs.sentRelay`.
-- `netInvite` / the invite-accept path / quick match: the `cfg.noP2P` mode selection and
-  the `invite-relay` / `accept-relay` signal types and their handlers.
-- the answer path: the `_netRelayAnswer` fork and the `d.relay` "peer answered in relay
-  mode, come over" branch.
-- `_netHandleMsg`: the doubled warn bar (`RB_WARN_MS * 2`) and the grace-window suppression.
-- `_netTeardown`: `s.relay = false` and the `relayAbort` abort.
+- `netP2POnly` and the per-session `p2pOnly` flag
+- `_netRelayHeld` in the pacing gate
+- the session slots `relay`, `relayAbort`, `relaySeq`, `relayGraceUntil`,
+  `relayPending`, `relayBusy`
+- `netRelayActive` (the RELAY MODE line on the duel board)
+- `cfg.noP2P`
 
-`js/storage.js` -- the `cfg.noP2P` toggle. `js/screens.js` -- the `netRelayActive()` board tag.
+## Server side
 
-## Test coverage
-
-There is none, by intent. No suite has the relay as its SUBJECT: a frozen transport that is
-scheduled for deletion does not earn ~1s of every commit's regression budget, and its known
-pathologies were server-side (long-poll batching, store-full) rather than engine bugs.
-
-`test/net-handshake.js` still drives several invite/lobby cases through `__setRelay(true)`,
-but only as a VEHICLE -- the relay handshake completes without WebRTC mocks, so it is the
-cheapest way to reach a connected pairing. Those cases assert lobby behaviour, not relay
-behaviour, and they move to a mocked p2p path when the relay goes.
+`api/relay.php` and the two relay signal types belong to FOK-server. No client of this
+build calls them.

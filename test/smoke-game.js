@@ -66,16 +66,14 @@ runTest('SMOKE-GAME', `
     }
     log('gouranga beads on the gem rule ok: multiplier on budget, flat + reset off it');
 
-    // cfgVer 4: the RELAY ONLY row is gone (TURN RELAY took its place), so a save from before
-    // drops noP2P on load -- a client stuck on the HTTP relay would have no row to leave it
-    // by. A cfgVer-4 save keeps it (a save edit is the one way left onto the relay).
+    // noP2P is a retired key: no save keeps it, whatever its version.
     // cfgVer 5: the P2P ONLY toggle became the three-way row; ON reads as DISABLED.
     localStorage.setItem(CFG_KEY, JSON.stringify({ noP2P:true, cfgVer:3 })); loadCfg();
-    if(cfg.noP2P!==false) throw 'a pre-v4 save must lose noP2P';
+    if('noP2P' in cfg) throw 'an old save must lose noP2P';
     if(cfg.cfgVer!==5) throw 'the live cfg carries the current version';
     if(cfg.turnMode!==0) throw 'TURN RELAY defaults to AUTO';
     localStorage.setItem(CFG_KEY, JSON.stringify({ noP2P:true, noTurn:true, cfgVer:4 })); loadCfg();
-    if(cfg.noP2P!==true) throw 'a v4 save edit onto the relay is honoured';
+    if('noP2P' in cfg) throw 'a v4 save must lose noP2P too';
     if(cfg.turnMode!==2 || 'noTurn' in cfg) throw 'a v4 P2P ONLY save reads as DISABLED and drops the old key';
     localStorage.setItem(CFG_KEY, JSON.stringify({ turnMode:7, cfgVer:5 })); loadCfg();
     if(cfg.turnMode!==0) throw 'an out-of-range mode falls back to AUTO';
@@ -87,7 +85,7 @@ runTest('SMOKE-GAME', `
       if(seen.join('|')!=='TURN RELAY: AUTO|TURN RELAY: FORCED|TURN RELAY: DISABLED|TURN RELAY: AUTO') throw 'the row cycles AUTO -> FORCED -> DISABLED -> AUTO: '+seen.join('|');
       cfg.turnMode=0; row.adj(false); if(cfg.turnMode!==2) throw 'left from AUTO wraps to DISABLED'; }
     localStorage.setItem(CFG_KEY, JSON.stringify({})); loadCfg();
-    log('cfgVer 5 ok: noP2P dropped from an older save, TURN RELAY three-way row on the menu');
+    log('cfgVer 5 ok: noP2P dropped from every save, TURN RELAY three-way row on the menu');
 
     // THE SPLASH HOLD: frame 0 (dark, no coin) holds SPLASH_HOLD_S after the splash comes
     // up, then the 4 s cycle runs as before, its first drop at 1.5 s. drawSplash and the

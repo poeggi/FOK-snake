@@ -37,7 +37,7 @@ const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no a
 // (iceTransportPolicy 'relay'), so a match runs through TURN even on a LAN -- the way to
 // see the relayed path on a device. DISABLED: P2P only. Never asks, every pc is STUN-only,
 // the PEER's relay candidates are dropped (one relay allocation at either end is a path,
-// so refusing only our own would still ride the peer's) and no HTTP relay: no match of
+// so refusing only our own would still ride the peer's): no match of
 // this client rides a relay of any kind.
 const NET_TURN_AUTO = 0, NET_TURN_FORCED = 1, NET_TURN_DISABLED = 2;
 // A remote candidate DISABLED refuses: one whose address is a relay's.
@@ -207,7 +207,7 @@ const NET_SEND_CONG = 4 * NET_PKT_MAX;
 // by the redundant log, not the transport.
 const NET_DC_OPTS = { negotiated:true, id:0, ordered:false, maxRetransmits:0 };
 // Live network stats + the debug-overlay ring (declared early: the transport below stamps lastSrvAt).
-let _netDbg = { rtt:-1, p2pRtt:-1, relayRtt:-1, relayDrop:0, relayAge:0, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, iceTx:0, iceBat:0, qMs:0, path:'', inLog:[], sigLog:[],
+let _netDbg = { rtt:-1, p2pRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0, hbRx:0, hbTx:0, iceDeob:0, iceTx:0, iceBat:0, qMs:0, path:'', inLog:[], sigLog:[],
                 pollAt:0, pollHeld:false,   // pollAt = when the in-flight poll opened (0 = none open)
                 lagAvg:0, lagMin:0, lagMax:0, lagN:0 };   // peer PTS delta, averaged over _netLagN
 let _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
@@ -341,13 +341,12 @@ function _netGapWait(now, flight, tier){
 // sent beside it is the one that can take the host to a concurrency it has not served -- and
 // two beside it race each other and BOTH pay the full wait, which is why nothing but the
 // exempt lane may. The exempt lane is what a player is waiting on right now, where waiting
-// for the hold to answer would be worse than sending. Both kinds of hold count the same: the
-// worker does not know which endpoint parked it.
+// for the hold to answer would be worse than sending.
 // ...and a RUNNING clock sweep counts as traffic on every lane, probes and the gaps between
 // them alike: the contract's sweep is exclusive, nothing of ours leaves until its last sample
 // is back. The sweep itself is not gated: t.txt starts no work, so it is not a request for
 // this rule at all and has nothing to gain by queueing behind a hold.
-function _netGapFlight(tier){ return _netFlight + (_netSyncBusy ? 1 : 0) + ((tier !== NET_BG_SOLO && (_netPollHeld || _netRelayHeld)) ? 1 : 0); }
+function _netGapFlight(tier){ return _netFlight + (_netSyncBusy ? 1 : 0) + ((tier !== NET_BG_SOLO && _netPollHeld) ? 1 : 0); }
 // How many callers are waiting at the gate right now. The poll reads it: it must not park a
 // worker again while work of ours is still queued behind the one it just released.
 let _netGapN = 0;
@@ -395,7 +394,7 @@ function _netIcesPeerOk(v){ const m = /^\s*v?(\d+)/i.exec(String(v || '')); retu
 // and the one rule is to store whatever a hello answers (a first bind, a re-bind after the
 // operator's reset, a return after the row was forgotten). ONE stamp site: every request
 // that names the id is a POST and its body passes through here; nothing names the id on a
-// request line (4.21: the poll, the relay's held read and the vault restore are POSTs too),
+// request line (4.21: the poll and the vault restore are POSTs too),
 // which the web server's access log records on every hit.
 function _netTokBody(body){ return (body && body.id) ? Object.assign({}, body, { tok: getCloudToken() }) : body; }
 // 401 = the server refused our token: the id is bound to another device, or our copy is
@@ -444,7 +443,7 @@ async function _netPostRes(path, body, bg){
     finally { _netFlight--; }
 }
 async function _netPost(path, body, bg){ return (await _netPostRes(path, body, bg)).json; }
-// The READ: the poll, the relay's held read, a page of presence, the score board. With a
+// The READ: the poll, a page of presence, the score board. With a
 // body it is a POST that names the id (the token rides inside, never on the request line);
 // without one it is the bare GET of a read that names nobody. Soft-fail like the POST above:
 // null is any failure, a 204 is the empty mailbox.
@@ -809,12 +808,12 @@ async function _netTimeSync(force){
 // caller's -- it owns the layout numbers). N = network/transport (top-left),
 // T = timing/timekeeping (top-right), S = sim/rollback health (bottom-right).
 //   pts = engine tick clock (60/s). srv rtt/lat = round-trip to the SERVER / reported latency.
-//   vs <peer> <v4|v6 p2p|turn|relay> <ms> = who + how we are connected (turn = the ICE pair
-//   has a relay end; relay = the deprecated HTTP relay); the ms is the peer RTT off the ICE
+//   vs <peer> <v4|v6 p2p|turn> <ms> = who + how we are connected (turn = the ICE pair
+//   has a relay end); the ms is the peer RTT off the ICE
 //   candidate-pair, NOT the server -- the number that governs duel lag.
 //   anc = this device's clock offset vs the server (mr = min-rtt, a = age); PTS
 //   rests on it, so a wrong anc puts us out of step with the peer.
-//   P<i>[R|T] = my index, R = the HTTP relay, T = a TURN-relayed pair; ep = epoch; tgt = clock-driven tick target
+//   P<i>[T] = my index, T = a TURN-relayed pair; ep = epoch; tgt = clock-driven tick target
 //   ptk = peer-tick (sub-tick, ~0 = aligned); pts live/avg = peer one-way pts-delta (latest, then avg + min/max)
 //   rb = rollbacks/resim-ticks, mx = deepest; live = inputs applied with NO rewind
 //   dsy = desync, hok = hash-ok; in = input records rx/tx; pkt = ALL packets rx/tx
@@ -842,7 +841,7 @@ function netDebugQuad(){
     if(_netSess && _netSess.game){
         const _tgt = netTickTarget();
         const _turn = _netSess.pathKind === 'turn';
-        Nx.push('P' + netMyIndex() + (_netSess.relay ? 'R' : _turn ? 'T' : '') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
+        Nx.push('P' + netMyIndex() + (_turn ? 'T' : '') + ' v ' + String(_netSess.peer).slice(0,4) + ' ep' + (_netSess.epoch|0));
         // WHO + HOW we are connected to the other side. Name from their profile; IP/family from
         // the server's peer-net hint (present on BOTH sides -- offerer and accepter alike).
         const _pn = _netPeerNet[_netSess.peer];
@@ -850,9 +849,9 @@ function netDebugQuad(){
         // The peer's IP gets its OWN line: a full IPv6 next to the name overflows the quadrant.
         // The IP hint says which family a direct path would use; once the pair is read off
         // the pc (_netPathStat) a relay end outranks it: the match rides TURN.
-        const _how = _netSess.relay ? 'relay' : _turn ? 'turn' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam + '  p2p' : 'p2p') : 'p2p (no ip hint)';
-        Nm.push('vs ' + _pnm + '  ' + _how + (!_netSess.relay && d.p2pRtt >= 0 ? ' ' + d.p2pRtt + 'ms' : ''));
-        if(!_netSess.relay && _pn && _pn.ip) Nx.push(_pn.ip);
+        const _how = _turn ? 'turn' : _pn && _pn.ip ? (_pn.fam ? 'v' + _pn.fam + '  p2p' : 'p2p') : 'p2p (no ip hint)';
+        Nm.push('vs ' + _pnm + '  ' + _how + (d.p2pRtt >= 0 ? ' ' + d.p2pRtt + 'ms' : ''));
+        if(_pn && _pn.ip) Nx.push(_pn.ip);
         Nx.push(d.path || 'path ?');
         Nx.push('in ' + d.inRx + '/' + d.inTx + '  pkt ' + d.hbRx + '/' + d.hbTx);
         // RETX n = transition re-sends (go/req shipped again because no echo landed yet).
@@ -878,7 +877,7 @@ function netDebugQuad(){
         if(d.inLog.length) Nx.push('< ' + d.inLog.join(' '));
     } else {
         Nm.push('online ' + _netCounts.online + '  playing ' + _netCounts.playing);
-        if(_netLb.invite && Date.now()-(_netLb.invite.at||0) < NET_INVITE_STALE_MS) Nm.push('INVITE FROM ' + String(_netLb.invite.from).slice(0,4) + (_netLb.invite.relay?' (relay)':''));
+        if(_netLb.invite && Date.now()-(_netLb.invite.at||0) < NET_INVITE_STALE_MS) Nm.push('INVITE FROM ' + String(_netLb.invite.from).slice(0,4));
         if(_netHs.sent) Nm.push('INVITED ' + String(_netHs.sent).slice(0,4) + ' - waiting');
         if(_netHs.accepting) Nm.push('ACCEPTED ' + String(_netHs.accepting).slice(0,4) + ' - awaiting offer');
         if(_netHs.offerTo) Nm.push('OFFERED ' + String(_netHs.offerTo).slice(0,4) + ' x' + _netHs.offerTries);
@@ -1010,7 +1009,7 @@ function netMusicSeekSec(){
 // is synced, then they converge -- the game.js menu-music gate waits briefly for the sync.
 function netMenuSeekSec(){ const p = netPts(); return p != null ? p/1000 : 0; }
 function netDebugInfo(){
-    return { base:NET_BASE, offline:netOffline(), rttMs:_netDbg.rtt, relayRttMs:_netDbg.relayRtt, relay:!!(_netSess&&_netSess.relay), path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
+    return { base:NET_BASE, offline:netOffline(), rttMs:_netDbg.rtt, path:_netDbg.path, serverClockOfsMs:_netDbg.srvOfs,
              pts:simTick, peerTickOfs:_netDbg.peerTkOfs, rollbacks:_rbDbg.rb, resimTicks:_rbDbg.resim, maxRewindTicks:_rbDbg.maxRew,
              inputDrops:_rbDbg.drop, congDrops:_netDbg.congDrop|0, desyncs:_rbDbg.desync, hashOk:_rbDbg.hashOk, hashLost:_rbDbg.hashLost|0, fixes:_rbDbg.fix|0, txRetries:_netDbg.retx|0, epoch:_netSess?_netSess.epoch:null,
              inRx:_netDbg.inRx, inTx:_netDbg.inTx, lastPeerInputs:_netDbg.inLog.slice(),
@@ -1334,10 +1333,8 @@ let _netPollBusy = false, _netPollBusyAt = 0, _netPollAbort = null;
 let _netPollDown = false;   // the last poll failed: the next success is the mailbox coming BACK
 // Is a HELD poll open right now? Not a debug readout: every lane but the exempt one waits
 // on this (see _netGapFlight). An unheld poll is a request like any other and is counted by
-// _netFlight. _netRelayHeld is the same fact about the OTHER hold a client can have open --
-// DEPRECATED(relay)'s held GET, set by _netRelayLoop -- and it lives here rather than beside
-// that loop so the gate's own inputs are all in one file.
-let _netPollHeld = false, _netRelayHeld = false;
+// _netFlight.
+let _netPollHeld = false;
 // When the server lets the worker of the last HELD poll go, and before when no held poll
 // may be armed. An abort closes the socket on our side and nothing else: the server learns of a
 // gone client only when it writes, and the hold loop writes nothing until it answers, so
@@ -1527,7 +1524,7 @@ if(typeof document !== 'undefined' && document.addEventListener){
         // suspended), but performance.now() and the timers freeze -- so the silence timer can
         // miss it on wake. Measure the away time on the WALL clock and rebuild if it was more
         // than a blink; a rebuild that turns out unnecessary just re-establishes cheaply.
-        if(_netSess && _netSess.game && !_netSess.relay && !_netSess.reconnectAt && awayMs > RB_WARN_MS) _netReconnect(_netSess);
+        if(_netSess && _netSess.game && !_netSess.reconnectAt && awayMs > RB_WARN_MS) _netReconnect(_netSess);
         // A long background is where a phone changes network without ever going offline (wifi to
         // cellular, or a different wifi on the way home). Re-gather rather than keep reporting an
         // address that now belongs to somebody else's line.

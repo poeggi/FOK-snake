@@ -468,13 +468,12 @@ function driverSrc(id){
         + '    line: function(nd){ return _ttMatchLine(tourneyView() || {}, nd.nid, nd); },\n'
         + '    tag: function(nd){ return _ttNodeTag(nd); },\n'
         + '    cell: function(nd){ return _ttNodeCell(nd); },\n'
-        + '    snap: function(s){ return s ? { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, stakesWant:s.stakesWant, lvl0:s.lvl0, lvl:s.lvl, levelWant:s.levelWant, p2pOnly:s.p2pOnly } : null; },\n'
+        + '    snap: function(s){ return s ? { hearts:s.hearts, heartsWant:s.heartsWant, stakes:s.stakes, stakesWant:s.stakesWant, lvl0:s.lvl0, lvl:s.lvl, levelWant:s.levelWant } : null; },\n'
         + '    sess: function(peer, role){ return C.snap(_netMkSess(peer, role)); },\n'
         // A session that already EXISTS when the sheet is engaged, which is the case a fresh
         // _netMkSess can never show: the offer is answered before the sheet comes off the queue.
         + '    mint: function(peer, role){ _netSess = _netMkSess(peer, role); return C.snap(_netSess); },\n'
         + '    sessNow: function(){ return C.snap(_netSess); },\n'
-        + '    p2p: function(){ return _netP2POnly; },\n'
         + '    inGame: function(v){ inGame = !!v; },\n'
         + '    live: function(){ return inGame; },\n'
         + '    exit: function(){ _duelExit(); },\n'

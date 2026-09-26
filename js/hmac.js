@@ -115,7 +115,7 @@ function _hexBytes(s){
     if(typeof s !== 'string' || s.length === 0 || (s.length & 1)) return null;
     const out = new Uint8Array(s.length >> 1);
     for(let i = 0; i < out.length; i++){
-        const v = parseInt(s.substr(i * 2, 2), 16);
+        const v = parseInt(s.slice(i * 2, i * 2 + 2), 16);
         if(!(v >= 0 && v <= 255)) return null;
         out[i] = v;
     }

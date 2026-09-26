@@ -126,8 +126,7 @@ CONNECTION LOST = silence (every inbound datagram refreshes `_netMarkRecv`; a
 refused input never warns) OR a wedged peer sim: the proof of a live peer is
 the `tk` every packet stamps MOVING, taken only in `_netHandleMsg` (never
 from forwarded spectator packets). `_netSimStalled` suppresses where a sim
-may sit still (s.tx, lvlPending, reconnecting, relay, spectating, no
-baseline); RB_SIM_STALL_MS = RB_PERSIST_KILL_MS (banner), RB_SIM_KILL_MS =
+may sit still (s.tx, lvlPending, reconnecting, spectating, no baseline); RB_SIM_STALL_MS = RB_PERSIST_KILL_MS (banner), RB_SIM_KILL_MS =
 2x; no reconnect rung. Amber OUT OF SYNC = unhealed hash divergence; silence
 outranks it; both share RB_PERSIST_KILL_MS. Debouncing the amber banner was
 rejected. 'st' carries the WHOLE player (`_rbPackPlayer`). Guard:

@@ -1,7 +1,7 @@
 # Request pacing (client half; server half: FOK-server docs/API.md Pacing)
 
 THE SERVER HAS A LOW WORKER LIMIT. Every request in flight and every held
-connection (poll, relay) is a worker; the budget is concurrent connections per
+connection (the held poll) is a worker; the budget is concurrent connections per
 client, never bytes. Weigh every new request site and every cadence against it.
 
 One idea: fewer simultaneous requests per client. The cost is a ~51 ms slice
@@ -14,9 +14,9 @@ leaving in the same ms still both pay the slice.
 - ONE background gate: every background request queues behind `_netGate()`;
   `_netGapWait(now, flight)` is pure: anything of ours in flight beats
   elapsed time, else wait what is left of the gap.
-- ONE AT A TIME (API 4.10): a parked hold of ours (poll `_netPollHeld`, relay
-  `_netRelayHeld`) counts as traffic for every lane but the exempt one. A
-  third request beside a hold is never right.
+- ONE AT A TIME (API 4.10): a parked hold of ours (the poll, `_netPollHeld`)
+  counts as traffic for every lane but the exempt one. A third request
+  beside a hold is never right.
 - THREE lanes: `true` = paced background, waits a hold out (beat, roster,
   score); NET_BG_IDLE = same plus low priority (items.php); NET_BG_SOLO =
   EXEMPT: never beside another request of ours, no spacing, may go beside a

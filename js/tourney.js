@@ -583,11 +583,10 @@ function _ttEngage(d){
         // is not a level this build has.
         _ttWant = { peer, hearts:_duelHearts(d.hm), stakes:!!d.stakes, lvl:_duelLvl(d.lvl), speed:!!d.speed };
         _ttPlayNid = String(d.nid || '');   // this node's match owns the board now
-        netP2POnlySet(true);   // a tournament match is direct or nothing
         // _netMkSess is not the only moment a session can need dressing: a state re-read can
         // deliver the sheet after the feeder's offer was answered and the session minted.
         // Dress that session here too: the go repairs hearts and stakes on its own, but only
-        // a preset can refuse a wrong one, and p2p-only has no wire representation at all.
+        // a preset can refuse a wrong one.
         if(typeof _netSess !== 'undefined' && _netSess) tourneyDressSession(_netSess);
         // players[0] is the feeder and the feeder is always the offerer, so the two sides
         // never both offer. This is the quick-match path verbatim -- an offer needs no
@@ -619,7 +618,6 @@ function tourneyOfferOk(from){
 }
 function _ttFail(msg){
     _ttDone = _ttNid; _ttWant = null; _ttPlayNid = ''; _ttWatchNid = '';
-    netP2POnlySet(false);
     if(_TT_PHASES[_ttFace()]) _ttGo(_tt ? tourneyExitPhase() : 'tourneyLobby');
     _ttMsg(msg, true);
 }
@@ -636,7 +634,6 @@ function tourneyDressSession(s){
     s.levelWant = _ttWant.lvl;
     s.speed = _ttWant.speed;
     s.speedWant = _ttWant.speed;
-    s.p2pOnly = true;
 }
 
 // ---- reporting a result --------------------------------------------------------------
@@ -716,7 +713,6 @@ function tourneyOrphan(tid, nid){
 // ---- housekeeping --------------------------------------------------------------------
 function _ttClearMatch(){
     _ttOverAt = 0; _ttWant = null; _ttPlayNid = ''; _ttWatchNid = '';
-    netP2POnlySet(false);
     if(netSpectating()) specStop('');
     _duelExit();   // lands on tourneyExitPhase()
 }

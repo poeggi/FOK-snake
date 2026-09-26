@@ -145,17 +145,16 @@ name entry to open the keyboard.
   latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
   DataChannel. Where no direct path exists, ICE falls back to a TURN relay on
   short-lived credentials the server hands out per player (server API 4.22), the
-  same DataChannel one hop longer; the deprecated HTTP relay is used only where the
-  server offers no TURN. The netcode is
+  same DataChannel one hop longer. The netcode is
   deterministic lockstep with rollback: both clients run the same inputs-only sim
   off a shared PTS clock, so neither side owns the game state and controls feel
   local on both ends. Every timeline boundary (match start, level, rematch,
   death respawn, outage recovery) is agreed over an acknowledged go/req exchange
   with a peer-to-peer clock burst, and a periodic authoritative-state exchange
   heals any divergence. A TURN RELAY setting picks AUTO (ICE chooses), FORCED
-  (relay-only, to see the relayed path) or DISABLED (P2P only: never asks,
-  refuses the peer's relay candidates and takes no HTTP relay, so no match of
-  that client rides a relay of any kind)
+  (relay-only, to see the relayed path) or DISABLED (P2P only: never asks and
+  refuses the peer's relay candidates, so no match of that client rides a relay
+  of any kind)
 - Global online top-100 high scores, submitted with the deterministic replay
   material (seed + tick-stamped inputs) for server-side validation
 - A proven identity: the 32-bit id is public, a secret token the server mints on

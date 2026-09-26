@@ -457,7 +457,7 @@ const SETTINGS_CATS = [
         { lbl:()=>'STRICTLY OFFLINE: '+(netOffline()?'ON':'OFF'),
           dis:()=>_runInsecure(),   // not an HTTPS page (file://, plain http): the server is never spoken to, so offline is forced (greyed)
           act:()=>{cfg.offline=!cfg.offline;Snd.sfxPlay('select',cfg.music);if(cfg.offline)netOfflineClear();} },
-        { lbl:()=>'TURN RELAY: '+['AUTO','FORCED','DISABLED'][cfg.turnMode|0],   // AUTO = ICE picks the path; FORCED = relay-only pcs (see the relayed path on a device); DISABLED = P2P only (never asks, the peer's relay refused, no HTTP relay)
+        { lbl:()=>'TURN RELAY: '+['AUTO','FORCED','DISABLED'][cfg.turnMode|0],   // AUTO = ICE picks the path; FORCED = relay-only pcs (see the relayed path on a device); DISABLED = P2P only (never asks, the peer's relay refused)
           act:()=>{cfg.turnMode=((cfg.turnMode|0)+1)%3;Snd.sfxPlay('select',cfg.music);},
           adj:(r)=>{cfg.turnMode=((cfg.turnMode|0)+(r?1:-1)+3)%3;} },
         _tog('HIDE REMOTE COSMETICS','noRemoteCosmetics'),
@@ -1777,8 +1777,6 @@ function _drawDuelWarn(){
     ctg(w, CW/2, 22, sync ? '#ffe066' : '#ff6666', FONT.HINT, GLOW.TEXT);
 }
 function drawDuelBoard(now) {
-    if(netRelayActive())   // DEPRECATED(relay)
-        ct('RELAY MODE', CW/2, 8, '#ffd24a', FONT.HINT);   // latency self-explains
     const _sh=shakeOffset(now);   // arming happens sim-side via the 'nearmiss' event (see armNearMiss)
     if(_sh){ ctx.save(); ctx.translate(_sh.x,_sh.y); drawWorld(now); ctx.restore(); }   // shaken board
     else drawWorld(now);      // background + collectibles + both snakes: the shared layer

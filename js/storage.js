@@ -84,7 +84,7 @@ function _prefersReducedMotion() {
 function defaultCfg() {
     return { music:true, diff:1, musicStyle:0, snakeColor:0, shopItems:{}, wornItems:null,
              handed:0, volume:1, sfxVol:0.5, turbo:true, touchSelect:false, touchSens:1, keepAwake:true, offline:false, fps30:false, disableGlow:false, deferDraw:true, singleThreaded:false, gfxMode:1, smoothMotion:0, reduceMotion:_prefersReducedMotion(),
-             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, noP2P:false, turnMode:0, privateDuels:false, cfgVer:5,
+             autoCloud:false, boxPity:0, shopOpens:0, debug:0, x10:false, turnMode:0, privateDuels:false, cfgVer:5,
              itemReg:{}, mintQ:[], claimQ:[], itemsSeeded:0 };
 }
 // Clamp/coerce every field so a corrupt, partial, or foreign save can never put
@@ -114,8 +114,7 @@ function _sanitizeCfg() {
     cfg.reduceMotion = !!cfg.reduceMotion;   // absent -> defaultCfg() already seeded it from the OS pref
     cfg.autoCloud   = !!cfg.autoCloud;   // daily automatic cloud backup
     cfg.x10         = !!cfg.x10;   // DEBUG: x10 rare events (persisted like cfg.debug)
-    cfg.noP2P       = !!cfg.noP2P;   // DEPRECATED(relay): relay-only, off the menu (cleared on load below)
-    cfg.turnMode    = idx(cfg.turnMode, 3, 0);   // TURN RELAY: 0 AUTO (default) / 1 FORCED (relay-only pcs) / 2 DISABLED (P2P only: never asks, the peer's relay refused, no HTTP relay)
+    cfg.turnMode    = idx(cfg.turnMode, 3, 0);   // TURN RELAY: 0 AUTO (default) / 1 FORCED (relay-only pcs) / 2 DISABLED (P2P only: never asks, the peer's relay refused)
     cfg.privateDuels = !!cfg.privateDuels;   // duels still count, but no friend is offered a spectate link
     cfg.boxPity     = (Number.isInteger(cfg.boxPity)   && cfg.boxPity>=0)   ? cfg.boxPity   : 0;
     cfg.shopOpens   = (Number.isInteger(cfg.shopOpens) && cfg.shopOpens>=0) ? cfg.shopOpens : 0;
@@ -139,11 +138,7 @@ function loadCfg() {
     try { const raw = localStorage.getItem(CFG_KEY); if(raw) s = JSON.parse(raw); } catch(e) {}
     if(!s || typeof s!=='object' || Array.isArray(s)) s = {};
     if(!s.cfgVer || s.cfgVer < 2) delete s.touchSelect;   // v2 migration
-    // v3: relay-only was a stop-gap default while the handshake was unreliable. v4: its
-    // RELAY ONLY row is gone from the menu (TURN RELAY took its place), so a save that still
-    // holds it would route every duel through the HTTP relay with no way back. One rule
-    // covers both: the saved value is dropped and P2P (the low-latency path) is used.
-    if(!s.cfgVer || s.cfgVer < 4) delete s.noP2P;
+    delete s.noP2P;   // a retired key: nothing reads it, so no save keeps it
     // v5: the P2P ONLY toggle became the three-way TURN RELAY row; ON reads as DISABLED.
     if(!s.cfgVer || s.cfgVer < 5){ if(s.noTurn) s.turnMode = 2; delete s.noTurn; }
     Object.assign(cfg, defaultCfg(), s);

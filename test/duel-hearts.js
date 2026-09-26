@@ -199,7 +199,7 @@ const driver = `
 
     // ---- G) the wire: hm rides the boundary go, is adopted, and a preset mismatch kills ----
     globalThis.setTimeout = ()=>0;          // no retry/arm timers: this section is synchronous
-    _netLiveStart = ()=>{}; _netRelayLoop = async ()=>{}; _netRequestStart = async ()=>{};
+    _netLiveStart = ()=>{}; _netRequestStart = async ()=>{};
     _netArmBegin = ()=>{};                  // the begin is clock-driven; not what is on trial here
     _netTimeSync = async ()=>{};
     const mkSess = (role)=>{
@@ -353,28 +353,7 @@ const driver = `
     A(!cfg.wornItems.shades, 'the wardrobe write-back stopped working with stakes ON');
     R.steps.push('stakes off: no claim handle, no wardrobe write-back; stakes on unchanged');
 
-    // ---- I) P2P-ONLY: all three ways into the deprecated relay refuse ----
-    netP2POnlySet(false);
-    mkSess('host'); _netSess.game = false; _netSess.p2pOnly = true;
-    _netRelayStart(_netSess);
-    A(_netSess===null, 'a P2P-only session fell back to the server relay');
-    // The latch covers the window BEFORE a session exists: the relay handshake mints its own,
-    // so a per-session flag alone could never stop it.
-    netP2POnlySet(true);
-    _netSess = null; inGame = false;
-    _netRelayOffer('bbbbbbbb', null);
-    A(_netSess===null, 'the relay OFFER path built a session in p2p-only mode');
-    _netRelayAnswer('bbbbbbbb', { seed:1, profile:null });
-    A(_netSess===null, 'the relay ANSWER path built a session in p2p-only mode');
-    // ...and with the latch off it still works: this is a refusal, not a removal.
-    netP2POnlySet(false);
-    mkSess('host'); _netSess.game = false; _netSess.p2pOnly = false;
-    _netRelayStart(_netSess);
-    A(_netSess && _netSess.relay===true, 'the relay fallback stopped working for an ordinary duel');
-    _netSess = null;
-    R.steps.push('p2p-only refuses all three relay entry points (offer, answer, fallback); ordinary duels still fall back');
-
-    // ---- J) the 2-HEART LANE GOLDEN ----
+    // ---- I) the 2-HEART LANE GOLDEN ----
     // The default lane's golden lives in sim-determinism.js and must not move for any of the
     // above. This is the same idea for the lane the tournament actually plays: three full
     // 2-heart matches, hashing the wire contract (RB_HASH_DUEL off _rbDuelSnap) every tick.

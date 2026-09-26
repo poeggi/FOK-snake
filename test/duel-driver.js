@@ -22,7 +22,7 @@ const HOOKS = (id) => `
   cfg.offline=false;
   globalThis.fetch = async ()=>({ status:0, json:async()=>null });
   _netPost = async ()=>null; _netRead = async ()=>null; _netTimeSync = async ()=>{};
-  _netPollOnce = async ()=>{}; _netRelayLoop = async ()=>{};
+  _netPollOnce = async ()=>{};
   // NB: _netRequestStart is left REAL. The driver never reaches its server branch (first/rematch
   // boot via __p2pStart, not the server), but the p2pBoundary mode drives its 'level' branch --
   // the host-authored P2P boundary (_netOpenBoundary) -- for real over the wire.
