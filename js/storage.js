@@ -284,7 +284,7 @@ function resetPlayerId() {
 function getPlayerName() {
     try { return (localStorage.getItem('lastSName') || '').substring(0, MAX_NAME); } catch(e) { return ''; }
 }
-// Identity token (API 4.20): the id is public, this proves it. The server mints 16 random
+// Identity token: the id is public, this proves it. The server mints 16 random
 // bytes on the first hello of an unbound id and answers them once; every request that
 // names the id carries them from then on (net-api.js stamps `tok`), the cloud vault
 // included. Persist it like the id -- cookie (master) + localStorage backup -- so it too
@@ -434,14 +434,14 @@ async function cloudBackup(silent) {
         const r=await netBgFetch('/api/backup.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:getPlayerId(), tok, payload })});
         const j=await r.json().catch(()=>null);
         if(r.status===200 && j && j.ok){ ok=true; if(!silent) _dataMsg='CLOUD BACKUP SAVED'; }
-        else if(r.status===401){ _netTokRefused('/api/backup.php'); if(!silent) _dataMsg='ID BOUND TO ANOTHER DEVICE'; }
+        else if(_netTokNo('/api/backup.php', r.status, j)){ _netTokRefused('/api/backup.php'); if(!silent) _dataMsg='ID BOUND TO ANOTHER DEVICE'; }
         else if(r.status===413){ if(!silent) _dataMsg='CLOUD: TOO LARGE'; }
         else { if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
     } catch(e){ if(!silent) _dataMsg='CLOUD BACKUP FAILED'; }
     if(!silent) _dataMsgAt=_msgNow();
     return ok;
 }
-// DELETE MY DATA (API 4.23): the server forgets the id -- row, name, friendships, scores,
+// DELETE MY DATA: the server forgets the id -- row, name, friendships, scores,
 // backup, items, event memberships, the binding -- and this device starts over on a new id,
 // exactly as RESET ID does. Needs the wire and the token that proves the id: a dead wire or
 // a refusal leaves everything standing.
@@ -452,7 +452,7 @@ async function deleteAccount() {
     const r=await _netPostRes('/api/account.php', { id:getPlayerId(), action:'delete' }, NET_BG_SOLO);
     const ok=(r.status===200 && !!r.json);
     if(ok){ resetPlayerId(); _dataMsg='DATA DELETED - NEW ID '+fmtPlayerId(); }
-    else _dataMsg = r.status===401 ? 'ID BOUND TO ANOTHER DEVICE' : 'DELETE FAILED';
+    else _dataMsg = _netTokNo('/api/account.php', r.status, r.body) ? 'ID BOUND TO ANOTHER DEVICE' : 'DELETE FAILED';
     _dataMsgAt=_msgNow();
     return ok;
 }
@@ -465,7 +465,7 @@ async function _maybeAutoCloudBackup(){
     if(Date.now()-at < 86400000) return;                                   // at most once per day
     if(await cloudBackup(true)){ try{ localStorage.setItem(AUTOCLOUD_KEY, String(Date.now())); }catch(e){} }
 }
-// Cloud restore: ask the vault for the payload under id + token (a POST, 4.21: the token
+// Cloud restore: ask the vault for the payload under id + token (a POST: the token
 // never rides a request line), apply it. Needs the token -- id alone cannot read someone
 // else's backup.
 async function cloudRestore() {
@@ -480,7 +480,7 @@ async function cloudRestore() {
             let d=null; try{ d=JSON.parse(j.payload); }catch(e){}
             _dataMsg=_applyRestoredConfig(d)?'CLOUD RESTORED':'CLOUD: BAD DATA';
         } else if(r.status===404) _dataMsg='CLOUD: NO BACKUP';
-        else if(r.status===401){ _netTokRefused('/api/backup.php'); _dataMsg='ID BOUND TO ANOTHER DEVICE'; }
+        else if(_netTokNo('/api/backup.php', r.status, j)){ _netTokRefused('/api/backup.php'); _dataMsg='ID BOUND TO ANOTHER DEVICE'; }
         else _dataMsg='CLOUD RESTORE FAILED';
     } catch(e){ _dataMsg='CLOUD RESTORE FAILED'; }
     _dataMsgAt=_msgNow();

@@ -1302,8 +1302,8 @@ function _drawDuelControls(lk){
 }
 // On the online duel ready splash, show each player's device category as a small badge
 // tinted to that snake's head colour, flanking a "VS". Local 1vs1 (both snakes on one
-// device) has no platforms to compare, so it draws nothing. A peer on an older client
-// sends no platform -> that side is blank; you still see your own.
+// device) has no platforms to compare, so it draws nothing. A peer that sends no
+// platform leaves that side blank; you still see your own.
 function _drawDuelPlatforms(lk){
     const pl=netDuelPlatforms(); if(!pl) return;
     const y=CH/2+62;
@@ -1980,7 +1980,7 @@ function drawTourneyLobby(){
     if(!t){
         const notice = netStatusNotice();
         if(notice) drawSubhead(notice, '#ff8888');
-        else if(!netTourneyOk()) drawSubhead('TOURNAMENTS NEED A NEWER SERVER', '#ff8888');
+        else if(!netTourneyOk()) drawSubhead('TOURNAMENTS UNAVAILABLE', '#ff8888');
         else drawSubhead('2-' + tourneyMax() + ' PLAYERS - ONE 1vs1, EVERYONE ELSE WATCHES');
         _ttDrawRows(MENU_TOP, MENU_ROW);
         // The search line sits at STATUS_Y like every other menu's status, and yields to a
@@ -2814,7 +2814,7 @@ function drawEventMonitor(){
     // The two figures an operator wants visible across a room, side by side and the
     // same size: who is in, and who is here. Big, because they are read from the far
     // side of one. ONLINE is the monitor answer's count of members heard within the
-    // online window (API 4.15, an optional field); a server without it leaves the
+    // online window (an optional field); an answer without it leaves the
     // server-wide count the 1vs1 lobby shows, off hello/poll.
     // EV_MON_FIG_DX either side of the centre: a three-digit count at DISPLAY size is
     // 120 px wide, so 70 keeps two of them 20 px apart.

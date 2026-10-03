@@ -62,7 +62,7 @@ function _netIceFlush(s){
     const q = s.iceQ; s.iceQ = [];
     for(const c of q) _netIceRelease(s, c);
 }
-// ---- OUR OWN PUBLIC ADDRESSES, in both families (the hello `nets` field, server 4.2) ----
+// ---- OUR OWN PUBLIC ADDRESSES, in both families (the hello `nets` field) ----
 // The server only ever sees us on the ONE family the browser picked for that request, and a
 // browser gives us no way to ask for the other. On a dual-stack line Happy Eyeballs can sit on
 // v6 for hours, so our public v4 address is never observed -- which is exactly why "tournaments
@@ -182,15 +182,14 @@ function _netMkSess(peer, role){
              hearts:START_LIVES, stakes:true, speed:false,
              heartsWant:null, stakesWant:null, speedWant:null,
              lvl0:1, levelWant:null,
-             turn:false,   // the pc was built on a TURN credential (API 4.22): a failed connect had every path there is
+             turn:false,   // the pc was built on a TURN credential: a failed connect had every path there is
              relayOnly:false,   // the pc may only take the relay (TURN RELAY: FORCED, on a credential)
              pathKind:'',       // 'turn' once the selected ICE pair has a relay end, 'direct' otherwise (_netPathStat)
              lastSentTick:-1, lastPhase:'', lastBarsV:-1,
              lastRecvWall:0, reconnectAt:0, reconnecting:false,
              // simSeenWall: the last time we had PROOF the peer's sim advanced (see _netSimStalled).
              // 0 means "no baseline yet", which is never a fault -- a match that has not ticked cannot stall.
-             simSeenWall:0, peerTk:null,
-             peerV:'' };   // peerV: the peer's build line once it has named one -- the `ices` gate (net-api.js)
+             simSeenWall:0, peerTk:null };
     // A tournament match's parameters live on the ROLES SHEET, and the offer carries none
     // of them. Both sides mint their session here, so this is the one point both paths
     // share -- and the answerer, which never gets to speak, is dressed by it too.
@@ -212,7 +211,7 @@ async function _netSignalIce(to, payload){
     if(r && !r.json && r.status >= 500 && typeof setTimeout === 'function')
         setTimeout(() => { _netSignal(to, 'ice', payload); }, 400);
 }
-// ---- ICE, batched into one signal (`ices`, API 4.4) ----
+// ---- ICE, batched into one signal (`ices`) ----
 // A duel start trickles a dozen candidates inside a second. Sent one signal.php POST
 // each they queue behind one another on the one connection, on workers that are already
 // warm: the cost is per REQUEST, not per byte. So the TAIL of a gather goes out as one
@@ -260,20 +259,10 @@ function _netIceTxFlush(to){
     if(buf.length === 1){ _netSignalIce(to, JSON.stringify(buf[0])); return; }   // one candidate is not a batch
     _netSignalIces(to, buf);
 }
-// TWO gates, and both have to hold. The peer's build is the contract's gate: a client that
-// does not know `ices` drops the whole array through its default branch without a word.
-// The server's minor is ours: a 4.3 server refuses a signal type it has never heard of, so
-// without it this feature would break every connect against the server that is live today.
-// `ver` names the peer's build for a link this module does not own -- a spectator feed,
-// which negotiates with somebody who is not the duel peer and learns their build the same
-// way, off the offer or the answer. Left out, the gate is the duel session, as before. The
-// buffered ELEMENT is whatever the caller hands over, so a spectator's wrapped candidate
+// The buffered ELEMENT is whatever the caller hands over, so a spectator's wrapped candidate
 // rides the same window, the same cap and the same 5xx retry as the duel's bare one.
-function _netIceOut(to, cand, ver){
-    const s = _netSess;
-    const pv = ver === undefined ? ((s && s.peer === to) ? s.peerV : '') : ver;
-    const ok = typeof setTimeout === 'function' && netSrvMinor() >= 4 && _netIcesPeerOk(pv);
-    if(!ok){ _netSignalIce(to, JSON.stringify(cand)); return; }
+function _netIceOut(to, cand){
+    if(typeof setTimeout !== 'function'){ _netSignalIce(to, JSON.stringify(cand)); return; }
     let q = _netIceTx[to];
     if(!q) q = _netIceTx[to] = { buf:[], bytes:0, t:null, open:false };
     // The first candidate goes alone and at once -- unless one of OUR OWN requests is still
@@ -295,7 +284,7 @@ function _netRtcInit(peer, role){
     _netSess = _netMkSess(peer, role);
     _netLastPeer = peer;   // the FRIENDS screen offers BLOCK / REPORT on the last opponent
     _netSess.turn = !!netTurnHeld();   // built on a TURN credential: every path there is
-    const rc = netRtcConfig();         // the TURN credential held, or STUN alone (API 4.22)
+    const rc = netRtcConfig();         // the TURN credential held, or STUN alone
     _netSess.relayOnly = rc.iceTransportPolicy === 'relay';
     const pc = new RTCPeerConnection(rc);
     _netSess.pc = pc;
@@ -405,10 +394,6 @@ async function _netRtcAnswer(peer, d){   // we accepted / we are the quick-match
     _netSess.offKey = okey;
     for(const c of early) _netIceTake(_netSess, c);   // what the drain delivered during the ask, in order
     _netSess.peerProfile = _netClampProfile(d.profile);
-    // The offer names the peer's build, so the ANSWERER may batch its ICE from the very
-    // first candidate. The offerer only learns it from the answer and sends singles until
-    // then -- an asymmetry that costs a handful of requests once and heals itself.
-    _netSess.peerV = String((d && d.v) || '');
     _netNameSeen(peer, _netSess.peerProfile.name);
     _netSess.seed = (d.seed>>>0) || 1;
     _netHs.accepting = null;

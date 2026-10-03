@@ -186,6 +186,33 @@ try {
         S.__reply = null;
     });
 
+    await check('a 429 too many attempts latches like a 401; event.php keeps its own', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'5.0' } });
+        await S.__hello();
+        S.__take();
+        S.__reply = () => ({ status:429, json:{ ok:false, error:'too many attempts', retry_after:60 } });
+        await S.__post('/api/event.php', { id: S.__me(), action:'join', code:'ABCDEFGHJKM' });
+        eq(S.__refused(), false, 'a wrong event code past its cap is the join answer, not the id');
+        await S.__post('/api/friend.php', { id: S.__me(), action:'list' });
+        eq(S.__refused(), true, 'a wrong token past the cap is latched');
+        eq(S.__ok(), false, 'the wire is closed until the identity changes');
+        S.__take();
+        await S.__hello();
+        eq(S.__take().length, 0, 'nothing else leaves: the back-off never loops');
+        S.__reply = null;
+    });
+
+    await check('a 429 too many attempts on a read latches too', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'5.0' } });
+        await S.__hello();
+        S.__reply = () => ({ status:429, json:{ ok:false, error:'too many attempts', retry_after:60 } });
+        await S.__read('/api/poll.php', { id: S.__me() });
+        eq(S.__refused(), true, 'the poll refused past the cap is latched');
+        S.__reply = null;
+    });
+
     await check('ahead of the first answered hello, a refused poll is not the verdict; a refused hello is', async () => {
         S.__clearTok(); S.__fresh(); S.__take();
         S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });

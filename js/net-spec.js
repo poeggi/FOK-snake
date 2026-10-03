@@ -203,7 +203,7 @@ function _spServable(){
     return _spOn ? !!_spCtx : (netGameActive() && inGame && !!_spCtxBuild());
 }
 // THE MONITOR'S SLOT IS ITS OWN. An event's screen is a spectator nobody sees: the roles
-// sheet names it in a field of its own (server API 4.14), outside the tree, so no client
+// sheet names it in a field of its own, outside the tree, so no client
 // lists or counts it -- and it must not cost a human a direct slot either. So the two
 // direct slots are counted over everyone BUT the monitor, and the monitor always has
 // room: one id, one link, a re-ask replaces it. Never an alt: it feeds nobody.
@@ -314,16 +314,13 @@ function specHandshaking(){
 // to keep paying it, and no reason for a second batcher to exist to spare it.
 // What rides in the batch is our OWN wrapped candidate, so the sp marker sits on EVERY
 // entry: `ices` is contractually a JSON array, and an array has nowhere else to put it.
-// `l.ver` is the peer's build, empty until it names it -- the batcher then sends singles,
-// which is the contract's rule and heals itself the moment the offer or answer lands.
 function _spIceOut(l, cand){
-    _netIceOut(l.peer, { c:cand, sp:1 }, l.ver || ''); return;
-    _spSignal(l.peer, 'ice', { c:cand });
+    _netIceOut(l.peer, { c:cand, sp:1 });
 }
 function _spMkPc(peer, arr, kind){
-    const pc = new RTCPeerConnection(netRtcConfig());   // the player's TURN credential serves its spectator links too (API 4.22)
+    const pc = new RTCPeerConnection(netRtcConfig());   // the player's TURN credential serves its spectator links too
     const l = { peer, pc, dc:null, rdOk:false, iceQ:[], sub:false, kind, dead:false,
-                openAt:0, lastAt:_spNow(), live:false, ver:'' };
+                openAt:0, lastAt:_spNow(), live:false };
     // A fresh pc gathers afresh, so whatever is still buffered for this peer belongs to a
     // connection that no longer exists.
     _netIceTxReset(peer);
@@ -404,7 +401,6 @@ async function _spAnswer(peer, d){
     }
     _spDrop(_spOut, peer);
     const l = _spMkPc(peer, _spOut, 'out');
-    l.ver = String(d.v || '');   // named in the offer, so this side may batch from the first candidate
     l.dc = l.pc.createDataChannel('fokspec', SPEC_DC_OPTS);
     _spWire(l, _spOnServeMsg);
     for(const c of early) _spIceAdd(l, c);   // what the drain delivered during the wait, in order
@@ -441,7 +437,6 @@ function _spOnSignal(type, from, d){
     }
     if(type === 'answer'){
         if(!d.sdp) return;
-        l.ver = String(d.v || '');
         l.pc.setRemoteDescription(d.sdp).then(()=>{ l.rdOk = true; _spIceFlush(l); }).catch(()=>{});
         return;
     }

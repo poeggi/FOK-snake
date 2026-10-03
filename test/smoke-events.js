@@ -1039,11 +1039,11 @@ const DRIVER = `
       // eid is a tag on it and a membership check on the way in. There is no
       // second state machine here and there must never be one.
       {
-        const _oSetup=tourneySetupOpen, _oPost2=_netPostRes, _oMin=_netSrvMin;
-        // netTourneyOk() is the same gate the menu row uses, and it needs a server
-        // that answers 4.1 or better. Without it every create below would no-op and
-        // each assertion would pass by never running.
-        _netSrvMin = NET_API_BUILT_MINOR;
+        const _oSetup=tourneySetupOpen, _oPost2=_netPostRes, _oSeen=_netHelloSeen;
+        // netTourneyOk() is the same gate the menu row uses, and it needs an answered
+        // hello. Without it every create below would no-op and each assertion would pass
+        // by never running.
+        _netHelloSeen = true;
         if(!netTourneyOk()) throw 'the suite must look online to a tournament, or the create checks are vacuous';
         // EVERY post is recorded, not the last one: a create is followed by the reads
         // it provokes, and the last body on the wire is one of those.
@@ -1068,7 +1068,7 @@ const DRIVER = `
         await tourneyCreate(false, 1, false);
         if(created().length !== 1) throw 'exactly one ordinary create';
         if('eid' in created()[0]) throw 'an ordinary create must not post one: '+JSON.stringify(created()[0]);
-        _netPostRes=_oPost2; _netSrvMin=_oMin; _tt=null; _ttUi.busy=false; _ttUi.eid='';
+        _netPostRes=_oPost2; _netHelloSeen=_oSeen; _tt=null; _ttUi.busy=false; _ttUi.eid='';
       }
       // A lobby carrying an eid is marked in the announce -- it reached that list at
       // all only because we are in the event, and the room is why it is there.
@@ -1325,8 +1325,8 @@ const DRIVER = `
         // through the room lands on its boards, exactly as the tournament menu's
         // REJOIN does; anybody else is told it has started.
         {
-          const _oSrv=netSrvMinor, _oNetOk=_netOk;
-          netSrvMinor=()=>99; _netOk=()=>true;
+          const _oSeen=_netHelloSeen, _oNetOk=_netOk;
+          _netHelloSeen=true; _netOk=()=>true;
           const posts=[];
           let joins=0;
           tourneyJoin=async()=>{ joins++; };
@@ -1350,7 +1350,7 @@ const DRIVER = `
           if(phase !== 'eventPage') throw 'a refused rejoin must not move the screen, got '+phase;
           if(_evUi.msg !== 'ALREADY STARTED') throw 'a non-participant is told it has started, got '+_evUi.msg;
           if(_tt) throw 'a refusal adopts nothing';
-          netSrvMinor=_oSrv; _netOk=_oNetOk;
+          _netHelloSeen=_oSeen; _netOk=_oNetOk;
         }
 
         tourneyJoin=_oJoin; _ttPost=_oTtPost; _netAnchorRefresh=_oAnch;

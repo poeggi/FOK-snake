@@ -281,7 +281,6 @@ function _netOnSignal(sig){
                         _netSignal(from, 'bye', '');
                         break;
                     }
-                    _netSess.peerV = String(d.v || '');   // from here our own ICE may go out batched
                     if(d.profile){
                         _netSess.peerProfile = _netClampProfile(d.profile);
                         _netNameSeen(from, _netSess.peerProfile.name);
@@ -522,7 +521,7 @@ async function _netRequestStart(s, reason){
     // stale gate is coarse enough to pass any client that ever synced. A FIRST start sweeps
     // only when the anchor is older than NET_ANCHOR_MAX_AGE_MS (the pair's residual is the
     // P2P burst's job, not this one's) or when the server's resync hint
-    // (4.4) says this pair's two anchors disagree by more than it can account for. A
+    // says this pair's two anchors disagree by more than it can account for. A
     // REMATCH never sweeps: the anchor it holds carried the match just ended.
     const _force = _netResync && !identityOnly;
     if(!identityOnly) _netResync = false;   // the identity ask sweeps nothing: the hint stays for the next first start

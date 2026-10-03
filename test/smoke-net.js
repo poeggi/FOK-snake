@@ -354,7 +354,6 @@ runTest('SMOKE-NET', `
         const _m=_netApiMajor(r.api), _mn=_netApiMinor(r.api);
         _netApiNewer=(_m!==null && _m>NET_API_BUILT);
         _netApiOutdated=(_m===NET_API_BUILT && _mn>NET_API_BUILT_MINOR);
-        _netSrvMin=(_m===NET_API_BUILT && _mn!==null)?_mn:-1;
         if(typeof r.debug==='boolean'){
             if(_netDbgSrv!==null && r.debug!==_netDbgSrv){ cfg.debug=r.debug?Math.max(1,cfg.debug|0):0; }
             else if(_netDbgSrv===null && r.debug && !(cfg.debug|0)){ cfg.debug=1; }
@@ -373,50 +372,34 @@ runTest('SMOKE-NET', `
     if((cfg.debug|0)!==2) throw 'a repeated instruction must not stamp on a self-enabled client';
     // The REPORT is what we are actually doing, never what was asked.
     cfg.debug=0; _netDbgSrv=null;
-    // api MAJOR gate: the client's own MAJOR.MINOR string is compatible; an OLDER server
-    // and a legacy integer still are; a newer MINOR flags an update; only a newer MAJOR
-    // disables online. An older server MAJOR (one without the item registry) stays usable:
-    // online play is unaffected, item registration simply has nowhere to land.
-    // DERIVED, never a literal: a hard-coded "the version we are built against" goes stale the
-    // moment the constant moves, and it goes stale SILENTLY -- it just stops testing anything.
+    // api MAJOR gate: the client's own MAJOR.MINOR string is up to date, an OLDER major and
+    // a non-string api raise no flag, a newer MINOR flags an update, only a newer MAJOR
+    // disables online. DERIVED, never a literal: a hard-coded "the version we are built
+    // against" goes stale SILENTLY the moment the constant moves.
     const _BUILT = NET_API_BUILT + '.' + NET_API_BUILT_MINOR;
     const _NEWER_MINOR = NET_API_BUILT + '.' + (NET_API_BUILT_MINOR + 1);
     _applyHello({api:_BUILT});
     if(_netApiNewer||_netApiOutdated) throw 'built against ' + _BUILT + ': the same version must read as up to date';
     if(netUpdateNotice()) throw 'no update note when up to date';
-    // The tournament gate needs a working client AND a 4.1 server, so stub fetch back in:
-    // without it _netOk() is false and both halves of the assertion pass vacuously.
-    const _oFetchT=globalThis.fetch; globalThis.fetch=()=>({});
-    if(netSrvMinor()!==NET_API_BUILT_MINOR || !netTourneyOk()) throw 'a same-major ' + _BUILT + ' server must open the tournament gate';
+    // The tournament gate needs a working client AND an answered hello, so stub fetch back
+    // in: without it _netOk() is false and both halves of the assertion pass vacuously.
+    const _oFetchT=globalThis.fetch, _oSeenT=_netHelloSeen; globalThis.fetch=()=>({});
+    _netHelloSeen=false;
+    if(netTourneyOk()) throw 'before an answered hello the tournament gate must stay shut';
+    _netHelloSeen=true;
+    if(!netTourneyOk()) throw 'an answered hello must open the tournament gate';
+    globalThis.fetch=_oFetchT; _netHelloSeen=_oSeenT;
     // The beat is a contract constant: 60 s, half the 120 s online window.
     if(NET_HELLO_MS!==60000) throw 'the contract beat is 60 s';
-    _applyHello({api:'4.4'});
-    if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.4) must read as up to date';
-    if(netSrvMinor()!==4) throw 'a 4.4 server must report minor 4';
-    // 4.4 is also what the batched-ICE and pacing features gate on, so the minor a hello
-    // reports has to survive an older server rolling back under us.
-    _applyHello({api:'4.3'});
-    if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.3) must read as up to date';
-    if(netSrvMinor()!==3) throw 'a 4.3 server must report minor 3 -- the ices gate reads this';
-    // The tournament gate is a >= 4.1 gate, not an equality: a server that has tournament.php
-    // but not the hello nets field must keep serving tournaments.
-    _applyHello({api:'4.1'});
-    if(_netApiNewer||_netApiOutdated) throw 'an older MINOR (4.1) must read as up to date';
-    if(netSrvMinor()!==1 || !netTourneyOk()) throw 'a 4.1 server must still open the tournament gate';
-    _applyHello({api:'3.5'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER major (server 3.5) must read as up to date';
+    _applyHello({api:(NET_API_BUILT-1)+'.23'}); if(_netApiNewer||_netApiOutdated) throw 'an OLDER major must read as up to date';
     _applyHello({api:4});     if(_netApiNewer||_netApiOutdated) throw 'a non-string api must soft-fail with no flags';
-    // An OLDER minor still plays: only the features that need 4.1 are shut off, and the
-    // menu row that offers them greys out rather than failing at the first POST.
-    _applyHello({api:'4.0'}); if(_netApiNewer||_netApiOutdated) throw 'an older MINOR must read as up to date';
-    if(netSrvMinor()!==0 || netTourneyOk()) throw 'a 4.0 server must keep the tournament gate shut';
-    globalThis.fetch=_oFetchT;
     _applyHello({api:_NEWER_MINOR});   // newer MINOR: still compatible, but an update exists
     if(_netApiNewer) throw 'a newer MINOR must NOT disable online';
     if(!_netApiOutdated || netUpdateNotice()!=='UPDATE AVAILABLE - PLEASE RELOAD') throw 'a newer minor must flag UPDATE AVAILABLE';
-    _applyHello({api:'5.0'});   // newer MAJOR: incompatible
+    _applyHello({api:(NET_API_BUILT+1)+'.0'});   // newer MAJOR: incompatible
     if(!_netApiNewer || netUpdateNotice()!=='UPDATE REQUIRED - PLEASE RELOAD') throw 'a newer major must flag UPDATE REQUIRED and gate online off';
     _netApiNewer=false; _netApiOutdated=false;
-    log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on 4.1');
+    log('remote debug ok: instruction honoured on change, self-enabled left alone; api gate parses MAJOR.MINOR + flags newer minor/major + gates tournaments on an answered hello');
     cfg.debug=0;
 
     // ---- the hold decision + the queue gauge (hello pace, q_ms; API 4.4) ----
@@ -583,12 +566,12 @@ runTest('SMOKE-NET', `
     }
     log('hidden tab ok: hiding drops nothing, the hold survives the grace, a long-hidden browsing tab reads unheld on the cadence, a seek or a handshake keeps it');
 
-    // 4.9: a poll is a COMPLETE beat, so a screen holding one sends nothing beside it. What
-    // used to travel alongside -- the 60 s hello, the friends screen's roster read and the
-    // tournament lobby's 5 s hello -- rides the poll's own query string, because a request
-    // sent beside a parked poll can be the one that pays the pool's fork.
+    // A poll is a COMPLETE beat, so a screen holding one sends nothing beside it: the 60 s
+    // hello, the friends screen's roster read and the tournament lobby's 5 s hello ride the
+    // poll's own body, because a request sent beside a parked poll can be the one that pays
+    // the pool's fork.
     {
-        const _oGet49=_netRead, _oFetch49=globalThis.fetch, _oPost49=_netPost, _oMin=_netSrvMin;
+        const _oGet49=_netRead, _oFetch49=globalThis.fetch, _oPost49=_netPost;
         const _oDbg=cfg.debug, _oEnd=_netDuelEnd, _oHold=_netPollHoldEnd, _oSrv=_netDbgSrv;
         globalThis.fetch=()=>({});
         let _u=null, _posts=0;
@@ -597,11 +580,8 @@ runTest('SMOKE-NET', `
         const poll=(ph)=>{ _u=null; _netPollBusy=false; phase=ph; _netPollOnce(); };
         _netPace={hold:true}; _netFrSince=0; _netFlWant=false; _netTlAt=Date.now();
 
-        // aa, de and db cannot be seen in a 204, so they are the ones gated on the version.
-        _netSrvMin=8; _netDuelEnd='aabbccdd'; poll('friends');
-        if(/[?&](db|aa|de)=/.test(_u||'')) throw 'a pre-4.9 server must get none of the gated flags, got ' + _u;
-        _netSrvMin=9; cfg.debug=0; poll('friends');
-        if(!/[?&]db=0(&|$)/.test(_u||'')) throw 'every 4.9 poll must report our own debug state, got ' + _u;
+        _netDuelEnd='aabbccdd'; cfg.debug=0; poll('friends');
+        if(!/[?&]db=0(&|$)/.test(_u||'')) throw 'every poll must report our own debug state, got ' + _u;
         if(!/[?&]aa=1(&|$)/.test(_u||'')) throw 'the friends screen is consent: it must arm auto-accept on its own poll, got ' + _u;
         if(!/[?&]de=aabbccdd(&|$)/.test(_u||'')) throw 'the end of a duel must ride the poll, got ' + _u;
         cfg.debug=2; poll('friends');
@@ -620,7 +600,7 @@ runTest('SMOKE-NET', `
         if(!/[?&]fl=1(&|$)/.test(_u||'')) throw 'the roster ask must ride the poll, got ' + _u;
 
         // The three stand-downs, each held back until the poll has actually served the answer
-        // once: a re-released minor may report 4.9 without one, so these are feature-detected.
+        // once (feature-detected).
         _posts=0; _netTtPoll=false; _netHelloBusy=false; _netPollTick=4; phase='tourneyLobby'; _netTick();
         if(!_posts) throw 'with the announce unproven the 5 s hello must stand';
         _posts=0; _netTtPoll=true; _netHelloBusy=false; _netPollTick=4; _netTick();
@@ -632,31 +612,28 @@ runTest('SMOKE-NET', `
         if(!_posts) throw 'with the roster unproven the old route must stand';
         _posts=0; _netHelloBusy=false; netMyIdEnter();
         if(_posts) throw 'MY ID arms auto-accept with aa on its own poll, not with a hello';
-        _netSrvMin=8; _posts=0; _netHelloBusy=false; netMyIdEnter();
-        if(!_posts) throw 'against an older server MY ID still needs its hello';
 
         // ...and the beat itself, the last of the pairs: a hold standing IS the beat.
-        _netSrvMin=9; _netPollHoldEnd=Date.now()+5000;
-        if(_netBeatDue()) throw 'a 4.9 client holding a poll owes no hello';
+        _netPollHoldEnd=Date.now()+5000;
+        if(_netBeatDue()) throw 'a client holding a poll owes no hello';
         _netPollHoldEnd=0;
         if(!_netBeatDue()) throw 'with no hold standing the beat is due as ever';
-        _netPollHoldEnd=Date.now()+5000; _netSrvMin=8;
-        if(!_netBeatDue()) throw 'against an older server a poll is only most of a beat: keep beating';
 
         // api and the debug instruction land in ONE place, off a hello or a poll alike -- and
         // a 204 is a body we synthesise, so its missing api must not read as a rollback.
-        _netSrvMin=-1; _netDbgSrv=null; cfg.debug=0;
-        _netSrvSays({ok:true, api:'4.9', debug:true, signals:[]});
-        if(netSrvMinor()!==9) throw 'the poll body did not un-latch the server minor';
+        _netApiOutdated=false; _netDbgSrv=null; cfg.debug=0;
+        _netSrvSays({ok:true, api:NET_API_BUILT + '.' + (NET_API_BUILT_MINOR + 1), debug:true, signals:[]});
+        if(!_netApiOutdated) throw 'the api on a poll body was ignored';
         if(!(cfg.debug|0)) throw 'the debug instruction on a poll body was ignored';
         _netSrvSays({ok:true, signals:[]});
-        if(netSrvMinor()!==9) throw 'a 204 has no api and must leave the latch alone';
+        if(!_netApiOutdated) throw 'a 204 has no api and must leave the latch alone';
+        _netApiOutdated=false;
 
-        _netRead=_oGet49; _netPost=_oPost49; globalThis.fetch=_oFetch49; _netSrvMin=_oMin;
+        _netRead=_oGet49; _netPost=_oPost49; globalThis.fetch=_oFetch49;
         cfg.debug=_oDbg; _netDuelEnd=_oEnd; _netPollHoldEnd=_oHold; _netDbgSrv=_oSrv;
         _netFlWant=false; _netTtPoll=false; _netFrPoll=false; _netPollBusy=false; phase='menu';
     }
-    log('4.9 pacing ok: the poll is the beat -- flags gated or feature-detected, the three requests beside it stood down');
+    log('pacing ok: the poll is the beat -- the three requests beside it stood down');
 
     // ---- ONE gate for our own background traffic + the roster on hello (4.4 re-release) ----
     // What the live host charges is a scheduling slice paid PER REQUEST IN FLIGHT, not per

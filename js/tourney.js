@@ -19,7 +19,7 @@ const TT_TICK_MS    = 1000;    // housekeeping cadence while a tournament is hel
 const TT_REPORT_MS  = 2500;    // result-report retry spacing (the POST is idempotent)
 const TT_REPORT_MAX = 24;      // ~1 minute of retries, well inside the 3-min walkover ladder
 // A pushed event may name a delay the server wants before the requests that event provokes
-// (`after_ms`, API 4.4). A broadcast reaches the whole field in the same instant, so every
+// (`after_ms`). A broadcast reaches the whole field in the same instant, so every
 // recipient reacts in the same instant too, and their read-backs arrive as one burst -- on
 // a shared host that burst is the thing that queues. Bounded here as well as server-side:
 // a delay long enough to be a stall is not a delay we would honour. The server's own budget
@@ -154,10 +154,10 @@ function _ttRounds(t){
     while(a > 1){ a = Math.ceil(a / 2); est++; }
     return Math.max(deep, est, t ? (t.round | 0) : 0);
 }
-// The gate on the whole feature: tournaments need a 4.1 server. An older one answers 404
-// to tournament.php and never sends a roles sheet, so the menu row stays grey.
+// The gate on the whole feature: a live wire and an answered hello (a fresh id is bound by
+// its first hello, and a tournament call ahead of it is refused).
 function netTourneyOk(){
-    return _netOk() && netSrvMinor() >= 1;
+    return _netOk() && _netHelloSeen;
 }
 function _ttMsg(m, bad){ uiMsg(_ttUi, m, bad ? 'fail' : 'select'); }
 // A LINE about a match reads better with YOU in it -- "KAI vs YOU" -- so that is what
@@ -208,11 +208,11 @@ function tourneyLand(to){
     else phase = to;
 }
 function tourneyGoHome(fallback){ tourneyLand(tourneyHome(fallback)); }
-// THE WALKOVER CLOCK. The sheet carries `walkover_at` (server API 4.15, unix ms on the
+// THE WALKOVER CLOCK. The sheet carries `walkover_at` (unix ms on the
 // shared clock): the instant the server may first hand the node to whoever is still there.
 // Everybody waiting on a dealt match -- the player called up, the watchers, the event's
 // screen -- reads it off the same field, so everybody sees the same clock ticking. Seconds
-// left (0 once due), or -1 for nothing to show: no field (an older server), no synced
+// left (0 once due), or -1 for nothing to show: no field, no synced
 // clock, or a sheet younger than the grace -- a peer that is merely connecting must not
 // be shown a clock running against it. `sinceMs` is when the sheet landed HERE.
 function tourneyWalkoverLeft(roles, sinceMs){
@@ -429,7 +429,7 @@ function _ttOnSignal(d){
     const ev = String(d.event || ''), tid = String(d.tid || '');
     if(!ev || !tid) return;
     // Not our tournament to PLAY. An event's MONITOR is dealt the sheets of the event's
-    // tournament like any spectator (server API 4.14) without ever holding it here, so
+    // tournament like any spectator without ever holding it here, so
     // the signal goes to its screen; anything else is an echo from one we left or a
     // mix-up, and we render what state() says about the one we hold.
     if(!_tt || _tt.tid !== tid){
@@ -474,10 +474,9 @@ function _ttOnSignal(d){
             _tt.last = { nid:String(d.nid || ''), winner:d.winner || null, draw:!!d.draw,
                          score:d.score || null, why:String(d.why || '') };
             // The event IS the change. The node it names is settled in the picture we hold,
-            // and a server that sends the standings with it (rows, 1.4.17) has said everything
-            // the bracket screen draws -- eight clients re-reading 5 KB each on every settle was
-            // the fattest part of a tournament's one traffic peak. Only an older server, whose
-            // result carries no rows, still makes this a read.
+            // and the standings that ride with it (rows) are everything the bracket screen
+            // draws: eight clients re-reading 5 KB each on every settle would be the fattest
+            // part of a tournament's one traffic peak. A result without rows is still a read.
             _ttNodeSettle(_tt.last);
             if(Array.isArray(d.rows)){ _tt.standings = d.rows; _uiDirty = true; }
             else _ttSync();
@@ -779,9 +778,8 @@ function tourneyEnter(){
     _ttUi.sel = -1; _ttUi.msg = '';
     _ttUi.home = '';   // the multiplayer door: this is the room to give back
     // A tournament link parked a code at boot and this is the first screen that can spend it.
-    // It waits for the hello, because the join is gated on the server's minor version and an
-    // unanswered hello reads exactly like an old server. Unspent, it STAYS parked: a code is
-    // only worth burning against a server that could have taken it.
+    // It waits for the hello: the join is gated on an answered one. Unspent, it STAYS
+    // parked: a code is only worth burning against a server that could have taken it.
     const spend = () => {
         if(!_tourneyLink || _tt || !netTourneyOk()) return;
         const c = _tourneyLink; _tourneyLink = ''; tourneyJoin(c);
@@ -831,7 +829,7 @@ function tourneyRejoin(){
 // anybody who is not a participant, so nothing here has to judge that.
 async function tourneyResume(tid){
     if(_tt || _ttUi.busy) return false;
-    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return false; }
+    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS UNAVAILABLE', true); return false; }
     tid = String(tid || '');
     _ttUi.busy = true; _ttMsg('REJOINING...');
     const r = await _ttPost('state', { tid });
@@ -852,11 +850,10 @@ async function tourneyResume(tid){
     _ttSync();
     return true;
 }
-// A host holds one tournament at a time: a create while hosting is answered 409. Since
-// server 4.8 the same create sent again with replace:true ends the one we host -- exactly
-// as our own leave would -- and opens the new one in the same call, so we can never end
-// up holding neither. Feature-detected by behaviour, never by version: replace goes out
-// only after a 409, and a 409 to THAT is an older server, which gets the plain message.
+// A host holds one tournament at a time: a create while hosting is answered 409. The
+// same create sent again with replace:true ends the one we host -- exactly as our own
+// leave would -- and opens the new one in the same call, so we can never end up holding
+// neither. replace goes out only after a 409; a 409 to THAT gets the plain message.
 // The player is asked first (_ttAskReplace): a running tournament ends for everyone.
 // CREATE is two presses, not one: the screen that collects what a tournament is played FOR
 // comes first, and the row on it that says CREATE is the one that talks to the server. The
@@ -876,7 +873,7 @@ function tourneySetupOpen(eid){
 }
 async function tourneyCreate(stakes, lvl, speed, replace){
     if(_tt || _ttUi.busy) return;
-    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
+    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS UNAVAILABLE', true); return; }
     _ttUi.busy = true; _ttMsg('CREATING...');
     const body = { stakes: !!stakes, lvl: _duelLvl(lvl), speed: !!speed };
     // AN EVENT TOURNAMENT IS AN ORDINARY TOURNAMENT. `eid` is a tag on it and a
@@ -941,7 +938,7 @@ function _ttGoneWhy(){
 }
 async function tourneyJoin(arg){
     if(_tt || _ttUi.busy) return;
-    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS NEED A NEWER SERVER', true); return; }
+    if(!netTourneyOk()){ _ttMsg('TOURNAMENTS UNAVAILABLE', true); return; }
     const by = /^[0-9a-f]{32}$/i.test(String(arg)) ? { tid:String(arg) } : { code:String(arg).toUpperCase() };
     _ttUi.busy = true; _ttMsg('JOINING...');
     const r = await _ttPost('join', by);

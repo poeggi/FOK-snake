@@ -60,7 +60,7 @@ const HOOKS = `
   };
   globalThis.__sig = (d)=>_ttOnSignal(d);
   // CREATE while already hosting: the hooks the replace flow is driven through.
-  globalThis.__off = ()=>{ _tt = null; _ttHold(''); _ttUi.busy = false; _ttUi.ask = null; _ttUi.msg = ''; _netSrvMin = 8; phase = 'tourneySetup'; };   // where CREATE is actually pressed
+  globalThis.__off = ()=>{ _tt = null; _ttHold(''); _ttUi.busy = false; _ttUi.ask = null; _ttUi.msg = ''; _netHelloSeen = true; phase = 'tourneySetup'; };   // where CREATE is actually pressed
   globalThis.__setBack = (o)=>{ _ttBack = o; };
   globalThis.__back = ()=>_ttBack;
   globalThis.__tt = ()=>_tt;

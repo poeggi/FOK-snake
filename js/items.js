@@ -128,7 +128,7 @@ function itemLose(id){
 function itemClaim(c){
     // Refuse a body the server would only 400: it wants a 32-hex mid and uid, a
     // non-empty digest, a 16-hex self tag and a tick inside its range. A duel with
-    // no mid (an old server, or a local match) simply produces no claims.
+    // no mid (a local match) simply produces no claims.
     if(!c || !ITEM_UID_RE.test(c.uid || '') || !ITEM_UID_RE.test(c.mid || '')
        || !c.from || !c.to || c.from === c.to || !c.digest
        || !ITEM_TAG_RE.test(c.myTag || '')

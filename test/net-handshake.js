@@ -259,18 +259,8 @@ const HOOKS = (myId) => `
   // (unlike an invite, whose accept payload carries one).
   globalThis.__qmOffer   = (to)=> _netRtcOffer(to);   // returns the offer promise: the offer is async
   globalThis.__ageOffer  = (ms)=>{ _netHs.offeredAt -= ms; };
-  // API 4.4. The stub pc never gathers, so hand candidates to _netIceOut directly --
-  // that IS the callback the real pc.onicecandidate calls, so the batcher under test is
-  // the shipping one. Both of its gates are settable: the server minor and the peer build.
-  globalThis.__srvMin  = (n)=>{ _netSrvMin = n|0; };
-  globalThis.__setPeerV= (v)=>{ if(_netSess) _netSess.peerV = String(v); };
-  // This build's own version line with its MAJOR forced to the one that speaks 4.4. It
-  // tracks the FORMAT of APP_VERSION -- which is where the bug was: the constant reads
-  // 'v4.0.0', leading 'v' and all -- without pinning the test to a version number the
-  // release hook rewrites after these checks have already run.
-  // [0-9] and not a backslash class: this suite body is a template literal, which eats
-  // the backslash and would leave a regex matching a literal 'd' that never fires.
-  globalThis.__peerV4  = ()=> String(_swVersion || '').replace(/[0-9]+/, '4');
+  // The stub pc never gathers, so hand candidates to _netIceOut directly -- that IS the
+  // callback the real pc.onicecandidate calls, so the batcher under test is the shipping one.
   globalThis.__iceOut  = (c)=>{ _netIceOut(_netSess.peer, c); };
   globalThis.__flight = (n)=>{ _netFlight = n|0; };
   globalThis.__icePend = ()=>{ const q = _netIceTx[_netSess.peer]; return q ? q.buf.length : -1; };
@@ -278,7 +268,7 @@ const HOOKS = (myId) => `
   // The spectator leg of the same batcher. The link is built for REAL and its own
   // onicecandidate is what fires, so the wiring under test is the shipping one rather than
   // a hand-rolled call into the middle of it.
-  globalThis.__spMkIn   = (peer, ver)=>{ const l = _spMkPc(peer, _spIn, 'in'); l.ver = String(ver||''); l.rdOk = true; };
+  globalThis.__spMkIn   = (peer)=>{ const l = _spMkPc(peer, _spIn, 'in'); l.rdOk = true; };
   globalThis.__spGather = (peer, c)=>{ const l = _spFind(_spIn, peer); if(l) l.pc.onicecandidate({ candidate:c }); };
   globalThis.__spAdded  = (peer)=>{ const l = _spFind(_spIn, peer) || _spFind(_spOut, peer); return l ? l.pc._ice.slice() : []; };
   globalThis.__spDrop   = (peer)=>{ _spDrop(_spIn, peer); };
@@ -481,7 +471,7 @@ try {
     const got = A.__iceAdded().map(c => c.candidate.split(' ')[0]);
     if(JSON.stringify(got) !== JSON.stringify(['candidate:1'])) throw new Error('only the host candidate reaches the pc: ' + JSON.stringify(got));
     // The same rule on a spectator link.
-    A.__spMkIn('cafe0003', 'v4.0.0');
+    A.__spMkIn('cafe0003');
     A.__deliver({ from:'cafe0003', to:A_ID, type:'ices', payload:JSON.stringify([{ sp:1, c:relay }, { sp:1, c:host }]) });
     await flush();
     if(A.__spAdded('cafe0003').length !== 1) throw new Error('the spectator link drops the relay candidate too: ' + A.__spAdded('cafe0003').length);
@@ -719,17 +709,13 @@ try {
     if((+v4.candidate.split(' ')[3]) !== 1694498815) throw new Error('a v4 candidate keeps its own priority: ' + v4.candidate);
   });
 
-  // ------------------------------------------------- API 4.4: batched ICE (`ices`)
+  // ------------------------------------------------- batched ICE (`ices`)
   const cand = (i)=>({ candidate:'candidate:' + i + ' 1 udp 2113937151 2001:db8::' + i + ' 5000 typ host',
                        sdpMid:'0', sdpMLineIndex:0 });
   const addrs = (list)=> list.map(c => (/ (2001:db8::[0-9a-f]+) /.exec(c.candidate||'')||[])[1]).join(',');
-  // peerV null = dress the peer in a line shaped like THIS build's own. Spelling it out as
-  // a literal is how the leading 'v' of 'v4.0.0' got past the gate's own test once already:
-  // the wire carries APP_VERSION, never a hand-typed version.
-  const txSess = (srvMin, peerV)=>{
+  const txSess = ()=>{
     const A = mk(A_ID);
     A.__gameSess(B_ID, 'host');
-    A.__srvMin(srvMin); A.__setPeerV(peerV === null ? A.__peerV4() : peerV);
     A.__out.splice(0);
     return A;
   };
@@ -738,13 +724,13 @@ try {
   // than infer it: a widening that slipped past those waits would leave each of them timing
   // out into an empty __out and reporting a batcher that never fired as one that never batched.
   check('the gather window is the one every wait in this block is sized for', () => {
-    const A = txSess(4, null);
+    const A = txSess();
     if(A.__iceWin() !== 100) throw new Error('expected a 100ms gather window, got ' + A.__iceWin());
     if(A.__iceWin() >= 200) throw new Error('a window the waits below cannot outlast: ' + A.__iceWin());
   });
 
-  await acheck('4.4: the first candidate goes alone, the tail leaves as one ices', async () => {
-    const A = txSess(4, null);
+  await acheck('the first candidate goes alone, the tail leaves as one ices', async () => {
+    const A = txSess();
     for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
     let out = A.__out.splice(0);
     if(out.length !== 1 || out[0].type !== 'ice')
@@ -764,8 +750,8 @@ try {
   // The first candidate goes alone because it is the one that matters -- but "alone" costs a
   // request of its own, and a request of OURS already in flight is exactly the collision the
   // gather window exists to avoid. So the head skips its solo trip and rides the batch.
-  await acheck('4.4: with a request of ours in flight the first candidate rides the batch', async () => {
-    const A = txSess(4, null);
+  await acheck('with a request of ours in flight the first candidate rides the batch', async () => {
+    const A = txSess();
     A.__flight(1);
     for(let i = 1; i <= 3; i++) A.__iceOut(cand(i));
     if(A.__out.length !== 0)
@@ -780,32 +766,8 @@ try {
         throw new Error('the batch must carry the head as well, got ' + addrs(JSON.parse(out[0].payload)));
   });
 
-  // FALSIFICATION 1: the server's gate. A 4.3 server refuses a signal type it has never
-  // heard of, so against the instance that is live today nothing may batch at all.
-  check('FALSIFICATION: a 4.3 server gets one ice per candidate, never an ices', () => {
-    const A = txSess(3, '4.0.0');
-    for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
-    const out = A.__out.splice(0);
-    if(out.length !== 5) throw new Error('expected 5 singles, got ' + out.length);
-    if(out.some(x => x.type !== 'ice')) throw new Error('a 4.3 server must never be sent an ices');
-    if(A.__icePend() !== -1) throw new Error('nothing may be buffered when the feature is off');
-  });
-
-  // FALSIFICATION 2: the contract's gate. A client built before 4.4 drops the whole
-  // array through its default branch WITHOUT A WORD -- the one failure mode that would
-  // look like a flaky connect rather than a bug, so it must be impossible by construction.
-  check('FALSIFICATION: a peer that predates 4.4 gets one ice per candidate', () => {
-    for(const v of ['v3.9.2', '3.9.2', '']){
-      const A = txSess(4, v);
-      for(let i = 1; i <= 4; i++) A.__iceOut(cand(i));
-      const out = A.__out.splice(0);
-      if(out.length !== 4 || out.some(x => x.type !== 'ice'))
-          throw new Error('peer v"' + v + '" must get singles, got ' + JSON.stringify(out.map(x=>x.type)));
-    }
-  });
-
   check('a batch never exceeds the contract cap of 24', () => {
-    const A = txSess(4, null);
+    const A = txSess();
     for(let i = 1; i <= 30; i++) A.__iceOut(cand(i));   // 1 alone + 29 into the buffer
     const out = A.__out.splice(0);
     const bat = out.filter(x => x.type === 'ices');
@@ -818,7 +780,7 @@ try {
   // Half a batch is exactly the silent narrowing of the candidate set the retry exists
   // to prevent: the retry re-sends the WHOLE array, never its last element.
   await acheck('a 5xx retry re-sends the whole array', async () => {
-    const A = txSess(4, null);
+    const A = txSess();
     A.__iceOut(cand(1));            // the lone first candidate, accepted: it has its own retry
     A.__setSigFail(500);
     for(let i = 2; i <= 4; i++) A.__iceOut(cand(i));
@@ -835,7 +797,7 @@ try {
 
   // The receiving half: what A batched is what B feeds its pc, in order and unchanged --
   // a batched candidate must take exactly the path a lone one takes.
-  await acheck('4.4: the batch A sends is the candidate set B adds, in order', async () => {
+  await acheck('the batch A sends is the candidate set B adds, in order', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
@@ -844,7 +806,6 @@ try {
     pump(A, B);                       // A's offer -> B builds its answerer PC
     await flush();                    // ...and its remote description settles
     if(!B.__state().sess) throw new Error('B has no P2P session to add candidates to');
-    A.__srvMin(4); A.__setPeerV(A.__peerV4());
     A.__out.splice(0);
     for(let i = 1; i <= 5; i++) A.__iceOut(cand(i));
     await new Promise(r => setTimeout(r, 200));
@@ -865,14 +826,14 @@ try {
   });
 
   // The SPECTATOR leg. It negotiates its own connection to somebody who is not the duel
-  // peer, and until now it paid one signal.php POST per candidate -- a dozen requests aimed
-  // at the feeder, who is playing the match and is the slowest node in it to drain a
-  // mailbox. Same batcher, same window, same cap; only whose build gates it differs.
+  // peer; one signal.php POST per candidate would be a dozen requests aimed at the feeder,
+  // who is playing the match and is the slowest node in it to drain a mailbox. Same
+  // batcher, same window, same cap.
   const SPEC_PEER = 'cccccccc';
   const uncork = (list)=> list.map(x => x.c);
-  await acheck('4.4: a spectator link batches its ICE through the duel batcher', async () => {
-    const A = txSess(4, null);
-    A.__spMkIn(SPEC_PEER, A.__peerV4());
+  await acheck('a spectator link batches its ICE through the duel batcher', async () => {
+    const A = txSess();
+    A.__spMkIn(SPEC_PEER);
     A.__out.splice(0);
     for(let i = 1; i <= 5; i++) A.__spGather(SPEC_PEER, cand(i));
     let out = A.__out.splice(0);
@@ -894,22 +855,9 @@ try {
     A.__spDrop(SPEC_PEER);
   });
 
-  // FALSIFICATION: the gate is the PEER's build, and a watcher does not learn the feeder's
-  // until the answer lands. A batch sent before that is one nobody at the far end can read.
-  check('FALSIFICATION: a spectator whose peer has not named its build sends singles', () => {
-    const A = txSess(4, null);
-    A.__spMkIn(SPEC_PEER, '');
-    A.__out.splice(0);
-    for(let i = 1; i <= 5; i++) A.__spGather(SPEC_PEER, cand(i));
-    const out = A.__out.splice(0);
-    if(out.length !== 5 || out.some(x => x.type !== 'ice'))
-        throw new Error('an unnamed build must be sent one ice per candidate, got ' + JSON.stringify(out.map(x=>x.type)));
-    A.__spDrop(SPEC_PEER);
-  });
-
   // The marker is the whole of what tells a spectator signal from a duel one. Both arrive
   // here from the SAME id, which is what the router has to get right with nobody to ask.
-  await acheck('4.4: an ices is routed by its marker, never by who sent it', async () => {
+  await acheck('an ices is routed by its marker, never by who sent it', async () => {
     const A = mk(A_ID), B = mk(B_ID);
     const flush = () => new Promise(r=>setTimeout(r,0));
     A.__invite(B_ID); pump(A, B);
@@ -918,7 +866,7 @@ try {
     pump(A, B);
     await flush();
     if(!B.__state().sess) throw new Error('B has no P2P session to route against');
-    B.__spMkIn(A_ID, B.__peerV4());     // ...and a feed from the very same id
+    B.__spMkIn(A_ID);     // ...and a feed from the very same id
     const d0 = B.__iceAdded().length, s0 = B.__spAdded(A_ID).length;
     B.__deliver({ from:A_ID, to:B_ID, type:'ices',
                   payload: JSON.stringify([1, 2].map(i => ({ c:cand(i), sp:1 }))) });
@@ -965,7 +913,7 @@ try {
   // the stale gate leaves a 1 s budget a background wait would eat. Exempt is not ungated --
   // it still stands behind another request of ours, because a THIRD beside the poll is
   // forbidden. And the pts is read AFTER the wait, or it is old by the time it is sent.
-  await acheck('4.4: the start request passes the pacing gate before its body is built', async () => {
+  await acheck('the start request passes the pacing gate before its body is built', async () => {
     const A = mk(A_ID);
     A.__gameSess(B_ID, 'host');
     const r = await A.__startWith({});
@@ -977,7 +925,7 @@ try {
   // time from whatever anchor is held. A first start sweeps only on a stale anchor -- or
   // on the server's resync hint, the pair cross-check only the server can make (it sees
   // BOTH clients' clocks proved against the same start). A rematch never sweeps.
-  await acheck('4.4: a start sweeps on a stale anchor or a resync hint, once; a rematch never', async () => {
+  await acheck('a start sweeps on a stale anchor or a resync hint, once; a rematch never', async () => {
     const A = mk(A_ID);
     A.__gameSess(B_ID, 'host');
     const fresh = await A.__startWith({}, 'first');

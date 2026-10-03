@@ -1,5 +1,5 @@
 // ============================================================================
-// EVENTS (server API 4.11) -- a room an operator opens on the server.
+// EVENTS -- a room an operator opens on the server.
 //
 // A player gets in by scanning its QR: straight in when the event is OPEN, after
 // the organizer approves them when it is CLOSED. Inside, the organizer runs
@@ -976,17 +976,16 @@ function eventMonitorFace(pts){
 }
 // The wall asks for the pass only while it would show one: on its own screen, idle,
 // the event LIVE (a pass is refused otherwise). A reserved monitor row may ask
-// (API 4.15: `pass` is the third action a monitor row has).
+// (`pass` is the third action a monitor row has).
 function _evMonPassWant(){
     return phase === 'eventMonitor' && eventMonitorIdle() && eventState(_evMon) === 'active';
 }
 function _evMonPass(){ if(_evMonPassWant()) _evPassArm(); }
-// Does this event offer a screen at all? Server API 4.11 puts `monitor_allowed`
+// Does this event offer a screen at all? The server puts `monitor_allowed`
 // on `state` and on every `events` row precisely so this can be asked without
 // touching the slot -- the `monitor` call is the one that CLAIMS it, and using
 // it to find out would take the screen off a TV that is merely switched off.
-// ABSENT reads as allowed: an older server that never says is not saying no,
-// and the 403 settles it in that case.
+// ABSENT reads as allowed, and the 403 settles it.
 function eventMonitorOffered(e){
     e = e || _ev;
     return !!e && e.monitor_allowed !== false;
@@ -1009,7 +1008,7 @@ async function eventMonitorRead(){
         // screen nobody attends must not sit retrying a refusal forever.
         if(r.status === 409 || err === 'monitor taken'){
             // A 409 AFTER WE HELD THE SEAT is the event's own screen taking it back
-            // (API 4.15: a reserved screen has right of way; a member only stands in
+            // (a reserved screen has right of way; a member only stands in
             // while it is away). That is not a refusal to show: the stand-in goes
             // back to the event page and is told why. A feed it was watching ends
             // through the ordinary session end, which asks eventExitPhase.
@@ -1075,7 +1074,7 @@ function _evMonFollow(){
     _evMonTry++;
     if(/^[0-9a-f]{8}$/.test(feeder)) specWatch(feeder, String(t.tid || ''), nid);
 }
-// THE SHEET COMES TO THE MONITOR. Server API 4.14 deals an event's monitor the same
+// THE SHEET COMES TO THE MONITOR. The server deals an event's monitor the same
 // `tourney` signals its tournament's participants get -- `roles` names it in a field
 // of its own, outside the tree, so nobody lists it -- and tourney.js hands them here
 // when the tid is not one it holds. A sheet IS the state read, exactly as it is for a
@@ -1197,7 +1196,7 @@ function _evOnSignal(d){
         return;
     }
     if(what === 'monitor'){
-        // The seat moved: the event's own screen took it back from us (API 4.15).
+        // The seat moved: the event's own screen took it back from us.
         // Sent to the displaced holder only. Ask, and let the answer say so -- the
         // 409 the read gets is what puts us back on the page; nothing is adopted.
         if(_evEid === eid && _evMonT != null) eventMonitorRead();

@@ -16,7 +16,7 @@ const NET_BASE = 'https://fok-server.poggensee.it';
 // BOTH A and AAAA: the p2p connect wants candidates on whichever family works, and the
 // public-address discovery in net-rtc.js can only name a family it gathered over.
 const NET_STUN_URL = 'stun:stun.cloudflare.com:3478';
-// TURN (API 4.22). A peer behind a NAT that STUN cannot open has no direct path, and the
+// TURN. A peer behind a NAT that STUN cannot open has no direct path, and the
 // relay ICE adds to its candidates by itself is the standard way through: the same pc, the
 // same DataChannel, the same netcode, one forwarding hop. The server hands out short-lived
 // credentials for it, per id, as a ready iceServers list (turn.php); the client holds ONE
@@ -42,11 +42,11 @@ const NET_TURN_RETRY_MS = 60000;      // after a refusal (nothing on offer) no a
 const NET_TURN_AUTO = 0, NET_TURN_FORCED = 1, NET_TURN_DISABLED = 2;
 // A remote candidate DISABLED refuses: one whose address is a relay's.
 function netTurnRefused(c){ return cfg.turnMode === NET_TURN_DISABLED && !!c && String(c.candidate || '').indexOf(' typ relay') >= 0; }
-const NET_API_BUILT = 4;    // the contract MAJOR this client implements (FOK-server docs/API.md, Versioning)
+const NET_API_BUILT = 5;    // the contract MAJOR this client implements (FOK-server docs/API.md, Versioning)
 // The server's `api` is a "MAJOR.MINOR" string. Only the MAJOR gates compatibility -- a
 // newer MINOR on the same major is purely additive. Returns the major integer, or null
 // if unparseable (a soft failure, like every network failure here: no flags raised).
-const NET_API_BUILT_MINOR = 23;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
+const NET_API_BUILT_MINOR = 0;   // the contract MINOR this client is built against; bump it in the commit that implements a minor (docs/API.md holds what each one added)
 function _netApiMajor(a){
     if(typeof a === 'string'){ const m = a.match(/^\s*(\d+)/); return m ? +m[1] : null; }
     return null;
@@ -60,7 +60,7 @@ let _netApiNewer = false;   // server MAJOR is newer -> online features disable 
 let _netApiOutdated = false;   // server MINOR is newer (same major): still compatible, but an update exists
 let _netSrvErr = false;     // last heartbeat failed (shared by every online screen)
 let _netIdRefused = false;  // the server refused our token (401): the wire is stopped, see _netTokRefused
-// The operator's word on THIS build (API 4.23, hello's `upgrade`): 'advised' = a newer build
+// The operator's word on THIS build (hello's `upgrade`): 'advised' = a newer build
 // exists, say so, play on; 'required' = online is closed until the player updates. Re-read
 // on every hello answer, so a floor the operator lowers re-opens the wire by itself. The
 // server enforces nothing: the beat keeps going, only _netOk() closes.
@@ -213,7 +213,7 @@ let _netDbg = { rtt:-1, p2pRtt:-1, srvOfs:0, peerTkOfs:0, lag:0, inRx:0, inTx:0,
 let _netLagN = [];   // rolling window of peer PTS deltas: one sample is noise, the average is the figure
 function _netSigLog(line){ _netDbg.sigLog.unshift(line); if(_netDbg.sigLog.length>6) _netDbg.sigLog.length=6; _uiDirty=true; }
 
-// ---- OUR OWN TRAFFIC, and the server's own queue (API 4.4) ----
+// ---- OUR OWN TRAFFIC, and the server's own queue ----
 // The clock offset is this device's ONE binding onto the shared clock, and HALF of any
 // delay a sample meets lands straight in it. Measured on the live server through a single
 // duel: five requests waited exactly 51ms before any work ran, on workers that were already
@@ -251,7 +251,7 @@ function netSelfStacked(){ return netHostBusy() && _netQ.flight > 1; }
 // that a PAIR is mis-anchored -- and it is a hint, not a refusal: the start it rides on
 // stands, and the next one is given a full re-measure.
 let _netResync = false;
-// ---- the pace (API 4.4) ----
+// ---- the pace ----
 // The beat is CONTRACT, not wire. These intervals are stated in the contract and are the
 // same for every client, so they live here as constants. An earlier 4.4 server also sent
 // them in `pace`; they never carried anything but these numbers, and reading them back off
@@ -373,29 +373,19 @@ function _netGate(tier){
     _netGapQ = p;
     return p;
 }
-// `hold` is all of `pace` that is left. The interval fields an earlier 4.4 server still
-// sends beside it are IGNORED rather than adopted: they only ever carried the constants
-// above, and a second source for a number that has one is a second place to be wrong.
+// `hold` is all of `pace` there is: the intervals are the contract constants above.
 function _netPaceOf(j){
     const p = j && j.pace;
     if(p && typeof p === 'object' && typeof p.hold === 'boolean') _netPace.hold = p.hold;
 }
-// Batched ICE (`ices`, API 4.4) is only safe toward a peer that KNOWS the type: an older
-// client hands an unknown signal to its default branch and the WHOLE array is gone --
-// silently, and the candidates in it are the ones a direct route rides. So the gate is the
-// PEER's build rather than the server's, and app MAJOR 4 is the line that speaks 4.4.
-const NET_ICES_PEER_MAJOR = 4;
-// The build line on the wire is APP_VERSION, which carries a leading 'v' ('v4.0.0').
-function _netIcesPeerOk(v){ const m = /^\s*v?(\d+)/i.exec(String(v || '')); return !!m && +m[1] >= NET_ICES_PEER_MAJOR; }
 
-// ---- identity (API 4.20): the id is public, `tok` proves it ----
+// ---- identity: the id is public, `tok` proves it ----
 // Every request that names our id carries the token hello minted for it, or null until a
 // hello has answered one: the first hello of an unbound id binds the id and answers `tok`,
 // and the one rule is to store whatever a hello answers (a first bind, a re-bind after the
 // operator's reset, a return after the row was forgotten). ONE stamp site: every request
 // that names the id is a POST and its body passes through here; nothing names the id on a
-// request line (4.21: the poll and the vault restore are POSTs too),
-// which the web server's access log records on every hit.
+// request line, which the web server's access log records on every hit.
 function _netTokBody(body){ return (body && body.id) ? Object.assign({}, body, { tok: getCloudToken() }) : body; }
 // 401 = the server refused our token: the id is bound to another device, or our copy is
 // stale (a restored file that predates the binding, the operator's reset). The wire stops --
@@ -408,7 +398,14 @@ function _netTokRefused(path){
     if(!_netHelloSeen && path.indexOf('/api/hello.php') !== 0) return;
     if(_netIdRefused) return;
     _netIdRefused = true; _uiDirty = true;
-    _netSigLog('! 401 bad token ' + path.replace(/^\/api\/|\.php.*$/g, ''));
+    _netSigLog('! bad token ' + path.replace(/^\/api\/|\.php.*$/g, ''));
+}
+// The two shapes of that refusal. A 429 `too many attempts` is a wrong token past the
+// server's per-address cap, and the latch is the back-off it asks for: nothing leaves until
+// the identity changes. event.php answers the same words for wrong event codes, so a 429
+// there stays the join's own.
+function _netTokNo(path, status, j){
+    return status === 401 || (status === 429 && !!j && j.error === 'too many attempts' && path.indexOf('/api/event.php') !== 0);
 }
 function netIdRefused(){ return _netIdRefused; }
 function netIdentityChanged(){ _netIdRefused = false; _netHelloSeen = false; _netTurn = null; _netTurnNoAt = 0; if(_netOk()) _netHello(); }   // a credential is minted for an id, so the old one goes with it, and so does a refusal's backoff
@@ -435,7 +432,7 @@ async function _netPostRes(path, body, bg){
         _netDbg.lastSrvAt = performance.now();   // a POST always carries data both ways = real communication
         let j = null; try{ j = await r.json(); }catch(e){}   // an error status may carry no JSON at all
         _netQNote(j);   // every response carries the queue wait, error replies included
-        if(r.status === 401) _netTokRefused(path);
+        if(_netTokNo(path, r.status, j)) _netTokRefused(path);
         // Keep the server's own reason ({"ok":false,"error":"..."}): guessing it
         // from the status alone is how 'invalid pts' got misread as a clock drift.
         return { status: r.status, json: (j && j.ok) ? j : null, body: j, err: (j && j.error) ? String(j.error) : '' };
@@ -469,8 +466,8 @@ async function _netRead(path, signal, held, bg, body){
         // opposite of what a liveness readout is for. Any completed exchange counts.
         _netDbg.lastSrvAt = performance.now();
         if(r.status === 204) return { ok:true, signals:[] };
-        if(r.status === 401) _netTokRefused(path);
-        const j = await r.json();
+        let j = null; try{ j = await r.json(); }catch(e){}
+        if(_netTokNo(path, r.status, j)) _netTokRefused(path);
         _netQNote(j);
         return (j && j.ok) ? j : null;
     } catch(e){ return null; }
@@ -495,11 +492,11 @@ async function netBgFetch(path, opt){
     try { return await fetch(NET_BASE + path, opt); }
     finally { _netFlight--; }
 }
-// ---- TURN credentials (turn.php, API 4.22) ----
+// ---- TURN credentials (turn.php) ----
 // The one credential this client holds: the iceServers list as the server issued it, and
 // when it runs out. Null until an ask is answered. A refusal (503: nothing on offer right
 // now, one answer for every reason) or any failure leaves it as it is, and a pc built
-// meanwhile is STUN-only -- exactly the pre-4.22 pc, never a failed match. One ask in
+// meanwhile is STUN-only, never a failed match. One ask in
 // flight at a time; a refusal holds the next ask off for NET_TURN_RETRY_MS.
 let _netTurn = null;        // { ice, exp }
 let _netTurnP = null;       // the ask in flight
@@ -623,14 +620,14 @@ function _netMyName(){
 // Name entry wrote lastSName: drop the cache so the next read sees it (the TTL alone
 // only covers writes that bypass the game, e.g. a cloud-backup restore).
 function netNameChanged(){ _netMyNameC.at = 0; }
-// Where this client runs, as hello's `platform` names it (API 4.23): 'web' unless a store
+// Where this client runs, as hello's `platform` names it: 'web' unless a store
 // shell says otherwise. A shell (an iOS or Android web view) declares itself through ONE
 // global, FOK_SHELL, set by the script it injects ahead of ours; no UA is read for it.
 function netPlatform(){
     const s = (typeof FOK_SHELL === 'string') ? FOK_SHELL : '';
     return (s === 'ios' || s === 'android') ? s : 'web';
 }
-// The build as the server's floors read it (API 4.23): APP_VERSION without its leading v.
+// The build as the server's floors read it: APP_VERSION without its leading v.
 function netClientVersion(){ return String(APP_VERSION || '').replace(/^v/, ''); }
 // Device CATEGORY (API 3.4 'platform' tag): one of pc/mobile/tv/console, best-effort
 // from the UA plus touch/pointer/screen. Cached -- the answer is fixed for the tab. It
@@ -940,7 +937,7 @@ function duelSideName(i){
 }
 // The two players' device categories in PLAYER order (P0 = host, P1 = joiner), for the
 // duel ready splash. Mine from _detectPlatform(); the peer's from its exchanged profile
-// (null if an older client sent none -- that side just shows no badge). null = offline.
+// (null if the peer sent none -- that side shows no badge). null = offline.
 function netDuelPlatforms(){
     if(!netGameActive()) return null;
     const mine = _detectPlatform();
@@ -1017,7 +1014,7 @@ function netDebugInfo(){
              latencyReport:{ ms:_netLat.value, ageMs:_netLat.at?Date.now()-_netLat.at:null }, friendsLatency:_netFriendsLat,
              session: _netSess ? { peer:_netSess.peer, role:_netSess.role, game:_netSess.game } : null,
              iceDeob:_netDbg.iceDeob|0, peerNet: _netSess ? (_netPeerNet[_netSess.peer] || null) : null,
-             turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, turnMode: cfg.turnMode|0,   // the TURN credential held (API 4.22): seconds left, or none; the setting (0 auto, 1 forced, 2 disabled)
+             turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, turnMode: cfg.turnMode|0,   // the TURN credential held: seconds left, or none; the setting (0 auto, 1 forced, 2 disabled)
              turnPc: !!(_netSess && _netSess.turn), pathKind: _netSess ? (_netSess.pathKind || '') : null,   // this session's pc was built on the credential; what its selected ICE pair is ('turn' / 'direct', '' unread)
              // 4.4, and the whole point of it: iceSignals vs iceBatches says how many
              // requests the batching actually saved, and srvQueueMs is the server telling
@@ -1041,7 +1038,7 @@ let _netFriendsLat = {};
 let _netFriendsPlaying = {};
 // Open tournament lobbies the server announces to us: hosts whose address reaches it the
 // same way ours does, i.e. the people in this room. Asked for only while a screen that
-// shows them is open, and empty on a pre-4.1 server.
+// shows them is open.
 let _netTourneys = [];
 // THE ONE LANDING PLACE for the announce, whichever request brought it -- the hello
 // or the poll's tl. The tournament screens read the list as a list of rooms; an
@@ -1057,11 +1054,7 @@ function _netTtApply(v){
 function _netTlWant(){
     return phase === 'tourneyLobby' || eventTlWant();
 }
-// The server's contract MINOR, or -1 before the first hello. Features that need a newer
-// server than 4.0 gate on this rather than on a failed POST.
-let _netSrvMin = -1;
-function netSrvMinor(){ return _netSrvMin; }
-// ---- presence, as the server serves it (4.6): a cursor and deltas ----
+// ---- presence, as the server serves it: a cursor and deltas ----
 // The cursor is the server's `friends_at`, never our clock. 0 = "I know nothing": every
 // presence screen opens on it, so its first answer carries every accepted friend. A delta
 // entry is a friend's WHOLE current state, so applying one blind is always right and a
@@ -1111,7 +1104,7 @@ async function _netFrMore(){
 // looking player count. Drop it all now so offline reads as offline, not as a stale snapshot.
 function netOfflineClear(){
     _netCounts = { online:0, playing:0 }; _netFrSince = 0;
-    _netFriendsOnline = {}; _netFriendsLat = {}; _netFriendsPlaying = {}; _netTourneys = []; _netSrvMin = -1;
+    _netFriendsOnline = {}; _netFriendsLat = {}; _netFriendsPlaying = {}; _netTourneys = [];
     if(_netFr.list) for(const f of _netFr.list){ f.online = false; f.latency = null; }
     _uiDirty = true;
 }
@@ -1126,7 +1119,7 @@ function _netNameSeen(id, name){
 function netFriendName(id){ return _netFriendNames[id] || null; }
 // THE one landing place for what the server tells us unasked: the contract version and
 // the operator's debug instruction. Both travel server-to-client ONLY -- a client cannot
-// know either is due, so it can never be its job to ask -- which is why from 4.9 they ride
+// know either is due, so it can never be its job to ask -- which is why they ride
 // EVERY poll answer with a body as well as every hello, and why a client on a screen
 // holding a poll can stop beating without going deaf to them.
 // A 204 is a body-less answer we synthesise as {ok,signals} (see _netGet), so `api` is
@@ -1135,7 +1128,6 @@ function _netSrvSays(r){
     if(!r || typeof r !== 'object') return;
     if(typeof r.api === 'string'){
         const _srvMaj = _netApiMajor(r.api), _srvMin = _netApiMinor(r.api);   // re-evaluated on every answer: un-latches after a server rollback
-        _netSrvMin = (_srvMaj === NET_API_BUILT && _srvMin !== null) ? _srvMin : -1;   // only a same-MAJOR minor means anything to us
         _netApiNewer = (_srvMaj !== null && _srvMaj > NET_API_BUILT);   // newer MAJOR gates online off
         _netApiOutdated = (_srvMaj === NET_API_BUILT && _srvMin > NET_API_BUILT_MINOR);   // newer MINOR: still works, but flag an update
     }
@@ -1171,7 +1163,7 @@ async function _netHello(){
         // flag as public, so a bare beat would hand the duel back to the friends list.
         if(cfg.privateDuels) body.duel_private = true;
     }
-    // Presence rides a CURSOR (4.6): no ids, the server serves the caller's accepted friends
+    // Presence rides a CURSOR: no ids, the server serves the caller's accepted friends
     // whose state changed after it. Asked for only where a friend's state is on screen.
     if(_netFrScreen()) body.friends_since = _netFrSince;
     // The ROSTER, which the friends_* maps above are not: they answer for ids we already
@@ -1207,7 +1199,7 @@ async function _netHello(){
     // the client has not picked up yet ('pending') from a client that turned debug on
     // by itself ('self'), and deriving one from the other would erase that difference.
     if((cfg.debug|0) > 0) body.debug = true;
-    // The build and where it runs, on EVERY beat (API 4.23): the floors `upgrade` is judged
+    // The build and where it runs, on EVERY beat: the floors `upgrade` is judged
     // on may move between two of them, and a hello that names no version is told nothing.
     body.client = netClientVersion();
     body.platform = netPlatform();
@@ -1246,8 +1238,8 @@ async function _netHello(){
     // and the periodic friend.php list stands down. It never answered = that call stays,
     // which is the whole reason this is a fallback and not a minor check.
     if(body.friends_list && Array.isArray(r.friends)){ _netFrHello = true; _netFrAdopt(r.friends, false); }
-    if(Array.isArray(r.blocked)) _netBlocked = r.blocked.filter(b => typeof b === 'string');   // API 4.23, feature-detected
-    // A name the server kept differently from the one sent (its word filter, API 4.23): adopt
+    if(Array.isArray(r.blocked)) _netBlocked = r.blocked.filter(b => typeof b === 'string');   // feature-detected
+    // A name the server kept differently from the one sent (its word filter): adopt
     // it, so this screen shows what everyone else sees. Only ever answered when it changed.
     if(body.name && typeof r.name === 'string' && r.name !== body.name){ try{ localStorage.setItem('lastSName', r.name.slice(0, MAX_NAME)); }catch(e){} netNameChanged(); }
     _netFrFlushRemovals();
@@ -1279,16 +1271,11 @@ const NET_EVENTS_MS = 5000;
 // reads it at a fraction of the screens' cadence. The screens keep NET_EVENTS_MS.
 const NET_EVENTS_DOOR_MS = 15000;
 function _netEvEvery(){ return phase === 'multiplayer' ? NET_EVENTS_DOOR_MS : NET_EVENTS_MS; }
-// aa, de and db cannot be seen in a 204, so a client only stops beating for them against a
-// server that states 4.9. fl and tl are read off the answer instead (see the latches above).
-function _netPoll49(){ return netSrvMinor() >= 9; }
 // Is a held poll parked on a worker right now? While one is, a hello beside it is the
-// request that can pay the pool's ~130 ms fork, and from 4.9 it buys nothing.
+// request that can pay the pool's ~130 ms fork, and it buys nothing.
 function _netHolding(){ return _netPollHoldEnd > 0 && Date.now() < _netPollHoldEnd; }
-// THE beat rule: a hello is due unless a poll is already being one for us. Against a server
-// older than 4.9 a poll is only most of a beat (no `api`, no debug instruction, no arming),
-// so the hello stands whatever else is in flight.
-function _netBeatDue(){ return !(_netPoll49() && _netHolding()); }
+// THE beat rule: a hello is due unless a poll is already being one for us.
+function _netBeatDue(){ return !_netHolding(); }
 function _netPollDue(){
     // A match still needs the mailbox, at a fifth of the rate. A tournament one has to have
     // it -- roles sheets, patches and the result of OUR OWN node all arrive as signals, and
@@ -1403,24 +1390,24 @@ async function _netPollOnce(){
     // other request, and holding it back would only park the mailbox itself. An UNHELD one
     // is an ordinary request and takes the solo lane like any other -- second in line rather
     // than beside, which is the whole rule.
-    // The body (4.21; the members the query took): fs on a presence screen, where the poll's
-    // return carries the friend delta, the counters and the hold decision (4.6), so those
+    // The body: fs on a presence screen, where the poll's
+    // return carries the friend delta, the counters and the hold decision, so those
     // screens send no hello of their own...
     const body = { id:getPlayerId() };
     if(held) body.wait = NET_POLL_S;
     if(_netFrScreen()) body.fs = _netFrSince;
-    // ...and with it (4.9) the rest of what a holding screen needs.
+    // ...and with it the rest of what a holding screen needs.
     // fl and tl make the server ANSWER AT ONCE -- a screen that just opened is not waiting
     // for a signal that is not coming -- so tl rides a 5 s tick of its own rather than every
     // poll, or the tournament lobby's hold would never stand. aa only ARMS; clearing
     // auto-accept early stays hello's, and the window lapses on its own either way.
-    const de = (_netPoll49() && _netDuelEnd) ? _netDuelEnd : '';
+    const de = _netDuelEnd || '';
     const fl = _netFlWant;
     const tl = _netTlWant() && Date.now() - _netTlAt >= NET_TOURNEYS_MS;
     const ev = _netEvWant() && Date.now() - _netEvAt >= _netEvEvery();
-    const aa = _netPoll49() && (phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000);
+    const aa = phase === 'myId' || phase === 'friends' || Date.now() - _netMyIdAt < 60000;
     if(de) body.de = de;
-    if(_netPoll49()) body.db = (cfg.debug|0) > 0 ? 1 : 0;   // REPORT what is true: a poll that never says is never woken with an instruction
+    body.db = (cfg.debug|0) > 0 ? 1 : 0;   // REPORT what is true: a poll that never says is never woken with an instruction
     if(aa) body.aa = 1;
     if(fl) body.fl = 1;
     if(tl) body.tl = 1;
@@ -1698,14 +1685,11 @@ function netFriendVerify(id){
         return { ok:true, state:st };
     }, () => ({ offline:true }));
 }
-// The MY ID screen opened: one hello now, so the server arms auto-accept for the QR about
-// to be shown instead of waiting for the beat (up to a minute). The screen's own poll
-// carries the request itself the moment it lands; the client-side accept is what answers
-// it, this only lets the server accept on our behalf meanwhile.
+// The MY ID screen opened: its own poll arms auto-accept (`aa`) for the QR about to be
+// shown, for a minute from now. The client-side accept is what answers a request; this
+// only lets the server accept on our behalf meanwhile.
 function netMyIdEnter(){
     _netMyIdAt = Date.now();
-    // From 4.9 the screen's own poll arms it with `aa`, on the request it was making anyway.
-    if(_netOk() && !_netPoll49()) _netHello();
 }
 function netFriendsEnter(){
     _netFr.sel = 0; _netFr.confirm = null; _netFr.msg = '';
@@ -1869,7 +1853,7 @@ function _netFrRows(){
     if(_netLastPeer && !seen[_netLastPeer] && _netLastPeer !== getPlayerId()) rows.push({ id:_netLastPeer, state:'opponent', outgoing:false, online:false, latency:null });
     return rows;
 }
-// ---- block + report (API 4.23) ----
+// ---- block + report ----
 // The blocked list is the server's: hello answers `blocked` (feature-detected) and what is
 // held here is that answer with this device's own verbs applied, so a row changes the moment
 // the server said ok. A blocked pair exchanges nothing: the server drops their signals, never
