@@ -402,7 +402,7 @@ function startDuel(seed, ws, lvl) {
     // never resets them. The crystal, the warp and the gouranga line are all part of the duel
     // agreement now, and _gAt is hashed too, so two devices arriving with different last games
     // disagree at tick 0 over state neither one is using. Zero them so a duel is a function of
-    // seed + inputs only (see the startDuel rule in project_fok_duel_recovery.md).
+    // seed + inputs only (see the field-list rule in .claude/rules/duel.md).
     _gAt = 0;
     heart = null; heartAt = 0; heartIsEarly = false; _earlyHeartUsed = false; _earlyHeartTrigger = -1; _earlyHeartCount = 0;
     timeCrystal = null; timeCrystalAt = 0; _slowMode = false; _slowModeAt = 0;

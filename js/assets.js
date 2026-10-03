@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v4.5.16';
+const APP_VERSION = 'v4.5.17';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -154,7 +154,7 @@ const HEX_CHARS = '0123456789ABCDEF\r';   // ADD FRIEND entry dial (player IDs a
 // ambiguous -- and the dial offers exactly the characters a code can contain.
 const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ\r';
 const CODE_LEN = 6;
-// EVENT identifiers, off that same unambiguous alphabet (server API 4.12).
+// EVENT identifiers, off that same unambiguous alphabet.
 //
 // ELEVEN CHARACTERS IS THE WHOLE BUDGET, and both codes spend it differently. A
 // PASS is an eid plus its own 6 characters, dotted: 4 + 1 + 6. A printed KEY has
@@ -171,7 +171,7 @@ const EVENT_EID_LEN = 4, EVENT_PASS_LEN = 6, EVENT_KEY_LEN = 11;
 // the code exactly as it was scanned, dot and all, because that is what `join`
 // posts -- the server reads the event out of it and the client never has to know
 // which of the two it is holding. Anchored at the end: a link with anything
-// trailing is not one of ours. API 4.16 allows 0 and 1 in the eid only.
+// trailing is not one of ours. The eid alone allows 0 and 1.
 const EVENT_HASH_RE = new RegExp('#event=((?:[A-Z0-9]{' + EVENT_EID_LEN + '}[.][A-Z2-9]{' + EVENT_PASS_LEN + '})|(?:[A-Z2-9]{' + EVENT_KEY_LEN + '}))$');
 
 // Per-level GAME TICK: engine ticks (1/60 s) per game tick = the level's fixed

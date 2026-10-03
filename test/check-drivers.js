@@ -2,7 +2,7 @@
 // being evaluated -- contains something the insertion eats.
 // Run: node test/check-drivers.js   (exit 0 = clean, 1 = offenders listed)
 //
-// See .claude/rules/feedback_fok_driver_template_literal.md. Two things do not
+// See .claude/rules/testing.md. Two things do not
 // survive insertion, and they fail very differently:
 //
 //   A BACKTICK ends the literal early. That is loud -- a SyntaxError naming a

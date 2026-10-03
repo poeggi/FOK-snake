@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- The policy the whole game is written to (.claude/rules/project_fok_csp.md). Pages sends no
+    <!-- The policy the whole game is written to (.claude/rules/repo.md). Pages sends no
          CSP header, so this meta IS the policy: nothing inline, scripts and styles from this origin
          only, the API the one connection. An injected script is refused, not run. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; worker-src 'self'; manifest-src 'self'; connect-src 'self' https://fok-server.poggensee.it; base-uri 'none'; object-src 'none'; form-action 'none'">
@@ -13,7 +13,7 @@
          keeps the DNS lookup out of the boot clock sweep, whose FIRST sample is adopted as the
          anchor outright. DNS only, deliberately: a preconnect opens a TLS connection that the
          OFFLINE setting cannot refuse, and no static tag can read that setting -- gating it
-         would take an inline script (see .claude/rules/project_fok_csp.md). -->
+         would take an inline script (see .claude/rules/repo.md). -->
     <link rel="dns-prefetch" href="https://fok-server.poggensee.it">
     <!-- Our own origin. A controlled page boots from the bundle and opens no connection, so
          the update check's sw.js fetch (js/sw-update.js) would pay DNS + TCP + TLS first;
