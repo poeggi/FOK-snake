@@ -122,8 +122,7 @@ name entry to open the keyboard.
   archived on the event, and joining grants a secret achievement. Any member can
   pass the event on with a QR that lives 20 seconds and rotates on the shared
   clock. The server is the roster: nothing about a membership is kept on the
-  device, so a member who is removed simply finds the event gone. Needs server
-  API 4.11; against anything older the menu entry never appears
+  device, so a member who is removed simply finds the event gone
 - EVENT MONITOR: a screen to leave on a TV in the room. It shows the event live
   and, once a tournament runs, becomes an invisible spectator of it -- following
   the bracket from pair to pair. It never plays, is never seated and takes no
@@ -144,7 +143,7 @@ name entry to open the keyboard.
 - Online matchmaking via FOK-server (invite friends with live online status and
   latency, quick match) -- game traffic runs peer-to-peer over a WebRTC
   DataChannel. Where no direct path exists, ICE falls back to a TURN relay on
-  short-lived credentials the server hands out per player (server API 4.22), the
+  short-lived credentials the server hands out per player, the
   same DataChannel one hop longer. The netcode is
   deterministic lockstep with rollback: both clients run the same inputs-only sim
   off a shared PTS clock, so neither side owns the game state and controls feel
@@ -159,7 +158,7 @@ name entry to open the keyboard.
   material (seed + tick-stamped inputs) for server-side validation
 - A proven identity: the 32-bit id is public, a secret token the server mints on
   the id's first hello proves it on every request, always in a POST body and
-  never on a request line (server API 4.21); an id bound
+  never on a request line; an id bound
   to another device is refused and the MY ID screen says so. Id and token live in
   a cookie too, so identity survives a browser "clear site data", and travel
   together in the file backup
@@ -178,17 +177,8 @@ name entry to open the keyboard.
 Online features speak to FOK-server (https://fok-server.poggensee.it, repo
 `poeggi/FOK-server`); the client-facing contract is that repo's docs/API.md --
 matchmaking, signaling, PTS time sync, latency reporting and global scores.
-This client requires an **API v4** server; an older one will not matchmake or
-start duels. Tournaments and spectating additionally need **4.1** -- against a
-4.0 server the menu entry stays greyed out and everything else works as before.
-The per-round detail described above -- a match starting at the level the bracket
-says, a finished round stopping on a scoreboard -- arrived in **4.3**; a 4.1 or
-4.2 server still runs tournaments, just without it.
-Events need **4.11**, and their printed poster needs **4.12** -- that is where the
-key became 11 characters and the server began rendering the poster at the one QR
-shape the in-app scanner reads. An older server serves no event list at all, so the
-menu entry never appears and everything else works as before.
-Single-player is unaffected either way.
+This client is built against **API 5**. A server on a newer major closes the
+online half until the game updates. Single-player is unaffected either way.
 The engine runs on a deterministic fixed-timestep 60 Hz tick clock, which is
 what makes prediction netcode and replay-validated scores possible.
 (docs/multiplayer-server-prompt.md is the historical design brief.)

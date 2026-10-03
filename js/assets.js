@@ -4,7 +4,7 @@
 // AUTO-MANAGED by the pre-commit hook (mirrors sw.js CACHE). This is the version of the
 // CODE actually running -- read it, not the service-worker cache name, which lags behind
 // until the new worker installs and claims.
-const APP_VERSION = 'v5.0.0';
+const APP_VERSION = 'v5.0.1';
 const GAME_URL = 'https://poeggi.github.io/FOK-snake/';   // canonical deploy (friend links, QR)
 const COLS = 30, ROWS = 20, CS = 20;
 const CW = COLS * CS, CH = ROWS * CS;
@@ -74,7 +74,15 @@ const DEATH_DUR = T(84), LEVELDONE_DUR = T(84), READY_DUR = T(60), GO_DUR = T(18
 // The paper is always titled NEW SNAKE TIMES; supply a fresh id (drives the
 // unread badge) and one or more pages, each a headline + body lines ('' = blank
 // gap line). Pages are flipped with LEFT/RIGHT; the newest goes first.
-const ANNOUNCEMENT = { id:'v3.1.0', pages:[
+const ANNOUNCEMENT = { id:'v5.0.0', pages:[
+    { headline:'YOUR ID IS YOURS', lines:[
+        'NEW IN v5.0:',
+        'Your player ID is sealed with',
+        'a secret key - nobody else',
+        'can play as you',
+        '',
+        'New device? Restore your backup',
+        'file under SETTINGS > DATA.' ] },
     { headline:'TOURNAMENT NIGHT', lines:[
         'NEW IN v3.1:',
         'Up to 8 players, one trophy',
@@ -288,8 +296,8 @@ const EGG_ACHIEVEMENTS = [
     { id:'egg_tbd2',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
     { id:'egg_tbd3',     name:'???',         desc:'???', icon:EGG_BLANK_ICON },
 ];
-// What an EVENT achievement is drawn with when the operator named no icon. Server API
-// 4.11 carries name, desc and an optional 8x8 icon per event, so this is the only part
+// What an EVENT achievement is drawn with when the operator named no icon. The server
+// carries name, desc and an optional 8x8 icon per event, so this is the only part
 // of one that can be missing -- a room somebody opened is still worth a card.
 const EVENT_ACH_ICON = {p:{A:'#ffd700',B:'#cc8800',C:'#fff0aa'},
     d:['..AAAA..','.ACCCCA.','.ABBBBA.','.ABBBBA.','.ACCCCA.','..AAAA..','...BB...','........']};

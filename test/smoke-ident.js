@@ -213,6 +213,22 @@ try {
         S.__reply = null;
     });
 
+    await check('FALSIFICATION: a 429 with any other reason is not a token refusal', async () => {
+        S.__setTok(TOK); S.__fresh(); S.__take();
+        S.__reply = () => ({ status:200, json:{ ok:true, api:'5.0' } });
+        await S.__hello();
+        for(const err of ['mailbox full', 'rate limited', '']){
+            S.__reply = () => ({ status:429, json:{ ok:false, error:err, retry_after:60 } });
+            await S.__post('/api/signal.php', { id: S.__me(), to:'deadbeef', type:'ice', payload:'' });
+            await S.__read('/api/poll.php', { id: S.__me() });
+            eq(S.__refused(), false, 'a 429 "' + err + '" leaves the wire open');
+        }
+        S.__reply = () => ({ status:429 });
+        await S.__read('/api/poll.php', { id: S.__me() });
+        eq(S.__refused(), false, 'a body-less 429 leaves the wire open');
+        S.__reply = null;
+    });
+
     await check('ahead of the first answered hello, a refused poll is not the verdict; a refused hello is', async () => {
         S.__clearTok(); S.__fresh(); S.__take();
         S.__reply = () => ({ status:401, json:{ ok:false, error:'bad token' } });

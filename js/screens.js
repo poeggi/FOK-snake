@@ -1562,9 +1562,8 @@ function drawQuitConfirm() {
 // ================================================================
 // 1vs1 DUEL SCREENS
 // ================================================================
-// The TOURNAMENT row needs a 4.1 server to mean anything, and until the first hello lands
-// we do not know what we are talking to -- so it greys out rather than promising something
-// the server may not have.
+// The TOURNAMENT row greys out until a hello has answered: a fresh id is bound by its
+// first hello, and a tournament call ahead of it is refused.
 function _ttMenuOk(){ return netTourneyOk(); }
 function drawMultiplayer() {
     // Same skeleton as the other submenus (drawSettings): grid + overlay, TITLE headline

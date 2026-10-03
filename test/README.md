@@ -24,14 +24,14 @@ full regression coverage still gates every deploy:
     bash test/checks.sh --live   LIVE tier -- the two contracts that can only be proven
                                  against a deployed server, run AHEAD of the FAST tier:
                                  the peer-net direct-connection hint (test/peer-net.sh)
-                                 and the API 4.0 item registry (test/items-live.js).
+                                 and the item registry (test/items-live.js).
                                  Needs the network and writes to the real database under
                                  the project's fixed test ids, so it gates nothing -- run
                                  it by hand after a server deploy. Beside it, on
                                  demand and in no tier, node test/hello-live.js
                                  measures what one hello round trip costs there.
-                                 The test ids are bound on the server like any player
-                                 (API 4.20): their tokens live outside the repo in
+                                 The test ids are bound on the server like any player:
+                                 their tokens live outside the repo in
                                  ~/.fok-server-livetest.tok (test/live-tok.js), adopted
                                  from what hello answers on the first run.
 
@@ -413,7 +413,7 @@ The ring snapshot at a tick that is already IMMUTABLE (no accepted input can sti
 rewrite it) is the real equality test -- that is what both the driver's detector and
 the product's own 1Hz detector compare.
 
-### smoke-events.js  (FAST tier -- the client half of events, server API 4.16)
+### smoke-events.js  (FAST tier -- the client half of events)
 
 Twenty-eight lanes over `js/events.js` and the screens around it. What each one
 exists to stop, in the order they run (the 4.11 set first, then what came after):

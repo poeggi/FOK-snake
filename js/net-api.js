@@ -253,15 +253,13 @@ function netSelfStacked(){ return netHostBusy() && _netQ.flight > 1; }
 let _netResync = false;
 // ---- the pace ----
 // The beat is CONTRACT, not wire. These intervals are stated in the contract and are the
-// same for every client, so they live here as constants. An earlier 4.4 server also sent
-// them in `pace`; they never carried anything but these numbers, and reading them back off
-// the wire only bought a second place for the same value to be wrong.
+// same for every client, so they live here as constants and are never read off the wire:
+// a second source for a number that has one is a second place to be wrong.
 const NET_HELLO_MS = 60000;   // between heartbeats: half the 120 s online window, so one missed beat never reads as offline
 const NET_POLL_S   = 5;       // the longest hold poll.php serves, in whole seconds (`wait=`)
 // One thing does depend on the moment, and it is the biggest lever there is: a held poll
 // owns a server worker for its whole duration, so a server under pressure withdraws `hold`
-// first, by tier. A 4.3 server sends none of this and this default -- exactly what the
-// client did before -- stands.
+// first, by tier. Until a hello says otherwise, this default stands.
 let _netPace = { hold:true };
 // How many 1s ticks apart an UNHELD mailbox read sits: where the held poll's answer would
 // have landed, so withdrawing the hold does not cost the server a request per second in
@@ -275,7 +273,7 @@ const NET_UNHELD_EVERY = NET_POLL_S;
 // the page, and a frozen page arms nothing.
 const NET_HIDE_HOLD_MS = 30000;
 function _netHiddenLong(){ return _netHiddenAt > 0 && Date.now() - _netHiddenAt > NET_HIDE_HOLD_MS; }
-// ---- the background gate (the contract's 100ms request gap, 4.4) ----
+// ---- the background gate (the contract's 100ms request gap) ----
 // What a request costs this host is not its bytes: it is the slice it waits for a
 // worker before any work runs, and that slice is paid PER REQUEST IN FLIGHT. Two of ours
 // leaving in the same instant pay it twice -- which is what a 135ms hello and a 127ms
@@ -629,7 +627,7 @@ function netPlatform(){
 }
 // The build as the server's floors read it: APP_VERSION without its leading v.
 function netClientVersion(){ return String(APP_VERSION || '').replace(/^v/, ''); }
-// Device CATEGORY (API 3.4 'platform' tag): one of pc/mobile/tv/console, best-effort
+// Device CATEGORY (the profile's 'platform' tag): one of pc/mobile/tv/console, best-effort
 // from the UA plus touch/pointer/screen. Cached -- the answer is fixed for the tab. It
 // is deliberately coarse and never authoritative: the server whitelists these four and
 // stores anything else as null, so a wrong or unknown guess just shows no badge.
@@ -1016,7 +1014,7 @@ function netDebugInfo(){
              iceDeob:_netDbg.iceDeob|0, peerNet: _netSess ? (_netPeerNet[_netSess.peer] || null) : null,
              turnLifeS: _netTurn ? Math.round(_netTurnLife() / 1000) : null, turnMode: cfg.turnMode|0,   // the TURN credential held: seconds left, or none; the setting (0 auto, 1 forced, 2 disabled)
              turnPc: !!(_netSess && _netSess.turn), pathKind: _netSess ? (_netSess.pathKind || '') : null,   // this session's pc was built on the credential; what its selected ICE pair is ('turn' / 'direct', '' unread)
-             // 4.4, and the whole point of it: iceSignals vs iceBatches says how many
+             // The whole point of the batch: iceSignals vs iceBatches says how many
              // requests the batching actually saved, and srvQueueMs is the server telling
              // us how long its last answer waited for a worker.
              // ...and srvQueueFlight is what tells a busy HOST from a client queueing behind
@@ -1181,9 +1179,9 @@ async function _netHello(){
     if(_netEvWant()) body.events = true;
     // Our own public addresses, both families (see net-rtc.js: the server can only observe the
     // one the browser happened to use). Sent on every hello once discovered -- the server no-ops
-    // when nothing changed, so it costs nothing -- and needs no version gate: a 4.1 server
-    // ignores the unknown key. The refresh is throttled by its own ~5min TTL, so riding the
-    // heartbeat here is one RTCPeerConnection every few minutes, not one per hello.
+    // when nothing changed, so it costs nothing. The refresh is throttled by its own ~5min
+    // TTL, so riding the heartbeat here is one RTCPeerConnection every few minutes, not one
+    // per hello.
     // ...and not DURING a match: a gather opens a throwaway peer connection and spends STUN
     // round trips beside the duel's own DataChannel, while the addresses it finds are only
     // ever used to open the NEXT one. What is already known still rides along; the TTL means
@@ -1233,10 +1231,8 @@ async function _netHello(){
     _netFrApply(r);   // the counters, and the presence delta where one was asked for
     if(body.tourneys) _netTtApply(r.tourneys);
     if(body.events) _netEvApply(r.events);
-    // FEATURE-DETECTED, never version-gated: the roster on hello is a re-release of 4.4,
-    // so a server answering "4.4" may or may not carry it. It answered once = it answers,
-    // and the periodic friend.php list stands down. It never answered = that call stays,
-    // which is the whole reason this is a fallback and not a minor check.
+    // FEATURE-DETECTED, never version-gated: the roster on hello answered once = it answers,
+    // and the periodic friend.php list stands down. It never answered = that call stays.
     if(body.friends_list && Array.isArray(r.friends)){ _netFrHello = true; _netFrAdopt(r.friends, false); }
     if(Array.isArray(r.blocked)) _netBlocked = r.blocked.filter(b => typeof b === 'string');   // feature-detected
     // A name the server kept differently from the one sent (its word filter): adopt
@@ -1252,10 +1248,9 @@ async function _netHello(){
 // still surface there, silent everywhere else (incl. during games: the
 // DataChannel is the session). Gated on _netOk() -- offline clients never poll. ----
 let _netPollTick = 0;
-// 4.9: everything a screen HOLDING a poll needs rides the poll, no second request.
-// Two of the answers are FEATURE-DETECTED, never version-gated (a minor is re-released, so a
-// server may answer "4.9" without them): the old route stands until the poll has served the
-// answer once, exactly as _netFrHello does for the roster on hello.
+// Everything a screen HOLDING a poll needs rides the poll, no second request.
+// Two of the answers are FEATURE-DETECTED, never version-gated: the other route stands until
+// the poll has served the answer once, exactly as _netFrHello does for the roster on hello.
 let _netFrPoll = false;    // the poll serves `friends`: netFriendsEnter sends nothing beside it
 let _netTtPoll = false;    // the poll serves `tourneys`: the tournament lobby's 5 s hello stands down
 let _netFlWant = false;    // ask for the roster on the next poll (one-shot, armed by netFriendsEnter)
@@ -1274,8 +1269,10 @@ function _netEvEvery(){ return phase === 'multiplayer' ? NET_EVENTS_DOOR_MS : NE
 // Is a held poll parked on a worker right now? While one is, a hello beside it is the
 // request that can pay the pool's ~130 ms fork, and it buys nothing.
 function _netHolding(){ return _netPollHoldEnd > 0 && Date.now() < _netPollHoldEnd; }
-// THE beat rule: a hello is due unless a poll is already being one for us.
-function _netBeatDue(){ return !_netHolding(); }
+// THE beat rule: a hello is due unless a poll is already being one for us. Until a hello
+// has answered (the session's first, or the next after a failure) it stands anyway: only
+// a hello binds a fresh id and clears SERVER UNREACHABLE. The paced lane waits the hold out.
+function _netBeatDue(){ return !_netHelloSeen || _netSrvErr || !_netHolding(); }
 function _netPollDue(){
     // A match still needs the mailbox, at a fifth of the rate. A tournament one has to have
     // it -- roles sheets, patches and the result of OUR OWN node all arrive as signals, and
@@ -1423,8 +1420,7 @@ async function _netPollOnce(){
         // 204 is the answer we synthesise, which is why any answer at all clears it.
         if(de && _netDuelEnd === de) _netDuelEnd = '';
         // Re-derived from the answer, never latched once: a server that stops serving one of
-        // these -- a rollback, a re-released minor -- puts its fallback back, the same way
-        // _netSrvSays un-latches the minor rather than trusting what it saw before.
+        // these puts its fallback back, the same way _netSrvSays re-reads `api` on every answer.
         if(fl){ _netFlWant = false; _netFrPoll = Array.isArray(r.friends); if(_netFrPoll) _netFrAdopt(r.friends, false); }
         if(tl){ _netTlAt = Date.now(); _netTtPoll = Array.isArray(r.tourneys); if(_netTtPoll) _netTtApply(r.tourneys); }
         if(ev){ _netEvAt = Date.now(); _netEvApply(r.events); }
@@ -1467,12 +1463,10 @@ function _netTick(){
     const sub = _netFrScreen();
     if(sub && !_netFrSub) _netFrSince = 0;
     _netFrSub = sub;
-    // The lobby and friends screens refresh out of the poll they hold (fs, 4.6): friend
-    // state, counters and hold ride its return. From 4.9 the tournament lobby joins them --
-    // `tl` puts the announce on the same poll -- and this 5 s hello, which was 2-wide every
-    // five seconds and the most expensive of the three, stands down the moment the poll has
-    // served the list once. It stays as the fallback for a server that does not, because a
-    // re-released minor may answer 4.9 without it.
+    // The lobby and friends screens refresh out of the poll they hold (fs): friend state,
+    // counters and hold ride its return. The tournament lobby joins them -- `tl` puts the
+    // announce on the same poll -- and this 5 s hello stands down the moment the poll has
+    // served the list once. It stays as the fallback for a poll that does not (feature-detected).
     if(phase === 'tourneyLobby' && !_netTtPoll && _netPollTick % 5 === 0) _netHello();
     _netPollOnce();
 }
@@ -1608,9 +1602,9 @@ function netFriendBanned(){ return Date.now() < _netFrBannedUntil; }
 // _netPostRes, not _netPost: friend.php answers 429 for the 1h request ban, and the
 // status-blind variant made that indistinguishable from a blip -- the UI then sat on
 // 'NOT FRIENDS YET - RETRY IN A MOMENT' for an hour of a condition that will not clear.
-// 3.5 throttles the 'request' action per id: ~1s between requests, then a 60s cooldown
-// after a streak, on top of the 1h spam ban. retry_after carries the wait in seconds;
-// without it (a pre-3.5 server, or a body-less 429) fall back to a minute.
+// The server throttles the 'request' action per id: ~1s between requests, then a 60s
+// cooldown after a streak, on top of the 1h spam ban. retry_after carries the wait in
+// seconds; without it (a body-less 429) fall back to a minute.
 function _netFrWait(res){ const w = res.body && +res.body.retry_after; return w > 0 ? Math.min(w, 3600) : 60; }
 // bg: everything periodic or deferred -- the roster read and the queued removals -- is
 // paced with the rest of the background traffic, and waits out a held poll with it. A
@@ -1676,9 +1670,8 @@ function netFriendVerify(id){
         if(res.status === 429){ const w=_netFrWait(res); _netFrBannedUntil = Date.now() + w*1000; return { error:'rate', wait:w }; }
         if(!res.status || res.status >= 500) return { offline:true };   // no answer / server fault: not a verdict on the ID
         if(!res.json) return { error:'unknown' };   // 4xx: the server refused this peer outright
-        // API 3.5: exists:false = nobody ever registered that id, nothing was recorded and
-        // there is no 'state'. A pre-3.5 server omits the field, and absence is NOT a
-        // verdict -- fall through to the state it did answer with.
+        // exists:false = nobody ever registered that id, nothing was recorded and there is
+        // no 'state'. Absence is NOT a verdict: fall through to the state it did answer with.
         if(res.json.exists === false) return { error:'unknown' };
         const st = res.json.state;
         if(st === 'accepted' && !_netFrOk[id]){ _netFrOkMark(id); _netFrRefresh(false); }
@@ -1694,7 +1687,7 @@ function netMyIdEnter(){
 function netFriendsEnter(){
     _netFr.sel = 0; _netFr.confirm = null; _netFr.msg = '';
     netPresenceOpen();
-    // The roster rides the poll this screen is about to hold anyway (`fl`, 4.9), so nothing
+    // The roster rides the poll this screen is about to hold anyway (`fl`), so nothing
     // travels beside it -- the ask costs the request we were making regardless. Until the
     // poll has served it once, the old route stands: the heartbeat where the server puts the
     // roster on hello, friend.php where it does not. The migration friend.php runs has
@@ -1956,7 +1949,7 @@ function netFetchScores(){
 // roomful of clients is the gate they all queue at (NET_GAP_MS), which spaces the calls
 // rather than the sessions making them.
 if(_netTimers){
-    // 4.9: a poll is a COMPLETE beat -- presence, `api`, the debug instruction and (with
+    // A poll is a COMPLETE beat -- presence, `api`, the debug instruction and (with
     // `aa`) auto-accept all ride it -- so a client holding one owes no hello at all, and the
     // beat beside it was the last of the three standing pairs. What only a hello carries is
     // what the client itself knows is due: a rename (typed on a screen that holds nothing),

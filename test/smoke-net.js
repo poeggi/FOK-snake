@@ -614,10 +614,18 @@ runTest('SMOKE-NET', `
         if(_posts) throw 'MY ID arms auto-accept with aa on its own poll, not with a hello';
 
         // ...and the beat itself, the last of the pairs: a hold standing IS the beat.
-        _netPollHoldEnd=Date.now()+5000;
+        const _oSeenB=_netHelloSeen, _oErrB=_netSrvErr;
+        _netHelloSeen=true; _netSrvErr=false; _netPollHoldEnd=Date.now()+5000;
         if(_netBeatDue()) throw 'a client holding a poll owes no hello';
         _netPollHoldEnd=0;
         if(!_netBeatDue()) throw 'with no hold standing the beat is due as ever';
+        // Only a hello binds a fresh id and clears SERVER UNREACHABLE, so until one has
+        // answered the beat stands beside a hold.
+        _netPollHoldEnd=Date.now()+5000; _netHelloSeen=false;
+        if(!_netBeatDue()) throw 'before an answered hello the beat must stand beside a hold';
+        _netHelloSeen=true; _netSrvErr=true;
+        if(!_netBeatDue()) throw 'after a failed hello the beat must stand beside a hold';
+        _netHelloSeen=_oSeenB; _netSrvErr=_oErrB; _netPollHoldEnd=0;
 
         // api and the debug instruction land in ONE place, off a hello or a poll alike -- and
         // a 204 is a body we synthesise, so its missing api must not read as a rollback.

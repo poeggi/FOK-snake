@@ -48,7 +48,7 @@ function netLobbyEnter(){
     netPresenceOpen();
     if(_netOk()){
         _netHello();                                // presence right away, and the unreachable notice
-        // The roster rides the poll this screen holds anyway (`fl`, 4.9): peer-side
+        // The roster rides the poll this screen holds anyway (`fl`): peer-side
         // removals are noticed off it just as friend.php noticed them. Until the poll has
         // served it once, friend.php stands, exactly as on the friends screen.
         _netFlWant = true;
@@ -212,8 +212,8 @@ function _netOnSignal(sig){
         switch(sig.type){
             case 'invite': {
                 // An invite that sat in the mailbox longer than its sender waits for an answer
-                // is dead: the server keeps a signal for its whole online window (120 s from
-                // 4.5), the inviter gave up at NET_INVITE_STALE_MS. Answering it would put a
+                // is dead: the server keeps a signal for its whole online window (120 s),
+                // the inviter gave up at NET_INVITE_STALE_MS. Answering it would put a
                 // CONNECTING on this screen for nobody, and a decline would tell nobody anything.
                 if(_netSigStale(sig)){ _netSigLog('< ' + sig.type + ' STALE'); return; }
                 if(_netSess || _netLb.invite){ _netSignal(from, 'decline', ''); return; }   // busy: tell them right away
@@ -301,7 +301,7 @@ function _netOnSignal(sig){
                 if(_netSess && _netSess.peer === from && _netSess.pc) _netIceTake(_netSess, _netJson(pl));
                 else _netIceEarlyPark(from, _netJson(pl));   // the offer is being answered, its credential ask out
                 break;
-            // 4.4: SEVERAL candidates in one signal, in the order they were gathered. The
+            // SEVERAL candidates in one signal, in the order they were gathered. The
             // batch is a cheaper envelope and nothing else -- each candidate takes exactly
             // the path it would have taken alone, so nothing downstream can tell them apart.
             case 'ices': {

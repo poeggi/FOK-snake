@@ -121,7 +121,7 @@ function _submitName(){
             if(phase!=='nameEntry'||entryMode!=='friend') return;   // walked away while we asked
             if(ok){ _friendAdded(id, v.state, true); return; }
             _scanOk='';   // a scanned code nobody owns: unlock the viewfinder for another try
-            const w=(v&&v.wait)||60;   // server-stated back-off (3.5): seconds for a throttle, up to an hour for the spam ban
+            const w=(v&&v.wait)||60;   // server-stated back-off: seconds for a throttle, up to an hour for the spam ban
             _duelMsg = v&&v.error==='rate' ? 'TOO MANY REQUESTS - WAIT '+(w>=120?Math.ceil(w/60)+' MIN':w+'S')
                                            : 'INVALID ID - NO SUCH PLAYER';
             _duelMsgAt=_msgNow(); Snd.sfxPlay('fail',cfg.music); _uiDirty=true;
